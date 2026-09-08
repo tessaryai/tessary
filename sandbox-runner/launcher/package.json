@@ -1,0 +1,19 @@
+{
+  "name": "evals-sandbox-runner-launcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP sidecar that launches E2B microVMs to run deterministic grader code for the evals platform.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "dependencies": {
+    "e2b": "^2.46.1"
+  }
+}

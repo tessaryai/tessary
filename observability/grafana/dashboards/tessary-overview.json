@@ -1,0 +1,312 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Backend up",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "max(up{job=\"node\",deployment_environment=\"$deployment\"})",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                },
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate (5m)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (uri, method) (rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m]))",
+          "legendFormat": "{{method}} {{uri}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Request latency p95 (5m)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m])))",
+          "legendFormat": "{{uri}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx error rate",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{application=\"tessary-backend\",status=~\"5..\",deployment_environment=\"$deployment\"}[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HikariCP pool",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "hikaricp_connections_active{application=\"tessary-backend\",deployment_environment=\"$deployment\"}",
+          "legendFormat": "active",
+          "refId": "A"
+        },
+        {
+          "expr": "hikaricp_connections_idle{application=\"tessary-backend\",deployment_environment=\"$deployment\"}",
+          "legendFormat": "idle",
+          "refId": "B"
+        },
+        {
+          "expr": "hikaricp_connections_pending{application=\"tessary-backend\",deployment_environment=\"$deployment\"}",
+          "legendFormat": "pending",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap used",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (area) (jvm_memory_used_bytes{application=\"tessary-backend\",deployment_environment=\"$deployment\",area=\"heap\"})",
+          "legendFormat": "heap",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Host CPU idle (1 - utilisation)",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "avg(rate(node_cpu_seconds_total{mode=\"idle\",deployment_environment=\"$deployment\"}[5m]))",
+          "legendFormat": "idle",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Disk used (root fs)",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "1 - node_filesystem_avail_bytes{mountpoint=\"/\",deployment_environment=\"$deployment\"} / node_filesystem_size_bytes{mountpoint=\"/\",deployment_environment=\"$deployment\"}",
+          "legendFormat": "/",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Errors (last 1h)",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | detected_level=\"error\"",
+          "refId": "A"
+        }
+      ],
+      "description": "Labels come from Loki's native OTLP ingestion: it promotes a fixed set of resource attributes to indexed labels and stores everything else as structured metadata.\n\nVerified against production 2026-07-31: Grafana Cloud's Loki indexes the UN-suffixed `deployment_environment` (the OSS default list documents `deployment.environment.name`; the hosted config differs). Severity IS indexed as lowercase `detected_level`. Both were checked against the live label set rather than the docs, because getting either wrong returns EMPTY rather than erroring."
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "tessary",
+    "overview"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "deployment",
+        "type": "custom",
+        "current": {
+          "value": "tessary-production",
+          "text": "tessary-production"
+        },
+        "options": [
+          {
+            "text": "tessary-production",
+            "value": "tessary-production",
+            "selected": true
+          },
+          {
+            "text": "tessary-staging",
+            "value": "tessary-staging",
+            "selected": false
+          }
+        ],
+        "query": "tessary-production,tessary-staging",
+        "description": "Must match DEPLOYMENT_NAME verbatim \u2014 the live label value is `tessary-production`, not `production`. The previous options never matched, so every panel filtered on it returned empty silently."
+      },
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": {}
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Tessary \u2014 Overview",
+  "uid": "tessary-overview",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,30 @@
+# Scrub-gate allowlist (epic 4, gate clause 3). Read by tessary-paid/scripts/check-scrub.sh and
+# applied to BOTH scanners' findings, so an exemption exists in exactly one place. This file
+# PUBLISHES: a public-repo reviewer who cannot see what was exempted cannot review the exemption.
+# That is why it stayed here when #1293 moved the scrub gate itself and its forbidden-strings input
+# into the overlay — the strings we scan FOR cannot publish; the exemptions we granted must.
+#
+# TWO CONSUMERS NOW, and they must be kept in step BY HAND. The overlay's scrub gate reads this file
+# directly; the open tree's own scan (.github/workflows/secret-scan.yml) reads /.gitleaks.toml,
+# which carries the same rows in gitleaks' own allowlist format, one block per file with this file's
+# reason as its description. Nothing checks that the two agree. Add a row here, add the block there.
+#
+# Row shape:   path|reason      path is relative to the export root and must resolve there.
+# No `expires` column, on purpose: these are permanent test fixtures and detector sources, and an
+# entry that re-fires on a date is the recurring red run nobody acts on. An entry whose path no
+# longer exists in the export fails the gate by name.
+backend/app/src/test/java/ai/tessary/evals/classifier/detector/SecretLeakDetectorTest.java|fixtures for the product's own secret_leak detector: structurally valid FAKE Google, Stripe, GitHub, Slack, Anthropic and AWS-documentation keys
+backend/substrate/src/main/java/ai/tessary/evals/redaction/BuiltInRedactionRules.java|the redaction rules' own regex sources for credential prefixes; no literal key, kept here so a scanner heuristic change cannot turn a control into a red run
+backend/tenancy/src/test/java/ai/tessary/evals/auth/PlaceholderSecretGuardTest.java|fixture: one random 44-char base64 value standing in for a real sealing key, so the guard's "not the placeholder" branch has something to compare; minted for the test, seals nothing
+scripts/check-notice-coverage.sh|a run-scoped throwaway Postgres password literal for a stack that lives minutes and holds nothing
+backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServicePatTest.java|fixtures for the GitHub PAT service: ghp_ placeholders too short to be tokens
+backend/substrate/src/main/java/ai/tessary/evals/git/github/GithubTokenService.java|Javadoc names the PEM header it parses; no key material
+backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServiceKeyTest.java|fixture PEM blocks exercising the PKCS#1 and PKCS#8 parsers; throwaway keys generated for the test
+.env.example|placeholder local JDBC URL with no credential in it
+README.md|placeholder local JDBC URL with no credential in it
+docker-compose.yml|compose-internal JDBC URL; the password arrives from the environment
+docker-compose.dev.yml|compose-internal JDBC URL; the password arrives from the environment
+backend/substrate/src/main/java/ai/tessary/evals/git/GitCloneUrls.java|documents the clone URL shape with a TOKEN placeholder
+backend/analysis/src/test/java/ai/tessary/evals/rca/E2bRcaSandboxTest.java|fixture clone URL with the placeholder token "tok"
+sandbox-runner/launcher/server.js|comments document the clone URL and API-key shapes with placeholders
+sandbox-runner/agent-sandbox/agent-stream.js|comments document the clone URL and API-key shapes with placeholders

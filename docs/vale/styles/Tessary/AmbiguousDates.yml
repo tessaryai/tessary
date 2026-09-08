@@ -1,0 +1,7 @@
+extends: existence
+message: "Avoid ambiguous numeric dates. Write the month name (September 3, 2026), or use ISO 8601 (2026-09-03) in technical formats."
+link: /handbook/writing-style-guide.md#dates-and-times
+level: warning
+nonword: true
+tokens:
+  - '\b\d{1,2}/\d{1,2}/\d{2,4}\b'

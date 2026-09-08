@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.tessary</groupId>
+        <artifactId>backend</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>contract</artifactId>
+    <description>
+        Open API-contract module. Home of the
+        checked-in canonical OpenAPI spec (the single source of truth that ships in the open jar) and,
+        later, generated Spring API interfaces the app's controllers implement. Depends ONLY on
+        shared + jspecify/jackson — NO dependency on the app or any closed module — so it is cleanly
+        extractable to the open-source repo alongside shared.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>shared</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+        <!-- Jackson for the spec/schema DTOs (versions managed by the inherited spring-boot parent). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              §A2 layer 2 — the open/closed boundary, enforced at build time (mirrors shared). This
+              open module must never depend on the app (`app`) or any closed module; a violating
+              dependency fails `mvn verify` (and thus `task backend:check` + the pre-commit hook). Runs on
+              the `validate` phase.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-open-boundary</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>ai.tessary:app</exclude>
+                                    </excludes>
+                                    <message>
+                                        evals-contract is an OPEN module: it must not depend on the app
+                                        (`app`), which assembles the application above it. The paid
+                                        overlay is banned separately, for every module, by
+                                        `enforce-open-to-paid-direction` on the aggregator.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+                 from the aggregator's pluginManagement (prepare-agent + report), same
+                 no-configuration pattern as the enforcer plugin above. No coverage gate. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

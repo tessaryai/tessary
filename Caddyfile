@@ -1,0 +1,36 @@
+# Dev reverse proxy. Used by:
+#   - task caddy (local; env vars unset → localhost defaults)
+#   - docker-compose.dev.yml (container; env vars set to service names)
+#
+# Caddy listens on :8000 and routes
+#   /api/*       → backend (REST API)
+#   /auth/*      → backend (WorkOS login/callback/logout/me)
+#   /mcp         → backend (MCP Streamable HTTP transport)
+#   /webhooks/*  → backend (git provider webhook ingress; HMAC-authenticated)
+#   /v1/traces   → backend (OTLP/HTTP trace receiver; bearer-authenticated)
+#   /v1/query/*  → backend (read API; bearer-authenticated)
+#   /v1/usage/*  → backend (metering read; bearer-authenticated)
+#   else         → frontend (Vite dev server, HMR over websockets)
+#
+# Validate: caddy validate --config Caddyfile
+{
+	admin off
+}
+
+:8000 {
+	log {
+		output stdout
+		format console
+	}
+
+	@backend {
+		path /api/* /auth/* /mcp /mcp/* /webhooks/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
+	}
+	handle @backend {
+		reverse_proxy {$BACKEND_URL:localhost:8080}
+	}
+
+	handle {
+		reverse_proxy {$FRONTEND_URL:localhost:5173}
+	}
+}

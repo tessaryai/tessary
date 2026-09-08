@@ -1,0 +1,16 @@
+
+# TLS_MODE=acme: Caddy provisions the certificate from Let's Encrypt. TLS-ALPN-01 only, because
+# docker-compose.yml maps the host's :80 to the plain-HTTP :8000 site above, never to this
+# container's :80 where Caddy's HTTP-01 listener would need the challenge to land; :443 is mapped
+# straight through, so the ALPN challenge completes over the port that is already open. Forced
+# explicitly rather than letting Caddy try HTTP-01 first, time out, and fall back silently.
+https://@SITE_DOMAIN@ {
+	tls {
+		issuer acme {
+			email @ACME_EMAIL@
+			disable_http_challenge
+		}
+	}
+	import app
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

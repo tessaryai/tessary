@@ -1,0 +1,56 @@
+---
+title: "Trademarks"
+description: "What the Tessary name and logo cover, what you may do with them, and what needs permission."
+---
+
+This policy is separate from the Apache License 2.0 the open edition is offered under. The license grants rights in the code; it grants no rights in the marks below, and section 6 of the license says so. This page says what the marks are, what you may do with them without asking, and what needs permission.
+
+## The marks
+
+Tessary AI, Inc. claims the following marks:
+
+- **Tessary**, the word mark, in any casing.
+- **Tessary AI**, the company name used as a mark.
+- The Tessary logo, the file at [`docs/logo/tessary-logo.png`](https://github.com/tessaryai/tessary/blob/main/docs/logo/tessary-logo.png), in any size or color.
+
+"Tessary Cloud" names the hosted service and is covered by the word mark.
+
+## What you may do without asking
+
+- Refer to the software by its name to say what it is: "we run Tessary", "a Tessary plugin", "compatible with Tessary".
+- Say that your product or fork is based on, derived from, or built on Tessary, as long as your own name is the name of the product.
+- Use the word inside a package, repository, or image name, after your own name or the thing the package is, so that a reasonable person reads it as a description, not as ours: `acme-tessary-exporter`, `hubspot-connector-for-tessary`.
+- Keep the copyright and NOTICE lines the license requires in any redistribution. Those lines name Tessary and that is required, not a trademark use.
+
+## What needs permission
+
+- Using the marks as the name, or the leading part of the name, of a product, service, fork, company, domain, or account, or in a way that suggests we made it, endorse it, or support it.
+- Using the logo at all, other than to link to this project.
+- Registering a package, image, organization, or domain whose name is a confusable variant of ours.
+
+Ask at legal@tessary.ai.
+
+## A worked example
+
+The same fork, named two ways.
+
+| Compliant | Not compliant |
+|---|---|
+| **AcmeEvals**, described as "an agent-reliability platform built on Tessary", published as `acme/acmeevals` on Docker Hub and `github.com/acme/acmeevals`. | **Tessary Pro**, **TessaryX**, or **Tessary by Acme**, published as `acme/tessary` or `tessary-pro`, whatever the README says about its origin. |
+| A managed offering sold as "Acme Hosting for Tessary". | A managed offering sold as "Tessary Cloud" or "Tessary Hosted" by anyone but us. |
+
+The rule the table applies: your name first, our name as a description. A customer who reads the name should know who made it and who to call when it breaks.
+
+## "Open source" means the open edition
+
+The open edition, the code in the repository, is open source under the Apache License 2.0. The commercially licensed overlay is not, and neither is the combined product an overlay customer runs. No public-facing material from us or from a redistributor may describe the overlay or the combined product as open source. Describe the open edition as open source, and the rest as commercially licensed or as Tessary Cloud.
+
+## Namespaces we hold, and how they are rechecked
+
+Every registry, hub, and source-control coordinate our own install instructions and release pipeline reference is enumerated in [`scripts/lib/namespace-inventory.txt`](https://github.com/tessaryai/tessary/blob/main/scripts/lib/namespace-inventory.txt), one row per coordinate with where it is referenced and how its ownership is verified. `scripts/check-namespaces.sh` re-verifies each row against the platform's own ownership signal and fails if a coordinate the tree references is missing from the inventory, so a new publish target cannot go live unwatched.
+
+Owner: the security rota named in [`SECURITY.md`](https://github.com/tessaryai/tessary/blob/main/SECURITY.md). Cadence: quarterly and on dispatch through the `namespace-recheck` workflow, which opens an issue for the rota when a run is red, and before every release as a job in the release workflow that no image manifest merges without. Coordinates that are private verify only with a credential, so the workflow reports them unverified and an operator's run with `gh` and `HF_TOKEN` completes the recheck. A completed recheck is recorded by date in the inventory file's log section.
+
+## Changes to this policy
+
+This page is versioned with the repository; the commit history is its change log. Questions go to legal@tessary.ai.

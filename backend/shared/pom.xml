@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.tessary</groupId>
+        <artifactId>backend</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>shared</artifactId>
+    <description>
+        Open shared module: foundation code with NO dependency on any tessary feature or closed
+        module, so it is cleanly extractable to the open-source repo. Currently: the leased-job-queue
+        SQL (jobqueue/), the error catalog (errors/), and logging/observability infra (obs/).
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+        <!-- open/media/PdfTextExtractor (document/PDF modality, #985): sits beside the MediaStore SPI
+             so it flows transitively to substrate (ingest-time extraction) and llm-runtime/evaluation
+             (judge-time extraction) through the reactor chain. See pdfbox.version's comment in the
+             aggregator pom for the license/CI note. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
+        </dependency>
+        <!-- errors/ + obs/ (Phase 1): error catalog beans use HttpStatus + @Component + @PostConstruct;
+             obs infra uses spring-core TaskDecorator, slf4j, and a logback log filter. Versions are
+             managed by the spring-boot-starter-parent inherited via the aggregator. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+        <!-- Pyroscope dynamic-label API (io.pyroscope.labels.v2), used by MdcTaskDecorator to
+             tag CPU samples with the pool/tenant that produced them. Without labels a flame
+             graph can only say WHICH METHOD burned CPU, never for which workload — and with
+             virtual-thread pools that is the only attribution axis that carries meaning.
+
+             `provided` is load-bearing, not incidental:
+               - At runtime these classes come from the -javaagent jar on the SYSTEM classpath.
+                 Bundling a second copy into BOOT-INF/lib would risk the app touching a
+                 different Class object than the agent's, whose static label registry is where
+                 the samples are actually read from — labels would silently never appear.
+               - It also keeps the agent out of the shipped jar, so a deployment without the
+                 javaagent carries no dead weight.
+             Version MUST match the agent version pinned in backend/Dockerfile: the labels
+             protocol is shared static state between the two. -->
+        <dependency>
+            <groupId>io.pyroscope</groupId>
+            <artifactId>agent</artifactId>
+            <version>2.9.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Bare-activates spotbugs-maven-plugin from the aggregator's pluginManagement, the same
+                 no-configuration pattern core/pom.xml uses. Without this the module is not analysed at
+                 all: it built in 0.4s and emitted no spotbugsXml, so every class here (ErrorCode,
+                 StructuredLog, EvalsException, DetectionTableSchemaCheck) has been invisible to the
+                 gate. maven-pmd-plugin is still NOT activated here; that is a second, separate gap. -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+            </plugin>
+            <!--
+              §A2 layer 2 — the open/closed boundary, enforced at build time. This open module must
+              never depend on the app or any closed module; a violating dependency fails `mvn verify`
+              (and thus `task backend:check` + the pre-commit hook), so no human or agent can cross the
+              boundary by accident. Runs on the `validate` phase.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-open-boundary</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>ai.tessary:app</exclude>
+                                    </excludes>
+                                    <message>
+                                        shared is an OPEN module: it must not depend on the app
+                                        (`app`), which assembles the application above it. Invert the
+                                        dependency via an SPI interface in shared, or move the code.
+                                        The paid overlay is banned separately, for every module, by
+                                        `enforce-open-to-paid-direction` on the aggregator.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+                 from the aggregator's pluginManagement (prepare-agent + report), same
+                 no-configuration pattern as the enforcer plugin above. No coverage gate. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

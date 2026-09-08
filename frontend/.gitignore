@@ -1,0 +1,4 @@
+
+# Local Claude preview session cookie (do not commit)
+.preview-session
+vite.config.preview.ts

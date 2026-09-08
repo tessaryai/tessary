@@ -1,0 +1,129 @@
+version: 2
+
+# Dependency-update PRs only (#927, ledger item 29). This file does NOT gate anything — it opens
+# PRs that bump a manifest, which the normal review/CI path then has to pass like any other PR.
+# The CVE-scanning half of #927 (fails a build on an unsuppressed advisory) is a separate concern:
+# scripts/check-dependency-audit.sh, run ON DEMAND by a human (no CI job since
+# 2026-09-02; the old dependency-audit.yml workflow is gone) — not this file, and not anything GitHub-hosted, because
+# Dependabot's own alerts API is disabled for this repo today (measured 2026-09-01:
+# `gh api repos/tessaryai/tessary/dependabot/alerts` -> 403 "Dependabot alerts are disabled
+# for this repository"; flipping Settings -> Code security -> Dependabot alerts needs a
+# repo-admin human, recorded as a prereq in tessary-paid/OPEN-CORE.md item 29).
+#
+# WHICH DIRECTORIES ARE HERE, AND WHY tessary-paid/compile-service IS NOT.
+# Open-core decision D2: paid code lives in tessary-paid/ and the public export is a folder
+# filter — only that one directory disappears. Per the ledger's bucket table, everything else
+# below survives the export even though none of it ships in the OPEN image:
+#   - maven /backend            open (the reactor this file's own directory covers; tessary-paid's
+#                                Maven modules are NOT listed as a separate entry here on purpose —
+#                                see the exclusion note below)
+#   - npm   /frontend                        open
+#   - npm   /classify-service                open (ledger: stays open)
+#   - npm   /sandbox-runner/launcher          open — ships in the open image; also the direct `e2b`
+#                                             dependency most of #928's open advisories trace back
+#                                             to, so this is the entry that matters most here
+#   - npm   /sandbox-runner/agent-sandbox open (ledger: open, NOT glue — corrected 2026-09-01,
+#                                             this comment previously had it backwards)
+#   - uv    /slack-service                   glue
+#   - uv    /classifiers                     private (research tree, excluded from the public
+#                                             repo by the export denylist (scripts/lib/export-denylist.txt, #1105), but still on disk in
+#                                             THIS repo and still worth patching here)
+#   - github-actions /                       every workflow left in .github/workflows/ — Actions
+#                                             version pins are not code that ships anywhere, they
+#                                             are this repo's own CI config. The three hosted-deploy
+#                                             workflows (deploy-aws-production.yml,
+#                                             deploy-classify-service.yml, reusable-ecs-deploy.yml)
+#                                             moved to tessary-paid/.github/workflows/ (epic 7,
+#                                             #941/#1114) and are no longer scanned from here — a
+#                                             directory entry for them would be the exact
+#                                             paid-in-open leak rule 8 below exists to catch, and
+#                                             GitHub only executes .github/workflows/ at the repo
+#                                             root anyway, so they are inert YAML now regardless.
+#
+# tessary-paid/compile-service is the ONE uv workspace actually inside tessary-paid/, and it is
+# deliberately NOT listed: a directory entry here would have Dependabot open PRs against paid-tree
+# manifests from the open-core repo's own bot, which is exactly the kind of paid-in-open leak
+# check-open-boundary.sh's rule 5 (arbitrary files reading the export by path) exists to catch —
+# so rule 8 below greps this file for that path and fails loudly if it ever comes back.
+#
+# tessary-paid's Maven modules (behavior-drift, groundedness, conformance, sop, slack) are not a
+# separate `package-ecosystem: maven` entry for the same reason: they live under
+# tessary-paid/pom.xml, not backend/pom.xml, and a `directory: /tessary-paid` entry would be the
+# exact same leak as the uv one above, just for Maven coordinates instead of a pyproject.toml.
+#
+# Ecosystem key for the uv trees: GitHub's dependabot.yml schema has a native `uv` package
+# ecosystem (not `pip`) — verified against the current schema docs 2026-09-01 (supported since
+# CLI v0.11+). Using `pip` here would read requirements*.txt/setup.py, which these trees don't
+# have; `uv` reads pyproject.toml + uv.lock directly.
+#
+# Weekly, Mondays: matches ci.yml's cadence for consistency. These are GitHub-infrastructure-
+# hosted version-update runs, not jobs that run IN this repo's own Actions minutes, so the cadence
+# choice here is about PR review noise, not the free-tier CI-minutes budget that governs every
+# `on:` block in .github/workflows/.
+updates:
+  - package-ecosystem: maven
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: npm
+    directory: /classify-service
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      # Pinned EXACTLY to the version @huggingface/transformers resolves so ONE native ONNX
+      # Runtime ships (classify-service/package.json comments-dependencies). Dependabot can only
+      # bump it alone, which lands a second copy next to transformers' — bump it by hand, in
+      # lockstep with the transformers.js dependency. (Closed #968 for exactly this.)
+      - dependency-name: onnxruntime-node
+
+  - package-ecosystem: npm
+    directory: /sandbox-runner/launcher
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: npm
+    directory: /sandbox-runner/agent-sandbox
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      # Both of these mirror install lines baked into the E2B runtime image (template.ts and
+      # Dockerfile) and must move together with them, which a manifest-only PR cannot do:
+      #   - @opencode-ai/sdk is pinned in lockstep with the opencode-ai CLI the template installs
+      #     globally (closed #976);
+      #   - undici pins to ^6 so this line stays byte-identical to the two runtime recipes; a
+      #     major bump has to land in all three at once (closed #974). Minors/patches still flow.
+      - dependency-name: "@opencode-ai/sdk"
+      - dependency-name: undici
+        update-types: ["version-update:semver-major"]
+
+  # /sandbox-runner/lambda had an entry here. Track A deleted the Lambda executor along with the
+  # /grade and /lint routes it served, and deploy-grader-lambda.yml with it.
+
+  # /slack-service had an entry here. #1293 moved the adapter to tessary-paid/slack-service/, and
+  # it is DELETED rather than repointed: boundary rule 8 bans any `directory:` value under the
+  # overlay in this file, with no probe idiom and no exception (see the header block above, which
+  # records why tessary-paid/compile-service is likewise absent). Dependabot in this repo covers
+  # the open tree; overlay lockfiles are bumped by hand.
+
+  - package-ecosystem: uv
+    directory: /classifiers
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

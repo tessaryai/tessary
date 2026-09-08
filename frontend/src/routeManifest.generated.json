@@ -1,0 +1,352 @@
+[
+  {
+    "path": "/pricing",
+    "kind": "redirect",
+    "fullPath": "/pricing"
+  },
+  {
+    "path": "/login",
+    "kind": "view",
+    "fullPath": "/login"
+  },
+  {
+    "path": "/signup",
+    "kind": "view",
+    "fullPath": "/signup"
+  },
+  {
+    "path": "/link",
+    "kind": "view",
+    "fullPath": "/link"
+  },
+  {
+    "path": "/",
+    "kind": "view",
+    "fullPath": "/"
+  },
+  {
+    "path": "/orgs/:orgSlug",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug"
+  },
+  {
+    "path": "/orgs/:orgSlug/new-project",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/new-project"
+  },
+  {
+    "path": "/orgs/:orgSlug/projects/:projectSlug/*",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/*"
+  },
+  {
+    "path": "triage",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/triage"
+  },
+  {
+    "path": "cases/:caseId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/cases/:caseId"
+  },
+  {
+    "path": "traces",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/traces"
+  },
+  {
+    "path": "traces/:traceId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/traces/:traceId"
+  },
+  {
+    "path": "sessions/:sessionId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/sessions/:sessionId"
+  },
+  {
+    "path": "classifiers",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers"
+  },
+  {
+    "path": "classifiers/detectors",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors"
+  },
+  {
+    "path": "classifiers/findings/:findingId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers/findings/:findingId"
+  },
+  {
+    "path": "vitals",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/vitals"
+  },
+  {
+    "path": "rca/:reportId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/rca/:reportId"
+  },
+  {
+    "path": "concepts",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/concepts"
+  },
+  {
+    "path": "settings",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings"
+  },
+  {
+    "path": "sources",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/sources"
+  },
+  {
+    "path": "import",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/import"
+  },
+  {
+    "path": "providers",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/providers"
+  },
+  {
+    "path": "git",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/git"
+  },
+  {
+    "path": "models",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/models"
+  },
+  {
+    "path": "observer",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/observer"
+  },
+  {
+    "path": "notifications",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/notifications"
+  },
+  {
+    "path": "signal-tuning",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/signal-tuning"
+  },
+  {
+    "path": "mcp-tokens",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/mcp-tokens"
+  },
+  {
+    "path": "api-keys",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/api-keys"
+  },
+  {
+    "path": "pii-redaction",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/pii-redaction"
+  },
+  {
+    "path": "retention",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/retention"
+  },
+  {
+    "path": "members",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/members"
+  },
+  {
+    "path": "organization",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/organization"
+  },
+  {
+    "path": "workspace",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/workspace"
+  },
+  {
+    "path": "appearance",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/appearance"
+  },
+  {
+    "path": "feature-flags",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/feature-flags"
+  },
+  {
+    "path": "*",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/__unmatched__"
+  },
+  {
+    "path": "overview",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/overview"
+  },
+  {
+    "path": "explore",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/explore"
+  },
+  {
+    "path": "pipeline",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/pipeline"
+  },
+  {
+    "path": "pipeline/*",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/pipeline/*"
+  },
+  {
+    "path": "behavior-drift",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/behavior-drift"
+  },
+  {
+    "path": "repo-sync",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/repo-sync"
+  },
+  {
+    "path": "observer",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/observer"
+  },
+  {
+    "path": "graders",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/graders"
+  },
+  {
+    "path": "graders/:graderId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/graders/:graderId"
+  },
+  {
+    "path": "review",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/review"
+  },
+  {
+    "path": "review/:queueId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/review/:queueId"
+  },
+  {
+    "path": "runs/batch/:runId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/runs/batch/:runId"
+  },
+  {
+    "path": "datasets/:datasetId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/datasets/:datasetId"
+  },
+  {
+    "path": "datasets/new",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/datasets/new"
+  },
+  {
+    "path": "runs",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/runs"
+  },
+  {
+    "path": "runs/:runId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/runs/:runId"
+  },
+  {
+    "path": "signals",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/signals"
+  },
+  {
+    "path": "failure-modes",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/failure-modes"
+  },
+  {
+    "path": "issues",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/issues"
+  },
+  {
+    "path": "intents",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/intents"
+  },
+  {
+    "path": "results",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/results"
+  },
+  {
+    "path": "entries/:entryId",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/entries/:entryId"
+  },
+  {
+    "path": "call-sites",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/call-sites"
+  },
+  {
+    "path": "chains",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/chains"
+  },
+  {
+    "path": "invariants",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/invariants"
+  },
+  {
+    "path": "packs",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/packs"
+  },
+  {
+    "path": "taxonomy",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/taxonomy"
+  },
+  {
+    "path": "judge",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/judge"
+  },
+  {
+    "path": "datasets",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/datasets"
+  },
+  {
+    "path": "library",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/library"
+  },
+  {
+    "path": "sources",
+    "kind": "redirect",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/sources"
+  },
+  {
+    "path": "*",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/__unmatched__"
+  }
+]

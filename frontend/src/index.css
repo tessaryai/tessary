@@ -1,0 +1,326 @@
+/*
+ * Tessary base stylesheet. Every design token (color, type, radius, shadow,
+ * motion, layout) lives in ../tokens.css — this file imports it, then adds
+ * base-layer rules, keyframes, and scoped component CSS that isn't a token.
+ *
+ * Dark only (see src/ui/ThemeContext.tsx). The accent is achromatic (grey-50):
+ * buttons, selection and active nav come off the grey ramp. Blue is reserved
+ * for navigational links and the focus ring, and for the info/warning status.
+ */
+
+@import "tailwindcss";
+@import "../tokens.css";
+
+/* --- Motion (not a color/type/layout token, so it stays here) --- */
+@theme {
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* =============================================================================
+ * BASE LAYER — dark page background, Geist as default, mono everywhere we
+ * write code-y things. Text selection uses the grey accent, matching every
+ * other selected state in the app; the focus ring is the one blue affordance.
+ * ============================================================================= */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    background-color: var(--color-bg);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp,
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-accent-text-on);
+  }
+
+  ::placeholder {
+    color: var(--color-subtle);
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-control);
+  }
+
+  /* Tame autofill so it doesn't paint Chrome's stock blue into our dark inputs. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill {
+    -webkit-text-fill-color: var(--color-fg);
+    -webkit-box-shadow: 0 0 0 1000px var(--color-surface) inset;
+    caret-color: var(--color-fg);
+  }
+}
+
+/* =============================================================================
+ * REDUCED MOTION — collapse all durations globally so individual components
+ * don't have to think about it.
+ * ============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-micro: 0ms;
+    --duration-transition: 0ms;
+    --duration-reveal: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* =============================================================================
+ * MOTION PRIMITIVES — the v1.1 redesign's living surfaces. Short, restrained,
+ * no bounce; all collapse under prefers-reduced-motion (handled globally above).
+ * The agent mark is a CSS placeholder ready to swap for the Lottie when uploaded.
+ * ============================================================================= */
+
+@keyframes tess-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes tess-ag-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes tess-ag-ping {
+  0% { transform: scale(0.72); opacity: 0.5; }
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+@keyframes tess-ag-twinkle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.78); }
+}
+@keyframes tess-ag-glow {
+  0%, 100% { box-shadow: 0 0 16px rgba(112, 182, 253, 0.22); }
+  50% { box-shadow: 0 0 26px rgba(112, 182, 253, 0.42); }
+}
+@keyframes tess-drawer-in {
+  from { transform: translateX(28px); }
+  to { transform: translateX(0); }
+}
+@keyframes tess-modal-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* The looping "running"/"live" status dot — used by signal cards, the observer
+ * watch indicator, and any in-flight state. */
+.tess-pulse-dot {
+  animation: tess-pulse-dot 2s ease-in-out infinite;
+}
+
+/* Traces surface motion (ported from the v1.1 prototype). All collapse under the
+ * prefers-reduced-motion guard above (durations → 0, iteration-count → 1).
+ *  - tt-pulse:  the "Reading your traces…" busy dots + the live stream dot.
+ *  - tt-ping:   the expanding ring on the Connected/env "live" dot.
+ *  - tt-wave:   the listening-state equaliser bars.
+ *  - tt-rowin-h: the accent flash a newly-streamed row fades out from. */
+/* 2026-07 redesign shell motion (sheets/shell.md):
+ *  - tsyRail:  the one right-rail slide-in (ui/Rail.tsx).
+ *  - tsyPulse: generic attention pulse (pulse strip, live dots). */
+@keyframes tsyRail {
+  from { transform: translateX(14px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes tsyPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes tt-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@keyframes tt-ping {
+  0% { transform: scale(0.7); opacity: 0.55; }
+  80%, 100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes tt-wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+@keyframes tt-rowin-h {
+  from { background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)); }
+  to { background: var(--color-surface); }
+}
+
+/* The floating agent launcher — a dark-blue orb that breathes and glows, with
+ * an expanding accent ping ring. Wraps the tessellated spark mark. The two
+ * gradient stops are the accent hue (#70B6FD) darkened to ~21% and ~11%
+ * lightness — decorative shades of the accent, not tokens. */
+.tess-agent-orb {
+  background: radial-gradient(circle at 34% 30%, #11365B, #0B1C2D);
+  animation: tess-ag-breathe 3.4s ease-in-out infinite, tess-ag-glow 3.4s ease-in-out infinite;
+}
+.tess-agent-ping {
+  animation: tess-ag-ping 2.8s var(--ease-enter) infinite;
+}
+.tess-agent-ping-delay {
+  animation: tess-ag-ping 2.8s var(--ease-enter) 1.4s infinite;
+}
+.tess-agent-twinkle {
+  animation: tess-ag-twinkle 2.4s ease-in-out infinite;
+}
+
+/* Overlay surfaces (agent drawer, modals) rise/slide on enter. */
+.tess-drawer-in {
+  animation: tess-drawer-in 0.3s var(--ease-enter);
+}
+.tess-modal-in {
+  animation: tess-modal-in 0.28s var(--ease-enter);
+}
+
+/* =============================================================================
+ * MARKDOWN — scoped prose styling for rendered trace text and grader rationales
+ * (PayloadViewer / Markdown). Token-driven, dark-only, no typography plugin.
+ * ============================================================================= */
+
+.payload-md {
+  color: var(--color-fg);
+  font-size: var(--text-small);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.payload-md > :first-child { margin-top: 0; }
+.payload-md > :last-child { margin-bottom: 0; }
+.payload-md p { margin: 0.5em 0; }
+.payload-md h1,
+.payload-md h2,
+.payload-md h3,
+.payload-md h4 { font-weight: 600; margin: 0.8em 0 0.4em; line-height: 1.3; }
+.payload-md h1 { font-size: 1.15em; }
+.payload-md h2 { font-size: 1.08em; }
+.payload-md h3 { font-size: 1.02em; }
+.payload-md ul,
+.payload-md ol { margin: 0.5em 0; padding-left: 1.4em; }
+.payload-md ul { list-style: disc; }
+.payload-md ol { list-style: decimal; }
+.payload-md li { margin: 0.2em 0; }
+.payload-md a { color: var(--color-link); text-decoration: underline; }
+.payload-md a:hover { color: var(--color-link-hover); }
+
+.payload-md strong { font-weight: 600; }
+.payload-md em { font-style: italic; }
+.payload-md code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: 0.05em 0.35em;
+}
+.payload-md pre {
+  font-family: var(--font-mono);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: 0.6em 0.75em;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.payload-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.88em;
+}
+.payload-md blockquote {
+  border-left: 2px solid var(--color-border-strong);
+  padding-left: 0.75em;
+  margin: 0.6em 0;
+  color: var(--color-muted);
+}
+.payload-md hr { border: none; border-top: 1px solid var(--color-border); margin: 0.8em 0; }
+.payload-md table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.95em;
+}
+.payload-md th,
+.payload-md td {
+  border: 1px solid var(--color-border);
+  padding: 0.3em 0.55em;
+  text-align: left;
+}
+.payload-md th { background-color: var(--color-surface); font-weight: 600; }
+
+/* A chat bubble sets its own reading size; markdown inside it inherits rather
+ * than dropping to the payload panel's smaller `--text-small`. */
+.chat-bubble .payload-md {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Nothing inside a bubble scrolls sideways.
+ *
+ * A payload panel is a viewport onto one blob and can afford `overflow-x: auto`.
+ * A transcript cannot: the bubble is already width-capped, so a long line put a
+ * scrollbar under every other message and turned reading the conversation into
+ * a hunt. Code wraps instead, on any character — these are shell commands and
+ * paths, which have no spaces to break at. */
+.chat-bubble .payload-md pre {
+  overflow-x: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A table is the one thing that cannot wrap as a block, so its cells do. */
+.chat-bubble .payload-md table {
+  width: 100%;
+  max-width: 100%;
+}
+.chat-bubble .payload-md th,
+.chat-bubble .payload-md td {
+  overflow-wrap: anywhere;
+}
+
+/* =============================================================================
+ * JSON TREE — truncation ellipsis for string values (PayloadViewer / JsonTree).
+ * The viewer (@uiw/react-json-view) shortens long strings and toggles them on
+ * click, but its default ellipsis blended into the value text. We suppress it
+ * (stringEllipsis="") and render a visible accent ellipsis on the collapsed
+ * value — the library already wires the click handler + pointer cursor here.
+ * ============================================================================= */
+
+.payload-json .w-rjv-value-short::after {
+  content: "…";
+  margin-left: 0.1em;
+  color: var(--color-accent);
+  font-weight: 600;
+}

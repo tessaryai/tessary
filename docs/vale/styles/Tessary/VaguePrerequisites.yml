@@ -1,0 +1,9 @@
+extends: existence
+message: "State the actual prerequisite instead of a vague one like '%s'."
+link: /handbook/documentation-style-guide.md#state-prerequisites-precisely
+level: suggestion
+ignorecase: true
+tokens:
+  - 'basic technical knowledge'
+  - 'a properly configured environment'
+  - 'properly configured environment'

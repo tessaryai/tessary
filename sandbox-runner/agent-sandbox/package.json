@@ -1,0 +1,25 @@
+{
+  "name": "tessary-agent-sandbox-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "E2B v2 SDK template for observer drift analysis: clones a repo and runs OpenCode to detect grader drift. The `opencode` CLI is installed globally by the template build and driven over @opencode-ai/sdk. NO `type: module` here: the analyzer scripts are CommonJS and the host launcher (SANDBOX_BACKEND=local) runs them from this directory, where an ESM package default breaks `require` instantly (E2B never sees this file — the template copies the scripts alone); agent-stream.js reaches the ESM-only SDK through a dynamic import instead. build.ts runs via tsx, which handles its ESM syntax regardless.",
+  "scripts": {
+    "build": "tsx build.ts",
+    "test": "node --experimental-test-module-mocks --test"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "dependencies": {
+    "@opencode-ai/sdk": "1.18.13",
+    "acorn": "^8.18.0",
+    "acorn-walk": "^8.3.5",
+    "e2b": "^2.46.1",
+    "re2": "^1.26.1",
+    "undici": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

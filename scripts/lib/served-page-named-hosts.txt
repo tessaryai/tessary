@@ -1,0 +1,11 @@
+# Hosts the served frontend bundle NAMES as strings without ever fetching from them (epic 7
+# clause 9, #1197). scripts/check-zero-egress.sh's served-page vantage reds on any host string in
+# the HTML, stylesheets or scripts Caddy serves that is not on this list, so a new foreign origin
+# in the bundle, fetched or not, is a decision recorded here rather than a surprise.
+# Row shape: <host>|<why it is named>
+www.w3.org|the SVG and XHTML namespace URIs every inline icon carries; a namespace is an identifier, never fetched
+github.com|the repository link in the product's own help text
+react.dev|the React runtime's own error-message links, minified into the bundle
+reactrouter.com|the router library's own error-message links, minified into the bundle
+hooks.slack.com|the placeholder a Slack webhook field shows before the operator types their own; a route chunk, never fetched
+example.com|the placeholder a generic webhook field shows before the operator types their own; a route chunk, never fetched

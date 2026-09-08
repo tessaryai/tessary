@@ -1,0 +1,51 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Tessary",
+  "colors": {
+    "primary": "#FF3D6E",
+    "light": "#FF3D6E",
+    "dark": "#FF3D6E"
+  },
+  "appearance": {
+    "default": "dark",
+    "strict": true
+  },
+  "background": {
+    "color": {
+      "dark": "#121212"
+    }
+  },
+  "favicon": "/logo/tessary-logo.png",
+  "logo": {
+    "light": "/logo/tessary-logo.png",
+    "dark": "/logo/tessary-logo.png"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "index"
+        ]
+      },
+      {
+        "group": "Self-hosting",
+        "pages": [
+          "self-hosting/setup",
+          "self-hosting/configuration",
+          "self-hosting/custom-domain",
+          "self-hosting/deployment",
+          "self-hosting/upgrading",
+          "self-hosting/troubleshooting"
+        ]
+      },
+      {
+        "group": "Legal",
+        "pages": [
+          "trademarks"
+        ]
+      }
+    ]
+  }
+}

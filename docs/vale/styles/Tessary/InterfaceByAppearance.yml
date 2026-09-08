@@ -1,0 +1,11 @@
+extends: existence
+message: "Describe the interface element by its label, not by color or position ('%s')."
+link: /handbook/writing-style-guide.md#interface-references
+level: suggestion
+ignorecase: true
+tokens:
+  - '\b(?:blue|green|red|orange|yellow|purple|gray|grey|black|white) button\b'
+  - '\btop[- ](?:left|right)\b'
+  - '\bbottom[- ](?:left|right)\b'
+  - '\bupper[- ](?:left|right)\b'
+  - '\blower[- ](?:left|right)\b'

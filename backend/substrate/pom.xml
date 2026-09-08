@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.tessary</groupId>
+        <artifactId>backend</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>substrate</artifactId>
+    <description>
+        The observed record and the paths that write it: OTLP and SDK ingest, redaction, trace and
+        span storage, upstream sources, git integration, and the two stores every analysis layer
+        reads through (trend series, verdicts).
+
+        This is where telemetry becomes rows. Everything above interprets those rows - grades them,
+        classifies them, bills for them - and nothing here may import that interpretation, so a new
+        kind of analysis can never require an ingest change to land alongside it.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>tenancy</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>shared</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+        <!-- HealthIndicator for the `ingest` health component (#984): the health contributor API alone,
+             not the actuator starter, so the module stays a library and the app decides what to expose. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-health</artifactId>
+        </dependency>
+        <!-- The opt-in Kafka-API ingest spool (#984): the plain client, not spring-kafka, because the
+             spool owns one producer and one consumer and needs nothing of the listener container. -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- OTLP protobuf message types (ExportTraceServiceRequest, ResourceSpans, Span,
+             KeyValue, AnyValue, ...) AND the generated TraceServiceGrpc service stub. Already on the
+             runtime classpath transitively via spring-boot-starter-opentelemetry
+             (opentelemetry-exporter-otlp); the OTLP receivers (HTTP #117 + gRPC #235, ingest/otlp/)
+             decode these at COMPILE time, so it is declared explicitly here rather than relied on as a
+             transitive. Version pinned to the one the otel exporter already resolves so it cannot skew.
+             protobuf-java rides in transitively (locked to 4.x via dependencyManagement above). The
+             gRPC server runtime (io.grpc:*) is added below to back the TraceServiceGrpc stub. -->
+        <dependency>
+            <groupId>io.opentelemetry.proto</groupId>
+            <artifactId>opentelemetry-proto</artifactId>
+            <version>1.11.0-alpha</version>
+        </dependency>
+        <!-- gRPC server runtime for the OTLP/gRPC TraceService/Export receiver (#235). Versions come
+             from the grpc-bom imported above. grpc-netty-shaded brings a self-contained (shaded) Netty
+             so it can't clash with Tomcat's HTTP stack; grpc-protobuf/grpc-stub back the generated
+             TraceServiceGrpc stub that ships in opentelemetry-proto. grpc-protobuf's transitive
+             protobuf-java (3.25.x floor) is excluded — the runtime protobuf-java is the 4.x one pinned in
+             dependencyManagement, shared with opentelemetry-proto. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-beans</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <version>3.1.1</version>
+        </dependency>
+        <!-- grpc-protobuf backs the generated TraceServiceGrpc stub at RUNTIME
+             (ProtoFileDescriptorSupplier). Bytecode analysis sees no reference to it and
+             `mvn dependency:analyze` reports it unused - it is not. Removing it passes compile and
+             fails OtlpGrpcTraceServiceTest with NoClassDefFoundError. Its transitive protobuf-java
+             (3.25.x floor) is excluded; the runtime protobuf-java is the 4.x pin in the parent. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- The shared quality gate, configured once in the aggregator's pluginManagement. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>de.thetaphi</groupId>
+                <artifactId>forbiddenapis</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+            </plugin>
+            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+                 from the aggregator's pluginManagement (prepare-agent + report), same
+                 no-configuration pattern as every other plugin above. No coverage gate. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

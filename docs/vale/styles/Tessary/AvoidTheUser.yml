@@ -1,0 +1,7 @@
+extends: existence
+message: "Address the reader as 'you', or use a direct command, instead of 'the user' (unless you mean users as a group or are distinguishing roles)."
+link: /handbook/writing-style-guide.md#address-the-reader-directly
+level: suggestion
+ignorecase: true
+tokens:
+  - 'the user'

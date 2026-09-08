@@ -1,0 +1,103 @@
+# Local env
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+# Regenerated from the tree at the start of every workflow run, never read from a previous one.
+# Untracked on purpose: a committed copy is a stale copy, and the whole point of regenerating it is
+# that nobody reads yesterday's facts.
+tessary-paid/.claude/workflows/repo-brief.md
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+# Agent-loop scratch clones. Nested git worktrees, each a full copy of this repo — they must
+# never be enumerated as this repo's own files (scripts/check-docs-links.sh learned that the
+# hard way). Was only in .git/info/exclude, so a fresh clone and CI did not have it.
+.claude/worktrees/
+# Same thing for kosho's scratch clones. `.kosho/.gitignore` used to cover these, but its patterns
+# are anchored to its own directory and that file now lives under the overlay (#1293), where it
+# guards the overlay's copy and not this one. Declared here so the rule survives the overlay's
+# removal — untracked agent worktrees becoming git-visible is how a private checkout leaks.
+.kosho/worktrees/
+.kosho/hooks/*.sample
+
+# Secrets / keys — belt-and-suspenders on top of .env
+*.pem
+*.key
+id_rsa*
+*.log
+.local/
+.cache/
+
+# Python bytecode (from claude-skill/evals-prompt/validate.py runs)
+__pycache__/
+*.pyc
+
+# Generated synthesis output (the skill writes these into target repos;
+# if someone runs it at this repo root by accident, don't commit them)
+evals.yaml
+curation.yaml
+report.md
+
+# Java / Maven — glob covers the reactor modules (backend/target, backend/app/target, …)
+backend/**/target/
+# The paid overlay is a TOP-LEVEL folder, so the backend glob above cannot reach it. Its modules
+# inherit backend/pom.xml and therefore run the same plugins, which write the same target/ output —
+# tessary-paid/target/spotless-index got committed as source before this rule existed.
+tessary-paid/**/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+*.class
+hs_err_pid*.log
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+# The paid frontend's build outputs. The four rules above are PATH-SPECIFIC to frontend/, so none of
+# them reaches the overlay — same reason `tessary-paid/**/target/` exists separately from the
+# backend glob. node_modules here is a SYMLINK to frontend/node_modules, created by the paid gate
+# script rather than committed: it points into a gitignored tree, so a committed link would be
+# dangling on a fresh clone until someone ran `pnpm install`.
+tessary-paid/frontend/node_modules
+tessary-paid/frontend/dist/
+tessary-paid/frontend/.vite/
+# pnpm keeps its content-addressable store globally (~/Library/pnpm/store on macOS), which is what
+# makes a second worktree cost ~nothing. Guard against anyone pointing it inside the repo instead.
+.pnpm-store/
+
+# Caddy
+caddy_data/
+caddy_config/
+
+# Runtime scratch space, never a source input. The sandbox driver's own work directory moved out of
+# here to a named Docker volume (the one-command install — see sandbox-runner/README.md), so nothing in the repo
+# writes .data/ any more; the rule stays because a stack booted from an older revision still can.
+.data/
+
+# Crew
+.crew/
+
+# agent-loop per-host cache + artifacts (config/scripts ARE tracked; state is not)
+.dev-tools/agent-loop/state/
+.dev-tools/agent-loop/PAUSED
+.dev-tools/agent-loop/__pycache__/
+evals-migration-*.sql.gz
+*.sql.gz
+
+# GTM / go-to-market working files (leads, outreach drafts, scraped threads) — never committed
+gtm/
+
+# E2B analyzer template: contract files staged by build.ts from contract/ (never committed twice)
+sandbox-runner/agent-sandbox/vendor/
+
+# Design working files: .dc.html mockups and the published canvases they seed.
+# The canvases are ~2 MB each and mostly a minified editor bundle, so a design
+# exploration costs more diff than the feature it explores. Regenerate, don't commit.
+.design/
+.design-sketches/
+

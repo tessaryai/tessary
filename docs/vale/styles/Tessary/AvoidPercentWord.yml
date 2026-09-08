@@ -1,0 +1,7 @@
+extends: existence
+message: "Use the '%%' symbol with the numeral instead of spelling out 'percent', unless the context requires it."
+link: /handbook/writing-style-guide.md#numbers
+level: suggestion
+ignorecase: true
+tokens:
+  - percent

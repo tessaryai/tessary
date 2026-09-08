@@ -1,0 +1,32 @@
+# pnpm settings for this package. NOT a workspace definition — there is no `packages:` key, so this
+# stays a plain single project (the repo deliberately has no root workspace; each Node package keeps
+# its own lockfile so the Dockerfiles can build from their own directory).
+#
+# This file exists because pnpm 11 removed the `pnpm` field in package.json and reads .npmrc for auth
+# and registry only; every other setting lives here. It MUST be COPYed alongside package.json and
+# pnpm-lock.yaml in any Dockerfile that installs this package, or the overrides below vanish silently.
+
+overrides:
+  # js-yaml: NOT overridden, and this is the record of why (#928). @redocly/openapi-core, reached
+  # through openapi-typescript, pins js-yaml 4.3.0; <4.3.1 has quadratic CPU consumption resolving
+  # `!!omap` (GHSA-2v37-7h3g-55p8, high). Forcing `js-yaml: '>=4.3.1'` here was TRIED and REVERTED:
+  # 4.3.1 changed the exported type registry, and redocly's lib/js-yaml/index.js dies at import with
+  # `Cannot read properties of undefined (reading 'merge')`, which takes the whole spec -> types
+  # codegen with it. openapi-typescript is already at its newest in-range version, so there is no
+  # upstream bump to take either.
+  #
+  # Carried deliberately because the advisory is unreachable here, and by a wider margin than
+  # "build-time only" suggests: openapi-typescript is a devDependency, so it never reaches the
+  # browser bundle at all -- and `generate:api` feeds it evals-api.json, a checked-in JSON file.
+  # The `!!omap` path this advisory is about parses no YAML in this repo, from any source, ever.
+  # Revisit when redocly moves off 4.3.0.
+  # es-toolkit 1.46.0 pin: 1.47.0 (recharts' transitive dep) emits require_-prefixed CJS vars that
+  # collide with esbuild's module-wrapper naming, breaking Vite dep optimization
+  # (require_isUnsafeProperty is not a function). recharts declares ^1.39.3.
+  es-toolkit: 1.46.0
+  # openapi-typescript@7.x declares peer typescript@^5.x; this project is on typescript 6. The codegen
+  # only uses the TS compiler API to emit .d.ts and works fine on TS 6, so force its peer to ours —
+  # otherwise pnpm's autoInstallPeers quietly resolves a second, TS 5 copy for it to run against.
+  # Keep this version in step with devDependencies.typescript in package.json; pnpm 11 does not
+  # document the `$typescript` back-reference npm supports, so it is spelled out literally.
+  openapi-typescript>typescript: ^6.0.3

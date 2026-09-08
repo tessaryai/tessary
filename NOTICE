@@ -1,0 +1,628 @@
+Tessary Evals Platform
+Copyright 2026 Tessary Software Private Limited
+
+This product includes software developed by Tessary Software Private Limited.
+
+This file lists the third-party software bundled into the built artifacts — the open
+backend and frontend Docker images that make up the self-host Compose bundle — whose
+license requires that an attribution or NOTICE be forwarded to recipients. Most MIT, BSD
+and ISC dependencies are deliberately absent: absent an upstream NOTICE file of their
+own they carry no Apache-2.0-style forwarding obligation, and enumerating every one of
+them here would bury the entries that do carry one.
+scripts/check-notice-coverage.sh is the standing check that this list still matches what
+the images actually ship; its header documents what that does and does not prove.
+
+FRONTEND FONTS AND ICONS
+The frontend bundles the Geist, Geist Mono and Space Grotesk variable fonts
+(@fontsource-variable/geist, @fontsource-variable/geist-mono,
+@fontsource-variable/space-grotesk — all three the SIL Open Font License 1.1) and the
+Lucide icon set (lucide-react — the ISC License). Neither license uses Apache-2.0's
+NOTICE mechanism, so these are not attribution-forwarding entries in the sense the rest
+of this file tracks. OFL 1.1 does require its own license text to travel with the font
+files themselves, and Vite does not copy npm package license files into `dist` by
+default, so the frontend build copies each package's own LICENSE into the served bundle
+alongside the font binaries it ships. Deliberately no count is given here: the set grows
+(Space Grotesk joined it in #1154 when the wordmark's face moved off the Google Fonts
+CDN to make the self-host egress claim true), and a number in this paragraph goes stale
+without anything failing. scripts/check-notice-coverage.sh checks both halves against
+the built frontend image — that this paragraph exists, and that license text travels
+beside the fonts.
+
+================================================================================
+THIRD-PARTY SOFTWARE — BACKEND (Java, bundled in the built backend image)
+================================================================================
+Each entry keeps its Maven-artifact keyword list verbatim: scripts/check-notice-coverage.sh
+matches every bundled jar's bare artifact name as a substring of this file, so trimming a
+list to one representative name silently stops covering its siblings.
+
+--------------------------------------------------------------------------------
+AWS SDK for Java 2.0, 2.54.7
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): annotations, apache5-client, auth, aws-core,
+aws-json-protocol, bedrockruntime, checksums, checksums-spi, endpoints-spi, http-auth,
+http-auth-aws, http-auth-aws-eventstream, http-auth-spi, http-client-spi, identity-spi,
+json-utils, lambda, metrics-spi, netty-nio-client, profiles, protocol-core, regions,
+retries, retries-spi, sdk-core, third-party-jackson-core, utils, utils-lite
+--------------------------------------------------------------------------------
+AWS SDK for Java 2.0
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+This product includes software developed by
+Amazon Technologies, Inc (http://www.amazon.com/).
+
+**********************
+THIRD PARTY COMPONENTS
+**********************
+This software includes third party software subject to the following copyrights:
+- XML parsing and utility functions from JetS3t - Copyright 2006-2009 James Murty.
+- PKCS#1 PEM encoded private key parsing and utility functions from
+  oauth.googlecode.com - Copyright 1998-2010 AOL Inc.
+- Apache Commons Lang - https://github.com/apache/commons-lang
+- Netty Reactive Streams - https://github.com/playframework/netty-reactive-streams
+- Jackson-core - https://github.com/FasterXML/jackson-core
+- Jackson-dataformat-cbor - https://github.com/FasterXML/jackson-dataformats-binary
+
+The licenses for these third party components are included in LICENSE.txt
+
+- For Apache Commons Lang see also this required NOTICE:
+  Apache Commons Lang
+  Copyright 2001-2020 The Apache Software Foundation
+
+  This product includes software developed at
+  The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Spring Framework 7.0.9
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): spring-aop, spring-beans, spring-context, spring-core,
+spring-expression, spring-jdbc, spring-tx, spring-web, spring-webmvc
+--------------------------------------------------------------------------------
+Spring Framework 7.0.9
+Copyright (c) 2002-2026 Pivotal, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+This product may include a number of subcomponents with separate
+copyright notices and license terms. Your use of the source code for
+these subcomponents is subject to the terms and conditions of the
+subcomponent's license, as noted in the license.txt file.
+
+--------------------------------------------------------------------------------
+Spring Boot 4.1.1
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): spring-boot, spring-boot-actuator,
+spring-boot-actuator-autoconfigure, spring-boot-autoconfigure, spring-boot-health,
+spring-boot-http-converter, spring-boot-jackson, spring-boot-jarmode-tools,
+spring-boot-jdbc, spring-boot-micrometer-metrics, spring-boot-micrometer-observation,
+spring-boot-micrometer-tracing, spring-boot-micrometer-tracing-opentelemetry,
+spring-boot-opentelemetry, spring-boot-persistence, spring-boot-servlet,
+spring-boot-sql, spring-boot-tomcat, spring-boot-transaction, spring-boot-validation,
+spring-boot-web-server, spring-boot-webmvc
+--------------------------------------------------------------------------------
+Spring Boot 4.1.1
+Copyright (c) 2012-2026 VMware, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+--------------------------------------------------------------------------------
+Micrometer 1.17.1
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): micrometer-commons, micrometer-core,
+micrometer-jakarta9, micrometer-observation, micrometer-registry-otlp
+--------------------------------------------------------------------------------
+Micrometer
+
+Copyright (c) 2017-Present VMware, Inc. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+-------------------------------------------------------------------------------
+
+This product contains a modified portion of 'io.netty.util.internal.logging',
+in the Netty/Common library distributed by The Netty Project:
+
+  * Copyright 2013 The Netty Project
+  * License: Apache License v2.0
+  * Homepage: https://netty.io
+
+This product contains a modified portion of 'StringUtils.isBlank()',
+in the Commons Lang library distributed by The Apache Software Foundation:
+
+  * Copyright 2001-2019 The Apache Software Foundation
+  * License: Apache License v2.0
+  * Homepage: https://commons.apache.org/proper/commons-lang/
+
+This product contains a modified portion of 'JsonUtf8Writer',
+in the Moshi library distributed by Square, Inc:
+
+  * Copyright 2010 Google Inc.
+  * License: Apache License v2.0
+  * Homepage: https://github.com/square/moshi
+
+This product contains a modified portion of the 'org.springframework.lang'
+package in the Spring Framework library, distributed by VMware, Inc:
+
+  * Copyright 2002-2019 the original author or authors.
+  * License: Apache License v2.0
+  * Homepage: https://spring.io/projects/spring-framework
+
+--------------------------------------------------------------------------------
+Micrometer Tracing 1.7.1
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): micrometer-tracing, micrometer-tracing-bridge-otel
+--------------------------------------------------------------------------------
+Micrometer Tracing
+
+Copyright (c) 2017-Present VMware, Inc. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+-------------------------------------------------------------------------------
+
+This product contains a modified portion of 'io.netty.util.internal.logging',
+in the Netty/Common library distributed by The Netty Project:
+
+  * Copyright 2013 The Netty Project
+  * License: Apache License v2.0
+  * Homepage: https://netty.io
+
+This product contains a modified portion of 'StringUtils.isBlank()',
+in the Commons Lang library distributed by The Apache Software Foundation:
+
+  * Copyright 2001-2019 The Apache Software Foundation
+  * License: Apache License v2.0
+  * Homepage: https://commons.apache.org/proper/commons-lang/
+
+This product contains a modified portion of 'JsonUtf8Writer',
+in the Moshi library distributed by Square, Inc:
+
+  * Copyright 2010 Google Inc.
+  * License: Apache License v2.0
+  * Homepage: https://github.com/square/moshi
+
+This product contains a modified portion of the 'org.springframework.lang'
+package in the Spring Framework library, distributed by VMware, Inc:
+
+  * Copyright 2002-2019 the original author or authors.
+  * License: Apache License v2.0
+  * Homepage: https://spring.io/projects/spring-framework
+
+--------------------------------------------------------------------------------
+Micrometer Context Propagation 1.2.1
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): context-propagation
+--------------------------------------------------------------------------------
+Micrometer Context Propagation
+
+Copyright (c) 2017-Present VMware, Inc. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+-------------------------------------------------------------------------------
+
+This product contains a modified portion of 'io.netty.util.internal.logging',
+in the Netty/Common library distributed by The Netty Project:
+
+  * Copyright 2013 The Netty Project
+  * License: Apache License v2.0
+  * Homepage: https://netty.io
+
+This product contains a modified portion of 'StringUtils.isBlank()',
+in the Commons Lang library distributed by The Apache Software Foundation:
+
+  * Copyright 2001-2019 The Apache Software Foundation
+  * License: Apache License v2.0
+  * Homepage: https://commons.apache.org/proper/commons-lang/
+
+This product contains a modified portion of 'JsonUtf8Writer',
+in the Moshi library distributed by Square, Inc:
+
+  * Copyright 2010 Google Inc.
+  * License: Apache License v2.0
+  * Homepage: https://github.com/square/moshi
+
+This product contains a modified portion of the 'org.springframework.lang'
+package in the Spring Framework library, distributed by VMware, Inc:
+
+  * Copyright 2002-2019 the original author or authors.
+  * License: Apache License v2.0
+  * Homepage: https://spring.io/projects/spring-framework
+
+--------------------------------------------------------------------------------
+Jackson JSON processor — jackson-annotations 2.21, jackson-databind 2.21.5
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): jackson-annotations, jackson-databind
+--------------------------------------------------------------------------------
+Jackson is a high-performance, Free/Open Source JSON processing library. It was
+originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has been in
+development since 2007. It is currently developed by a community of developers.
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+Jackson 2.x core and extension components are licensed under Apache License 2.0.
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+A list of contributors may be found from the CREDITS(-2.x) file, which is included
+in some artifacts (usually source distributions); but is always available from the
+source code management (SCM) system project uses.
+
+--------------------------------------------------------------------------------
+Jackson JSON processor — jackson-datatype-jsr310, jackson-module-parameter-names 2.21.5
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): jackson-datatype-jsr310, jackson-module-parameter-names
+--------------------------------------------------------------------------------
+Jackson is a high-performance, Free/Open Source JSON processing library. It was
+originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has been in
+development since 2007. It is currently developed by a community of developers.
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per the accompanying LICENSE file.
+
+A list of contributors may be found from the CREDITS file, which is included in
+some artifacts (usually source distributions); but is always available from the
+source code management (SCM) system project uses.
+
+--------------------------------------------------------------------------------
+Jackson JSON processor — jackson-dataformat-yaml 2.21.5
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): jackson-dataformat-yaml
+--------------------------------------------------------------------------------
+Jackson is a high-performance, Free/Open Source JSON processing library. It was
+originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has been in
+development since 2007. It is currently developed by a community of developers.
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per the accompanying LICENSE file.
+
+A list of contributors may be found from the CREDITS file, which is included in
+some artifacts (usually source distributions); but is always available from the
+source code management (SCM) system project uses.
+
+--------------------------------------------------------------------------------
+Jackson JSON processor — jackson-core 2.21.5
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): jackson-core
+--------------------------------------------------------------------------------
+Jackson is a high-performance, Free/Open Source JSON processing library. It was
+originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has been in
+development since 2007. It is currently developed by a community of developers.
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+Jackson 2.x core and extension components are licensed under Apache License 2.0.
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+jackson-core bundles a shaded copy of FastDoubleParser
+<https://github.com/wrandelshofer/FastDoubleParser>, available under an MIT license,
+Copyright © 2023 Werner Randelshofer, Switzerland.
+
+jackson-core bundles a copy of the Schubfach number writing code
+<https://github.com/c4f7fcce9cb06515/Schubfach>, available under an MIT license,
+Copyright 2018-2020 Raffaello Giulietti.
+
+--------------------------------------------------------------------------------
+Jackson JSON processor — jackson-core 3.1.5, jackson-databind 3.1.5
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): jackson-core, jackson-databind
+(both a 2.x and a 3.x Jackson generation are present on the classpath simultaneously,
+each with its own distinct NOTICE text)
+--------------------------------------------------------------------------------
+Jackson is a high-performance, Free/Open Source JSON processing library. It was
+originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has been in
+development since 2007. It is currently developed by a community of developers.
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+Jackson 3.x core and extension components are licensed under Apache License 2.0.
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+jackson-core bundles a shaded copy of FastDoubleParser
+<https://github.com/wrandelshofer/FastDoubleParser>, available under an MIT license,
+Copyright © 2023 Werner Randelshofer, Switzerland.
+
+jackson-core bundles a copy of the Schubfach number writing code
+<https://github.com/c4f7fcce9cb06515/Schubfach>, available under an MIT license,
+Copyright 2018-2020 Raffaello Giulietti.
+
+--------------------------------------------------------------------------------
+Apache Commons Collections 4.5.0
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): commons-collections4
+--------------------------------------------------------------------------------
+Apache Commons Collections
+Copyright 2001-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache Commons IO 2.22.0
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): commons-io
+--------------------------------------------------------------------------------
+Apache Commons IO
+Copyright 2002-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache Commons Lang 3.20.0
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): commons-lang3
+--------------------------------------------------------------------------------
+Apache Commons Lang
+Copyright 2001-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache Commons Logging 1.3.6
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): commons-logging
+--------------------------------------------------------------------------------
+Apache Commons Logging
+Copyright 2001-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache Commons Text 1.15.0
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): commons-text
+--------------------------------------------------------------------------------
+Apache Commons Text
+Copyright 2014-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache HttpClient 5.6.4
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): httpclient5
+--------------------------------------------------------------------------------
+Apache HttpClient
+Copyright 1999-2021 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache HttpComponents Core HTTP/1.1, 5.4.3
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): httpcore5
+--------------------------------------------------------------------------------
+Apache HttpComponents Core HTTP/1.1
+Copyright 2005-2021 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache HttpComponents Core HTTP/2, 5.4.3
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): httpcore5-h2
+--------------------------------------------------------------------------------
+Apache HttpComponents Core HTTP/2
+Copyright 2005-2021 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Netty (repackaged into io.grpc:grpc-netty-shaded, pulled in transitively by gRPC 1.83.1)
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): grpc-netty-shaded
+--------------------------------------------------------------------------------
+The Netty Project
+
+Copyright 2016 The Netty Project
+
+The Netty Project licenses this file to you under the Apache License, version 2.0
+(the "License"); you may not use this file except in compliance with the License.
+You may obtain a copy of the License at: http://www.apache.org/licenses/LICENSE-2.0
+
+This product contains a forked and modified version of Tomcat Native
+  * LICENSE: license/LICENSE.tomcat-native.txt (Apache License 2.0)
+  * HOMEPAGE: http://tomcat.apache.org/native-doc/, https://svn.apache.org/repos/asf/tomcat/native/
+
+This product contains the Maven wrapper scripts from 'Maven Wrapper'.
+  * LICENSE: license/LICENSE.mvn-wrapper.txt (Apache License 2.0)
+  * HOMEPAGE: https://github.com/takari/maven-wrapper
+
+This product contains code from BoringSSL.
+  * LICENSE: license/LICENSE.boringssl.txt (Apache License 2.0)
+  * HOMEPAGE: https://boringssl.googlesource.com/boringssl/
+
+--------------------------------------------------------------------------------
+Apache Tomcat, embedded (11.0.24)
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): tomcat-annotations-api, tomcat-embed-core,
+tomcat-embed-el, tomcat-embed-websocket
+--------------------------------------------------------------------------------
+Apache Tomcat
+Copyright 1999-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+[tomcat-embed-core's own NOTICE additionally lists the original XML Schemas for Java EE
+Deployment Descriptors it bundles, obtainable from
+http://www.oracle.com/webfolder/technetwork/jsc/xml/ns/javaee/index.html — omitted here
+for brevity; the copyright/attribution line above is identical across all four modules.]
+
+--------------------------------------------------------------------------------
+Apache PDFBox 3.0.8
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): pdfbox
+--------------------------------------------------------------------------------
+Apache PDFBox
+Copyright 2002-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+Based on source code contributed to the original PDFBox project.
+Copyright (c) 2002-2007, www.pdfbox.org
+
+Includes the Adobe Glyph List
+Copyright 1997, 1998, 2002, 2007, 2010 Adobe Systems Incorporated.
+
+Includes the Zapf Dingbats Glyph List
+Copyright 2002, 2010 Adobe Systems Incorporated.
+
+Includes the Bidi Mirroring Glyph Property (BidiMirroring-8.0.0.txt)
+Copyright 1991-2015 Unicode, Inc.
+
+Includes parts of TwelveMonkeys ImageIO
+Copyright 2008-2016 Harald Kuhr
+
+Includes the CMYK ICC-profile (CGATS001Compat-v2-micro.icc)
+https://github.com/saucecontrol/Compact-ICC-Profiles
+Released to the public domain under the Creative Commons CC0 license by Clinton Ingram,
+saucecontrol
+
+--------------------------------------------------------------------------------
+Apache PDFBox io 3.0.8
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): pdfbox-io
+--------------------------------------------------------------------------------
+Apache PDFBox io
+Copyright 2002-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+--------------------------------------------------------------------------------
+Apache FontBox 3.0.8
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): fontbox
+--------------------------------------------------------------------------------
+Apache FontBox
+Copyright 2008-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+Based on source code contributed to the original FontBox project.
+Copyright (c) 2006-2007, www.fontbox.org
+
+Includes the Script Property (Scripts-10.0.0.txt)
+Copyright 2017 Unicode, Inc.
+
+--------------------------------------------------------------------------------
+Swagger Core 2.2.47 — swagger-annotations, swagger-core, swagger-models
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): swagger-annotations-jakarta, swagger-core-jakarta,
+swagger-models-jakarta
+--------------------------------------------------------------------------------
+Swagger Core
+Copyright (c) 2015. SmartBear Software Inc.
+Swagger Core is licensed under the Apache 2.0 license.
+A copy of the Apache 2.0 license can be found in the LICENSE file.
+
+--------------------------------------------------------------------------------
+Jakarta Activation API 2.1.4
+License: Eclipse Public License 2.0 OR BSD 3-Clause OR GPL-2.0-only w/ Classpath
+         Exception 2.0 (contributor's choice; this product is not itself a
+         contribution and simply depends on the published artifact)
+Bundled as (Maven artifact IDs): jakarta.activation-api
+--------------------------------------------------------------------------------
+Notices for Jakarta Activation. Produced and maintained by the Jakarta Activation
+project (https://projects.eclipse.org/projects/ee4j.jaf). "Jakarta Activation" is a
+trademark of the Eclipse Foundation. SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
+OR GPL-2.0-only with Classpath-exception-2.0. The project's own NOTICE additionally
+lists third-party content it leverages (Apache Ant, Apache Commons Lang, font-awesome,
+jsoup, JTHarness, JUnit, normalize.css) under their own respective licenses — see
+https://github.com/jakartaee/jaf-api for the full text.
+
+--------------------------------------------------------------------------------
+Jakarta Annotations API 3.0.0
+License: Eclipse Public License 2.0 OR GPL-2.0-only w/ Classpath Exception 2.0
+Bundled as (Maven artifact IDs): jakarta.annotation-api
+--------------------------------------------------------------------------------
+Notices for Jakarta Annotations. Produced and maintained by the Jakarta Annotations
+project (https://projects.eclipse.org/projects/ee4j.ca). "Jakarta Annotations" is a
+trademark of the Eclipse Foundation. SPDX-License-Identifier: EPL-2.0 OR
+GPL-2.0-only with Classpath-exception-2.0.
+
+--------------------------------------------------------------------------------
+Jakarta XML Binding API 4.0.5
+License: Eclipse Distribution License v1.0 (BSD-3-Clause)
+Bundled as (Maven artifact IDs): jakarta.xml.bind-api
+--------------------------------------------------------------------------------
+Copyright (c) 2018, 2024 Oracle and/or its affiliates. All rights reserved.
+Notices for Jakarta XML Binding. Produced and maintained by the Jakarta XML Binding
+project (https://projects.eclipse.org/projects/ee4j.jaxb). "Jakarta XML Binding" is a
+trademark of the Eclipse Foundation. SPDX-License-Identifier: BSD-3-Clause.
+
+--------------------------------------------------------------------------------
+Apache Log4j API 2.25.5 (transitive; this product's actual logging backend is Logback,
+Log4j API/adapter jars are pulled in by a transitive dependency's SLF4J binding choice)
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): log4j-api, log4j-to-slf4j
+--------------------------------------------------------------------------------
+Apache Log4j API
+Copyright 1999-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+[log4j-to-slf4j's own NOTICE reads "Log4j API to SLF4J Adapter" in place of "Apache
+Log4j API" on the first line; the copyright and ASF attribution lines are identical.]
+
+--------------------------------------------------------------------------------
+Java ClassMate library
+License: Apache License 2.0
+Bundled as (Maven artifact IDs): classmate
+--------------------------------------------------------------------------------
+Java ClassMate library was originally written by Tatu Saloranta (tatu.saloranta@iki.fi).
+Other developers who have contributed code are: Brian Langel.
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+--------------------------------------------------------------------------------
+Pyroscope Java agent (downloaded directly in backend/Dockerfile, not via Maven)
+License: Apache License 2.0 (agent itself); bundles one MPL 2.0 data file, see below
+Bundled as: pyroscope.jar
+--------------------------------------------------------------------------------
+Note that publicsuffixes.gz is compiled from The Public Suffix List:
+https://publicsuffix.org/list/public_suffix_list.dat
+
+It is subject to the terms of the Mozilla Public License, v. 2.0:
+https://mozilla.org/MPL/2.0/

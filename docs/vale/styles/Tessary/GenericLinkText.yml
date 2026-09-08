@@ -1,0 +1,9 @@
+extends: existence
+message: "Write link text that describes the destination or action, not a generic phrase like '%s'."
+link: /handbook/writing-style-guide.md#links
+level: warning
+ignorecase: true
+tokens:
+  - 'click here'
+  - 'read this'
+  - 'learn more'

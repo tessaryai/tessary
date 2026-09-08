@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {"type": "string", "description": "One short paragraph: what happened and the change that caused it — or that no change was located."},
+    "verdict": {"type": "string", "enum": ["behavior_change", "traffic_shift", "definition_change", "model_change", "inconclusive"]},
+    "checklist": {
+      "type": "array",
+      "description": "One entry per check id in dossier/checklist.md — your own call on each measurement.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {"type": "string", "description": "The check id, exactly as it appears in dossier/checklist.md."},
+          "assessment": {
+            "type": "string",
+            "enum": ["ruled_out", "contributing", "explains", "unknown"],
+            "description": "ruled_out: measured and does not explain any of the movement. contributing: part of the story. explains: accounts for the movement on its own. unknown: the evidence does not settle it."
+          },
+          "detail": {"type": "string", "description": "Why you assessed it that way, citing what you checked."}
+        },
+        "required": ["check", "assessment", "detail"]
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "description": "1-4 root-cause hypotheses, most likely first. Empty is a legitimate answer when you located no change and nothing survives as a lead.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+          "rationale": {"type": "string"},
+          "evidence_trace_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Trace ids from this finding's own evidence refs (either side) that evidence this. A traffic_shift or behavior_change hypothesis set must include at least one baseline-side id — that verdict compares the baseline against the flagged evidence, and an uncited comparison is downgraded."
+          }
+        },
+        "required": ["title", "confidence", "rationale", "evidence_trace_ids"]
+      }
+    },
+    "detailed_report": {
+      "type": "string",
+      "description": "The full investigation as markdown: what was checked, in code and in traces, and how the evidence supports the verdict. Must end with an '## Evidence audit' section — a table mapping every load-bearing claim to its evidence (a trace id, a repo path/commit, or a query) — and a '## What would settle it' section naming the next experiment."
+    }
+  },
+  "required": ["summary", "verdict", "checklist", "hypotheses", "detailed_report"]
+}

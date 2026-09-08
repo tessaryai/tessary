@@ -1,0 +1,526 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      Reactor aggregator for the Maven multi-module skeleton. The Spring Boot app lives in the `app`
+      module; `shared` and `contract` are OPEN modules (cleanly extractable, no dependency on the app
+      or any closed module — enforced by bannedDependencies in each module's pom). Spring Boot's
+      dependency/plugin management is inherited from spring-boot-starter-parent here and flows to
+      every module.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>ai.tessary</groupId>
+    <artifactId>backend</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>shared</module>
+        <module>contract</module>
+        <module>core</module>
+        <module>test-support</module>
+        <module>tenancy</module>
+        <module>substrate</module>
+        <module>product</module>
+        <module>llm-runtime</module>
+        <module>analysis</module>
+        <module>surfaces</module>
+        <module>app</module>
+    </modules>
+
+    <properties>
+        <java.version>25</java.version>
+        <!-- Formatting toolchain (build-time only; never on the runtime classpath). Declared here
+             rather than in `app` because Spotless is bound for EVERY module below. -->
+        <spotless.version>3.10.1</spotless.version>
+        <palantir-java-format.version>2.91.0</palantir-java-format.version>
+        <docker.api.version>1.44</docker.api.version>
+        <error-prone.version>2.50.0</error-prone.version>
+        <forbiddenapis.version>3.10</forbiddenapis.version>
+        <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
+        <nullaway.version>0.14.1</nullaway.version>
+        <pmd.version>7.27.0</pmd.version>
+        <spotbugs-maven-plugin.version>4.10.4.0</spotbugs-maven-plugin.version>
+        <spotbugs.version>4.10.4</spotbugs.version>
+        <findsecbugs.version>1.14.0</findsecbugs.version>
+        <awssdk.version>2.54.12</awssdk.version>
+        <grpc.version>1.84.0</grpc.version>
+        <langchain4j.version>1.19.0</langchain4j.version>
+        <!-- CVE-2026-65182 / CVE-2026-65905 / CVE-2026-68525: spring-boot-starter-parent:4.1.1's
+             BOM pins tomcat-embed-core to 11.0.24. Override ahead of Boot's own BOM until a
+             4.1.2+ parent is released; remove this once that BOM catches up to >=11.0.25. -->
+        <tomcat.version>11.0.25</tomcat.version>
+        <!-- PDF text extraction for the document/PDF modality (#985, Epic 8 Track B): pure-Java,
+             Apache-2.0, no native binaries and no network egress — safe for the open bucket per
+             D2/D4. Verified latest stable 3.x on Maven Central 2026-09-02. NOT covered by CI (
+             scripts/check-dependency-audit.sh is on-demand-only, per its own header) — a bad license
+             choice here would not be caught automatically; this note is the record that the license
+             was checked by hand at introduction time. -->
+        <pdfbox.version>3.0.8</pdfbox.version>
+        <opentelemetry-instrumentation.version>2.31.1-alpha</opentelemetry-instrumentation.version>
+        <protobuf-java.version>4.36.0</protobuf-java.version>
+        <!-- Testcontainers 2.x: the artifacts were regrouped, so the modules depend on
+             `testcontainers-postgresql` / `testcontainers-junit-jupiter`, NOT the 1.x
+             `postgresql` / `junit-jupiter` names. Docker is required to run `mvn verify`. -->
+        <testcontainers.version>2.0.5</testcontainers.version>
+        <archunit.version>1.5.0</archunit.version>
+        <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
+        <!-- SOP-conformance embedding serving (analysis/classifier/conformance): the in-process
+             ONNX forward pass over the bundle's frozen checkpoint plus the checkpoint's own
+             tokenizer.json via the HuggingFace tokenizers JNI binding. Verified latest stable on
+             Maven Central 2026-08-07. -->
+        <onnxruntime.version>1.29.0</onnxruntime.version>
+        <djl-tokenizers.version>0.36.0</djl-tokenizers.version>
+        <!-- Verified latest stable on Maven Central 2026-09-01 (#930). Only the 11 open modules
+             below bare-activate this plugin (backend/test-support and every tessary-paid/*
+             module deliberately do not) — see the per-module comment at each activation site. -->
+        <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <!-- Default to empty rather than leaving argLine unset. jacoco:prepare-agent (bound only
+             in modules that bare-activate jacoco-maven-plugin, i.e. never in tessary-paid/) rebinds
+             this property to the -javaagent flag it needs surefire to fork with. Every module that
+             never runs prepare-agent — every tessary-paid module, by construction — must still
+             resolve ${argLine} to nothing rather than leave the literal unresolved token, which
+             would hard-fail the forked test JVM. -->
+        <argLine></argLine>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- AWS SDK v2 BOM: single source of truth for every awssdk module (Bedrock-runtime
+                 pulled by langchain4j-bedrock + the Lambda client we add directly), so they never
+                 drift apart on a shared transitive like aws-core. -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- alpha BOM, not the stable one — the Logback appender is still
+                 versioned under -alpha even though the artifact itself has been
+                 production-ready for years. -->
+            <dependency>
+                <groupId>io.opentelemetry.instrumentation</groupId>
+                <artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
+                <version>${opentelemetry-instrumentation.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- gRPC BOM: pins grpc-netty-shaded / grpc-protobuf / grpc-stub (the OTLP/gRPC receiver, #235)
+                 to one version. Unmanaged by the Spring Boot 4 BOM, so imported here. -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Lock protobuf-java to the version opentelemetry-proto resolves (4.x). grpc-protobuf
+                 declares an older 3.25.x floor; this pin keeps the runtime protobuf single-versioned so
+                 the gRPC stub and the OTLP message types share one protobuf-java. -->
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf-java.version}</version>
+            </dependency>
+            <!-- Swagger annotations (@Operation, @Schema) used directly by controllers and DTOs.
+                 They arrive transitively via springdoc, but a module that only annotates - rather
+                 than configures OpenAPI - depends on the annotations alone, so the version is pinned
+                 here to the one springdoc resolves rather than left to whichever module wins.
+
+                 HELD at 2.2.47. 2.2.53 emits `"default": ""` on 26 enum and array-item schemas that
+                 have no such default, which is wrong API documentation and rides into every
+                 generated client as a bogus `@default` JSDoc tag. No type changes - purely a
+                 fidelity regression in a contract we publish. Re-check on the next release; the
+                 test for it is `task contract:openapi` followed by grepping the spec for
+                 `"default": ""`. -->
+            <dependency>
+                <groupId>io.swagger.core.v3</groupId>
+                <artifactId>swagger-annotations-jakarta</artifactId>
+                <version>2.2.55</version>
+            </dependency>
+            <!-- JSpecify nullness annotations (@Nullable) - the contract NullAway checks.
+                 Managed here so the modules that use it cannot drift to different versions. -->
+            <dependency>
+                <groupId>org.jspecify</groupId>
+                <artifactId>jspecify</artifactId>
+                <version>1.0.1</version>
+            </dependency>
+            <!-- The conformance encoder's serving pair (see the property comment above). Managed
+                 here so no second module can pull a drifting version of either native binding. -->
+            <dependency>
+                <groupId>com.microsoft.onnxruntime</groupId>
+                <artifactId>onnxruntime</artifactId>
+                <version>${onnxruntime.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.djl.huggingface</groupId>
+                <artifactId>tokenizers</artifactId>
+                <version>${djl-tokenizers.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <!-- The shared quality gate. Declared here so EVERY module is held to the same
+                 compiler flags, NullAway packages, forbidden-API set, SpotBugs filter and PMD
+                 ruleset. A module activates them by naming the plugin with no configuration;
+                 a module that forgets is visible as an absence, not as silently ungated code.
+                 pluginManagement rather than plugins so the aggregator (which has no sources)
+                 does not try to run them on itself. -->
+            <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Pin the Docker Engine API version the Testcontainers docker-java client
+                         talks. docker-java defaults to an old API version (1.32); Docker Engine
+                         25.0+ / Docker Desktop sets MinAPIVersion=1.44 and rejects anything older
+                         with HTTP 400, so the test datasource container fails to start without
+                         this. 1.44 (Docker 25.0, Jan 2024) is the floor supported by every modern
+                         daemon — old enough for any CI runner, new enough for current Desktop.
+                         docker-java reads the `api.version` SYSTEM PROPERTY (not the DOCKER_API_VERSION
+                         CLI env var). Override with -Ddocker.api.version=<v> if a daemon needs it. -->
+                    <systemPropertyVariables>
+                        <api.version>${docker.api.version}</api.version>
+                    </systemPropertyVariables>
+                    <!-- jacoco:prepare-agent (open modules only, #930) rewrites the `argLine`
+                         property to the -javaagent flag it needs threaded into the forked test
+                         JVM's command line. Without this element surefire never reads that
+                         property back, and the module silently reports 0% coverage with no build
+                         error — the property default above keeps it empty for every module
+                         (i.e. every tessary-paid module) that never runs prepare-agent. -->
+                    <argLine>${argLine}</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                    <compilerArgs>
+                        <arg>-XDcompilePolicy=simple</arg>
+                        <arg>--should-stop=ifError=FLOW</arg>
+                        <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
+                        <!-- NotJavadoc: records/DTOs document components with block comments
+                             (matches the PMD DanglingJavadoc exclusion). JavaLangClash:
+                             model/Runtime mirrors the synth-schema name (contract-driven).
+                             NullAway covers 25 open package prefixes plus the whole paid
+                             overlay; widen
+                             AnnotatedPackages one package at a time and run the gate — a package
+                             that is not listed is NOT checked, and a name that matches nothing is
+                             silently ignored, so keep this list honest.
+                             `ai.tessary.paid` is here rather than in an overlay
+                             maven-compiler-plugin override on purpose. The overlay re-points
+                             SpotBugs and forbidden-apis because their filters are open-package
+                             globs that would match nothing there; NullAway's is one argument
+                             inside one long -Xplugin string, and overriding it one directory over
+                             means restating the whole ErrorProne line. Two copies of that line
+                             diverge, and the half that goes stale is the one nobody reads —
+                             which is the silently-inapplicable-analyser failure
+                             tessary-paid/pom.xml's own header says it exists to close.
+                             `scripts/check-open-boundary.sh` greps `backend/*/pom.xml` for
+                             `ai.tessary.paid`, and this file is `backend/pom.xml`, which that
+                             glob does not match: it already carries `<module>../tessary-paid</module>`
+                             and the enforcer's `<exclude>ai.tessary.paid:*</exclude>`.
+                             Still outside the set: alert, annotation, assistant, billing, ci, compile, config, experiment, gate, git, llm, llmspi, metering, model, observer, ops, plan, prediction, pricing, query, rca, redaction, regrade, review, routing, search, slack, storage, synth, tenant, traces, trend, trendstore, usage, verdict, vitals. -->
+                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.evals.open.errors,ai.tessary.evals.open.obs,ai.tessary.evals.apidoc,ai.tessary.evals.crypto,ai.tessary.evals.version,ai.tessary.evals.web,ai.tessary.evals.mcp,ai.tessary.evals.sources,ai.tessary.evals.golden,ai.tessary.evals.curation,ai.tessary.evals.dataset,ai.tessary.evals.auth,ai.tessary.evals.ingest,ai.tessary.evals.run,ai.tessary.evals.judge,ai.tessary.evals.db,ai.tessary.evals.priors,ai.tessary.evals.pipeline,ai.tessary.evals.sandbox,ai.tessary.evals.risk,ai.tessary.evals.classifier,ai.tessary.evals.analytics,ai.tessary.evals.featureflags,ai.tessary.evals.cases,ai.tessary.evals.sopcompile,ai.tessary.paid</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>com.google.errorprone</groupId>
+                            <artifactId>error_prone_core</artifactId>
+                            <version>${error-prone.version}</version>
+                        </path>
+                        <path>
+                            <groupId>com.uber.nullaway</groupId>
+                            <artifactId>nullaway</artifactId>
+                            <version>${nullaway.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>de.thetaphi</groupId>
+                <artifactId>forbiddenapis</artifactId>
+                <version>${forbiddenapis.version}</version>
+                <configuration>
+                    <failOnUnsupportedJava>false</failOnUnsupportedJava>
+                    <!-- Only our own hand-written classes; scope the check to our package
+                         so generated glue in target/ is never linted. -->
+                    <includes>
+                        <include>ai/tessary/evals/**</include>
+                    </includes>
+                    <bundledSignatures>
+                        <bundledSignature>jdk-unsafe</bundledSignature>
+                        <bundledSignature>jdk-non-portable</bundledSignature>
+                        <bundledSignature>jdk-system-out</bundledSignature>
+                    </bundledSignatures>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>forbidden-apis-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                            <goal>testCheck</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs-maven-plugin.version}</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Low</threshold>
+                    <includeTests>false</includeTests>
+                    <sarifOutput>true</sarifOutput>
+                    <excludeFilterFile>${project.basedir}/../config/spotbugs-exclude.xml</excludeFilterFile>
+                    <!-- Our own classes only; skip any generated glue in target/. -->
+                    <onlyAnalyze>ai.tessary.evals.-</onlyAnalyze>
+                    <!-- find-sec-bugs adds the security detectors core SpotBugs does not ship:
+                         injection (SQL, command, LDAP), path traversal, SSRF, XXE, weak crypto and
+                         hardcoded keys, insecure cookie flags. It is the only security static
+                         analysis that runs on a contributor's machine — CodeQL needs the repo to be
+                         public before it can run at all (see .github/workflows/codeql.yml). -->
+                    <plugins>
+                        <plugin>
+                            <groupId>com.h3xstream.findsecbugs</groupId>
+                            <artifactId>findsecbugs-plugin</artifactId>
+                            <version>${findsecbugs.version}</version>
+                        </plugin>
+                    </plugins>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs</artifactId>
+                        <version>${spotbugs.version}</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>spotbugs-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>${maven-pmd-plugin.version}</version>
+                <configuration>
+                    <rulesets>
+                        <ruleset>${project.basedir}/../config/pmd-ruleset.xml</ruleset>
+                    </rulesets>
+                    <includeTests>false</includeTests>
+                    <printFailingErrors>true</printFailingErrors>
+                    <!-- The generated column-name constant interfaces (build-time codegen from
+                         the Liquibase schema) are not hand-authored source; skip them. -->
+                    <excludeRoots>
+                        <excludeRoot>${project.build.directory}/generated-sources/schema-columns</excludeRoot>
+                    </excludeRoots>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-core</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-java</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>pmd-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Coverage baseline, open modules only (#930). NO GATE — this establishes a
+                 number before the epic 1 extractions continue, it does not fail a build on a
+                 threshold. pluginManagement-only, exactly like every other plugin in this block:
+                 the aggregator has no sources and never runs it, and — unlike every other plugin
+                 here — tessary-paid/*/pom.xml does NOT bare-activate this one, so paid modules
+                 never run jacoco either. That omission (not a flag, not a profile) is the entire
+                 open/paid scoping mechanism: open-core decision D2 is satisfied structurally.
+                 Paid coverage tooling is epic 5's concern, where the paid integration-test
+                 harness actually gets built. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <!-- Rewrites the `argLine` property (see the surefire config above) to
+                             the -javaagent flag before the forked test JVM starts. -->
+                        <id>jacoco-prepare-agent</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <propertyName>argLine</propertyName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- HTML + XML report from the exec data prepare-agent recorded, once the
+                             module's own tests have run. -->
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <!-- Spotless: deterministic, auto-fixable formatting. `mvn spotless:apply` reformats in
+                 place; `spotless:check` gates the build. The palantir engine formats and orders
+                 imports; Spotless forks a worker JVM and injects the required jdk.compiler
+                 add-exports flags itself, so no MAVEN_OPTS are needed.
+
+                 Declared on the AGGREGATOR so every module inherits it — formatting drift in any of
+                 them must fail the build exactly as it does in `app`. Declaring it here is also what makes the bare `mvn spotless:apply`
+                 behind `task backend:format` resolve: the `spotless` plugin prefix is looked up
+                 against the root project, so a declaration only in `app` left the task failing with
+                 "No plugin found for prefix 'spotless'". The aggregator itself has no sources, so
+                 the extra binding on this pom is a no-op.
+
+                 Bound to `validate`, NOT `verify`: formatting is a pure source-text check that
+                 needs no compilation, and at `verify` it only reported after the full test suite
+                 had run — paying ~3 minutes to learn about a misplaced brace. At `validate` it
+                 fails in ~2s, before compile. Fix with `task backend:format`. -->
+            <!-- Open-core direction check (open-core decision D2). Declared on the AGGREGATOR
+                 so EVERY module inherits it: an open module that declares a dependency on anything
+                 in the paid overlay fails `mvn validate` before a line is compiled, which is what
+                 makes "the open tree contains no paid code" a mechanical property rather than a
+                 review convention. `tessary-paid/pom.xml` disables this execution for its own
+                 subtree, because paid->open and paid->paid are both allowed; only open->paid is not.
+
+                 Transitive on purpose: an open module must not reach paid code through a sibling
+                 either. Maven is the whole enforcement for Java — a class cannot be imported
+                 without the dependency that carries it. `scripts/check-open-boundary.sh` covers
+                 what Maven cannot see (source text, the frontend, Docker build inputs). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-open-to-paid-direction</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>ai.tessary.paid:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>
+                                        This is an OPEN module and it must not depend on the paid
+                                        overlay (ai.tessary.paid:*). The open tree has to build with
+                                        tessary-paid/ deleted. Invert the dependency behind an SPI
+                                        interface in the open module and let the paid module
+                                        implement it, or move the calling code into the overlay.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <palantirJavaFormat>
+                            <version>${palantir-java-format.version}</version>
+                        </palantirJavaFormat>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotless-check</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!--
+      The paid overlay joins THIS reactor when it is present on disk (open-core decision D2: one
+      repo now, two at cutover). File activation rather than a hand-thrown flag, because the
+      property being modelled is literally "does tessary-paid/ exist" — after the cutover the public
+      repo simply will not have it, and this pom then builds the open edition with no edit.
+
+      So:
+        mvn -f backend/pom.xml verify              open + paid, one reactor  (task backend:check)
+        mvn -f backend/pom.xml -P '!paid' verify   open edition only         (task backend:check:open)
+
+      The module path escapes this directory because the overlay is a top-level folder, which is
+      what makes the public export a folder filter rather than a per-file sieve. Maven builds
+      out-of-tree modules fine; `scripts/check-module-hygiene.sh` knows to exclude them from the
+      Docker module lists, since per D4 the open image carries no paid code.
+    -->
+    <profiles>
+        <profile>
+            <id>paid</id>
+            <activation>
+                <file>
+                    <exists>${project.basedir}/../tessary-paid/pom.xml</exists>
+                </file>
+            </activation>
+            <modules>
+                <module>../tessary-paid</module>
+            </modules>
+        </profile>
+    </profiles>
+</project>

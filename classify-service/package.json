@@ -1,0 +1,25 @@
+{
+  "name": "evals-classify-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone encoder classification service for the evals platform's built-in signal heads.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "onnxruntime-node": "1.24.3"
+  },
+  "comments-dependencies": {
+    "onnxruntime-node": "Direct dependency for embed.js's raw InferenceSession (last_hidden_state serving — no task pipeline exposes it). Pinned EXACTLY to the version @huggingface/transformers resolves so one native ONNX Runtime ships; bump the pin in lockstep with the transformers.js dependency."
+  },
+  "comments": {
+    "allowBuilds": "The dependency-build-script allowlist lives in pnpm-workspace.yaml, not here: pnpm 11 removed the `pnpm` field in package.json and ignores it silently. onnxruntime-node/sharp/protobufjs all need their install scripts; without them the image builds clean and fails at model load."
+  }
+}

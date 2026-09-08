@@ -1,0 +1,68 @@
+# gitleaks rules for the credential formats this product itself mints or accepts (epic 6 clause 1,
+# #1146). Extends the built-in rule set rather than replacing it, so every third-party vendor key
+# shape gitleaks already knows stays covered; what is added is what no vendor list will ever carry.
+# The enumeration these rules implement is scripts/lib/self-minted-credential-formats.txt, and
+# the export-candidate scrub gate's `--prove-rules` mode plants one synthetic instance per rule and
+# requires a hit. That gate moved into the paid overlay with #1293 (it is the only thing that reads
+# the export-candidate tree); this ruleset stayed open, and TWO gates read it now. The overlay's
+# gate scans the export candidate. The open repo's own secret scan
+# (.github/workflows/secret-scan.yml, through .gitleaks.toml) scans the checkout itself: #1293's
+# review added that extension, because the two subjects overlap almost exactly — the candidate IS
+# root-minus-overlay — but run on different cadences, and only the public repo's own scan sees a
+# contributor's push the moment it lands. Nothing stock matches `tsy_w_…`.
+title = "tessary self-minted credential formats"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "tessary-api-key"
+description = "Tessary API key or MCP token: tsy_<scope>_ plus 22 url-safe base64 characters"
+regex = '''\btsy_[wqa]_[A-Za-z0-9_-]{22}\b'''
+keywords = ["tsy_"]
+[rules.allowlist]
+# Documentation placeholders: a token whose 22 characters are one repeated letter is a shape, not a key.
+regexes = ['''tsy_[wqa]_(x{22}|X{22}|0{22}|\.{22})''']
+
+[[rules]]
+id = "tessary-device-code"
+description = "Tessary device-link device code: link_ plus 32 url-safe base64 characters"
+regex = '''\blink_[A-Za-z0-9_-]{32}\b'''
+keywords = ["link_"]
+
+[[rules]]
+id = "tessary-sealing-key"
+description = "A session or secret-box sealing key assigned to its environment name (44-char base64); the two shipped placeholders are public by design and excluded"
+# The value may sit directly after the name, or inside a compose default (`NAME: ${NAME:-value}`),
+# which is exactly how docker-compose.yml carries these keys.
+regex = '''(?i)\b(EVALS_AUTH_COOKIE_PASSWORD|EVALS_SECRET_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9+/]{43}=)'''
+secretGroup = 2
+keywords = ["EVALS_AUTH_COOKIE_PASSWORD", "EVALS_SECRET_KEY"]
+[rules.allowlist]
+regexes = ['''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=''', '''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtc2VhbCE=''']
+
+[[rules]]
+id = "tessary-service-key"
+description = "A service-to-service bearer (classify, compile, slack, sandbox launcher), either side of each symmetric pair, assigned to its environment name: 32+ hex or 40+ base64 characters; the shipped launcher placeholder is public by design and excluded"
+regex = '''(?i)\b(CLASSIFY_API_KEY|COMPILE_SERVICE_KEY|SLACK_SERVICE_KEY|SANDBOX_API_KEY|EMBED_API_KEY|EVALS_COMPILE_SERVICE_KEY|EVALS_SOP_COMPILE_API_KEY|EVALS_OBSERVER_ENCODER_API_KEY|EVALS_(?:OBSERVER|RCA)_AGENTIC_LAUNCHER_API_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Fa-f0-9]{32,}|[A-Za-z0-9+/=_-]{40,})'''
+secretGroup = 2
+keywords = ["CLASSIFY_API_KEY", "COMPILE_SERVICE_KEY", "SLACK_SERVICE_KEY", "SANDBOX_API_KEY", "EMBED_API_KEY", "LAUNCHER_API_KEY", "ENCODER_API_KEY", "SOP_COMPILE_API_KEY"]
+
+[rules.allowlist]
+# Base64 of `CHANGE-ME-insecure-default-launch`, the launcher bearer docker-compose.yml ships on
+# both sides of the pair. Excluded on the same terms as the two sealing placeholders above: it is
+# published deliberately so a fresh `docker compose up` authenticates instead of 401ing, and
+# PlaceholderSecretGuard refuses to boot a SITE_DOMAIN install that is still on it.
+regexes = ['''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo''']
+
+[[rules]]
+id = "tessary-db-password"
+description = "The database password assigned to its environment name with any value but the public compose placeholder"
+# The value may not begin with `$`: `${VAR}`, `$$VAR` and `$(command)` are references, not values.
+regex = '''(?i)\b(POSTGRES_PASSWORD|EVALS_DB_PASSWORD)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9!@#%^&*_+=\-./]{8,})'''
+secretGroup = 2
+keywords = ["POSTGRES_PASSWORD", "EVALS_DB_PASSWORD"]
+# Allowlist regexes are matched against the secret group alone. The public placeholder `evals` is
+# already shorter than the eight characters a value needs, so this row is a statement, not a filter.
+[rules.allowlist]
+regexes = ['''^evals$''']

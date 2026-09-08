@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs runs at Max effort / Low threshold. These exclusions are deliberate: each is a
+  pattern that is a false positive or an intentional design choice for this codebase, NOT a
+  silenced real bug. Genuine correctness findings are fixed in the code, not listed here.
+-->
+<FindBugsFilter>
+    <!-- Spring-generated glue we don't author: CGLIB proxies for @Configuration/@Component
+         classes (*$$SpringCGLIB$$*) and any AOT-style bean-definition glue (*__BeanDefinitions,
+         *__Autowiring, ...). Our own classes never contain '__' or '$$' (nested types use a
+         single '$'), so this only ever matches framework-generated artifacts. -->
+    <Match>
+        <Class name="~.*(\$\$|__).*" />
+    </Match>
+
+    <!-- Value-object exposure (EI_EXPOSE_REP / EI_EXPOSE_REP2 / MS_EXPOSE_REP, ~200 hits):
+         our records/DTOs and the model/ graph are immutable by convention and passed around as
+         read-only data. Defensive-copying every collection accessor adds no real safety and
+         fights the record design. This is the standard SpotBugs exclusion for record/DTO code. -->
+    <Match>
+        <Bug category="MALICIOUS_CODE" />
+    </Match>
+
+    <!-- Deliberate broad catches: per AGENTS.md, per-entry run execution, crypto seal/open, and
+         parse/transform paths catch broadly to degrade gracefully (one unit fails → WARN, the run
+         continues). Narrowing them would defeat that resilience. -->
+    <Match>
+        <Bug pattern="REC_CATCH_EXCEPTION" />
+    </Match>
+
+    <!-- '\n' in format strings that are SQL or LLM prompts is the intended literal newline; '%n'
+         would emit a platform-specific separator, which is wrong for both a Postgres query and an
+         LLM prompt body. -->
+    <Match>
+        <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE" />
+    </Match>
+
+    <!-- Transparent rethrow: LlmCaller catches RuntimeException only to record it on the
+         OpenTelemetry span, then rethrows the original unchanged. -->
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION" />
+    </Match>
+
+    <!-- EvalsException carries transient request-context args (which may hold non-serializable
+         values); the rendered message is preserved on the RuntimeException superclass, args() is
+         null-safe, and the exception is never Java-serialized in this web app. -->
+    <Match>
+        <Class name="ai.tessary.evals.open.errors.EvalsException" />
+        <Bug pattern="SE_TRANSIENT_FIELD_NOT_RESTORED" />
+    </Match>
+    <!-- ===================================================================================
+         find-sec-bugs (added with the plugin itself). Its first full run over this tree
+         produced 343 findings and zero real bugs; what follows is that triage, kept in the two
+         shapes this file's header asks for. Re-run the triage with:
+           mvn -P '!paid' -DskipTests -Dpmd.skip=true -Dspotbugs.failOnError=false -fae verify
+         =================================================================================== -->
+
+    <!-- Informational detectors that fire on shape, not on a defect. SPRING_ENDPOINT marks every
+         @RequestMapping method (145 hits, one per endpoint); COOKIE_USAGE and SERVLET_HEADER mark
+         reading a cookie or a header at all. They are inventory aids for a manual audit, not
+         findings, and this project's cookie flags are asserted by AuthFilterPostureTest instead. -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+    <Match>
+        <Bug pattern="COOKIE_USAGE,SERVLET_HEADER" />
+    </Match>
+
+    <!-- CRLF_INJECTION_LOGS on every parameterised SLF4J call (150 hits). Parameterised logging is
+         the mitigation this detector exists to ask for; it fires on the call shape regardless. The
+         separate question of WHAT goes into a log line is governed by AGENTS.md's logging rules and
+         by StructuredLogFieldsTest, not by this detector. -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS" />
+    </Match>
+
+    <!-- IMPROPER_UNICODE on toLowerCase/toUpperCase, 33 sites, every one of them already passing
+         Locale.ROOT. This is NOT excluded wholesale, because a blanket rule would also silence the
+         detector on code written later in exactly the places it is worth having. It is excluded
+         everywhere EXCEPT the seven guard classes below, where it stays armed; the sites those
+         classes have today are then excluded one by one, each having been read.
+
+         An earlier draft of this block claimed case mapping was a live security gap in the
+         platform-staff email match, where the allowlist lowercases and the column does not. That
+         claim was wrong and review caught it: PlatformStaffProperties normalizes BOTH sides through
+         the same normalize() (:36 stores, :52 compares), so the match itself is sound. The real
+         issue there is a different one, and not this detector's to catch: app_user.email is
+         case-sensitively UNIQUE, so `Ops@example.com` can be registered alongside a staff
+         `ops@example.com` and will normalize into the allowlist. That is a schema fix. -->
+    <Match>
+        <Bug pattern="IMPROPER_UNICODE" />
+        <Not>
+            <Or>
+                <Class name="ai.tessary.evals.auth.AuthFilter" />
+                <Class name="ai.tessary.evals.auth.RateLimitFilter" />
+                <Class name="ai.tessary.evals.auth.PublicOriginGuard" />
+                <Class name="ai.tessary.evals.tenant.SignupPolicy" />
+                <Class name="ai.tessary.evals.ingest.UrlGuard" />
+                <Class name="ai.tessary.evals.git.github.GithubWebhookAdapter" />
+                <Class name="ai.tessary.evals.llm.MantleHttpClient" />
+            </Or>
+        </Not>
+    </Match>
+
+    <!-- The guard-class sites as they stand today. Each folds an input that is ASCII by
+         specification, so no Unicode case-mapping collision can reach the decision:
+           AuthFilter            an HTTP method, and a percent-encoding probe over a URI whose
+                                 alphabet is ASCII by RFC 3986
+           RateLimitFilter       "POST".equalsIgnoreCase(method), which is locale-independent
+           PublicOriginGuard     a hostname and a tls-mode enum
+           SignupPolicy          a wire enum
+           UrlGuard              a URI scheme
+           GithubWebhookAdapter  an HTTP header NAME, ASCII by RFC 9110
+           MantleHttpClient      the same, against the JDK restricted-header set
+         A NEW case-fold in any of these seven classes still fires, which is the point of the
+         shape above. -->
+    <Match>
+        <Or>
+            <Class name="ai.tessary.evals.auth.AuthFilter" />
+            <Class name="ai.tessary.evals.auth.RateLimitFilter" />
+            <Class name="ai.tessary.evals.auth.PublicOriginGuard" />
+            <Class name="ai.tessary.evals.tenant.SignupPolicy" />
+            <Class name="ai.tessary.evals.ingest.UrlGuard" />
+            <Class name="ai.tessary.evals.git.github.GithubWebhookAdapter" />
+            <Class name="ai.tessary.evals.llm.MantleHttpClient" />
+        </Or>
+        <Bug pattern="IMPROPER_UNICODE" />
+    </Match>
+
+    <!-- The four narrow false positives, each pinned to the method it fires on so the detector stays
+         live everywhere else. These are the detectors worth having; blanket-excluding any of them
+         would defeat the reason the plugin was added. -->
+    <Match>
+        <!-- A private helper taking the SQL as a parameter. Both call sites pass a
+             `private static final String` text block; the detector cannot see through the parameter. -->
+        <Class name="ai.tessary.evals.pricing.PriceBookRepository" />
+        <Method name="batch" />
+        <Bug pattern="SQL_INJECTION_SPRING_JDBC" />
+    </Match>
+    <Match>
+        <!-- ALL_ZEROS.equals(headSha): GitHub's branch-deleted sentinel, not a secret comparison.
+             The HMAC comparison in this same class uses MessageDigest.isEqual and is not flagged. -->
+        <Class name="ai.tessary.evals.git.github.GithubWebhookAdapter" />
+        <Method name="parsePush" />
+        <Bug pattern="UNSAFE_HASH_EQUALS" />
+    </Match>
+    <Match>
+        <!-- These three write Jackson-serialised JSON under Content-Type: application/json. There is
+             no HTML sink, and the only caller-influenced value is an internally-generated reason. -->
+        <Or>
+            <Class name="ai.tessary.evals.auth.AuthFilter" />
+            <Class name="ai.tessary.evals.auth.RateLimitFilter" />
+        </Or>
+        <Or>
+            <Method name="reject401" />
+            <Method name="reject403" />
+            <Method name="reject429" />
+        </Or>
+        <Bug pattern="XSS_SERVLET" />
+    </Match>
+    <Match>
+        <!-- Seeded Random for deterministic sample data. Feeds no token, id or secret; those use
+             SecureRandom (SecretBox, ApiKeyService, Ids, SessionCipher, DeviceLinkService). Pinned to
+             the one method so a future new Random() anywhere else in this class still fires.
+             PriorsGovernance was in this list in an earlier draft and should not have been: review
+             established it is the differential-privacy epsilon-noise draw, where a predictable PRNG
+             is the whole attack. It is fixed in code rather than excluded here. -->
+        <Class name="ai.tessary.evals.onboarding.SampleShowcase" />
+        <Method name="generate" />
+        <Bug pattern="PREDICTABLE_RANDOM" />
+    </Match>
+    <!-- ===================================================================================
+         The `shared` module's own findings, visible for the first time because this change also
+         bare-activates spotbugs-maven-plugin in shared/pom.xml. That module activated neither
+         analyser, so nothing in it had ever been scanned.
+         =================================================================================== -->
+
+    <Match>
+        <!-- to_regclass('<table>') on a name that comes from DetectionTableRegistry, i.e. registered
+             in code, never from a request. The detector cannot see that, and it is right not to
+             assume it: assertPlainIdentifier now enforces the property at the call rather than
+             leaving it as a convention, mirroring ProjectPurgeRepository.assertKnown. -->
+        <Class name="ai.tessary.evals.detection.DetectionTableSchemaCheck" />
+        <Method name="assertExists" />
+        <Bug pattern="SQL_INJECTION_JDBC,SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE" />
+    </Match>
+    <Match>
+        <!-- The format string is the ErrorCode's own template (a catalog constant) and a
+             StructuredLog call site's literal respectively. Neither takes a caller-supplied format;
+             the caller supplies the ARGUMENTS, which is the safe half. -->
+        <Or>
+            <Class name="ai.tessary.evals.open.errors.ErrorCode" />
+            <Class name="ai.tessary.evals.open.obs.StructuredLog$Builder" />
+        </Or>
+        <Bug pattern="FORMAT_STRING_MANIPULATION" />
+    </Match>
+</FindBugsFilter>

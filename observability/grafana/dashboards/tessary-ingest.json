@@ -1,0 +1,599 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Accept rate  /v1/traces",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "OTLP pushes accepted per second. Zero with a customer who believes they are exporting means the problem is upstream of us — start at ingest-runbook.md § 'Traces are not arriving'.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Non-2xx share (O6)",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\",status!~\"2..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m])), 0.0001)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "Objective O6: >= 99.5% non-5xx. A step to ~100% 401 is a revoked or wrong-project token, not an outage.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.005
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Accept latency  /v1/traces (O1: p99 < 250ms)",
+      "gridPos": {
+        "h": 5,
+        "w": 10,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "description": "enqueue does no I/O, so this measures decode + map + a hash. Production keeps only the SLO buckets (100ms/250ms/500ms/1s/2s/5s), so these quantiles are bucket-resolution, not exact.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Status classes",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\",uri=\"/v1/traces\"}[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Spans persisted / min (O2)",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap spans [1m]))",
+          "legendFormat": "written",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap unwritable_spans [1m]))",
+          "legendFormat": "unwritable",
+          "refId": "B"
+        }
+      ],
+      "description": "From the ingest.throughput heartbeat, which is silent when nothing moved — a flat gap means no traffic, not a broken drainer. Objective O2 is >= 200/s sustained, i.e. 12,000 on this axis. `unwritable` is spans validation dropped because no row could represent them (no producer ids, no parseable start time, absurd size) — steady-state zero, and a persistent non-zero is a producer to go and look at."
+    },
+    {
+      "type": "timeseries",
+      "title": "Batches: enqueued vs shed vs failed (O3, O5)",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap batches [1m]))",
+          "legendFormat": "enqueued",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap shed_batches [1m]))",
+          "legendFormat": "shed",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap failed_batches [1m]))",
+          "legendFormat": "failed",
+          "refId": "C"
+        }
+      ],
+      "description": "shed = the queue was full and we dropped a batch (recoverable: the write path is idempotent, so re-ingest fills it in). failed = the batch exhausted its retries against Postgres. Objectives O3 and O5 are both zero."
+    },
+    {
+      "type": "timeseries",
+      "title": "Spool depth and oldest unprocessed age (O4)",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap queue_depth [1m]))",
+          "legendFormat": "depth",
+          "refId": "A"
+        },
+        {
+          "expr": "max(last_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap spool_oldest_age_ms [1m]))",
+          "legendFormat": "oldest age (ms)",
+          "refId": "B"
+        }
+      ],
+      "description": "Objective O4: the oldest unprocessed batch (ms; depth and age share the axis) stays under evals.ingest.spool.max-lag-ms; depth is a count and shares the axis only for shape. An age that climbs while depth holds is the drainer being dead rather than busy — /actuator/health/ingest says which."
+    },
+    {
+      "type": "timeseries",
+      "title": "Redaction cost",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "avg(avg_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"redaction.batch\" | unwrap durationMs [5m]))",
+          "legendFormat": "ms / batch",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"redaction.batch\" | unwrap bytes [5m])) / 1024 / 1024",
+          "legendFormat": "MB scanned / 5m",
+          "refId": "B"
+        }
+      ],
+      "description": "Duration climbing out of proportion to bytes means a pathological rule — almost always a newly added CUSTOM rule with unbounded quantifiers. This exact shape saturated production on 2026-07-31."
+    },
+    {
+      "type": "timeseries",
+      "title": "Retention: rows deleted",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (signal) (sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"retention.deleted\" | unwrap deleted [1h]))",
+          "legendFormat": "{{signal}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Per signal class, per hourly sweep. A partner reporting 'data disappeared' is checked here first — retention and shedding look identical from outside the product."
+    },
+    {
+      "type": "stat",
+      "title": "Retention sweeps hitting the batch cap",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 19
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"retention.deleted\" | truncated=\"true\" [1h]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "truncated=true means a (project, signal) hit max-batches-per-sweep and stopped early with more to delete. Expected for a few passes after a TTL is shortened; sustained means the backlog is not draining and the bound needs raising.",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "classify-service: decommissionable?",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 19
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"encoder.dependency\" | unwrap projects [24h]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "Launch requirement J1. Counts projects with an ENABLED encoder-backed classifier whose org also holds the capability. Only scale the ECS task to zero at 0 — the two encoder classifiers do not fail loudly when the service goes, they just stop producing, which reads like a quiet week.",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "YES — 0 projects depend on it",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1,
+                "to": 100000,
+                "result": {
+                  "text": "NO — projects still using an encoder classifier",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Span lateness vs its trace's last rollup (spec §7.6)",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_negative [1m]))",
+          "legendFormat": "clock stepped backward",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_lt_1s [1m]))",
+          "legendFormat": "< 1s",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_lt_10s [1m]))",
+          "legendFormat": "< 10s",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_lt_60s [1m]))",
+          "legendFormat": "< 60s",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_lt_5m [1m]))",
+          "legendFormat": "< 5m",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap late_ge_5m [1m]))",
+          "legendFormat": ">= 5m",
+          "refId": "F"
+        }
+      ],
+      "description": "span.event_ts minus the rolled_up_through of its trace at the moment it arrived. The 10s and 2s rollup windows in spec §7.4 are starting points and THIS is what sets them: a growing >= 60s tail means spans are landing after their trace settled and the windows are too short. Negative lateness is a producer whose clock stepped backward — spec §6.2 accepts that such a producer can lose a span's final version, and this bucket is the only place that failure is visible."
+    },
+    {
+      "type": "timeseries",
+      "title": "Trace rollup queue (spec §7.2–§7.4)",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_recomputed [1m]))",
+          "legendFormat": "traces rolled up",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_settled [1m]))",
+          "legendFormat": "of those, settled",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_rearmed [1m]))",
+          "legendFormat": "re-armed by the reaper",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(sum_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_failed [1m]))",
+          "legendFormat": "recomputes that threw",
+          "refId": "D"
+        },
+        {
+          "expr": "max(max_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_queue_depth [1m]))",
+          "legendFormat": "queue depth (gauge)",
+          "refId": "E"
+        },
+        {
+          "expr": "max(max_over_time({service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | event=\"ingest.throughput\" | unwrap rollup_overdue_ms [1m]))",
+          "legendFormat": "oldest deadline behind, ms (gauge)",
+          "refId": "F"
+        }
+      ],
+      "description": "From the ingest.throughput heartbeat. The gap between 'rolled up' and 'settled' is spans landing between a trace's claim and its write — normal in small numbers, and the same finding the lateness panel reports from the span's side. 're-armed by the reaper' is steady-state ZERO: anything else is a worker that died after claiming, or one slow enough that a sweep caught it mid-claim. The two gauges are sampled once per sweep, and 'oldest deadline behind' is the one that matters: a queue that stops draining is invisible from every trace surface, which keeps serving the last numbers the worker wrote with no gap and no error."
+    },
+    {
+      "type": "logs",
+      "title": "Ingest warnings",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | detected_level=\"warn\" |~ \"substrate|redaction\"",
+          "refId": "A"
+        }
+      ],
+      "description": "The two WARNs this dashboard's numbers come from: 'substrate write buffer full — shed batch' and 'substrate batch write failed'. There was a third, the once-per-project notice that a non-probabilistic sampling policy was being ignored; sampling was removed outright, so it no longer exists."
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "tessary",
+    "ingest"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "deployment",
+        "type": "custom",
+        "current": {
+          "value": "tessary-production",
+          "text": "tessary-production"
+        },
+        "options": [
+          {
+            "text": "tessary-production",
+            "value": "tessary-production",
+            "selected": true
+          },
+          {
+            "text": "tessary-staging",
+            "value": "tessary-staging",
+            "selected": false
+          }
+        ],
+        "query": "tessary-production,tessary-staging",
+        "description": "Must match DEPLOYMENT_NAME verbatim — the live label value is `tessary-production`, not `production`. A wrong value returns empty panels rather than an error."
+      },
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": {}
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Tessary — Ingest",
+  "uid": "tessary-ingest",
+  "version": 1,
+  "weekStart": ""
+}

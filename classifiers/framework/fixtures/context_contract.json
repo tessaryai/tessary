@@ -1,0 +1,512 @@
+{
+  "_comment": "Cross-language golden fixtures for classifier context serialization (contract v2). Python: framework/context.py + tests/test_context.py. Java: ConversationThreadRenderer (+ ContentExtractor.partPlaceholder) MUST reproduce these byte-for-byte (ConversationThreadContractParityTest) — this file IS train/serve parity. contract_v2 pins per-turn rendering (render_context/render_input): user verbatim, assistant capped at 256 tokens (head + '…[+N tok]'), tool_call/tool_result parts enriched to terse markers ([tool:<name> ok] / [tool:<name> error: <=120-char snippet]; a successful tool_result collapses to nothing), image/file/unsupported placeholders unchanged. reduction pins reduce_thread: standalone tool-observation markers, error snippets, the assistant cap, and trajectory-preserving eviction (keep head + earliest failure + most-recent recent_k, thin the middle, mark drops '[… N earlier turns elided …]', never drop the scored final). Do not edit rendered strings without bumping the contract version everywhere. The `narrowing` cases pin windowByUserTurns/stubAssistants (the pooled-head context policy).",
+  "contract_v2": [
+    {
+      "name": "two_prior_turns",
+      "turns": [
+        [
+          "user",
+          "hi, can you export this?"
+        ],
+        [
+          "assistant",
+          "Sure — running the export now."
+        ]
+      ],
+      "rendered_context": "[user] hi, can you export this?\n[assistant] Sure — running the export now.",
+      "final": "still broken",
+      "rendered_input": "[user] hi, can you export this?\n[assistant] Sure — running the export now.\n[user] still broken"
+    },
+    {
+      "name": "single_turn_degrades_to_bare_message",
+      "turns": [],
+      "rendered_context": "",
+      "final": "the export button returns a 403",
+      "rendered_input": "the export button returns a 403"
+    },
+    {
+      "name": "whitespace_is_stripped_per_turn",
+      "turns": [
+        [
+          "assistant",
+          "  Done.  "
+        ]
+      ],
+      "rendered_context": "[assistant] Done.",
+      "final": "  no.  ",
+      "rendered_input": "[assistant] Done.\n[user] no."
+    },
+    {
+      "name": "multimodal_image_with_caption_renders_as_placeholder",
+      "turns": [
+        [
+          "user",
+          [
+            {
+              "type": "text",
+              "text": "look at this"
+            },
+            {
+              "type": "image",
+              "caption": "a login screen"
+            }
+          ]
+        ],
+        [
+          "assistant",
+          "I see the screenshot."
+        ]
+      ],
+      "rendered_context": "[user] look at this [image: a login screen]\n[assistant] I see the screenshot.",
+      "final": "still broken",
+      "rendered_input": "[user] look at this [image: a login screen]\n[assistant] I see the screenshot.\n[user] still broken"
+    },
+    {
+      "name": "multimodal_bare_final_with_image_and_file",
+      "turns": [],
+      "rendered_context": "",
+      "final": [
+        {
+          "type": "text",
+          "text": "here"
+        },
+        {
+          "type": "image"
+        },
+        {
+          "type": "file",
+          "name": "report.pdf"
+        }
+      ],
+      "rendered_input": "here [image] [file: report.pdf]"
+    },
+    {
+      "name": "tool_call_ok_and_success_result_collapse_to_ok_marker",
+      "turns": [
+        [
+          "user",
+          "run the deploy"
+        ],
+        [
+          "assistant",
+          [
+            {
+              "type": "tool_call",
+              "name": "deploy",
+              "arguments": {
+                "env": "prod"
+              }
+            },
+            {
+              "type": "tool_result",
+              "content": "rollout complete"
+            },
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        ]
+      ],
+      "rendered_context": "[user] run the deploy\n[assistant] [tool:deploy ok] Done.",
+      "final": "thanks",
+      "rendered_input": "[user] run the deploy\n[assistant] [tool:deploy ok] Done.\n[user] thanks"
+    },
+    {
+      "name": "tool_result_error_renders_snippet",
+      "turns": [
+        [
+          "user",
+          "search the docs"
+        ],
+        [
+          "assistant",
+          [
+            {
+              "type": "tool_call",
+              "name": "search"
+            },
+            {
+              "type": "tool_result",
+              "is_error": true,
+              "content": "429 Too Many Requests:   rate limit exceeded,\n retry after 30s. upstream=vector-db pool exhausted, 64/64 connections in use, backoff advised"
+            }
+          ]
+        ]
+      ],
+      "rendered_context": "[user] search the docs\n[assistant] [tool:search ok] [tool error: 429 Too Many Requests: rate limit exceeded, retry after 30s. upstream=vector-db pool exhausted, 64/64 connections in use]",
+      "final": "ugh",
+      "rendered_input": "[user] search the docs\n[assistant] [tool:search ok] [tool error: 429 Too Many Requests: rate limit exceeded, retry after 30s. upstream=vector-db pool exhausted, 64/64 connections in use]\n[user] ugh"
+    },
+    {
+      "name": "multimodal_unknown_part_is_marked_unsupported_not_dropped",
+      "turns": [
+        [
+          "user",
+          [
+            {
+              "type": "audio"
+            },
+            {
+              "type": "text",
+              "text": "  hey  "
+            }
+          ]
+        ]
+      ],
+      "rendered_context": "[user] [unsupported] hey",
+      "final": "ok",
+      "rendered_input": "[user] [unsupported] hey\n[user] ok"
+    },
+    {
+      "name": "assistant_prose_is_capped_at_the_token_budget",
+      "turns": [
+        [
+          "user",
+          "walk me through the deploy"
+        ],
+        [
+          "assistant",
+          "Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. "
+        ]
+      ],
+      "rendered_context": "[user] walk me through the deploy\n[assistant] Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the roll …[+74 tok]",
+      "final": "got it",
+      "rendered_input": "[user] walk me through the deploy\n[assistant] Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the roll …[+74 tok]\n[user] got it"
+    },
+    {
+      "name": "assistant_cap_splits_on_codepoint_not_surrogate",
+      "turns": [
+        [
+          "assistant",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      ],
+      "rendered_context": "[assistant] aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀 …[+25 tok]",
+      "final": "ok",
+      "rendered_input": "[assistant] aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀 …[+25 tok]\n[user] ok"
+    }
+  ],
+  "reduction": [
+    {
+      "name": "big_tool_payload_reduces_to_bare_ok_marker",
+      "budget": 4000,
+      "recent_k": 3,
+      "context": [
+        [
+          "user",
+          "deploy the billing service"
+        ],
+        [
+          "tool",
+          "deploy",
+          null
+        ]
+      ],
+      "final": [
+        "user",
+        "did it ship?"
+      ],
+      "reduced": "[user] deploy the billing service\n[tool:deploy ok]\n[user] did it ship?"
+    },
+    {
+      "name": "tool_error_reduces_to_truncated_snippet",
+      "budget": 4000,
+      "recent_k": 3,
+      "context": [
+        [
+          "user",
+          "look up the invoice"
+        ],
+        [
+          "tool",
+          "sql_query",
+          "ERROR: relation \"invoices\" does not exist at character 15;   the schema was migrated, table renamed to billing_invoices last week, update your query and retry the lookup now"
+        ]
+      ],
+      "final": [
+        "user",
+        "nevermind, I'll check the dashboard myself"
+      ],
+      "reduced": "[user] look up the invoice\n[tool:sql_query error: ERROR: relation \"invoices\" does not exist at character 15; the schema was migrated, table renamed to billing_invoices la]\n[user] nevermind, I'll check the dashboard myself"
+    },
+    {
+      "name": "assistant_cap_inside_a_reduced_thread",
+      "budget": 4000,
+      "recent_k": 3,
+      "context": [
+        [
+          "user",
+          "walk me through the deploy"
+        ],
+        [
+          "assistant",
+          "Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. "
+        ]
+      ],
+      "final": [
+        "user",
+        "got it"
+      ],
+      "reduced": "[user] walk me through the deploy\n[assistant] Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the rollout begins and we watch the health checks converge before shifting traffic. Here is a detailed walkthrough of the deployment steps you asked about. First we build the image, then we push it to the registry, then the roll …[+74 tok]\n[user] got it"
+    },
+    {
+      "name": "elision_keeps_head_failure_and_recent_tail",
+      "budget": 260,
+      "recent_k": 2,
+      "context": [
+        [
+          "user",
+          "can you migrate the users table?"
+        ],
+        [
+          "assistant",
+          "Sure, starting the migration now."
+        ],
+        [
+          "tool",
+          "migrate",
+          "lock timeout: could not acquire ACCESS EXCLUSIVE on users after 30s"
+        ],
+        [
+          "assistant",
+          "The migration hit a lock timeout; retrying."
+        ],
+        [
+          "tool",
+          "migrate",
+          null
+        ],
+        [
+          "assistant",
+          "Retry succeeded, users table migrated."
+        ],
+        [
+          "user",
+          "and the orders table?"
+        ],
+        [
+          "assistant",
+          "Migrating orders now."
+        ],
+        [
+          "tool",
+          "migrate",
+          null
+        ],
+        [
+          "assistant",
+          "Orders table migrated successfully."
+        ]
+      ],
+      "final": [
+        "user",
+        "nevermind, I'll just do it by hand"
+      ],
+      "reduced": "[user] can you migrate the users table?\n[assistant] Sure, starting the migration now.\n[tool:migrate error: lock timeout: could not acquire ACCESS EXCLUSIVE on users after 30s]\n[… 6 earlier turns elided …]\n[assistant] Orders table migrated successfully.\n[user] nevermind, I'll just do it by hand"
+    },
+    {
+      "name": "tool_error_snippet_splits_on_codepoint_not_surrogate",
+      "context": [
+        [
+          "tool",
+          "search",
+          "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee😀xxxx"
+        ]
+      ],
+      "final": [
+        "user",
+        "nevermind"
+      ],
+      "budget": 4000,
+      "recent_k": 3,
+      "reduced": "[tool:search error: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee😀]\n[user] nevermind"
+    },
+    {
+      "name": "tool_error_snippet_collapses_nbsp_like_python",
+      "context": [
+        [
+          "tool",
+          "fetch",
+          "timeout after\n\t30s"
+        ]
+      ],
+      "final": [
+        "user",
+        "ok"
+      ],
+      "budget": 4000,
+      "recent_k": 3,
+      "reduced": "[tool:fetch error: timeout after 30s]\n[user] ok"
+    }
+  ],
+  "serving_v0": [
+    {
+      "name": "multi_user_messages_newline_joined_no_prefixes",
+      "user_texts": [
+        "find me a flight to Berlin",
+        "no, DEPARTING Berlin"
+      ],
+      "rendered": "find me a flight to Berlin\nno, DEPARTING Berlin"
+    },
+    {
+      "name": "single_message_verbatim",
+      "user_texts": [
+        "how do I export to csv?"
+      ],
+      "rendered": "how do I export to csv?"
+    },
+    {
+      "name": "blank_messages_skipped",
+      "user_texts": [
+        "",
+        "  ",
+        "still nothing?"
+      ],
+      "rendered": "still nothing?"
+    }
+  ],
+  "narrowing": [
+    {
+      "name": "one_exchange_stubbed_from_a_longer_thread",
+      "context": [
+        [
+          "user",
+          "hi, is my policy active?"
+        ],
+        [
+          "assistant",
+          "Let me check that for you now."
+        ],
+        [
+          "user",
+          "policy SHJ-1 and my name is A B"
+        ],
+        [
+          "assistant",
+          "Verified. Your policy lapsed on 2 July."
+        ]
+      ],
+      "user_turns": 1,
+      "stub_assistant": true,
+      "final": "ok fine, noted the ticket number",
+      "narrowed": "[user] policy SHJ-1 and my name is A B\n[assistant] [reply]\n[user] ok fine, noted the ticket number"
+    },
+    {
+      "name": "window_larger_than_thread_keeps_everything",
+      "context": [
+        [
+          "user",
+          "what does cashless mean?"
+        ],
+        [
+          "assistant",
+          "It means the insurer settles directly."
+        ]
+      ],
+      "user_turns": 5,
+      "stub_assistant": true,
+      "final": "ok got it thanks",
+      "narrowed": "[user] what does cashless mean?\n[assistant] [reply]\n[user] ok got it thanks"
+    },
+    {
+      "name": "window_zero_degrades_to_the_bare_turn",
+      "context": [
+        [
+          "user",
+          "earlier question"
+        ],
+        [
+          "assistant",
+          "earlier answer"
+        ]
+      ],
+      "user_turns": 0,
+      "stub_assistant": true,
+      "final": "just tell me if it is approved",
+      "narrowed": "just tell me if it is approved"
+    },
+    {
+      "name": "window_keeps_tool_markers_that_follow_the_kept_user_turn",
+      "context": [
+        [
+          "user",
+          "first ask"
+        ],
+        [
+          "assistant",
+          "first reply"
+        ],
+        [
+          "user",
+          "check the preauth please"
+        ],
+        [
+          "tool",
+          "lookup_claim",
+          null
+        ],
+        [
+          "tool",
+          "fetch_policy",
+          "upstream 503"
+        ],
+        [
+          "assistant",
+          "I could not reach the claims system."
+        ]
+      ],
+      "user_turns": 1,
+      "stub_assistant": true,
+      "final": "this is not helping",
+      "narrowed": "[user] check the preauth please\n[tool:lookup_claim ok]\n[tool:fetch_policy error: upstream 503]\n[assistant] [reply]\n[user] this is not helping"
+    },
+    {
+      "name": "stub_without_windowing_leaves_user_and_tool_text_intact",
+      "context": [
+        [
+          "user",
+          "deploy the billing service"
+        ],
+        [
+          "tool",
+          "deploy",
+          null
+        ],
+        [
+          "assistant",
+          "Shipped — all green."
+        ]
+      ],
+      "user_turns": -1,
+      "stub_assistant": true,
+      "final": "did it actually ship?",
+      "narrowed": "[user] deploy the billing service\n[tool:deploy ok]\n[assistant] [reply]\n[user] did it actually ship?"
+    },
+    {
+      "name": "window_without_stubbing_keeps_assistant_prose",
+      "context": [
+        [
+          "user",
+          "first ask"
+        ],
+        [
+          "assistant",
+          "first reply"
+        ],
+        [
+          "user",
+          "second ask"
+        ],
+        [
+          "assistant",
+          "Your cover is Rs 3,00,000."
+        ]
+      ],
+      "user_turns": 1,
+      "stub_assistant": false,
+      "final": "wait, 5 lakh? no no",
+      "narrowed": "[user] second ask\n[assistant] Your cover is Rs 3,00,000.\n[user] wait, 5 lakh? no no"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+extends: substitution
+message: "Use American spelling and grammar."
+link: /handbook/writing-style-guide.md#use-american-english
+level: error
+ignorecase: true
+swap:
+  behaviour: behavior
+  behaviours: behaviors
+  analyse: analyze
+  analysed: analyzed
+  analysing: analyzing
+  centre: center
+  centres: centers
+  colour: color
+  colours: colors
+  favour: favor
+  favours: favors
+  favourite: favorite
+  organise: organize
+  organises: organizes
+  organised: organized
+  organising: organizing
+  organisation: organization
+  organisations: organizations
+  realise: realize
+  realises: realizes
+  realised: realized
+  realising: realizing
+  licence: license
+  licences: licenses
+  cancelled: canceled
+  cancelling: canceling
+  travelling: traveling
+  traveller: traveler
+  modelling: modeling
+  modelled: modeled
+  labelled: labeled
+  labelling: labeling
+  optimise: optimize
+  optimises: optimizes
+  optimised: optimized
+  optimising: optimizing
+  optimisation: optimization
+  utilise: utilize
+  utilised: utilized
+  utilising: utilizing
+  synchronise: synchronize
+  synchronised: synchronized
+  initialise: initialize
+  initialised: initialized
+  customise: customize
+  customised: customized
+  customisation: customization
+  minimise: minimize
+  minimised: minimized
+  maximise: maximize
+  maximised: maximized
+  prioritise: prioritize
+  prioritised: prioritized
+  authorise: authorize
+  authorised: authorized
+  authorisation: authorization

@@ -1,0 +1,8 @@
+extends: existence
+message: "Don't use an em dash. Use a comma, colon, parentheses, or a new sentence instead."
+link: /handbook/writing-style-guide.md#dashes
+level: error
+nonword: true
+tokens:
+  - '—'
+  - '&mdash;'

@@ -1,0 +1,168 @@
+{
+  "manifest": {
+    "bundle_format": 1,
+    "engine_version": "0.7.0",
+    "exported_from": "compile-service (tests/gen_fixture.py)",
+    "encoder": {
+      "checkpoint": "sentence-transformers/all-MiniLM-L6-v2",
+      "bundled": false,
+      "note": "serve your own ONNX copy of this checkpoint; attention-mask mean pooling, L2 normalisation, max_length 256 (experiments/shared/encoders.py)"
+    },
+    "nli_checkpoint": null,
+    "text_rendering": "user_message\n<answer>\nagent_message",
+    "intent_vocabulary": [
+      "billing",
+      "greeting"
+    ],
+    "feature_layout": {
+      "activation_and_expectation": "embedding+intent_onehot",
+      "detector_heads": "embedding (agent_message only)",
+      "unseen_intent_onehot": "all zeros (no opinion), never an error"
+    },
+    "admission_guard": {
+      "type": "unseen_intent",
+      "missing_intent_value": "",
+      "reference_intents": [
+        "billing",
+        "greeting"
+      ]
+    },
+    "intent_matcher": null,
+    "gate_sentinel": {
+      "test": "two-window G-test, df 1, on admitted activations per admitted turn",
+      "stale_iff": "the sentinel family's Holm step-down rejects this rule's p AND |det_rate - ref_rate| >= min_effect",
+      "role": "annotation on findings, never a veto"
+    },
+    "multiple_comparisons": {
+      "method": "holm_bonferroni",
+      "families": [
+        "drift test over the SOP's rules",
+        "gate sentinel over the SOP's rules (separate family, annotation only)"
+      ],
+      "family_size": "the SOP's rule count, skipped rules included",
+      "step": "the k-th smallest p in a family is compared against alpha / (m - k + 1); the first failure ends the pass and nothing beyond it is rejected",
+      "guarantee": "family-wise error rate <= alpha under arbitrary dependence"
+    },
+    "drift_defaults": {
+      "alpha": 0.01,
+      "min_activations": 30,
+      "min_effect": 0.1
+    },
+    "config": {
+      "encoder": "minilm",
+      "target_fpr": 0.02,
+      "labels": null
+    },
+    "reference": {
+      "traces": "compile-service request corpus",
+      "sha256": "",
+      "n_turns": 80,
+      "n_conversations": 40,
+      "time_range": [
+        "2026-08-01T00:00:00Z",
+        "2026-08-08T01:00:00Z"
+      ]
+    },
+    "rules": {
+      "lookup_on_billing": {
+        "kind": "tool",
+        "scope": "conversation",
+        "description": "look the account up before answering a billing question",
+        "activation_source_authored": "intents",
+        "activation_resolved": "intents",
+        "obligation_tools": [
+          "tool:lookup_account"
+        ],
+        "act": null,
+        "combine": null,
+        "owed_when": null,
+        "forbidden": false,
+        "before": null,
+        "paired_by": null,
+        "files": {
+          "activation": "rules/lookup_on_billing/activation.json",
+          "expectation": "rules/lookup_on_billing/expectation.json",
+          "reference": "rules/lookup_on_billing/reference.json"
+        }
+      },
+      "quote_policy_number": {
+        "kind": "speech",
+        "scope": "turn",
+        "description": "quote the policy number back to the member",
+        "activation_source_authored": "always",
+        "activation_resolved": "always",
+        "obligation_tools": null,
+        "act": "quotes the policy number back to the member",
+        "combine": "any",
+        "owed_when": null,
+        "forbidden": false,
+        "before": null,
+        "paired_by": null,
+        "files": {
+          "activation": "rules/quote_policy_number/activation.json",
+          "detectors": "rules/quote_policy_number/detectors.json",
+          "expectation": "rules/quote_policy_number/expectation.json",
+          "reference": "rules/quote_policy_number/reference.json"
+        }
+      }
+    }
+  },
+  "rules": {
+    "lookup_on_billing": {
+      "activation": {
+        "kind": "intents",
+        "intents": [
+          "billing"
+        ],
+        "decision": "applicable iff turn.intent is in intents"
+      },
+      "expectation": {
+        "kind": "constant",
+        "value": 1.0
+      },
+      "reference": {
+        "intents": [
+          "billing",
+          "greeting"
+        ],
+        "n_reference_turns": 80,
+        "n_reference_activations": 40,
+        "reference_satisfaction_rate": 1.0
+      }
+    },
+    "quote_policy_number": {
+      "activation": {
+        "kind": "always",
+        "decision": "applicable on every turn"
+      },
+      "detectors": {
+        "combine": "any",
+        "detectors": [
+          {
+            "type": "regex",
+            "patterns": [
+              "policy (number|no)"
+            ],
+            "flags": [
+              "IGNORECASE"
+            ],
+            "decision": "fires iff any pattern matches anywhere in agent_message (search)"
+          }
+        ]
+      },
+      "expectation": {
+        "kind": "constant",
+        "value": 1.0
+      },
+      "reference": {
+        "intents": [
+          "billing",
+          "greeting"
+        ],
+        "n_reference_turns": 80,
+        "n_reference_activations": 80,
+        "reference_satisfaction_rate": 1.0
+      }
+    }
+  }
+}

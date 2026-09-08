@@ -1,0 +1,95 @@
+---
+title: "Custom domain"
+description: "Put a self-hosted Tessary on your own hostname with one variable, and choose how it is served: Let's Encrypt, your own certificate, or a TLS terminator you already run."
+---
+
+Everything about the public origin follows one variable, `SITE_DOMAIN`. Set it to the hostname and the sign-in landing page, the WorkOS callback and the agentic lanes' callback origin are derived from it; nothing else has to agree with it, and the backend refuses to start if something does not. How the hostname is served is a second variable, `TLS_MODE`.
+
+## The DNS record
+
+Point the hostname at the machine that runs the stack: an `A` record (and `AAAA` if the host has one) for `tessary.acme-corp.com`. In `acme` mode Let's Encrypt validates that record over port 443, so the record must resolve from the public internet before the first boot; the other two modes need only your own resolvers to see it.
+
+## The one variable
+
+In `.env` beside `docker-compose.yml`:
+
+```bash
+SITE_DOMAIN=tessary.acme-corp.com
+```
+
+A bare hostname: no `https://`, no port, no path. A scheme-prefixed value is refused at boot with the key named, because the stack builds the full origin itself wherever it needs one. Setting `SITE_DOMAIN` also arms the placeholder-key guard: both sealing keys must be your own before the instance answers on a real hostname, as [Secure the instance](/self-hosting/setup#secure-the-instance) describes.
+
+From `SITE_DOMAIN`, the backend derives:
+
+| Derived | Value | Override |
+| --- | --- | --- |
+| Sign-in and sign-out landing | `https://tessary.acme-corp.com/` | `EVALS_AUTH_FRONTEND_URL`, which must then name the same host |
+| WorkOS callback | `https://tessary.acme-corp.com/auth/callback` | `WORKOS_REDIRECT_URI`, same rule, checked only when WorkOS is configured |
+| Agentic lanes' callback origin | `https://tessary.acme-corp.com` | `EVALS_RCA_AGENTIC_MCP_BASE_URL` and `EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL`, each of which must then name the same host |
+
+An override that names a different host, `localhost` included, refuses the boot, naming the key beside `SITE_DOMAIN`, so a domain change cannot leave a stale origin behind. The backend logs the resolved set on every boot as `public origin https://… from SITE_DOMAIN=…`.
+
+## How it is served
+
+`TLS_MODE` picks one of three shapes. The default is `acme`.
+
+### `acme`: Let's Encrypt
+
+Caddy, in the frontend container, obtains and renews the certificate itself over TLS-ALPN-01. Two prerequisites: `HTTPS_PORT` (443 by default) reachable from the internet at the hostname, and `ACME_EMAIL` set to your address. There is no default for the address, because the Let's Encrypt account, its expiry notices and its revocation notices belong to whoever runs the instance; with `SITE_DOMAIN` set and `ACME_EMAIL` blank the backend refuses to start and says so.
+
+```bash
+SITE_DOMAIN=tessary.acme-corp.com
+TLS_MODE=acme
+ACME_EMAIL=you@acme-corp.com
+```
+
+No DNS provider plugin and no Cloudflare token are involved. If port 443 cannot be reached from the internet, use one of the two modes below rather than a DNS challenge.
+
+### `owncert`: your own certificate
+
+For an internal CA or a purchased certificate. Mount the PEM pair into the frontend container at `/certs/tls.crt` and `/certs/tls.key` with a small override file, and no ACME attempt is made:
+
+```yaml
+# tessary.override.yml
+services:
+  frontend:
+    volumes:
+      - /etc/tessary/certs:/certs:ro
+```
+
+```bash
+SITE_DOMAIN=tessary.acme-corp.com
+TLS_MODE=owncert
+```
+
+```bash
+docker compose -f docker-compose.yml -f tessary.override.yml up -d
+```
+
+Renewing is replacing the two files and restarting the frontend container. The paths can be changed with `TLS_CERT_FILE` and `TLS_KEY_FILE` on the frontend service if the mount has to land elsewhere.
+
+### `upstream`: a terminator you already run
+
+For a load balancer or reverse proxy that terminates TLS in front of Tessary. Caddy serves plain HTTP on `HTTP_PORT` and does not open a TLS listener; the proxy forwards to that port. Tell Caddy which addresses that proxy uses, and it honours the forwarded client address and scheme from them and from nobody else:
+
+```bash
+SITE_DOMAIN=tessary.acme-corp.com
+TLS_MODE=upstream
+TRUSTED_PROXIES=10.0.0.0/8
+```
+
+The proxy must send `X-Forwarded-Proto: https` and `X-Forwarded-For`; Caddy passes them to the backend only when they arrive from a `TRUSTED_PROXIES` address, so a client that reaches `HTTP_PORT` directly cannot forge either. With `TRUSTED_PROXIES` blank, forwarded headers are ignored from every peer and the backend sees the proxy's own address as the client.
+
+## WorkOS
+
+If you sign in through WorkOS, register the derived callback, `https://tessary.acme-corp.com/auth/callback`, as a redirect URI in the WorkOS dashboard. Nothing else changes: `WORKOS_REDIRECT_URI` is derived unless you set it, and a value on another host refuses the boot.
+
+## Checking it
+
+After `docker compose up -d`:
+
+```bash
+docker compose logs backend | grep 'public origin'
+```
+
+names the resolved origins, and `https://tessary.acme-corp.com/auth/mode` answers from the backend through Caddy. A boot that stops with `Refusing to start:` in the backend log names the variable to fix.

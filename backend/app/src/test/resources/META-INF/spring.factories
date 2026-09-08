@@ -1,0 +1,5 @@
+# Globally applied to every Spring test context (SpringApplication loads ApplicationContextInitializer
+# entries from spring.factories). Points the suite at the JVM-singleton pgvector Testcontainers DB.
+org.springframework.context.ApplicationContextInitializer=\
+  ai.tessary.evals.db.TestcontainersPostgresInitializer,\
+  ai.tessary.evals.auth.TestAuthDisabledInitializer

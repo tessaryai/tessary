@@ -1,0 +1,129 @@
+---
+title: "Troubleshooting"
+description: "Diagnose and resolve common problems with a self-hosted Tessary deployment, organized by what you observe."
+---
+
+## Back up and restore Postgres
+
+A Tessary backup is a full-cluster dump, not a dump of a single database. Restoring it drops existing objects before recreating them, so restoring overwrites the target cluster's current state.
+
+Run both operations through the `postgres` service in your compose deployment, using the `POSTGRES_PASSWORD` environment variable and `psql` as the `POSTGRES_USER`. This is the canonical backup and restore reference: [upgrading](/self-hosting/upgrading) and other self-hosting pages link here rather than repeating these steps.
+
+<Steps>
+  <Step title="Dump the cluster">
+    Run `pg_dumpall` inside the `postgres` service and write the output to a file on the host.
+
+    ```bash
+    docker compose exec -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+      pg_dumpall -U "$POSTGRES_USER" > backup.sql
+    ```
+
+    Store `backup.sql` somewhere outside the deployment, such as encrypted object storage.
+  </Step>
+</Steps>
+
+<Steps>
+  <Step title="Restore the cluster">
+    Pipe the dump file into `psql` inside the `postgres` service.
+
+    ```bash
+    docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+      psql -U "$POSTGRES_USER" < backup.sql
+    ```
+
+    A dump taken with `pg_dumpall` includes clean-and-if-exists statements, so restoring drops existing objects before recreating them from the dump.
+  </Step>
+  <Step title="Verify the changelog tables">
+    Confirm that Liquibase's changelog tables came back populated and unlocked before starting the backend.
+
+    ```bash
+    docker compose exec -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+      psql -U "$POSTGRES_USER" -c "SELECT count(*) FROM databasechangelog;" \
+      -c "SELECT * FROM databasechangeloglock;"
+    ```
+
+    <Check>
+      `databasechangelog` has a nonzero row count, and `databasechangeloglock` contains a row with `locked` set to `false`. A locked or missing changelog table blocks the backend from booting.
+    </Check>
+  </Step>
+</Steps>
+
+## Classifiers aren't producing findings
+
+**Symptom:** A project looks quiet. No findings appear even though the agent is running and traces are arriving.
+
+**Cause:** A classifier fits a baseline for each call site before it can determine whether anything changed. A newly connected project has no baseline yet, so it produces no findings for a while by design.
+
+**Resolution:** No action is required. Findings begin appearing once each classifier has enough traces to establish a baseline for its call sites.
+
+<Note>
+  This is expected behavior for a new project, not a malfunction. If findings still don't appear after traces have been flowing for an extended period, treat it as a separate problem rather than assuming the baseline period is still in progress.
+</Note>
+
+## Frustration and groundedness classifiers never fire
+
+**Symptom:** Every classifier except frustration and groundedness produces findings. Those two specific classifiers never fire, even on projects with active traffic.
+
+**Cause:** Frustration and groundedness are served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `EVALS_OBSERVER_ENCODER_URL` and `EVALS_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for these two classifiers to call.
+
+**Resolution:** None in the open edition. The model weights `classify-service` loads are gated and not published, so there is no self-host path to these two classifiers. This is expected behaviour, not a misconfiguration: every other classifier runs without them. See the encoder section of [configuration](/self-hosting/configuration) for the variables involved.
+
+## Agentic RCA or Layer-2 triage failing at the sandbox-launch step
+
+**Symptom:** RCA (root-cause analysis) or Layer-2 triage fails, and the failure occurs when the sandbox launches.
+
+**Cause:** `sandbox-runner` needs read-write access to the host's Docker socket to launch its sandboxes as sibling containers. Permissions issues, rootless Docker, or a nonstandard Docker Desktop socket path can all block that access.
+
+**Resolution:** If the failure comes from a permissions error on `/var/run/docker.sock`, find the GID that owns the socket on your host with `getent group docker`, then set `DOCKER_SOCK_GID` to that value so the launcher container can write to it. Rootless Docker and a nonstandard Docker Desktop socket path require host-specific Docker configuration outside Tessary's own settings.
+
+<Note>
+  Self-hosted Tessary has no non-agentic fallback for RCA. `sandbox-runner` always runs, so resolving its access to the Docker socket is required, not optional.
+</Note>
+
+## The backend refuses to start after setting SITE_DOMAIN
+
+**Symptom:** The stack ran fine on localhost. You set `SITE_DOMAIN` and now the `backend` container exits, logging `Refusing to start: this instance is served on <your domain>` and naming `EVALS_AUTH_COOKIE_PASSWORD`, `EVALS_SECRET_KEY`, or both.
+
+**Cause:** Those keys are still on the placeholders `docker-compose.yml` ships. They are published in the public repository, so an instance reachable at a real hostname with either one in place can have its sessions forged and its stored credentials read. Tessary refuses the boot rather than let that happen quietly.
+
+**Resolution:** Generate a replacement for each key the message names and put it in `.env`, then bring the stack up again:
+
+```bash
+openssl rand -base64 32
+```
+
+Full steps, including which of the two matters most and when to do it: [Secure the instance](/self-hosting/setup#secure-the-instance).
+
+<Note>
+  If the instance already stored provider API keys under the placeholder `EVALS_SECRET_KEY`, changing it makes them unreadable and they have to be entered again. Nothing else is lost.
+</Note>
+
+## TLS certificates aren't issuing
+
+**Symptom:** `SITE_DOMAIN` is set, but Caddy never issues a certificate.
+
+**Cause:** In the default `TLS_MODE=acme`, Caddy requests the certificate from Let's Encrypt over the TLS-ALPN challenge, which requires that domain's DNS to point at the host and `HTTPS_PORT` (443) to be reachable from the internet. If the backend log says `Refusing to start` and names `ACME_EMAIL`, the account address is blank: it is required in this mode and has no default.
+
+**Resolution:** Set `ACME_EMAIL`, then confirm DNS resolves to the host's public IP address and that port 443 is open to inbound traffic before Caddy attempts the challenge again. `docker compose logs frontend` shows the attempt. If port 443 cannot be reached from the internet, switch to `TLS_MODE=owncert` (your own certificate) or `TLS_MODE=upstream` (a terminator you already run); [Custom domain](/self-hosting/custom-domain) covers both.
+
+Unset `SITE_DOMAIN` to fall back to plain HTTP on `HTTP_PORT` (default 80). If Tessary becomes reachable that way, the problem is DNS or network reachability rather than the application.
+
+## Sign-in doesn't match older instructions
+
+**Symptom:** Older instructions describe signing in with WorkOS SSO, but self-hosted Tessary never prompts for it.
+
+**Cause:** WorkOS SSO is opt-in for self-hosted deployments, not the default.
+
+**Resolution:** Sign in with local email and password through the signup endpoint instead. Use WorkOS only if you've configured it yourself.
+
+## Unexpected outbound network calls
+
+**Symptom:** You observe outbound calls or DNS lookups to `home.tessary.ai`, but your deployment requires zero egress.
+
+**Cause:** By default, Tessary sends one anonymous opt-out heartbeat to `home.tessary.ai`.
+
+**Resolution:** Set `EVALS_TELEMETRY_ENABLED=false`. With telemetry disabled, Tessary makes no outbound calls, including DNS lookups, to that host. The full list of destinations an instance may reach, and the check that holds the stack to it, is [What leaves your network](/self-hosting/configuration#what-leaves-your-network).
+
+## Something else
+
+If your problem isn't covered on this page, it isn't documented yet. Report the exact symptom rather than assuming a fix from a similar problem above.

@@ -1,0 +1,29 @@
+# Documented suppressions for scripts/check-dependency-audit.sh (#927 step 4, ledger item 29).
+#
+# One entry per accepted finding. Starts empty: #928 ("Clear the 49 open dependency advisories",
+# ledger item 30) does the remediation, and any advisory it decides is a false positive or an
+# accepted risk rather than something to fix gets its entry added here, not silently ignored.
+#
+# Fields:
+#   id          the scanner's own identifier — a GHSA id for pnpm audit / pip-audit findings, a
+#               CVE id for OWASP dependency-check-maven findings (see that tool's own suppression
+#               XML, which check-dependency-audit.sh generates from the `maven`-tagged entries
+#               here rather than a second hand-authored file)
+#   ecosystems  which of [maven, npm, uv] this suppression applies under — a finding is only
+#               suppressed for a scanner whose ecosystem name is listed here, so the same GHSA id
+#               appearing in two unrelated ecosystems (rare, but the id spaces are not disjoint)
+#               does not silently suppress both from one entry
+#   reason      one line: why this is accepted (false positive / no fix available yet / risk
+#               accepted and why), not "suppressing for now" — see SECURITY.md's suppression
+#               section for who signs off
+#   expires     an ISO date. check-dependency-audit.sh drops any entry whose `expires` has
+#               passed, so the finding re-fires as a real one — a suppression with no review date
+#               is the broken-window failure mode #927's acceptance criteria calls out by name
+#
+# Example (commented out — delete the leading `# ` on all four lines to use it):
+#   # - id: GHSA-xxxx-xxxx-xxxx
+#   #   ecosystems: [npm]
+#   #   reason: "transitive dev-only dependency, no runtime path; upstream fix tracked in #928"
+#   #   expires: 2026-12-01
+
+suppressions: []

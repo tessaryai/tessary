@@ -1,0 +1,47 @@
+{
+  "name": "tessary-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && node scripts/copy-dep-licenses.mjs",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "generate:api": "openapi-typescript ../backend/contract/src/main/resources/openapi/evals-api.json -o src/api/generated/schema.d.ts",
+    "generate:routes": "node scripts/generate-route-manifest.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@tanstack/react-query": "^5.102.8",
+    "@uiw/react-json-view": "2.0.0-alpha.43",
+    "lucide-react": "^1.41.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.3",
+    "recharts": "^3.10.1",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^30.0.1",
+    "openapi-typescript": "^7.13.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "comments": {
+    "overrides": "Dependency overrides live in pnpm-workspace.yaml, not here: pnpm 11 removed the `pnpm` field in package.json and ignores it silently. See that file for the es-toolkit pin and the openapi-typescript peer override, both of which are load-bearing."
+  }
+}

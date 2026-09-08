@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the baked bundle validator without the caller having to know its layout. The observer
+# prompts call this so the agent never guesses a path. validate.py imports its sibling
+# pipeline_io, so we invoke it in place. Both files are baked from the platform's own
+# contract/ copies by template.ts (staged into vendor/ by build.ts) — the evals plugin is
+# no longer installed in this sandbox and no longer carries a validator.
+set -e
+p="/home/user/tessary-contract/validate.py"
+if [ ! -f "$p" ]; then
+  echo "tessary-evals-validate: baked validator missing at $p (template built without vendor/?)" >&2
+  exit 2
+fi
+exec python3 "$p" "$@"

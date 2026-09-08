@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evals.tessary.ai/schemas/grader.v9.json",
+  "title": "Grader (on-disk form)",
+  "description": "Schema for one grader YAML file under .tessary/graders/. The authoritative validator is validate.py (at the plugin root), which enforces these structural rules plus cross-field invariants and optional pipeline.yaml / bundle cross-references. This schema is the contract any grader author must satisfy; validate.py is the enforcer. v2 added: self_tests[].category (self_tests removed in v7 — see below), applies_when_check (deterministic graders; removed in v9 — see below), per-grader runtime fields (block_on_fail, dataset_refs, and the v9-removed owner / cost / latency budgets), and a _meta provenance block for survivable re-runs. v3 adds kind=score (continuous 1-5 quality scoring). v4 adds scope=trace (multi-turn: grade the final turn given prior n-1 messages) and kind=agentic (binary verdict produced by an agent running in a sandbox via agent_spec; emitted here, executed by the runner). v5 adds no grader fields (the change is the call-site default_grade_mode flag plus pinned trace history sourcing). v6: applies_when is ALWAYS evaluated by an LLM at runtime — for kind=deterministic the platform runs a separate LLM applicability gate before the (gate-free) deterministic_check; for llm_judge/score it rides inline in the judge prompt. applies_when_check is REMOVED (the gate is never compiled). Trace deterministic checks receive structured input (messages + tool_uses). v7 REMOVES per-grader self_tests entirely: graders no longer carry hand-authored self-test cases, the self_test_pass_rate/self_test_variance calibration fields, or the applies_when ↔ not_applicable self-test invariant. A grader's behavior is now validated platform-side against reusable golden datasets — real spans associated with the grader and labeled per (grader, dataset_item) — so the author emits only the verdict body, applies_when, confidence, and rationale. v8 DEFERS judge-prompt authoring to the platform for kind=llm_judge and kind=score: the author emits the definition (kind, applies_when, rubric_levels+score_scale for score, confidence, rationale) plus a top-level marker `_body_source: platform` and does NOT author judge_prompt/rubric; the platform expands the verdict body on import. When `_body_source` is absent the v7 requirements still hold (so deterministic/execution/agentic bodies and any legacy llm_judge/score files keep validating). v8 also adds the orchestrator-owned call-site field expected_spans (telemetry nomenclature extracted from the call site's code) — schema'd on the call_site shard, not on the grader. v9 makes three changes: (1) REMOVES the redundant grader fields applies_when_check (already removed as a feature in v6), owner, cost_budget_tokens, and latency_budget_ms_p95, and the grader-level compliance_tags (the FAILURE-MODE-level compliance_tags is unchanged and still consumed); all were unread or write-only on the grader. (2) Adds the body LIFECYCLE: the `_body_source` enum is widened to {platform, platform-materialized, human} so a platform-MATERIALIZED body (synced back into the repo by the platform's GitHub integration) and a HUMAN-edited body are first-class on-disk states — for these two values the inline judge_prompt/rubric MUST be PRESENT (the inverse of `platform`, which requires it empty); _meta gains optional materialized_at + body_digest (a canonical hash used to detect a human edit of a materialized body). (3) expected_spans entries gain `source: observed | inferred` (default inferred) on the call_site shard so OTel-observed span names are trusted unconditionally and `confidence` ranks only inferred guesses. All v9 changes are additive/optional-defaulted: every existing v8 bundle still validates. The $id tracks the current contract version (9).",
+  "type": "object",
+  "required": [
+    "id",
+    "scope",
+    "name",
+    "kind",
+    "confidence",
+    "rationale"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable grader ID. For single_call and trace: `<failure_mode_id>::grader`. For chain: `<chain_id>::<failure_name>::grader`. Attached by orchestrator, not author."
+    },
+    "scope": {
+      "enum": ["single_call", "chain", "trace"],
+      "description": "single_call: grades one call's output. chain: grades a relationship across N distinct call-site outputs in a session. trace: grades the final turn of a multi-turn session given the prior n-1 messages as context — anchored to one call_site_id like single_call."
+    },
+    "failure_mode_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Required for failure-catching kinds (llm_judge, deterministic, execution). The failure mode this grader catches."
+    },
+    "quality_dimension_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Required for kind=score. The quality dimension this grader scores (parallel to failure_mode_id). Resolves to a pipeline quality_dimensions[].id; validate.py --bundle enforces the bijection."
+    },
+    "call_site_id": {
+      "type": ["string", "null"],
+      "description": "Required and non-empty when scope=single_call or scope=trace; must be null/absent when scope=chain."
+    },
+    "chain_id": {
+      "type": ["string", "null"],
+      "description": "Required and non-empty when scope=chain; must be null/absent when scope=single_call."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "taxonomy_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Attached by orchestrator at the taxonomy step, before grader synthesis fan-out, so subagents can splice it onto each grader at write time. Required for failure-catching kinds; absent for kind=score (quality dimensions are not taxonomy-clustered)."
+    },
+
+    "kind": {
+      "enum": ["llm_judge", "deterministic", "execution", "score", "agentic"]
+    },
+    "agent_spec": {
+      "type": "object",
+      "description": "Required for kind=agentic. Declares an agent that produces the verdict by multi-turn analysis in a sandbox (e.g. running `git diff` / tests / file exploration) rather than a single judge call. This plugin only emits the spec; the runner (evals-platform) executes it — validate.py never runs it.",
+      "required": ["harness", "sandbox", "task_prompt", "verdict_contract"],
+      "properties": {
+        "harness": {
+          "enum": ["opencode"],
+          "description": "The agent harness the runner launches. Extensible enum; opencode is the only value today."
+        },
+        "sandbox": {
+          "type": "object",
+          "description": "The sandbox the runner provisions for the agent.",
+          "required": ["image"],
+          "properties": {
+            "image": { "type": "string", "minLength": 1, "description": "Container/sandbox image, e.g. 'opencode/base:latest'." },
+            "network": { "enum": ["none", "egress", "full"], "description": "Network policy. Default to the most restrictive the task allows." }
+          }
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Tools the grading agent may use, e.g. ['bash', 'read', 'git']."
+        },
+        "task_prompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The grading task the agent performs. Self-contained instructions ending in a single decision, e.g. 'Run `git diff HEAD~1 HEAD` and decide whether it correctly implements the requested change.'"
+        },
+        "verdict_contract": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How the agent must emit its result so the runner can parse it, e.g. 'print PASS or FAIL on the final line'. v1 verdicts are binary (pass/fail)."
+        },
+        "budgets": {
+          "type": "object",
+          "description": "Soft caps the runner enforces.",
+          "properties": {
+            "max_turns": { "type": "integer", "minimum": 1 },
+            "max_cost_usd": { "type": "number", "minimum": 0 },
+            "timeout_s": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "score_scale": {
+      "type": "object",
+      "description": "Required for kind=score. The integer range the judge assigns; current convention is min 1, max 5.",
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "integer" },
+        "max": { "type": "integer" }
+      }
+    },
+    "rubric_levels": {
+      "type": "object",
+      "description": "Required for kind=score. Maps each level (stringified integer in [min, max]) to a concrete, observable anchor describing output at that level. (For kind=llm_judge the prose `rubric` string is used instead.)",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "applies_when": {
+      "type": ["string", "null"],
+      "description": "Natural-language applicability predicate, ALWAYS evaluated by an LLM at runtime (v6). For kind=llm_judge/score it rides inline in the judge prompt; for kind=deterministic the platform runs a separate LLM applicability gate BEFORE the deterministic_check and skips out-of-scope outputs — so the deterministic_check must NOT implement the gate itself. When set, out-of-scope outputs are reported not_applicable at runtime; golden dataset items that fall outside scope are surfaced as not_applicable by the platform runner rather than asserted by the author (v7 removed per-grader self-tests)."
+    },
+    "_body_source": {
+      "enum": ["platform", "platform-materialized", "human"],
+      "description": "Body-provenance marker for kind=llm_judge / kind=score, the three-state lifecycle (v9; the value was a single 'platform' in v8). DEFERRED — 'platform': the author deferred the verdict body to the platform; the grader carries only the definition (kind, applies_when (llm_judge), rubric_levels+score_scale (score), confidence, rationale) and MUST NOT carry a non-empty judge_prompt/rubric. MATERIALIZED — 'platform-materialized': the platform generated the body and synced it back into the repo (via its GitHub integration); the inline judge_prompt (+rubric for llm_judge) MUST now be PRESENT and is frozen via _meta.locked_fields; _meta.materialized_at and _meta.body_digest are recorded. HUMAN — 'human': a human edited a materialized body in-repo; the body MUST be PRESENT and is treated as the new authoritative body that propagates back upstream on the next platform sync. Absent means the body is plugin-authored inline (the legacy v7 shape). The marker is valid ONLY on llm_judge/score; deterministic/execution/agentic bodies never set it and stay plugin-authored.",
+      "deprecated": false
+    },
+    "judge_prompt": {
+      "type": "string",
+      "description": "Required and non-empty when kind=llm_judge — UNLESS _body_source == 'platform' (v8 deferral), in which case it is deferred to the platform and must be omitted/empty. When _body_source is 'platform-materialized' or 'human' (v9) the platform/human body is PRESENT here and required non-empty."
+    },
+    "rubric": {
+      "type": "string",
+      "description": "Required and non-empty when kind=llm_judge — UNLESS _body_source == 'platform' (v8 deferral), in which case it is deferred to the platform and must be omitted/empty. When _body_source is 'platform-materialized' or 'human' (v9) the body is PRESENT here and required non-empty."
+    },
+    "deterministic_check": {
+      "type": "string",
+      "description": "Required and non-empty when kind=deterministic."
+    },
+    "execution_spec": {
+      "type": "string",
+      "description": "Required and non-empty when kind=execution."
+    },
+
+    "confidence": {
+      "enum": ["high", "medium", "low"],
+      "description": "Author-assigned confidence in this grader. Behavioral calibration now happens platform-side against golden datasets (real labeled spans), not via per-grader self-tests."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One sentence in user-impact terms for the curation report."
+    },
+
+    "block_on_fail": {
+      "type": ["boolean", "null"],
+      "description": "Optional override for the global severity_policy (in pipeline.yaml runtime.severity_policy). When true, a failing grader blocks CI/release regardless of severity. When false, a failing grader is report-only. When absent, the severity_policy default applies."
+    },
+    "dataset_refs": {
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/dataset_ref" },
+      "description": "Optional. Pointers to real inputs this grader should run against — captured trace span IDs or file:line source locations. Populated by the orchestrator from the traces fetched for the call site, or from static discovery. Empty/absent means 'no captured dataset'."
+    },
+
+    "pack_ids": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Set of pack ids this grader's failure mode belongs to (propagated from failure_modes[].pack_ids). Empty / absent = baseline (not pack-contributed). Each entry must resolve to a pipeline.packs[].id; validate.py --bundle enforces."
+    },
+    "_meta": {
+      "$ref": "#/$defs/meta",
+      "description": "Provenance + lock metadata used to survive re-runs. Orchestrator writes this on first emission; carries forward across re-syntheses; respects locked_fields on overwrite."
+    },
+
+    "_validation_error": {
+      "type": "string",
+      "description": "Set by the step-6 subagent if validation kept failing after 3 retries. Presence of this key is an explicit accepted-broken signal — validate.py short-circuits all other rules and returns 0 when this key is present, so the file is not re-flagged by later --pipeline cross-check passes. The operator-facing report.md and the failed-validation count in the summary line surface these files."
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "scope": { "const": "single_call" } } },
+      "then": {
+        "required": ["call_site_id"],
+        "properties": {
+          "call_site_id": { "type": "string", "minLength": 1 },
+          "chain_id": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "scope": { "const": "chain" } } },
+      "then": {
+        "required": ["chain_id"],
+        "properties": {
+          "chain_id": { "type": "string", "minLength": 1 },
+          "call_site_id": { "type": "null" }
+        }
+      }
+    },
+    {
+      "comment": "trace grades the final turn of a multi-turn session at one call site; routes like single_call.",
+      "if": { "properties": { "scope": { "const": "trace" } } },
+      "then": {
+        "required": ["call_site_id"],
+        "properties": {
+          "call_site_id": { "type": "string", "minLength": 1 },
+          "chain_id": { "type": "null" }
+        }
+      }
+    },
+    {
+      "comment": "llm_judge requires an inline judge_prompt+rubric UNLESS the body is deferred to the platform (_body_source == 'platform', v8). v9: 'platform-materialized'/'human' are != 'platform', so this conditional correctly REQUIRES the present body for the materialized/human states.",
+      "if": {
+        "properties": {
+          "kind": { "const": "llm_judge" },
+          "_body_source": { "not": { "const": "platform" } }
+        }
+      },
+      "then": { "required": ["judge_prompt", "rubric"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "deterministic" } } },
+      "then": { "required": ["deterministic_check"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "execution" } } },
+      "then": { "required": ["execution_spec"] }
+    },
+    {
+      "comment": "agentic produces a binary verdict via an agent running in a sandbox; the spec is emitted here, executed by the runner.",
+      "if": { "properties": { "kind": { "const": "agentic" } } },
+      "then": { "required": ["agent_spec"] }
+    },
+    {
+      "comment": "Failure-catching kinds carry a failure_mode_id and a taxonomy_node_id.",
+      "if": { "properties": { "kind": { "enum": ["llm_judge", "deterministic", "execution", "agentic"] } } },
+      "then": { "required": ["failure_mode_id", "taxonomy_node_id"] }
+    },
+    {
+      "comment": "Score graders always link to a quality dimension and carry an anchored rubric + scale.",
+      "if": { "properties": { "kind": { "const": "score" } } },
+      "then": { "required": ["quality_dimension_id", "rubric_levels", "score_scale"] }
+    },
+    {
+      "comment": "A score grader carries an inline judge_prompt UNLESS the body is deferred to the platform (_body_source == 'platform', v8). v9: 'platform-materialized'/'human' are != 'platform', so this conditional correctly REQUIRES the present judge_prompt for the materialized/human states.",
+      "if": {
+        "properties": {
+          "kind": { "const": "score" },
+          "_body_source": { "not": { "const": "platform" } }
+        }
+      },
+      "then": { "required": ["judge_prompt"] }
+    }
+  ],
+
+  "$defs": {
+    "dataset_ref": {
+      "type": "object",
+      "description": "One pointer to a real input this grader can be run against.",
+      "anyOf": [
+        { "required": ["trace_id", "span_id"] },
+        { "required": ["file"] },
+        { "required": ["jsonl_path"] }
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "description": "OTel trace_id (hex). Paired with span_id."
+        },
+        "span_id": {
+          "type": "string",
+          "description": "OTel span_id (hex)."
+        },
+        "file": {
+          "type": "string",
+          "description": "Source-code location, e.g. 'src/handlers/email.py:142'."
+        },
+        "jsonl_path": {
+          "type": "string",
+          "description": "Path (relative to .tessary/) of a JSONL dataset capturing inputs for this call site, e.g. 'datasets/<call_site_id>.jsonl'."
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional human label."
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Provenance + lock metadata. Allows re-runs to carry hand-edits forward.",
+      "required": ["author", "synthesized_at", "synth_inputs_digest"],
+      "properties": {
+        "author": {
+          "type": "string",
+          "description": "Identifier of the grader author that produced this file (e.g. 'default', 'evals-prompt')."
+        },
+        "author_contract_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Contract version the author conformed to. Set by the orchestrator to the version the producing author declared (the bundled default author and evals-prompt both declare 8, the current contract version)."
+        },
+        "synthesized_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp of when this file was synthesized."
+        },
+        "synth_inputs_digest": {
+          "type": "string",
+          "minLength": 8,
+          "description": "Hex digest (first 16+ chars of SHA-256) over the canonical author input: failure_mode + call_site/chain + product_profile snapshot. Re-runs that produce the same digest may safely overwrite locked_fields=[] graders without diff churn."
+        },
+        "locked_fields": {
+          "type": "array",
+          "items": {
+            "enum": ["judge_prompt", "rubric", "applies_when", "deterministic_check", "execution_spec", "block_on_fail"]
+          },
+          "description": "Fields the orchestrator must preserve verbatim on re-run. Set by humans during curation (or by --lock at the CLI). On overwrite, the orchestrator loads the existing file, retains values for every key in this list, and only refreshes other fields."
+        },
+        "human_edited": {
+          "type": "boolean",
+          "description": "Set to true by curators (or by tooling) to mark the file as touched. Re-runs warn before overwriting human_edited files unless --force. v9: also set automatically when a `platform-materialized` body's recomputed body_digest no longer matches _meta.body_digest (a human edited the materialized body); the grader's _body_source is promoted to 'human' at the same time."
+        },
+        "grounding": {
+          "type": "string",
+          "enum": ["observed"],
+          "description": "What this grader was authored from. `observed`: the call site's real traces were fetched from the linked project and read before authoring — the only value a synthesis can stamp, since trace grounding is unconditional. Optional and absent on bundles synthesized before trace grounding was mandatory."
+        },
+        "materialized_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "v9. ISO-8601 timestamp recorded when the platform materialized the verdict body back into this repo file (i.e. when _body_source became 'platform-materialized'). Optional; present only on materialized/human bodies."
+        },
+        "body_digest": {
+          "type": "string",
+          "minLength": 8,
+          "description": "v9. Hex SHA-256 over the CANONICAL verdict body the platform last materialized — the normalized judge_prompt (+ '\\n' + rubric for llm_judge), each stripped of trailing whitespace per line and of leading/trailing blank lines. On load, a recomputed digest that differs from this value signals a human edit: the grader is promoted from 'platform-materialized' to 'human' and _meta.human_edited is set true, so the next platform sync propagates the human revision upstream. Optional; present only on materialized/human bodies."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+# The must-not-publish denylist: the one declaration every consumer derives from (epic 4, clause 1).
+#
+# Row shape:   pattern|kind|scope|reason
+#   kind    delete  the export removes it; it must match at least one path in the SOURCE tree
+#           never   the export must contain nothing matching it; allowed to match nothing
+#           exempt  a carve-out from a `never` or `delete` row; must match at least one SOURCE path
+#   scope   dir     pattern is a directory prefix, resolved from the repo root
+#           file    pattern is one exact path
+#           glob    pattern is a shell glob matched against every path's basename
+#   reason  the CATEGORY only. This file publishes (boundary rule 6 derives from it in the public
+#           repo forever), so no partner name, account id, credential name or measurement goes here.
+#
+# Consumers: scripts/lib/export-simulate.sh (applies `delete`), scripts/check-open-boundary.sh
+# (rule 3's image-input check and rule 6's markdown check derive from `delete`),
+# scripts/lib/check-export-denylist.sh (validates this file and, with the overlay present, asserts
+# every `delete` and `exempt` row still resolves AND that the two selections agree — see below),
+# tessary-paid/scripts/check-scrub.sh (enforces `never` over the export candidate; #1293 moved that
+# scanner into the overlay, so the public repo carries no copy of it and no copy of the
+# forbidden-strings file it reads).
+# This file carries no row for itself or its loader, by rule: a self-denying denylist deletes the
+# input the public repo's own gate reads.
+#
+# --- WHY THIS FILE IS NINETEEN ROWS SHORTER THAN IT WAS (#1293) ---
+# Until #1293 the private material lived at public paths and this file was the only thing keeping it
+# out of the export: twenty `delete` rows naming classifiers/, product/, slack-service/, .dev-tools/,
+# .claude/, OPEN-CORE.md, ten devdocs pages and four scripts. That made the denylist load-bearing in
+# the worst way — the boundary was a text file, and a row silently going stale published the tree it
+# named. #1293 relocated every one of those paths physically under tessary-paid/, so the overlay row
+# below now covers all of them and the individual rows would be dead (or, for two of them, WRONG:
+# `classifiers|delete|dir` and `.claude|delete|dir` would delete open code, because the classifiers
+# public half and .claude/launch.json deliberately stay).
+# The end state the boundary now asserts mechanically (see check-export-denylist.sh's set-equality
+# section): root-minus-tessary-paid and the denylist-filtered tree select the IDENTICAL file set.
+# Adding a `delete` row for a public path breaks that equality and the gate says so by name. Keep it
+# that way: the answer to "this must not publish" is `git mv` it under tessary-paid/, not a new row.
+#
+# --- WHAT PUBLISHES DELIBERATELY (D2's required decision record) ---
+# There is no `keep` kind, so these are comments; check-export-denylist.sh skips comment lines. They
+# are recorded here because each one was, at some point, argued the other way:
+#   handbook/                     all 8 files publish. Company handbook, written to be read outside.
+#   .claude/launch.json           publishes. A dev-server config with no internal process in it; the
+#                                 rest of .claude/ (commands/, workflows/) went private in #1293.
+#   classifiers/framework/,       publish. The open half of the classifier tree: the harness, the two
+#   classifiers/tool_error/,      shipped open classifiers, their tests, pyproject.toml and uv.lock.
+#   classifiers/metric_drift/,    The research half (experiments/, frustration/, groundedness/,
+#   classifiers/data_gen/         behavior_drift/, refusal/, out/) is under tessary-paid/ instead.
+#                                 data_gen/ publishes because check-open-boot.sh's trace emitter is
+#                                 the open edition's only working one (#1293 fork F1, unruled).
+
+# --- the paid overlay (D2): the boundary, in one row ---
+tessary-paid|delete|dir|paid overlay
+
+# --- credential material: asserted absent from the export, never deleted (there is nothing to delete) ---
+.env|never|file|local environment file
+.env.*|never|glob|local environment file
+*.pem|never|glob|key material
+*.key|never|glob|key material
+id_rsa*|never|glob|key material
+.env.example|exempt|file|documented template, no values
+frontend/.env.example|exempt|file|documented template, no values

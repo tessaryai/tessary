@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="backend"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Curated PMD ruleset for the evals backend: PMD 7's recommended quickstart,
+        trimmed of rules that conflict with this project's conventions (Spotless owns
+        formatting; AGENTS.md documents the rest). Exclusions are deliberate and
+        rationale'd — genuine findings are fixed in code, not silenced here.
+    </description>
+
+    <rule ref="rulesets/java/quickstart.xml">
+        <!-- House style: single-statement if/else/for/while bodies are written without
+             braces (if (x) return y;), and Spotless/palantir preserves that. -->
+        <exclude name="ControlStatementBraces" />
+        <!-- False positive for SLF4J: parameterized logging (log.info("x={}", x)) defers
+             message construction, so isXxxEnabled() guards add nothing. AGENTS.md mandates
+             this logging style. -->
+        <exclude name="GuardLogStatement" />
+        <!-- volatile is a valid, intentional concurrency primitive here (lock-free flags). -->
+        <exclude name="AvoidUsingVolatile" />
+        <!-- Records/DTOs document their components with block comments; PMD wants @param on
+             the record instead. The block-comment style is intentional and readable. -->
+        <exclude name="DanglingJavadoc" />
+        <!-- The unused parameter is the rowNum of Spring's RowMapper.mapRow(rs, rowNum); the
+             signature requires it even when a mapper ignores it. -->
+        <exclude name="UnusedFormalParameter" />
+        <!-- *Dtos classes are namespaces grouping related nested record DTOs; PMD doesn't
+             count nested types, so it sees an "empty" non-instantiable class. -->
+        <exclude name="MissingStaticMethodInNonInstantiatableClass" />
+        <!-- Re-included below with allowIncrementDecrement so idiomatic ++ counters pass. -->
+        <exclude name="AssignmentInOperand" />
+        <!-- All hits are the standard interrupt-flag-restoration idiom: a broad
+             `catch (Exception e) { if (e instanceof InterruptedException) ...interrupt(); }`.
+             Splitting into a dedicated catch would duplicate the shared handling. -->
+        <exclude name="AvoidInstanceofChecksInCatchClause" />
+        <!-- The only hit is the @SpringBootApplication main class, which Spring instantiates
+             as a configuration bean — a private constructor would break it. -->
+        <exclude name="UseUtilityClass" />
+        <!-- The flagged parentheses wrap nested ternaries (x : (a ? b : c)) for readability;
+             removing them harms clarity, and Spotless owns formatting. -->
+        <exclude name="UselessParentheses" />
+    </rule>
+
+    <!-- Keep AssignmentInOperand for a genuine `x = y` hidden in a condition, but allow the
+         idiomatic increment/decrement counters used throughout (e.g. switch-arm tallies). -->
+    <rule ref="category/java/errorprone.xml/AssignmentInOperand">
+        <properties>
+            <property name="allowIncrementDecrement" value="true" />
+        </properties>
+    </rule>
+</ruleset>

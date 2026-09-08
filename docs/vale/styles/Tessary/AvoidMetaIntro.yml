@@ -1,0 +1,15 @@
+extends: existence
+message: "Open with what the page helps the reader accomplish, not a summary of the document itself ('%s')."
+link: /handbook/documentation-style-guide.md#start-pages-directly
+level: suggestion
+ignorecase: true
+tokens:
+  - 'in this guide'
+  - 'in this document'
+  - 'in this article'
+  - 'in this tutorial'
+  - 'this guide will'
+  - 'this document will'
+  - 'this article will'
+  - 'this tutorial will'
+  - 'we will walk you through'

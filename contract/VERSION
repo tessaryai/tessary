@@ -1,0 +1,18 @@
+plugin_source: tessary/plugins/plugins/evals
+plugin_commit: e7602ebbff0ffc345d98fd57029188b7c45912d3
+plugin_release: evals-v0.27.1
+schema_version: 0.16.0
+vendored_at: 2026-08-19
+plugin_license: MIT — contract/LICENSE is plugins/evals/LICENSE copied verbatim from tessaryai/plugins@e7602ebbff0ffc345d98fd57029188b7c45912d3 (byte-identical at main)
+
+# Files listed in scripts/lib/vendored-plugin-files.sh are vendored copies from the
+# evals plugin. Re-run scripts/sync-evals-contract.sh to refresh; commit the result
+# alongside any code changes that adapt the platform to the new contract.
+# contract/LICENSE is VENDORED like the rest, not hand-written, and the plugin is MIT — ours, but
+# not Apache-2.0. Stamping an SPDX header into grader.schema.json or AUTHORING_CONTRACT.md instead
+# would fail twice over: check-vendored-plugin.sh cmp's every vendored file byte-for-byte against
+# plugins@main so the header reads as drift, and sync-evals-contract.sh would erase it on the next
+# refresh. A LICENSE file beside the copies travels with them and is re-proved on every check.
+# validate.py and pipeline_io.py are NOT vendored: they are platform-owned (the plugin
+# dropped its validator with synthesis in v0.23.0) and only happen to live here so the
+# contract tests and the E2B analyzer bake share one copy.

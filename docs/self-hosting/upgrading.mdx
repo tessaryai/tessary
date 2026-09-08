@@ -1,0 +1,115 @@
+---
+title: "Upgrading"
+description: "Upgrade a self-hosted Tessary deployment safely, including what to back up first and how schema migrations run."
+---
+
+Upgrading pulls new container images and lets the backend apply any pending Postgres schema migrations automatically. Back up your database first: there's no rollback path once a migration has run.
+
+## Before you upgrade
+
+<Warning>
+  Take a Postgres backup before you upgrade. See [Back up and restore Postgres](/self-hosting/troubleshooting#back-up-and-restore-postgres) in Troubleshooting for the commands.
+
+  There is no documented rollback path for a schema migration once it has run. If an upgrade causes a problem, restoring from your backup is the only recovery path.
+</Warning>
+
+## One-time: the Compose project is now named `tessary`
+
+<Warning>
+  This applies once, to installations created before this release. If you install for the first time from this release onward, skip this section.
+
+  The Compose project name changed from `evals-platform` to `tessary`. Docker derives volume, container and network names from the project name, so **the new stack looks for volumes that do not exist yet and creates them empty.** Started without one of the two remedies below, the backend comes up against an empty database and Caddy reissues your TLS certificates.
+</Warning>
+
+Three volumes are project-prefixed and therefore change name:
+
+| Held | Old name | New name |
+| --- | --- | --- |
+| The database | `evals-platform_tessary-postgres-data` | `tessary_tessary-postgres-data` |
+| Caddy's certificate state | `evals-platform_caddy-data` | `tessary_caddy-data` |
+| Caddy's config state | `evals-platform_caddy-config` | `tessary_caddy-config` |
+
+`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_evals`). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
+
+Pick one of these two. Do it **before** the first `docker compose up` on the new configuration.
+
+### Option A — keep the old project name
+
+Nothing moves. Name the old project explicitly on every command from now on:
+
+```bash
+docker compose -f oci://docker.io/tessaryai/tessary:compose -p evals-platform up -d -y
+docker compose -p evals-platform ps
+```
+
+`-p` outranks the project name pinned in the configuration. This is the smaller change and it is a valid end state, not just a delay — but every command needs the flag, and the documentation elsewhere assumes `-p tessary`.
+
+### Option B — copy the volumes to the new names
+
+Do this with the stack **stopped**, so nothing is writing while the copy runs.
+
+```bash
+docker compose -p evals-platform down
+
+for v in tessary-postgres-data caddy-data caddy-config; do
+  docker volume create "tessary_$v"
+  docker run --rm \
+    -v "evals-platform_$v":/from \
+    -v "tessary_$v":/to \
+    alpine:3.20 sh -c 'cp -a /from/. /to/'
+done
+```
+
+Then start the stack normally — `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y` — and confirm with `docker compose -p tessary ps` that every service is healthy and your existing projects and traces are still there.
+
+This copies rather than moves, so the old volumes are still on disk if something is wrong. Remove them only once you are satisfied:
+
+```bash
+docker volume rm evals-platform_tessary-postgres-data evals-platform_caddy-data evals-platform_caddy-config
+```
+
+### If you imported our Grafana dashboards
+
+The three dashboards and the alert rules under `observability/` changed identity in the same release: their `uid`s are now `tessary-overview`, `tessary-ingest` and `tessary-cpu`, the Grafana folder they expect is `tessary`, and every panel query selects `service_name="tessary-backend"` instead of `service_name="evals-platform-backend"`.
+
+Nothing in a running Grafana renames itself when the files change. Create the `tessary` folder first — the alert-rule import fails outright if it does not already exist — then re-import all three dashboards and the alert rules. The old dashboards keep their old `uid`s and their annotation history; delete them when you are ready.
+
+Metric and log series recorded before the upgrade carry the old `service_name`, and renaming a query does not go back and rename the data. Panels will show history stopping at the upgrade and starting again under the new name. If you need continuity across your retention window, widen the selector to a regex over both names — `service_name=~"(evals-platform|tessary)-backend"` — and narrow it back once the old data has aged out. Otherwise the split is simply the cost, and is the trade this rename accepted.
+
+## How migrations work
+
+Postgres schema migrations run automatically through Liquibase when the backend container starts. There's no separate migrate command to run, and no cloud account or external migration tool is involved.
+
+## Upgrade steps
+
+<Steps>
+  <Step title="Re-run the install command">
+    ```bash
+    docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+    ```
+
+    The `compose` tag always resolves to the current release, and the configuration behind it pins that release's images, so this one command fetches the new configuration and the new images together. Docker recreates any container whose image changed. The backend applies any new schema migrations during that boot, before it starts serving traffic.
+
+    From a clone, the equivalent is `git pull && docker compose pull && docker compose up -d`.
+
+    <Check>
+      Containers are running on the new images, and the backend is serving traffic again. Check with `docker compose -p tessary ps`.
+    </Check>
+  </Step>
+</Steps>
+
+<Note>
+  A configuration published from a registry can never be older than the images it names: every release publishes both, and the configuration carries that release's version as its own default. Pin a release by naming it — `oci://docker.io/tessaryai/tessary:compose-<version>`, for a published release version — and upgrade by dropping back to the `compose` tag.
+</Note>
+
+Your data is in named volumes (`tessary-postgres-data`, `tessary-sandbox-work`), so it survives a recreate. Only `docker compose -p tessary down -v` removes it.
+
+## Preserve TLS certificate state
+
+<Note>
+  Preserve the Caddy certificate-state volumes across the upgrade. If they're removed or recreated, Caddy reissues TLS certificates unnecessarily.
+</Note>
+
+## What isn't supported yet
+
+Self-hosted upgrades don't currently have a documented maintenance-window requirement, a blue-green deployment mechanism, or a downgrade path. If an upgrade needs to be reverted, restore from the Postgres backup you took before upgrading.

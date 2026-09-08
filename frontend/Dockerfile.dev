@@ -1,0 +1,48 @@
+# Frontend dev image — Vite dev server with HMR.
+#
+# Source is bind-mounted at runtime (see docker-compose.dev.yml). HMR works
+# through Caddy's reverse_proxy — Caddy upgrades websockets automatically.
+#
+# node_modules lives in a named volume so it persists across rebuilds AND
+# doesn't conflict with whatever's on the host.
+
+FROM node:24-alpine
+
+WORKDIR /app
+
+# Global install rather than corepack — see frontend/Dockerfile. PNPM_VERSION comes from the build
+# orchestrator (Taskfile `PNPM_VERSION`); no default, so the version has a single source.
+ARG PNPM_VERSION
+RUN npm i -g pnpm@${PNPM_VERSION}
+
+# The pnpm store must live OUTSIDE /app, because the node_modules named volume shadows everything
+# under /app/node_modules at runtime. Put it there and the build-time install below is wasted work —
+# the volume hides both the tree and the store, and first boot re-downloads the lot. At /pnpm-store
+# it survives on the image layer, so the startup install is a local copy with no network.
+ENV PNPM_STORE_DIR=/pnpm-store
+
+# Cache deps. pnpm-workspace.yaml carries this package's overrides (pnpm 11 no longer reads them
+# from package.json), so it has to come along or the resolved tree differs from CI's.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --store-dir "$PNPM_STORE_DIR"
+
+EXPOSE 5173
+
+# `--host 0.0.0.0` is required for the dev server to be reachable from the
+# Caddy container — Vite binds to localhost only by default.
+#
+# NOTE no `--` before it, unlike the npm form this replaced. npm needs `--` to separate script args
+# and strips it; pnpm forwards trailing args as-is and would pass the `--` through to vite, which
+# then ignores the flag, binds to localhost, and leaves Caddy 502-ing on every request.
+# Reinstall at startup to populate the mounted node_modules volume (the build-time install lands in
+# an image layer that the named volume shadows). Warm from the image-layer store above, so this is a
+# local file copy rather than a re-download. It cannot hardlink — store and volume are different
+# filesystems — which costs disk inside the volume but nothing in wall-clock worth optimizing.
+# Mirror Taskfile's pre-pnpm self-heal: a named volume can retain npm's flat node_modules after
+# the migration. pnpm installs over it without clearing, which leaves dead files and lets
+# undeclared transitive imports keep resolving. `task rf` alone does not wipe the volume.
+# Clear *contents* of a pre-pnpm tree — never `rm -rf node_modules` itself. In compose the
+# named volume is mounted at /app/node_modules, so removing the mount point fails with
+# "Resource busy" and the container exits (Caddy then 502s on lookup frontend). An empty
+# fresh volume also matches "dir exists, no .pnpm", so content-delete is the only safe form.
+CMD ["sh", "-c", "if [ -d node_modules ] && [ ! -d node_modules/.pnpm ]; then echo 'clearing pre-pnpm node_modules before install'; find node_modules -mindepth 1 -delete; fi && pnpm install --frozen-lockfile --store-dir \"$PNPM_STORE_DIR\" && pnpm run dev --host 0.0.0.0"]

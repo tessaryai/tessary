@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "useDefineForClassFields": true,
+    "noEmit": true,
+
+    /*
+     * The paid seam's type-check half (open-core D2). `@paid` is the one specifier open source uses
+     * for surfaces a commercial build adds; here it resolves to `src/paid/index.ts`, the open stub,
+     * so the open tree type-checks against real code rather than against a missing module.
+     *
+     * It stays INSIDE `src` deliberately. `scripts/check-open-boundary.sh` rule 2 fails on the paid
+     * overlay's directory name appearing in this file — that block exists to close exactly this
+     * escape hatch — and now also asserts positively that this mapping still points under
+     * `frontend/src`. The paid build's own tsconfig lives in the overlay and overrides this entry.
+     *
+     * No `baseUrl` is needed: TypeScript resolves `paths` values against this file's directory when
+     * one is absent, which is what keeps the mapping readable and relative.
+     */
+    "paths": {
+      "@paid": ["./src/paid/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

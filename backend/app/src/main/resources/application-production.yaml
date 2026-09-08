@@ -1,0 +1,125 @@
+# Activated via SPRING_PROFILES_ACTIVE=production in prod containers. Tunes
+# HikariCP for the deployed shape (single-instance EC2 talking to a sidecar
+# Postgres container over the docker network) and turns on OTLP export of
+# traces + metrics via the Alloy sidecar.
+springdoc:
+  api-docs:
+    # springdoc WARNs at startup on every boot that /v3/api-docs is public unless this is set
+    # (obs Gap 3 noise). Nothing in prod serves off the live endpoint — the frontend generates its
+    # TypeScript types from the checked-in backend/contract spec at build time (see
+    # docs/reference/architecture.md), and OpenApiSpecDriftTest/`task contract:openapi` run under
+    # the default/test profile, not `production` — so disabling it here only affects the deployed
+    # server, never the build-time contract-drift guard.
+    enabled: false
+
+spring:
+  datasource:
+    hikari:
+      # Under Project Loom (spring.threads.virtual.enabled), virtual threads are
+      # effectively unbounded, but the JDBC pool is NOT — so pool size, not thread
+      # count, is the throughput ceiling on the write path. Connections that can't
+      # be acquired within connection-timeout (10s) surface as backpressure rather
+      # than starving threads. Keep this bounded; do not inflate it to "match" the
+      # virtual-thread count. The grading workers claim jobs in small batches and grade each
+      # unit's graders sequentially, so grading concurrency is bounded by their pools and stays
+      # well under this 10-connection pool.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      leak-detection-threshold: 30000
+      pool-name: evals-hikari
+  liquibase:
+    enabled: true
+
+# Cookie is sent over HTTPS only in prod (Caddy terminates TLS, X-Forwarded-Proto
+# is honoured via server.forward-headers-strategy). Without this flag the cookie
+# would ship without `Secure` and could be exfiltrated by any plain-HTTP request
+# to a sibling subdomain. Lives under evals.auth (not workos), same as the rest
+# of the session/cookie config since #851 moved it off the WorkOS-specific
+# properties onto the provider-agnostic AuthProperties.
+evals:
+  auth:
+    cookie-secure: true
+
+server:
+  # Caddy in front terminates TLS and forwards X-Forwarded-{For,Proto,Host}.
+  # Native strategy honours these headers so WorkOS redirects + cookie Secure
+  # checks see the original https://app.tessary.ai scheme, not http.
+  forward-headers-strategy: native
+  tomcat:
+    # Trust forwarded headers only from Caddy (same docker network) — the
+    # frontend container's IP isn't fixed, so allow the whole bridge subnet.
+    # Caddy is the only hop in front; CF→Caddy is on the public side.
+    remoteip:
+      # Tightened from "all RFC1918" to just the docker default bridge range
+      # (172.16.0.0/12) plus loopback. The other containers on the network
+      # (postgres, alloy) live in 172.x; Caddy is also on 172.x. We never
+      # peer with 10.x or 192.x in this deployment, so allowing those is
+      # only a footgun if a future container can spoof X-Forwarded-For.
+      internal-proxies: "172\\.(1[6-9]|2[0-9]|3[0-1])\\..*|127\\.0\\.0\\.1"
+      protocol-header: x-forwarded-proto
+      remote-ip-header: x-forwarded-for
+
+management:
+  # Sample 100% of traces — volume is too low to worry about cost and we want
+  # full fidelity for debugging. Drop to 0.1 if traffic grows.
+  tracing:
+    sampling:
+      probability: 1.0
+  # Traces + logs: Spring Boot 4 OTLP autoconfig (spring-boot-starter-opentelemetry).
+  # gRPC to Alloy on 4317 — bare host:port, no path (the path is HTTP-only and
+  # breaks gRPC). The Logback appender is installed in OtelExportConfig.
+  # This block only supplies endpoint/transport -- whether export actually fires is governed by
+  # management.tracing.export.otlp.enabled / management.logging.export.otlp.enabled, which live in
+  # the base application.yaml (off by default, #864) and are NOT overridden here, so this profile
+  # stays inert until a self-hoster flips those two flags on.
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://alloy:4317}
+          transport: grpc
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://alloy:4317}
+          transport: grpc
+  otlp:
+    # Metrics ride Micrometer's OTLP registry (separate from the OTel SDK), which
+    # is HTTP/protobuf only, so it must hit Alloy's HTTP receiver (4318).
+    # Off by default (#864): url/step below are only meaningful once a self-hoster sets
+    # MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true. Unlike tracing/logging above, this profile
+    # DOES set `enabled` itself (Micrometer's OTLP registry is a different autoconfig from the
+    # OTel SDK's), so it has to be flipped here, not just left to application.yaml.
+    metrics:
+      export:
+        enabled: false
+        url: http://alloy:4318/v1/metrics
+        step: 30s
+  metrics:
+    distribution:
+      # percentiles-histogram emits Micrometer's full ~75-bucket exponential
+      # histogram per timer, multiplying series by every `le` bucket. For
+      # http.server.requests that was ~4.2k active series (75 buckets x ~51 URIs
+      # x status), pushing Grafana Cloud's free tier (10k series cap) over the
+      # limit. Keep only the explicit SLO buckets below: that preserves latency
+      # SLOs/Apdex while cutting the `le` dimension from 75 -> 7 (~390 series).
+      percentiles-histogram:
+        http.server.requests: false
+        http.client.requests: false
+      slo:
+        http.server.requests: 100ms,250ms,500ms,1s,2s,5s
+    tags:
+      application: tessary-backend
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        # Only /actuator/health is public. Metrics travel via OTLP push to the
+        # Alloy sidecar (see management.otlp.*), not via a scrape endpoint —
+        # exposing /actuator/prometheus publicly leaks tenant slugs through
+        # http.server.requests{uri=...} cardinality.
+        include: health

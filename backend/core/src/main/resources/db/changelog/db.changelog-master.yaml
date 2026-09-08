@@ -1,0 +1,36 @@
+# Liquibase master changelog: the OPEN lane.
+#
+# The open schema is defined by a single squashed baseline changeset (0000-baseline.sql, author
+# `evals`), re-photographed 2026-09 for the public repo cutover (#1144): the 0017-0023 chain that
+# followed the epic-3 DB partition (#1074) is folded into it, as the 2026-08 chain of 96 changesets
+# and the 0001-0016 chain were folded before it. Every paid-only table (plus the one FK the ordering
+# forces to follow them) lives in the OVERLAY lane instead: tessary-paid/db's own master changelog,
+# db/changelog/paid/ in that module's resources, whose baseline is tessary-paid:P0000-paid-baseline
+# and which applies strictly after the whole of this one. See that file's header, and OPEN-CORE.md's
+# Epic 3 section and divergence log, for the partition's shape and why moving tables out is not a
+# forward DROP migration (decision D-A).
+#
+# No fold carried its history forward: every database any of these chains had ever touched was
+# dropped and recreated on its reset day, so a database of this era has run this one changeset
+# (plus, where the paid overlay is present, tessary-paid:P0000-paid-baseline) and nothing else.
+# There is no conversion path and no straggler accommodation: a database that predates the baseline
+# fails its first boot loudly and is recreated, never repaired in place.
+#
+# New open migrations go here in order below the baseline, as changes/NNNN-*.sql under author
+# `evals`, numbering from the next free number after the fold (0024). Paid migrations live in the
+# overlay lane under their own master changelog, as paid/changes/PNNNN-*.sql under author
+# `tessary-paid`, numbering from P0001; the overlay always applies after the whole open master (its
+# own floor pin HALTs on a database that has not run evals:0000-baseline).
+#
+# A reading note for the rest of the repo: comments in Java, Python and shell that cite a migration
+# by number ("added by 0072", "as of the teardown (0083)", "dropped by 0016", "removed in 0017")
+# mean a chain that no longer exists as files. Every such changeset has been folded into a baseline
+# and the numbering restarted, so a future changeset carrying one of those numbers is a different
+# migration than the one they name, and where the cited DDL landed on a table that lives in the paid
+# overlay, the citation points at tessary-paid:P0000-paid-baseline, which is where that DDL
+# physically lives today. Not every old citation has a successor file: some named changesets were a
+# data-only DELETE or UPDATE, not schema, so a fold left nothing at all to point at.
+databaseChangeLog:
+  - include:
+      file: db/changelog/changes/0000-baseline.sql
+      relativeToChangelogFile: false

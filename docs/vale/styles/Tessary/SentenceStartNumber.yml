@@ -1,0 +1,7 @@
+extends: existence
+message: "Spell out a number that begins a sentence, or rewrite the sentence so it doesn't start with a numeral."
+link: /handbook/writing-style-guide.md#numbers
+level: suggestion
+nonword: true
+tokens:
+  - '(?:^|(?<=[.!?]\s))\d+\b'

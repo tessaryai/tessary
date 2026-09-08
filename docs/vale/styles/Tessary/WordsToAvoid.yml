@@ -1,0 +1,21 @@
+extends: existence
+message: "'%s' is on Tessary's watch list of words that exaggerate, obscure, patronize, or make unsupported claims. It isn't automatically forbidden: use it only if it's accurate and necessary here."
+link: /handbook/writing-style-guide.md#words-and-phrases-to-avoid
+level: suggestion
+ignorecase: true
+tokens:
+  - obviously
+  - obvious
+  - simply
+  - simple
+  - trivial
+  - effortless
+  - seamless
+  - revolutionary
+  - best-in-class
+  - powerful
+  - robust
+  - magic
+  - leverage
+  - utilize
+  - empower

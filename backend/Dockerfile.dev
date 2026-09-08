@@ -1,0 +1,46 @@
+# Backend dev image — JVM mode with Spring Boot devtools for fast iteration.
+#
+# Source is mounted at runtime (see docker-compose.dev.yml). Edits to .java
+# files don't auto-recompile inside the container — when you change Java code,
+# run:  task docker:dev:reload-backend
+# which execs `mvn compile` in this container; devtools restarts on classpath
+# change. For full restart: task docker:dev:restart-backend.
+#
+# Frontend Vite HMR is fully automatic (it watches the mounted source via the
+# OS file API).
+
+FROM maven:3.9-eclipse-temurin-25
+
+WORKDIR /app
+
+# Prefetch deps as a cached layer. Pulled out so unrelated src edits don't force a full dep
+# re-download on rebuild. EVERY module pom is copied: Maven refuses to read the aggregator at all
+# if a declared <module> directory is missing, so a partial list fails the build outright rather
+# than degrading. A module added to backend/pom.xml must be added here too —
+# scripts/check-module-hygiene.sh enforces that.
+COPY pom.xml ./
+COPY shared/pom.xml ./shared/pom.xml
+COPY contract/pom.xml ./contract/pom.xml
+COPY test-support/pom.xml ./test-support/pom.xml
+COPY core/pom.xml ./core/pom.xml
+COPY tenancy/pom.xml ./tenancy/pom.xml
+COPY substrate/pom.xml ./substrate/pom.xml
+COPY product/pom.xml ./product/pom.xml
+COPY llm-runtime/pom.xml ./llm-runtime/pom.xml
+COPY analysis/pom.xml ./analysis/pom.xml
+COPY surfaces/pom.xml ./surfaces/pom.xml
+COPY app/pom.xml ./app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+EXPOSE 8080
+
+# Source is bind-mounted into /app/app/src at runtime (see docker-compose.dev.yml), plus a maven
+# cache volume on /root/.m2 so the local repo persists across restarts.
+#
+# Two steps, because spring-boot:run can't run reactor-wide: `-pl app` alone can't resolve the
+# sibling module jars (nothing installs them), but `-pl app -am` drags every module into the
+# reactor and runs the `run` goal on ALL of them — it dies on the non-executable parent pom.
+# So: install app's whole dependency chain into the (cached) local repo first, then run the app
+# module alone against .m2. `-pl app -am` on `install` is safe; only `run` is the problem.
+# A library-source change needs a container restart to reinstall; app hot-reloads via devtools.
+CMD ["sh", "-c", "mvn -B -q -pl app -am install -DskipTests -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true && mvn -B -pl app spring-boot:run"]

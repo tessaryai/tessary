@@ -1,0 +1,17 @@
+# Local data, trained artifacts, caches — never committed (regenerated from the scripts).
+data/
+artifacts/
+.venv/
+__pycache__/
+*.pyc
+.uv/
+.sm_build/
+
+# Training artefacts. SetFit/Trainer write these on every run; they are outputs, not source.
+checkpoints/
+
+# Module scratch outputs. `out/` holds what the module scripts write: the small JSON result
+# records ARE committed (they are the measurement evidence), the .jsonl bulk is not — corpora and
+# per-pair score dumps run to megabytes and every one of them is one command away:
+#   uv run python -m groundedness.build_corpus   /   -m groundedness.dump_pairs
+out/*.jsonl

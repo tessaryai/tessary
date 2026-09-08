@@ -1,0 +1,9 @@
+target/
+# .mvn/ is NOT ignored — the native Docker build needs .mvn/jvm.config
+# (Error Prone's --add-exports) at compile time.
+.idea/
+.vscode/
+*.iml
+.git/
+.DS_Store
+hs_err_pid*.log

@@ -1,0 +1,44 @@
+# Namespace ownership recheck (epic 6 clause 7, #1152): every registry, hub and source-control
+# coordinate the tree's own install instructions and release pipeline reference still resolves,
+# through the platform's own ownership signal, to tessaryai, and every coordinate the tree
+# references is in scripts/lib/namespace-inventory.txt. Quarterly, because the namespace-reuse
+# precedents this clause cites ran on multi-year gaps between abandonment and exploitation, plus
+# on dispatch. release.yml runs the same check before any manifest merges. A red run opens an issue for the security rota, the same routing
+# scrub-gate.yml uses and for the same reason: no mail credentials, and an issue is what the rota
+# can act on. The confusable-name scan the clause originally carried is cut for this launch
+# (ruled 2026-09-07); this job is the ownership half.
+name: namespace-recheck
+
+on:
+  schedule:
+    - cron: '0 6 1 */3 *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  recheck:
+    name: every published namespace still resolves to tessaryai
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify ownership and inventory coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-namespaces.sh --negative
+      - name: Route a red run to the security rota
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="The quarterly namespace recheck failed: ${run_url}"
+          body="${body}"$'\n\n'"A published coordinate no longer resolves to tessaryai, or the tree references a coordinate scripts/lib/namespace-inventory.txt does not list. Owner per SECURITY.md's rota: security@tessary.ai."
+          body="${body}"$'\n'"Private rows (the two GitHub repositories, the Hugging Face heads and dataset) verify only with gh auth and HF_TOKEN on an operator's machine; a UNVERIFIED line is not this issue's cause."
+          body="${body}"$'\n'"Do not publish a release until the coordinate is reclaimed or the inventory is corrected with a reason, and log the recheck in the inventory's recheck section."
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "namespace recheck RED: a published coordinate is not ours ($(date -u +%Y-%m-%d))" \
+            --label security \
+            --body "$body"

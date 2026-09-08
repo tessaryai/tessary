@@ -1,0 +1,197 @@
+---
+title: "Set up Tessary"
+description: "Walk through self-hosting Tessary with Docker Compose, from first boot to a connected trace source."
+---
+
+Self-host Tessary with Docker Compose. This page covers first boot: bringing up the services, creating an account, and connecting a trace source.
+
+There is nothing to configure first. Every credential the stack needs has a working default, so one command boots the whole thing:
+
+```bash
+docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+```
+
+That reference is the Compose configuration itself, published to the registry as an artifact beside the images, so this works with nothing cloned and no `.env`. Two of the defaults it ships are placeholders published in the repository, which is fine for the localhost test drive this page walks through and not fine for anything else. [Secure the instance](#secure-the-instance) is where you replace them; Tessary warns on every boot until you do, and refuses to start the moment you point a real domain at it.
+
+<Note>
+  Handing this to a coding agent instead? [`setup.md`](https://github.com/tessaryai/tessary/blob/main/setup.md) in the repository root is written as instructions to one, and stops at the URL — everything from creating an account onward is this page.
+</Note>
+
+## Prerequisites
+
+- Docker Compose v2.34 or newer (`docker compose version`). Older versions either cannot read a compose file from a registry or hide it behind an experimental flag.
+- Docker Engine 26 or newer, for the named-volume subpath mount the sandbox runner uses.
+- A free `tessary` Compose project name on your host (the configuration pins the project name to `tessary`)
+- The group id of the Docker socket as containers see it, so the sandbox runner can reach it. The default is `0`, which is what Docker Desktop uses on macOS and Windows — if that is you, there is nothing to set. On Linux, run `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock busybox:1.36 stat -c %g /var/run/docker.sock`; if it prints anything but `0` (a stock install usually prints the `docker` group's id, often `999`), write `DOCKER_SOCK_GID=<that number>` into a `.env` file beside `docker-compose.yml` before starting. Getting this wrong shows up as `EACCES /var/run/docker.sock` in the sandbox runner's log and an agentic RCA or triage run that never starts.
+
+A clone is optional. From one, `docker compose up -d` runs the same configuration from `docker-compose.yml` in the repository root, and additionally supports `--build` and the `observability` profile, neither of which a registry reference can resolve.
+
+## Operating a stack you started from a registry
+
+Once the stack is up, day-to-day commands find it by project name and need no configuration file:
+
+```bash
+docker compose -p tessary ps
+docker compose -p tessary logs -f backend
+docker compose -p tessary down
+```
+
+Name `-f oci://docker.io/tessaryai/tessary:compose` again only to start or upgrade the stack.
+
+A `.env` beside the command still sets any variable the configuration names (`HTTP_PORT`, `SITE_DOMAIN`, the sealing keys, and the rest of [Configuration](/self-hosting/configuration)'s table). What it cannot do is reach settings the configuration does not name: from a clone the file passes your whole `.env` into the backend container, and a published artifact deliberately carries no `.env` at all. For those, layer a small override file:
+
+```bash
+docker compose -f oci://docker.io/tessaryai/tessary:compose -f tessary.override.yml up -d -y
+```
+
+Or take a local copy and stop using the registry: `docker compose -f oci://docker.io/tessaryai/tessary:compose config > docker-compose.yml`.
+
+## What comes up
+
+`docker compose up -d` starts the following services:
+
+| Service | Role | Notes |
+| --- | --- | --- |
+| `postgres` | Database | `pgvector/pgvector:pg16`. Health-checked; `backend` waits for it to become healthy. |
+| `backend` | Spring Boot application | Listens on 8080 and 4317. Both ports are internal only, not published to the host. Health-checked on its own `/actuator/health`; `frontend` waits for it. |
+| `frontend` | Web UI | Bundles Caddy. Published on the host's `HTTP_PORT` and `HTTPS_PORT` (default 80 and 443). Health-checked on its own HTTP listener. |
+| `sandbox-runner-work-init` | One-shot init | Runs `chown` on the sandbox runner's work volume, then exits. |
+| `sandbox-runner` | Sandbox execution | Runs by default. Needs access to the Docker socket. Health-checked on its `/healthz`. |
+
+For what every environment variable in the configuration does, see [Configuration](/self-hosting/configuration).
+
+## Start Tessary
+
+<Steps>
+  <Step title="Start the services">
+    ```bash
+    docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+    ```
+
+    The published configuration pins every image to the release it shipped with,
+    `tessaryai/tessary:<service>-<version>` — never a moving `-latest` tag — so this reference can
+    never hand you a configuration older than its own images. To hold a stack still, name the
+    release instead: `oci://docker.io/tessaryai/tessary:compose-<version>`, where `<version>` is a
+    published release. From a clone the images default to `-latest` and follow each release; set
+    `TESSARY_VERSION` in `.env` to pin all four together at once (see `.env.example`).
+  </Step>
+  <Step title="Wait for it to be ready">
+    ```bash
+    docker compose -p tessary ps
+    ```
+
+    `-p tessary` is how you reach the stack after the install: the project name is pinned in the configuration, so `ps`, `logs` and `down` all find it without naming a file.
+
+    <Check>
+      `docker compose ps` shows `postgres`, `backend`, `frontend` and `sandbox-runner` with `healthy` in their STATUS column, and `sandbox-runner-work-init` as `exited (0)`. The backend takes the longest, under a minute on a laptop. Then open `http://localhost` (or `https://<your SITE_DOMAIN>` if you set one). The sign-up screen loads.
+    </Check>
+  </Step>
+</Steps>
+
+## What lands on your disk
+
+Nothing but what Docker manages: the images, Compose's cached copy of the configuration, and two named volumes.
+
+| Volume | Holds | Removed by |
+| --- | --- | --- |
+| `tessary_tessary-postgres-data` | The database. Set `POSTGRES_DATA_DIR` to a host path to keep it somewhere you chose instead. | `docker compose -p tessary down -v` |
+| `tessary-sandbox-work` | The sandbox runner's per-run working directories, shared with the containers it spawns. The launcher passes this name to the Docker daemon when it starts a sibling container, so it is deliberately not project-prefixed. | the same |
+
+`down` on its own keeps both.
+
+## Secure the instance
+
+Do this before the instance holds anything you care about, and before anything but your own machine can reach it.
+
+Sign-up is open by default: anyone who can reach the instance can create an account. That is what lets the first run need no admin bootstrap, and it is also why the instance must stay on your own machine or inside your own network until you have set the sign-up policy. Once your own account exists, go to **Settings → Members → Sign-up policy** and choose listed email domains or invitation only; the change takes effect immediately and never removes a member. Colleagues you invite from that page join your organization; anyone the policy merely admits gets an organization of their own. Both are described in [Configuration](/self-hosting/configuration#sign-up-policy). The repository's exposure sweep (`scripts/check-exposure-sweep.sh`, which probes a fresh boot from outside) records the open sign-up endpoint on a fresh boot as by design for exactly this reason, and this paragraph is its documented posture.
+
+Tessary ships with two sealing keys already set, which is why the steps above needed no configuration. They are placeholders, written in `docker-compose.yml` in the public repository, so they are not secrets and anyone can read them:
+
+| Variable | What the placeholder exposes |
+| --- | --- |
+| `EVALS_AUTH_COOKIE_PASSWORD` | Seals the session cookie. Anyone can forge a session against an instance still using the default, with no prior access to anything. |
+| `EVALS_SECRET_KEY` | Seals what Tessary stores for you: provider API keys, ingestion-source credentials, the GitHub install-state token. Anyone who reaches your database can decrypt all of it. |
+
+The backend logs a warning on every boot that runs either default (`docker compose logs backend` shows `Running on the shipped placeholder value`), and refuses to start once `SITE_DOMAIN` names a real host, so an instance cannot go public on a published key by accident. Replace them:
+
+<Steps>
+  <Step title="Generate a value for each and put them in .env">
+    ```bash
+    [ -f .env ] || cp .env.example .env
+    printf 'EVALS_AUTH_COOKIE_PASSWORD=%s\nEVALS_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" >> .env
+    ```
+
+    The copy of `.env.example` carries both keys commented out with the same `openssl` recipe beside them (the first line keeps a `.env` you already have, such as one carrying `DOCKER_SOCK_GID`); the second line appends one generated value for each, and a later assignment wins. Set `POSTGRES_PASSWORD` to your own too if you publish the database port or share the host; it defaults to `evals` and is otherwise reachable only from the Compose network.
+
+    Without a clone, write the two keys straight into a `.env` in the directory you run the install command from. Compose reads it from there.
+  </Step>
+  <Step title="Restart">
+    ```bash
+    docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+    ```
+
+    <Check>
+      `docker compose logs backend` no longer carries the placeholder warning.
+    </Check>
+  </Step>
+</Steps>
+
+<Warning>
+  Do this before you store a provider API key, not after. `EVALS_SECRET_KEY` is what already-stored credentials were sealed with, so changing it makes them unreadable and they have to be entered again. Keep the value you settle on: a `pg_dump` restored onto a host with a different key cannot read the credentials in it.
+</Warning>
+
+## Sign up and connect your traces
+
+Signing up and connecting a source is a two-step, gated flow: step 2 has exactly one way through it (a tagged span arriving) and one quiet escape hatch (a sample project), and nothing past it is reachable until one of those happens.
+
+<Steps>
+  <Step title="Create your account">
+    Create the first account with an email and password. The open edition authenticates through `PasswordAuthProvider` by default, so no WorkOS or SSO configuration is required. Tessary creates your organization and a `Default` project during sign-up, so there is nothing to fill in for either.
+  </Step>
+  <Step title="Connect your traces">
+    You land directly on the connect gate — a full screen with no sidebar, since nothing else in the product is reachable yet. It shows the ingest endpoint (your own origin plus `/v1/traces`), a `Bearer` token already minted, and a one-line prompt written for a coding agent. The prompt points at [`instrument.md`](https://github.com/tessaryai/tessary/blob/main/instrument.md), which is the workflow your agent follows: read your repository and its own contributor instructions, show you the agent call sites it found and wait for you to confirm them, extend whatever tracing you already have rather than adding a second stack, stamp every model call's span with a `tessary.call_site.id` attribute, and finish by telling you exactly which files and variables the endpoint and token go in. Expect it to come back with questions, so keep this screen open while it works. Wiring the exporter by hand works too — both fields are right there — but you still need that attribute, since it is how Tessary attributes a span to a call site (a place in your code that invokes a model) at all.
+
+    The gate does not open on any span landing. It opens on a **tagged** one:
+
+    - Nothing has arrived yet: the screen shows a pulsing "listening" indicator and stays as it is.
+    - Spans arrive but none carry `tessary.call_site.id`: the screen replaces itself with a narrower repair prompt — the same guide, deep-linked to its tagging section only, so your agent adds the attribute and leaves the working exporter alone — with a live count of spans received versus spans tagged. There is no other exit from this state — the fix is always to tag the spans that are already arriving.
+    - A tagged span lands: the gate opens on its own and the project drops you on Triage.
+
+    No application to instrument yet? Send one tagged span from the stack itself, with nothing installed. Copy the **Bearer Token** field on the gate and run this from the repository root:
+
+    ```bash
+    docker compose exec -T sandbox-runner node - <token> < scripts/emit-span.js
+    ```
+
+    It prints `sent one span tagged tessary.call_site.id=first-span` on HTTP 200, the gate opens on that span, and the ladder below reads `fitting` on its next poll. The script is plain Node with no dependencies; read it to see exactly what a span needs to carry.
+
+    Would rather look around first? A quiet **Start with a sample project** link (visible only in the first, "nothing yet" state) creates a second, clearly-labeled project full of generated data and drops you straight into it — connecting your own traces is still the default and the only way into your *real* project's data.
+  </Step>
+</Steps>
+
+## Confirm traces are arriving
+
+Once you are past the gate, Tessary tracks the project's progress through a milestone ladder — a broader, ongoing read than the gate's own tagged-span check. **Triage** names the stage the project is in whenever its queue is empty, and says what has to happen for the next one to arrive. The connect fields live under **Settings** → **Sources** for later.
+
+| Milestone | Meaning |
+| --- | --- |
+| `not_connected` | No source connected yet. |
+| `listening` | The ingest endpoint is live and authenticated. Nothing has arrived yet. |
+| `fitting` | Traces are arriving. Classifiers are fitting a baseline. |
+| `watching` | Classifiers are evaluating traces against the fitted baseline. |
+| `finding` | A classifier created a finding. |
+| `case` | Triage validated a finding as a case. Tessary is working end to end. |
+
+<Note>
+  `listening` → `fitting` advances on any span, tagged or not — it is a broader question ("has traffic arrived at all") than the connect gate's own ("has a *tagged* span arrived"), which is why the gate can still be open at `fitting` if every span so far is untagged. Classifiers need a history of traces to fit a baseline before they can evaluate anything, so a new project stays at `fitting` for a while before it reaches `watching`. This is expected, not a failure.
+</Note>
+
+## Optional: connect a GitHub repository
+
+Connecting a GitHub repository is optional and not required to complete setup. It gives Tessary source code to ground root-cause analysis and triage in, which improves both. Connect one from **Settings > Git integration**, either through the in-app manifest wizard or with a personal access token.
+
+## Encoder-based classifiers are unavailable in the open edition
+
+<Note>
+  The frustration and groundedness classifiers depend on a separate `classify-service`, and they are **not available in the open edition**. The self-hosting configuration does not start that service, its encoder URL and API key environment variables ship blank, and the model weights the service loads are gated and not published, so standing it up yourself is not a path this documentation can offer. Every other classifier runs out of the box; setup reaches connected traces and a first case without these two.
+</Note>

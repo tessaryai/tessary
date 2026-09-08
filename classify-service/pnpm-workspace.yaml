@@ -1,0 +1,56 @@
+# pnpm settings for this package. NOT a workspace definition — no `packages:` key, so this stays a
+# plain single project. Exists because pnpm 11 removed the `pnpm` field in package.json and reads
+# .npmrc for auth/registry only. MUST be COPYed alongside package.json + pnpm-lock.yaml in the
+# Dockerfile, or the allowBuilds entries below vanish and the image builds a broken runtime.
+
+# pnpm disallows dependency build scripts by default. These three need theirs:
+#   onnxruntime-node  postinstall fetches the native ONNX Runtime binaries every encoder head runs on
+#   sharp             install fetches the libvips binary
+#   protobufjs        postinstall generates its inlined descriptors
+# Without these, `pnpm install` still exits 0 and the failure only surfaces later at model load.
+allowBuilds:
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+
+# Transitive advisory fixes (#928). Both are pulled in by dependencies whose own latest release
+# still carries the vulnerable version, so there is no upstream bump to take:
+#
+#   sharp    @huggingface/transformers@4.2.0 -- the LATEST release, not a stale pin -- depends on
+#            sharp 0.34.5, and <0.35.0 inherits four libvips CVEs.
+#
+#            NOT a dead-code override, which is what an earlier draft of this comment claimed and
+#            got wrong. transformers imports sharp STATICALLY (src/utils/image.js:17) and
+#            dereferences it at module init (image.js:33), so importing transformers at all dlopens
+#            libvips into the serving process. What this service never does is INVOKE sharp's image
+#            API -- it embeds text only. So the override does put a new native binary in-process.
+#
+#            What makes that safe is a gate, not an assumption: this Dockerfile's runtime stage runs
+#            `node warmup.js` plus `require('./classify')` and `require('./embed')` on the deploy
+#            platform, so a sharp that cannot load fails the image build rather than the first
+#            request. Verified additionally by importing transformers with sharp 0.35.4 linked.
+#
+#   adm-zip  onnxruntime-node depends on it, and <0.6.0 blows up to 4GB on a crafted archive.
+#
+#            It does NOT unpack the ONNX Runtime binaries -- those ship bundled, which an earlier
+#            draft of this comment also got wrong. script/install-metadata.js:11-16 reaches adm-zip
+#            only for the 'linux/x64' + cuda12 target; every other target's list is empty and
+#            download() returns before `new AdmZip(...)`. Production is linux/arm64 and CI installs
+#            with --ignore-scripts, so the extraction path does not run here at all.
+#
+#            Which means the clean `pnpm install` after this override is NOT evidence: nothing
+#            exercised the code. The bump stands on the API surface onnxruntime-node calls being
+#            unchanged across 0.5 -> 0.6, read directly rather than inferred, and on the exposure
+#            being nil either way. Kept because removing a finding beats carrying one.
+#
+# Deliberately NOT done here: bumping onnxruntime-node itself (1.24.3 -> 1.29.0). Three reasons,
+# strongest first:
+#   1. The direct dependency is pinned EXACTLY to 1.24.3 because transformers depends on exactly
+#      1.24.3. Bumping ours alone installs a SECOND native runtime alongside the one transformers
+#      resolves, which is worse than being a version behind.
+#   2. 1.24.3 carries no open advisory, so this is not security debt.
+#   3. It is the runtime every encoder head's numbers come out of, and embed.smoke.test.js SKIPS
+#      without CONFORMANCE_ENCODER_MODEL_DIR, so CI cannot prove the embeddings did not move.
+overrides:
+  sharp: '>=0.35.0'
+  adm-zip: '>=0.6.0'

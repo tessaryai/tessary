@@ -1,0 +1,117 @@
+# gitleaks configuration for the OPEN tree's own secret scan (#1293, C5).
+#
+# WHAT THIS IS AND IS NOT. This file configures .github/workflows/secret-scan.yml, which scans THIS
+# checkout in filesystem mode. It is not the export-candidate scrub: that gate, its forbidden-string
+# list and its trufflehog leg are overlay-owned (tessary-paid/scripts/check-scrub.sh) precisely
+# because publishing a list of the strings we scan for would be self-defeating. What is left here is
+# the half that can be public without paradox — a stock rule set, plus the exemptions, each with the
+# reason it was granted.
+#
+# THE EXEMPTIONS PUBLISH ON PURPOSE. They are ported from scripts/lib/scrub-allowlist.txt, which
+# says it in its own header: "a public-repo reviewer who cannot see what was exempted cannot review
+# the exemption." So this is one block per file with that file's written reason as its description,
+# not a squashed regex — a reviewer must be able to see WHICH file was exempted and WHY, and a
+# combined `paths` array would lose the pairing. Fifteen entries, matching that file row for row;
+# keep them in step by hand, and keep the reasons.
+#
+# WHAT IS EXTENDED, AND THE REASON THAT WAS WRONG. `useDefault = true` adds gitleaks' built-in rules
+# rather than replacing them, and `path` adds scripts/lib/gitleaks-self-minted.toml (epic 6 clause 1,
+# #1146) — the five formats THIS PRODUCT mints or accepts: `tsy_<scope>_` API keys and MCP tokens,
+# `link_` device codes, and the sealing-key, service-key and db-password env assignments.
+#
+# An earlier revision of this file left that ruleset out, on the stated ground that a self-minted
+# rule set "cannot publish without publishing the strings it looks for". That reason does not hold
+# and was corrected in #1293's review: gitleaks-self-minted.toml and its enumeration
+# scripts/lib/self-minted-credential-formats.txt are BOTH open files on no denylist row, so they
+# publish either way — what would have been withheld is the detection, not the disclosure. The
+# reason it does hold for is the FORBIDDEN-CONTENT sweep, which is a list of specific secrets rather
+# than of shapes; that stays overlay-owned and this file runs none of it.
+#
+# The coverage this closes is the public repo's alone. The overlay's scrub gate already runs these
+# same rules over the export candidate — root-minus-overlay, i.e. exactly this tree's content — but
+# it runs on the overlay's cadence, so between a contributor's push and the next scrub the public
+# repo's own scan was the only thing looking, and no stock rule matches `tsy_w_…`.
+#
+# The top-level `[[allowlists]]` below apply to the extended rules too, so the fifteen reviewed
+# exemptions cover both rule sets.
+
+title = "Tessary open tree"
+
+[extend]
+path = "scripts/lib/gitleaks-self-minted.toml"
+
+[[allowlists]]
+description = "fixtures for the product's own secret_leak detector: structurally valid FAKE Google, Stripe, GitHub, Slack, Anthropic and AWS-documentation keys"
+paths = ['''^backend/app/src/test/java/ai/tessary/evals/classifier/detector/SecretLeakDetectorTest\.java$''']
+
+[[allowlists]]
+description = "the redaction rules' own regex sources for credential prefixes; no literal key, kept here so a scanner heuristic change cannot turn a control into a red run"
+paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/redaction/BuiltInRedactionRules\.java$''']
+
+[[allowlists]]
+description = "fixture: one random 44-char base64 value standing in for a real sealing key, so the guard's \"not the placeholder\" branch has something to compare; minted for the test, seals nothing"
+paths = ['''^backend/tenancy/src/test/java/ai/tessary/evals/auth/PlaceholderSecretGuardTest\.java$''']
+
+[[allowlists]]
+description = "a run-scoped throwaway Postgres password literal for a stack that lives minutes and holds nothing"
+paths = ['''^scripts/check\-notice\-coverage\.sh$''']
+
+[[allowlists]]
+description = "fixtures for the GitHub PAT service: ghp_ placeholders too short to be tokens"
+paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServicePatTest\.java$''']
+
+[[allowlists]]
+description = "Javadoc names the PEM header it parses; no key material"
+paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/git/github/GithubTokenService\.java$''']
+
+[[allowlists]]
+description = "fixture PEM blocks exercising the PKCS#1 and PKCS#8 parsers; throwaway keys generated for the test"
+paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServiceKeyTest\.java$''']
+
+[[allowlists]]
+description = "placeholder local JDBC URL with no credential in it"
+paths = ['''^\.env\.example$''']
+
+[[allowlists]]
+description = "placeholder local JDBC URL with no credential in it"
+paths = ['''^README\.md$''']
+
+[[allowlists]]
+description = "compose-internal JDBC URL; the password arrives from the environment"
+paths = ['''^docker\-compose\.yml$''']
+
+[[allowlists]]
+description = "compose-internal JDBC URL; the password arrives from the environment"
+paths = ['''^docker\-compose\.dev\.yml$''']
+
+[[allowlists]]
+description = "documents the clone URL shape with a TOKEN placeholder"
+paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/git/GitCloneUrls\.java$''']
+
+[[allowlists]]
+description = "fixture clone URL with the placeholder token \"tok\""
+paths = ['''^backend/analysis/src/test/java/ai/tessary/evals/rca/E2bRcaSandboxTest\.java$''']
+
+[[allowlists]]
+description = "comments document the clone URL and API-key shapes with placeholders"
+paths = ['''^sandbox\-runner/launcher/server\.js$''']
+
+[[allowlists]]
+description = "comments document the clone URL and API-key shapes with placeholders"
+paths = ['''^sandbox\-runner/agent\-sandbox/agent\-stream\.js$''']
+
+[[allowlists]]
+description = "redaction-engine fixtures: a ghp_ placeholder and a three-segment dummy JWT fed to the redactor to prove it redacts them; no real credential"
+paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/redaction/RedactionEngineTest\.java$''']
+
+[[allowlists]]
+description = "WorkOS placeholders (sk_test_placeholder, client_test_placeholder) the origin-guard test hands the stub client; not a token"
+paths = ['''^backend/tenancy/src/test/java/ai/tessary/evals/auth/PublicOriginGuardTest\.java$''']
+
+[[allowlists]]
+description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it, and #1044); it exists so the secret_leak detector has something to catch"
+paths = ['''^classifiers/data_gen/emit_local\.py$''']
+
+[[allowlists]]
+description = "build output and dependencies: JaCoCo re-renders allowlisted test sources as HTML under target/; both trees are gitignored and never exported, but present in a local checkout"
+paths = ['''(^|/)target/''', '''(^|/)node_modules/''']

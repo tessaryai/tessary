@@ -1,0 +1,42 @@
+extends: capitalization
+message: "Use sentence case for this heading: '%s'."
+link: /handbook/writing-style-guide.md#everything-within-a-page
+level: error
+scope: heading.h4
+match: $sentence
+indicators:
+  - ':'
+exceptions:
+  - Tessary
+  - Mintlify
+  - Vale
+  - API
+  - CLI
+  - CI
+  - CD
+  - SDK
+  - MCP
+  - LLM
+  - RCA
+  - SLO
+  - URL
+  - URLs
+  - JSON
+  - YAML
+  - SQL
+  - HTTP
+  - HTTPS
+  - OTLP
+  - ID
+  - IDs
+  - UUID
+  - AWS
+  - S3
+  - OAuth
+  - SSO
+  - TLS
+  - SSL
+  - JWT
+  - GitHub
+  - Slack
+  - Docker

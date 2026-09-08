@@ -1,0 +1,78 @@
+[project]
+name = "evals-classifiers"
+version = "0.1.0"
+description = "Default-classifier modules for the evals platform: local-first training, judge-labeling, and the shared eval harness."
+requires-python = ">=3.11"
+# Core deps are light so the harness + data scripts run without the training stack.
+# The training stack (torch/transformers/onnx) is an optional extra — install it on the
+# GPU box (Windows WSL2) where fine-tuning actually happens.
+dependencies = [
+    "datasets>=3.0",
+    "numpy>=1.26",
+    "boto3>=1.34",       # BedrockJudge
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+# The dataset-quality toolchain (framework/agreement.py + framework/audit.py). All permissive:
+# cleanlab relicensed AGPL->Apache-2.0 at v2.9.0 — the >=2.9 pin is a license floor, keep it.
+quality = [
+    "scikit-learn>=1.5",
+    "cleanlab>=2.9",
+    "statsmodels>=0.14",
+    "nltk>=3.9",
+]
+# The annotation bridge (framework/annotation_io.py) — talks to the dev Argilla service
+# (`task classifiers:up`). Argilla the project is in maintenance mode; the SDK is stable.
+annotation = ["argilla>=2.8"]
+# The corpus emitters (data_gen/emit_local.py, data_gen/food_delivery/emit.py). The platform's OTLP
+# receiver is protobuf-only, so the proto-http exporter is required — not the grpc one.
+otlp = [
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+train = [
+    "torch>=2.4",
+    "transformers>=4.48",
+    "accelerate>=0.34",
+    "scikit-learn>=1.5",
+    "optimum[onnxruntime]>=1.23",
+    "onnx>=1.16",
+    "onnxruntime>=1.19",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# The project is unpackaged (modules resolve from this directory as cwd) — mirror that for tests.
+#
+# THE OVERLAY ENTRY IS LOAD-BEARING — DO NOT PRUNE IT. #1293 relocated every classifier that is
+# not open (`frustration`, `groundedness`, `behavior_drift`, `refusal`, `experiments`, `out`) plus
+# `sop_compiler` and the 17 tests that exercise them into the overlay, so this entry is now what
+# resolves ALL of them, not just top-level `sop_compiler` as it was under #843. The open packages
+# (`framework`, `tool_error`, `metric_drift`) keep resolving from `"."`, so a relocated test can
+# still import both halves.
+#
+# Those tests are run by explicit path from THIS rootdir rather than from a second uv project of
+# their own — a second project would need its own lock and would duplicate this dependency set:
+#     cd classifiers && uv run --extra quality pytest -c pyproject.toml \
+#         ../tessary-paid/classifiers/tests/
+# `-c pyproject.toml` is REQUIRED, not decoration: with an argument outside this directory pytest
+# picks the repo root as rootdir, reads no config there, and applies neither entry below — every
+# relocated test then fails to import. Measured, #1293.
+#
+# `"."` MUST stay first: pytest inserts these in declared order, and the overlay ahead of it would
+# shadow the open packages. It cannot collapse to a bare `["."]` either — `metric_drift/
+# export_corpus.py` spells its own import absolutely (`from metric_drift.corpus import ...`).
+# With `tessary-paid/` deleted (the public export, D2) the overlay entry is a non-existent
+# directory, which pytest ignores, and only the six open tests under `tests/` remain — the truth.
+pythonpath = [".", "../tessary-paid/classifiers"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 118
+target-version = "py311"

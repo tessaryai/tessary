@@ -1,0 +1,63 @@
+# The open frontend image's Caddy configuration, rendered by render.sh (#1225): this file is the
+# part every deployment shares. render.sh writes the global options first (admin off, and the
+# operator's trusted proxies when TRUSTED_PROXIES is set), then this file, then one site block for
+# SITE_DOMAIN chosen by TLS_MODE: site-acme.caddy, site-owncert.caddy, or none for upstream, where
+# the operator's own terminator fronts the :8000 listener below. No SITE_DOMAIN, no site block.
+#
+# Routes (identical on every listener):
+#   /api/*  /auth/*  /mcp  /mcp/*  /webhooks/*  /git/github/callback  /git/github/manifest/callback  /v1/traces  /v1/query/*  /v1/usage/*   → backend
+#   else                                                                           → static (Vite production build at /srv)
+
+# Cache policy for the static build. Imported by every listener so they can never drift.
+#
+# THE DOCUMENT RULE IS THE LOAD-BEARING HALF. Filenames under /assets/ carry a content hash and can
+# never change, so they are immutable; index.html carries none, and a browser that decided to hold
+# it would be pinned to a build whose asset filenames no longer exist, with no server-side way to
+# recover. So the two rules ship together or not at all: never the asset rule alone. Matching on
+# `not path /assets/*` is correct whether Caddy evaluates these headers before or after `try_files`
+# rewrites an SPA route to /index.html, because both are outside /assets.
+(static_cache) {
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	@document not path /assets/*
+	header @document Cache-Control "no-cache"
+}
+
+(app) {
+	@backend {
+		path /api/* /auth/* /mcp /mcp/* /webhooks/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
+	}
+	handle @backend {
+		reverse_proxy {$BACKEND_URL:backend:8080} {
+			# The client as Caddy resolved it: the peer, or, when the peer is one of the operator's
+			# TRUSTED_PROXIES, the address that proxy forwarded. Caddy applies the same rule to the
+			# X-Forwarded-* headers it passes on, so an untrusted peer's forwarded headers never
+			# reach the backend as if they were true.
+			header_up X-Real-IP {client_ip}
+		}
+	}
+	handle {
+		root * /srv
+		import static_cache
+		try_files {path} /index.html
+		file_server
+	}
+	encode gzip
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Plain HTTP, always: compose-internal traffic, the host's HTTP_PORT, the container's own health
+# probe, and, in upstream mode, everything the operator's TLS terminator forwards.
+:8000 {
+	import app
+}

@@ -1,0 +1,8 @@
+
+# TLS_MODE=owncert: the operator's own certificate and key, mounted into the container (an internal
+# CA, a purchased wildcard). No ACME attempt is made and no ACME account is registered.
+https://@SITE_DOMAIN@ {
+	tls @TLS_CERT_FILE@ @TLS_KEY_FILE@
+	import app
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

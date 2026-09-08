@@ -1,0 +1,1132 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "CPU alerts",
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "target": {
+          "type": "tags",
+          "matchAny": true,
+          "limit": 100,
+          "tags": [
+            "cpu"
+          ]
+        }
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Overview dashboard",
+      "type": "dashboards",
+      "tags": [
+        "overview"
+      ],
+      "asDropdown": false,
+      "icon": "external link"
+    }
+  ],
+  "liveNow": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "tessary",
+    "cpu",
+    "rca"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "deployment",
+        "type": "custom",
+        "current": {
+          "value": "tessary-production",
+          "text": "tessary-production"
+        },
+        "options": [
+          {
+            "text": "tessary-production",
+            "value": "tessary-production",
+            "selected": true
+          },
+          {
+            "text": "tessary-staging",
+            "value": "tessary-staging",
+            "selected": false
+          }
+        ],
+        "query": "tessary-production,tessary-staging",
+        "description": "Must match DEPLOYMENT_NAME verbatim \u2014 the live label value is `tessary-production`, not `production`. The previous options never matched, so every panel filtered on it returned empty silently."
+      },
+      {
+        "name": "pool",
+        "label": "Pool (profile filter)",
+        "type": "custom",
+        "description": "Filters the flame graph to one async pool via the tessary_pool label. '.*' includes everything, INCLUDING request-thread work that carries no pool label (a regex match also matches an absent label).",
+        "current": {
+          "value": ".*",
+          "text": "all"
+        },
+        "query": ".*,observer,synth,signal,grader-run,rca,embed,slack,alert-deliver,behavior-triage,dataset-run,analytics",
+        "options": [
+          {
+            "text": "all",
+            "value": ".*",
+            "selected": true
+          },
+          {
+            "text": "observer",
+            "value": "observer",
+            "selected": false
+          },
+          {
+            "text": "synth",
+            "value": "synth",
+            "selected": false
+          },
+          {
+            "text": "signal",
+            "value": "signal",
+            "selected": false
+          },
+          {
+            "text": "grader-run",
+            "value": "grader-run",
+            "selected": false
+          },
+          {
+            "text": "rca",
+            "value": "rca",
+            "selected": false
+          },
+          {
+            "text": "embed",
+            "value": "embed",
+            "selected": false
+          },
+          {
+            "text": "slack",
+            "value": "slack",
+            "selected": false
+          },
+          {
+            "text": "alert-deliver",
+            "value": "alert-deliver",
+            "selected": false
+          },
+          {
+            "text": "behavior-triage",
+            "value": "behavior-triage",
+            "selected": false
+          },
+          {
+            "text": "dataset-run",
+            "value": "dataset-run",
+            "selected": false
+          },
+          {
+            "text": "analytics",
+            "value": "analytics",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": {}
+      },
+      {
+        "name": "DS_PYROSCOPE",
+        "type": "datasource",
+        "query": "grafana-pyroscope-datasource",
+        "current": {}
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Tessary \u2014 CPU root cause",
+  "uid": "tessary-cpu",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "type": "row",
+      "title": "1 \u2014 Is CPU actually high, and is it even our fault?",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": [],
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "CPU utilisation",
+      "description": "1 - idle, averaged across all vCPUs. This is the number the alert fires on.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          }
+        }
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "CPU steal",
+      "description": "Time the EC2 hypervisor gave our vCPU to another tenant, or we ran out of burstable (t3/t4g) CPU credits. ANY sustained non-zero value means the spike is the host's problem, not the application's \u2014 check this BEFORE reading any other panel. Was invisible until the Alloy mode-drop rule was relaxed.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(rate(node_cpu_seconds_total{mode=\"steal\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.02
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        }
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "iowait",
+      "description": "Blocked on disk, not burning CPU. High here with low user time means the bottleneck is Postgres or the EBS volume \u2014 adding CPU would not help.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 10,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(rate(node_cpu_seconds_total{mode=\"iowait\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          }
+        }
+      },
+      "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "Backend JVM share of host CPU",
+      "description": "process_cpu_usage is the backend JVM's own recent CPU as a fraction of total machine capacity. Compare against the utilisation tile: if utilisation is 0.9 and this is 0.15, the CPU is being burned by something OTHER than the backend (sandbox-runner, postgres, caddy) \u2014 and per-container metrics are the documented next step.",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 15,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(process_cpu_usage{application=\"tessary-backend\",deployment_environment=\"$deployment\"})"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          }
+        }
+      },
+      "id": 5
+    },
+    {
+      "type": "stat",
+      "title": "Load avg (1m) per core",
+      "description": "Run-queue depth normalised by vCPU count. >1 means work is queueing for CPU.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(node_load1{deployment_environment=\"$deployment\"}) / count(count by (cpu) (node_cpu_seconds_total{deployment_environment=\"$deployment\"}))"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        }
+      },
+      "id": 6
+    },
+    {
+      "type": "row",
+      "title": "2 \u2014 What KIND of CPU? (user vs kernel vs disk vs stolen)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "collapsed": false,
+      "panels": [],
+      "id": 7
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU by mode (stacked)",
+      "description": "The primary triage panel. Read the SHAPE of the spike:\n\n\u2022 user dominates  \u2192 our own code. Go to the flame graph in section 4.\n\u2022 system dominates \u2192 syscall/kernel overhead: heavy IO, container networking, or GC-driven page faults.\n\u2022 iowait dominates \u2192 disk-bound, almost always Postgres. Not a CPU problem.\n\u2022 steal dominates  \u2192 the EC2 host or exhausted burst credits. Not our problem to fix in code.",
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{mode}}",
+          "expr": "avg by (mode) (rate(node_cpu_seconds_total{mode!=\"idle\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "steal"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "iowait"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "system"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "id": 8
+    },
+    {
+      "type": "timeseries",
+      "title": "Host CPU vs backend JVM CPU",
+      "description": "Divergence between these two lines is the attribution signal. Together = the backend is the cause. Host high while JVM flat = a different container is the cause.",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "host total",
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\",deployment_environment=\"$deployment\"}[5m]))"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "backend JVM",
+          "expr": "max(process_cpu_usage{application=\"tessary-backend\",deployment_environment=\"$deployment\"})"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 9
+    },
+    {
+      "type": "row",
+      "title": "3 \u2014 If it is the JVM: is it GC, JIT, or real work?",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "collapsed": false,
+      "panels": [],
+      "id": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "GC time fraction",
+      "description": "Seconds of GC pause per second of wall clock. Above ~0.1 the JVM is spending >10% of its life collecting and the CPU spike IS the GC \u2014 look at allocation rate next, not at the flame graph's application frames. This is the single most common cause of a JVM CPU spike that looks like 'the app got slow for no reason'.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{cause}}",
+          "expr": "sum by (cause) (rate(jvm_gc_pause_seconds_sum{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        }
+      },
+      "id": 11
+    },
+    {
+      "type": "timeseries",
+      "title": "Allocation rate",
+      "description": "Bytes allocated per second. A step change here that lines up with the spike means some code path started churning objects \u2014 that is what drove the GC, and the alloc profile in section 4 will name it.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "allocated",
+          "expr": "sum(rate(jvm_gc_memory_allocated_bytes_total{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m]))"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 12
+    },
+    {
+      "type": "timeseries",
+      "title": "JIT compilation time",
+      "description": "Milliseconds of JIT compiler CPU per second. Spikes right after a deploy are normal warm-up. A sustained spike long after startup means deoptimisation churn \u2014 rare, but it looks exactly like an application CPU leak if you are not looking for it.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "JIT",
+          "expr": "sum(rate(jvm_compilation_time_ms_total{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m])) / 1000"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap used by pool",
+      "description": "A heap that stays pinned near max while GC time climbs is the classic pre-OOM death spiral: the collector runs constantly and reclaims almost nothing. This host has OOM-looped before (2026-07-12, four warm ONNX heads).",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{id}}",
+          "expr": "sum by (id) (jvm_memory_used_bytes{application=\"tessary-backend\",deployment_environment=\"$deployment\",area=\"heap\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "max",
+          "expr": "sum(jvm_memory_max_bytes{application=\"tessary-backend\",deployment_environment=\"$deployment\",area=\"heap\"})"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 14
+    },
+    {
+      "type": "timeseries",
+      "title": "Threads by state",
+      "description": "PLATFORM threads only. Note: the async pools in AsyncConfig run on VIRTUAL threads, which do NOT appear here \u2014 a virtual-thread workload can saturate CPU with this panel looking flat. That is exactly why the profile in section 4 exists. A climbing RUNNABLE count still catches carrier-thread pinning.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{state}}",
+          "expr": "sum by (state) (jvm_threads_states_threads{application=\"tessary-backend\",deployment_environment=\"$deployment\"})"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 15
+    },
+    {
+      "type": "timeseries",
+      "title": "HikariCP \u2014 pending connection acquisitions",
+      "description": "The production pool is capped at 10. Sustained `pending` means threads are blocked waiting for a DB connection \u2014 usually a symptom of slow queries (pair with iowait), not of CPU. Included here because DB saturation and CPU saturation are routinely confused.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "active",
+          "expr": "hikaricp_connections_active{application=\"tessary-backend\",deployment_environment=\"$deployment\"}"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "pending",
+          "expr": "hikaricp_connections_pending{application=\"tessary-backend\",deployment_environment=\"$deployment\"}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pending"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "id": 16
+    },
+    {
+      "type": "row",
+      "title": "4 \u2014 WHICH CODE burned it (continuous profile)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "collapsed": false,
+      "panels": [],
+      "id": 17
+    },
+    {
+      "type": "flamegraph",
+      "title": "CPU flame graph \u2014 backend JVM",
+      "description": "Stack-sampled CPU attribution down to the method. Set the dashboard time range to the spike window and this shows exactly which call paths burned the cycles.\n\nThis is the panel that answers the question metrics cannot. It is also the ONLY thing that works for the virtual-thread pools in AsyncConfig (observer/synth/signal/grader-run/rca/embed), because Micrometer's executor_* binders do not attach to SimpleAsyncTaskExecutor and there is no per-pool counter to read.\n\nWiden the time range to a known-quiet period and compare to establish a baseline before concluding a frame is anomalous.\n\nUse the 'Pool' variable above to isolate one async pool (tessary_pool label). That axis exists because the pools run on VIRTUAL threads \u2014 there is no durable thread identity to group by, so a label bound at task-submission time is the only way to ask 'which background workload burned this'.",
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "grafana-pyroscope-datasource",
+        "uid": "${DS_PYROSCOPE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "profile",
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "labelSelector": "{service_name=\"tessary-backend\", deployment_environment=\"$deployment\", tessary_pool=~\"$pool\"}"
+        }
+      ],
+      "id": 18
+    },
+    {
+      "type": "row",
+      "title": "5 \u2014 What work drove it (correlate the spike with traffic)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "collapsed": false,
+      "panels": [],
+      "id": 19
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by endpoint",
+      "description": "Does the spike line up with a traffic change? If CPU rose but request rate did not, the cause is background work (a queue drainer, a sweep, a scheduled job), not user traffic.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{method}} {{uri}}",
+          "expr": "topk(10, sum by (uri, method) (rate(http_server_requests_seconds_count{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m])))"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 20
+    },
+    {
+      "type": "timeseries",
+      "title": "Request latency p95",
+      "description": "Built from the explicit SLO buckets (100ms/250ms/500ms/1s/2s/5s) the production profile keeps \u2014 percentiles-histogram is deliberately off for series-budget reasons, so resolution above 5s is coarse.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{uri}}",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application=\"tessary-backend\",deployment_environment=\"$deployment\"}[5m]))))"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "id": 21
+    },
+    {
+      "type": "logs",
+      "title": "Backend WARN/ERROR during this window",
+      "description": "Scoped to the dashboard time range, so narrowing to the spike narrows these logs. Exception type/message/stacktrace ride as structured metadata (see the loki.process stage in config.alloy) \u2014 expand a line to see them.\n\nVerified against production 2026-07-31: Grafana Cloud's Loki indexes the UN-suffixed `deployment_environment` (the OSS default list documents `deployment.environment.name`; the hosted config differs). Severity IS indexed as lowercase `detected_level`. Both were checked against the live label set rather than the docs, because getting either wrong returns EMPTY rather than erroring.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"tessary-backend\", deployment_environment=\"$deployment\"} | detected_level=~\"warn|error\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      },
+      "id": 22
+    }
+  ]
+}

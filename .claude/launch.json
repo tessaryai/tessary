@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "autoPort": true,
+  "configurations": [
+    {
+      "name": "tessary",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--config",
+        "vite.config.preview.ts"
+      ],
+      "cwd": "frontend",
+      "port": 5173
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "mint@latest",
+        "dev",
+        "--port",
+        "3333"
+      ],
+      "cwd": "docs",
+      "port": 3333
+    }
+  ]
+}

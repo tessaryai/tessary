@@ -1,0 +1,28 @@
+---
+title: "Tessary self-hosting docs"
+description: "Introduce Tessary self-hosting docs and route readers to the setup, configuration, deployment, upgrading, and troubleshooting pages."
+---
+
+Tessary's open edition is an open-source agent reliability platform. It ingests every trace an agent produces, runs cheap classifiers against each one to create findings, groups related findings into cases, and runs an agentic RCA (root-cause analysis) to explain what caused each case.
+
+This documentation covers self-hosting the open-source product with Docker Compose. It does not cover Tessary Cloud, the SaaS-hosted product.
+
+## Explore the self-hosting docs
+
+<CardGroup cols={2}>
+  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
+    Bring up the services with Docker Compose and connect your first trace source.
+  </Card>
+  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
+    Look up every environment variable and what it controls.
+  </Card>
+  <Card title="Deployment topology" icon="server" href="/self-hosting/deployment">
+    See the services Tessary runs and how they fit together.
+  </Card>
+  <Card title="Upgrading" icon="arrow-up" href="/self-hosting/upgrading">
+    Move a self-hosted deployment to a new Tessary version.
+  </Card>
+  <Card title="Troubleshooting" icon="triangle-exclamation" href="/self-hosting/troubleshooting">
+    Diagnose and resolve common self-hosting problems.
+  </Card>
+</CardGroup>

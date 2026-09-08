@@ -1,0 +1,477 @@
+// =============================================================================
+// Grafana Alloy Configuration for tessary
+// =============================================================================
+// Receives OTLP telemetry from the backend, tails container stdout/stderr off
+// the Docker socket, scrapes host metrics, and ships everything to Grafana Cloud
+// (Tempo / Loki / Prometheus). Traces fan out: the
+// full stream goes to Tempo, and a gen_ai-only filter forwards just the judge's
+// LLM spans on to Langfuse — so Langfuse holds LLM traces and nothing else,
+// while Grafana still sees every span (LLM spans land in both).
+//
+// Required environment (set on the deployed EC2 host via SSM Parameter Store):
+//   GRAFANA_CLOUD_API_KEY        write token shared across all three exporters
+//   GRAFANA_CLOUD_LOKI_URL       e.g. https://logs-prod-us-central1.grafana.net/loki/api/v1/push
+//   GRAFANA_CLOUD_LOKI_USERNAME  Loki instance ID (numeric)
+//   GRAFANA_CLOUD_TEMPO_URL      e.g. https://tempo-us-central1.grafana.net:443
+//   GRAFANA_CLOUD_TEMPO_USERNAME Tempo instance ID (numeric)
+//   GRAFANA_CLOUD_PROM_URL       e.g. https://prometheus-prod-...grafana.net/api/prom/push
+//   GRAFANA_CLOUD_PROM_USERNAME  Prometheus instance ID (numeric)
+//   GRAFANA_CLOUD_PYROSCOPE_URL       e.g. https://profiles-prod-...grafana.net
+//   GRAFANA_CLOUD_PYROSCOPE_USERNAME  Profiles instance ID (numeric)
+//   DEPLOYMENT_NAME              stamped as deployment.environment on all signals
+//   LANGFUSE_OTLP_ENDPOINT       base OTLP URL, e.g. https://cloud.langfuse.com/api/public/otel
+//   LANGFUSE_PUBLIC_KEY          Langfuse project public key (pk-lf-...)
+//   LANGFUSE_SECRET_KEY          Langfuse project secret key (sk-lf-...)
+//
+// When any exporter's env vars are unset, Alloy still starts but that exporter
+// fails to connect and backs off — useful for local smoke runs, and load-bearing
+// now that the alloy service itself is opt-in (docker-compose.yml's `observability`
+// profile, #864): a self-hoster who enables only Langfuse, or only Grafana Cloud,
+// must not crash-loop the whole collector over the piece they left unconfigured.
+// Every endpoint/username/password below is wrapped in coalesce(env(...), "<placeholder>")
+// for exactly that reason — Alloy's component loader hard-fails config load (not a
+// per-exporter runtime backoff) on an EMPTY string for any of these, so the bare
+// `env("X")` this file used to have here crashed on any blank var, not just Langfuse's
+// (verified 2026-09-02 booting this image directly against a blank env). The
+// placeholder resolves to something that only fails at *connect* time — auth 401s,
+// DNS/connect refused — which is the harmless backoff this comment always claimed.
+// Same pattern config.dev.alloy already uses; mirrored here rather than invented fresh.
+
+// =============================================================================
+// OTLP Receiver — accepts telemetry from the backend
+// =============================================================================
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+// =============================================================================
+// Batch Processor
+// =============================================================================
+otelcol.processor.batch "default" {
+  timeout         = "1s"
+  send_batch_size = 1024
+
+  output {
+    metrics = [otelcol.processor.attributes.default.input]
+    logs    = [otelcol.processor.attributes.default.input]
+    traces  = [otelcol.processor.attributes.default.input]
+  }
+}
+
+// =============================================================================
+// Attributes Processor — stamp service namespace + deployment env on every signal
+// =============================================================================
+otelcol.processor.attributes "default" {
+  action {
+    key    = "service.namespace"
+    value  = "tessary"
+    action = "upsert"
+  }
+
+  action {
+    key    = "deployment.environment"
+    value  = env("DEPLOYMENT_NAME")
+    action = "upsert"
+  }
+
+  // deployment.environment.NAME, in addition to the un-suffixed key above. Loki's OTLP ingestion
+  // promotes a fixed list of 17 resource attributes to indexed labels and the one it looks for is
+  // `deployment.environment.name` — the un-suffixed form lands in structured metadata instead. Both
+  // are set: traces/metrics keep consuming the old key, and Loki gets the label it will index.
+  // Getting this wrong is silent: every {deployment_environment="..."} query returns EMPTY, not an
+  // error.
+  action {
+    key    = "deployment.environment.name"
+    value  = env("DEPLOYMENT_NAME")
+    action = "upsert"
+  }
+
+  output {
+    metrics = [otelcol.exporter.prometheus.grafana_cloud.input]
+    logs    = [otelcol.exporter.otlphttp.grafana_cloud_logs.input]
+    // Traces fan out: the whole stream to Tempo, plus a gen_ai-only branch to
+    // Langfuse. LLM spans therefore reach both; everything else, Tempo only.
+    traces  = [
+      otelcol.exporter.otlp.grafana_cloud_tempo.input,
+      otelcol.processor.filter.langfuse_llm_only.input,
+    ]
+  }
+}
+
+// =============================================================================
+// Langfuse branch — keep eval spans (LLM generations + named product roots)
+// =============================================================================
+// Platform LLM calls (LlmCaller / ChatJudgeRunner) stamp gen_ai.* attributes.
+// Non-LLM product roots (agentic sandboxes, deterministic-grader-run) stamp
+// langfuse.trace.name instead (equal to the static kebab span name — see
+// docs/reference/telemetry-naming.md). Live grading paths currently pass a null
+// parentTrace, so each call is its own Langfuse trace; restoring run-level
+// parents is a follow-up. This filter keeps spans that have EITHER attribute and
+// drops everything else (HTTP/DB/etc.).
+otelcol.processor.filter "langfuse_llm_only" {
+  error_mode = "ignore"
+
+  traces {
+    span = [
+      `attributes["gen_ai.operation.name"] == nil and attributes["langfuse.trace.name"] == nil`,
+    ]
+  }
+
+  output {
+    traces = [otelcol.exporter.otlphttp.langfuse.input]
+  }
+}
+
+// Langfuse ingests OTLP over HTTP/protobuf only (no gRPC). The otlphttp
+// exporter appends /v1/traces to the base endpoint. Auth is HTTP Basic over
+// {public_key}:{secret_key}, the same credential shape the pull-ingest adapter
+// uses. NOTE: this is a single, global Langfuse target — judge spans from every
+// tenant project land in this one Langfuse project, independent of the
+// per-project ingestion sources sealed in Postgres.
+otelcol.exporter.otlphttp "langfuse" {
+  client {
+    endpoint = coalesce(env("LANGFUSE_OTLP_ENDPOINT"), "https://langfuse-disabled.invalid")
+    auth     = otelcol.auth.basic.langfuse.handler
+  }
+
+  retry_on_failure {
+    max_interval     = "60s"
+    max_elapsed_time = "5m"
+  }
+}
+
+otelcol.auth.basic "langfuse" {
+  username = coalesce(env("LANGFUSE_PUBLIC_KEY"), "disabled")
+  password = coalesce(env("LANGFUSE_SECRET_KEY"), "disabled")
+}
+
+// =============================================================================
+// Prometheus Exporter — metrics to Grafana Cloud
+// =============================================================================
+otelcol.exporter.prometheus "grafana_cloud" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = coalesce(env("GRAFANA_CLOUD_PROM_URL"), "https://prom-disabled.invalid/api/prom/push")
+
+    basic_auth {
+      username = coalesce(env("GRAFANA_CLOUD_PROM_USERNAME"), "disabled")
+      password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+    }
+
+    queue_config {
+      capacity    = 500
+      max_shards  = 1
+      max_backoff = "60s"
+    }
+  }
+}
+
+// =============================================================================
+// Logs -> Grafana Cloud, natively as OTLP
+// =============================================================================
+// Alloy remains the egress control point: everything still lands here first and every processor
+// above (batching, the attribute stamps, and any filter added later) still governs what leaves the
+// box. Only the final hop's wire format changed.
+//
+// This replaces otelcol.exporter.loki + a hand-rolled loki.process pipeline. That exporter emits
+// Loki's legacy push format and wraps the record in a JSON envelope (grafana/alloy#2757), so the
+// old config had to unwrap it with stage.json and then hand-copy a FIXED allowlist of attributes
+// into structured metadata. Anything not on that list was dropped silently — which is exactly what
+// happened to StructuredLog's key-value pairs: they reached Alloy and died here.
+//
+// Loki 3.0+ ingests OTLP natively: it promotes a fixed set of resource attributes to indexed labels
+// and stores every remaining resource attribute, scope attribute and log attribute as structured
+// metadata automatically. No allowlist, so a new field is queryable the moment it is logged.
+//
+// THE INDEXED LABEL SET IS THEREFORE FIXED AND KNOWN:
+//   service_name                  <- service.name              ("tessary-backend")
+//   service_namespace             <- service.namespace         ("tessary")
+//   deployment_environment        <- deployment.environment    ("tessary-production")
+//   detected_level                <- derived from OTLP severity, lowercase
+//   exporter, job                 <- added by the Grafana Cloud gateway
+//
+// VERIFIED against production on 2026-07-31 by listing the live label set, NOT taken from upstream
+// docs. Loki OSS documents `deployment.environment.name` as the promoted key; Grafana Cloud's hosted
+// config promotes the UN-suffixed `deployment.environment` as well. Trusting the OSS list made a
+// dashboard query filter on a label that does not exist — which returns EMPTY, never an error. Both
+// keys are stamped below, so this is correct either way; check the live set before changing a query.
+// Loki's default promotion list also covers cloud.*/k8s.*/container.name/service.instance.id; none
+// of those are set on this deployment, so they never appear. Everything else — logger.name,
+// thread.name, exception.*, code.*, trace_id, and every StructuredLog field — is structured
+// metadata: filterable and greppable, without adding index cardinality.
+//
+// Severity is NOT an indexed label any more. Loki derives `detected_level` from the OTLP severity
+// and stores it as structured metadata, so a query filters on that rather than on `level`.
+otelcol.exporter.otlphttp "grafana_cloud_logs" {
+  client {
+    // The Grafana Cloud OTLP gateway; the exporter appends /v1/logs. Same credentials the
+    // classify-service already uses for its direct export, so no new secret is introduced.
+    endpoint = coalesce(env("GRAFANA_CLOUD_OTLP_ENDPOINT"), "https://otlp-logs-disabled.invalid")
+    auth     = otelcol.auth.basic.grafana_cloud_otlp.handler
+  }
+
+  retry_on_failure {
+    max_interval     = "60s"
+    max_elapsed_time = "5m"
+  }
+}
+
+otelcol.auth.basic "grafana_cloud_otlp" {
+  username = coalesce(env("GRAFANA_CLOUD_OTLP_USERNAME"), "disabled")
+  password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+}
+
+// The Loki push endpoint, used ONLY by the Docker stdout tailer below. The backend's own logs no
+// longer travel this way — they go out as native OTLP (above), where attributes become structured
+// metadata automatically. Container stdout is unstructured console text with no OTLP producer, so
+// it still needs the classic push path.
+loki.write "grafana_cloud" {
+  endpoint {
+    url = coalesce(env("GRAFANA_CLOUD_LOKI_URL"), "https://loki-disabled.invalid/loki/api/v1/push")
+
+    basic_auth {
+      username = coalesce(env("GRAFANA_CLOUD_LOKI_USERNAME"), "disabled")
+      password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+    }
+
+    min_backoff_period  = "5s"
+    max_backoff_period  = "2m"
+    max_backoff_retries = 3
+  }
+}
+
+// =============================================================================
+// Docker Log Scraping — container stdout/stderr to Grafana Cloud
+// =============================================================================
+// Why this exists: every component above only ships what the *backend* pushes
+// over OTLP, so Loki held exactly one service — tessary-backend. The
+// sandbox-runner launcher (Node) speaks no OTLP; it writes plain console.log /
+// console.error, which lands in that container's json-file log and never leaves
+// the host. The real cause of every sandbox failure (E2B errors, Bedrock 4xx,
+// missing env) was therefore invisible to anyone doing an RCA from Grafana —
+// the blind spot that prompted this block. Tailing the Docker socket closes it.
+//
+// Requires /var/run/docker.sock bind-mounted read-only into this container; see
+// the alloy service in docker-compose.yml.
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+// An allowlist, not "tail everything". Compose stamps com.docker.compose.service
+// on each container, and that name is what becomes service_name.
+//
+// `compile` is here because its absence cost a day of an incident. compile-service
+// logs with the json-file driver (10m x 3, docker-compose.yml), so its only copy
+// lived on the host and `docker compose up -d --force-recreate` destroyed it on
+// every deploy — the three defects that kept all v3 SOPs out of production (#793)
+// had to be read off a container that a redeploy would have erased. It is also
+// cheap to ship: a whole compile emits tens of lines (routing decisions, per-stage
+// spend, one line per parked conversation), not per-request traffic.
+//
+// Two services are deliberately excluded:
+//   - backend — it already ships structured logs through the OTLP branch above.
+//     Scraping its stdout too would duplicate every line AND collide with the
+//     existing service_name="tessary-backend" stream, mixing raw console
+//     output into streams that carry parsed level/exception metadata.
+//   - alloy — tailing our own stdout feeds this pipeline's log lines back into
+//     itself.
+// Extend the keep regex to add more (e.g. "sandbox-runner|compile|postgres"),
+// keeping an eye on Grafana Cloud ingest volume for chatty ones like Caddy access
+// logs. Anything added here must be low-volume or bounded: this is an ingest bill.
+discovery.relabel "container_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "sandbox-runner|compile"
+    action        = "keep"
+  }
+
+  // Mirror the OTLP naming ("tessary-<service>") so these streams sit in
+  // the same label namespace as the backend's and a single service_name filter
+  // can span both sources.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "(.+)"
+    replacement   = "tessary-$1"
+    target_label  = "service_name"
+    action        = "replace"
+  }
+
+  // Docker reports names with a leading slash ("/tessary-sandbox-runner-1").
+  // Bounded cardinality (one per container), so it is safe as an indexed label
+  // and it is what tells two replicas apart.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+    action        = "replace"
+  }
+
+  // Same stamp stage.labels applies on the OTLP branch, so deployment_environment
+  // filters work across both. No source_labels: the value is a constant read from
+  // the environment when the config is evaluated, not derived from the target.
+  rule {
+    replacement  = env("DEPLOYMENT_NAME")
+    target_label = "deployment_environment"
+    action       = "replace"
+  }
+}
+
+// One tailer per discovered container (discovery.docker emits one target per
+// container network — every service here is on the single `evals` network, so
+// that is one target each). Lines are forwarded verbatim, with no loki.process
+// in between: the launcher writes free-form console output, unlike the OTLP
+// branch whose exporter wraps records in a JSON envelope that must be unwrapped.
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.container_logs.output
+  forward_to       = [loki.write.grafana_cloud.receiver]
+  refresh_interval = "15s"
+}
+
+// =============================================================================
+// OTLP Exporter — traces to Grafana Cloud Tempo
+// =============================================================================
+otelcol.exporter.otlp "grafana_cloud_tempo" {
+  client {
+    // gRPC, not HTTP(S) — bare host:port, no scheme (mirrors config.dev.alloy's
+    // tempo-disabled.invalid:443 placeholder for the same reason: a URL scheme here
+    // is itself a config-load error, distinct from the exporters above which are HTTP).
+    endpoint = coalesce(env("GRAFANA_CLOUD_TEMPO_URL"), "tempo-disabled.invalid:443")
+    auth     = otelcol.auth.basic.grafana_cloud_tempo.handler
+  }
+
+  sending_queue {
+    queue_size = 100
+  }
+
+  retry_on_failure {
+    max_interval     = "120s"
+    max_elapsed_time = "10m"
+  }
+}
+
+otelcol.auth.basic "grafana_cloud_tempo" {
+  username = coalesce(env("GRAFANA_CLOUD_TEMPO_USERNAME"), "disabled")
+  password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+}
+
+// =============================================================================
+// Continuous Profiling — in-JVM CPU attribution (Pyroscope)
+// =============================================================================
+// Why this exists: host and per-container CPU metrics can only ever say "the
+// backend is at 300% CPU". They cannot say WHICH CODE. That gap is unusually
+// wide here because almost every pool in AsyncConfig is a SimpleAsyncTaskExecutor
+// on virtual threads — Micrometer's executor_* binders don't attach to those
+// (there is no bounded queue or platform-thread pool to instrument), and a
+// per-thread CPU breakdown is meaningless when threads are ephemeral virtual
+// ones. Stack sampling is the only thing that answers "why".
+//
+// The backend runs the Pyroscope java agent (see backend/Dockerfile) which
+// pushes CPU/alloc/lock profiles here. Alloy relays them to Grafana Cloud so the
+// backend never holds cloud credentials — same posture as every other signal.
+//
+// Cost: profiles are billed by ingested GB, NOT by Prometheus active series, so
+// this does not touch the 10k free-tier series cap the CPU-mode rule above is
+// budgeted against. Free tier includes 50 GB/month; one JVM at a 10s upload
+// interval is a small fraction of that.
+pyroscope.receive_http "default" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = 4040
+  }
+
+  forward_to = [pyroscope.write.grafana_cloud.receiver]
+}
+
+pyroscope.write "grafana_cloud" {
+  endpoint {
+    url = coalesce(env("GRAFANA_CLOUD_PYROSCOPE_URL"), "https://pyroscope-disabled.invalid")
+
+    basic_auth {
+      username = coalesce(env("GRAFANA_CLOUD_PYROSCOPE_USERNAME"), "disabled")
+      password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+    }
+  }
+
+  // Mirrors the attributes processor's stamp so profiles filter by the same
+  // deployment_environment the dashboard's $deployment variable drives.
+  external_labels = {
+    "deployment_environment" = env("DEPLOYMENT_NAME"),
+    "service_namespace"      = "tessary",
+  }
+}
+
+// =============================================================================
+// Host Metrics — VM-level CPU, memory, disk, network
+// =============================================================================
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+
+  set_collectors    = ["cpu", "meminfo", "diskstats", "filesystem", "loadavg", "netdev", "uname"]
+  enable_collectors = []
+
+  netdev {
+    device_include = "^(eth|ens|eno|bond|wlan)[0-9]+"
+  }
+
+  filesystem {
+    mount_points_exclude = "^/(run|sys|proc|dev|snap|var/lib/docker)($|/)"
+    fs_types_exclude     = "^(tmpfs|squashfs|overlay|nsfs|fuse\\..*)$"
+  }
+}
+
+prometheus.scrape "host_metrics" {
+  targets    = prometheus.exporter.unix.host.targets
+  forward_to = [prometheus.relabel.host_metrics.receiver]
+
+  scrape_interval = "15s"
+  job_name        = "node"
+}
+
+// CPU modes: keep the four that answer "why is CPU high", drop the rest.
+//
+// This used to drop EVERY non-idle mode, which made utilisation computable
+// (1 - rate(idle)) but the cause un-diagnosable — a spike looked identical
+// whether it was our own code, kernel/syscall overhead, disk stalls, or the
+// hypervisor stealing our slice. The four kept modes separate exactly those:
+//
+//   user    our own userspace work (JVM, node, postgres) — the "we did it" case
+//   system  kernel/syscall time — heavy IO syscalls, container/network overhead
+//   iowait  blocked on disk — NOT really CPU burn; points at Postgres or disk
+//   steal   the EC2 hypervisor gave our vCPU to someone else, or we exhausted
+//           a burstable (t3/t4g) CPU credit balance. Non-zero steal means the
+//           spike is the host's fault, not ours — the single most misdiagnosed
+//           cause, and invisible under the old rule.
+//
+// Still dropped (nice/irq/softirq/guest/guest_nice) — near-zero on this host and
+// pure series cost. Budget: 4 modes x vCPU count (~16 series on a 4-vCPU box),
+// against the Grafana Cloud free tier's 10k active-series cap. See the
+// percentiles-histogram note in application-production.yaml for the prior
+// series-budget incident.
+prometheus.relabel "host_metrics" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__", "mode"]
+    regex         = "node_cpu_seconds_total;(irq|softirq|nice|guest|guest_nice)"
+    action        = "drop"
+  }
+}

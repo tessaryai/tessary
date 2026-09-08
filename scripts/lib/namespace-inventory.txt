@@ -1,0 +1,50 @@
+# Every registry, hub and source-control coordinate this project's own install instructions and
+# release pipeline reference (epic 6 clause 7, #1152), one row each. scripts/check-namespaces.sh
+# verifies every row against the platform's own ownership signal and reds when a coordinate the
+# tree references is missing here, so a new publish target cannot go live unwatched.
+#
+# HAND-MAINTAINED, and the gate cannot tell you otherwise. check-namespaces.sh's `_known()` reads
+# COLUMN 2 ONLY and is ecosystem-blind, so a tree reference to github.com/tessaryai/tessary
+# normalises onto the dockerhub row of the same coordinate and half 2 never reports it missing;
+# and half 1 verifies each row against the platform API, never against the tree, so a row nothing
+# references any more stays green. Adding a github row for a repository, or retiring one, is
+# therefore an edit somebody has to make on purpose (#1293).
+#
+# Row shape:   <ecosystem>|<coordinate>|<referenced by>|<owning account>|<verification>|<account id>
+#   verification   dockerhub-repo        GET hub.docker.com/v2/repositories/<ns>/<name>/ → .namespace
+#                  dockerhub-org         GET hub.docker.com/v2/orgs/<ns>/ → .orgname, .type Organization; id = .uuid
+#                  github-org            GET api.github.com/orgs/<org> → .login, .type Organization; id = .id
+#                  github-repo           GET api.github.com/repos/<org>/<repo> → .owner.login; id = .owner.id
+#                  github-repo-private   the same through `gh api`; UNVERIFIED when gh is unauthenticated or its token cannot read the repository (never ok by assumption)
+#                  ghcr                  the GHCR namespace IS the GitHub org; ownership is github-org's, resolvability is
+#                                        check-selfhost-images.sh's (`docker buildx imagetools inspect` once published)
+#                  hf-org                GET huggingface.co/api/organizations/<org>/overview → .name; id = ._id
+#                  hf-model, hf-dataset  GET huggingface.co/api/{models,datasets}/<org>/<name> → .author, with HF_TOKEN
+#                                        when set; gated and private repositories answer 401 anonymously, exactly as a
+#                                        nonexistent one does, so without a token the row is UNVERIFIED
+#   account id     the stable id the platform exposes for the owning account, pinned so that a namespace deleted and
+#                  re-registered under the same name by someone else is red; empty where the platform exposes none
+#                  (the org row of the same ecosystem carries the pin)
+#
+# Private coordinates verify fully only on an operator's machine (gh auth, HF_TOKEN); the CI recheck reports them
+# UNVERIFIED, and the quarterly recheck log row says which run verified them.
+#
+ecosystem|coordinate|referenced by|owning account|verification|account id
+dockerhub|tessaryai/tessary|docker-compose.yml and docker-compose.dev.yml (backend, frontend, sandbox-runner, AGENT_IMAGE defaults); .env.example; docs/self-hosting/setup.mdx; .github/workflows/release.yml DOCKER_REPO|tessaryai|dockerhub-repo|
+dockerhub|tessaryai|the namespace of every published image|tessaryai|dockerhub-org|45447ec3-985b-4e4f-bf1a-b51b794ee7fe
+ghcr|ghcr.io/tessaryai/tessary|.github/workflows/release.yml GHCR_REPO (the mirror of every published image); .env.example|tessaryai|ghcr|
+github|tessaryai|the organization every repository and package sits under|tessaryai|github-org|244997004
+github|tessaryai/tessary|docs/self-hosting/setup.mdx (the setup.md link), docs/self-hosting/deployment.mdx (the clone command), docs/trademarks.mdx (the trademark policy) — the repository the tree now names; private until the epic 11 cutover|tessaryai|github-repo-private|244997004
+github|tessaryai/evals-platform|NOTHING in the tree any more: #1293 (C9) repointed every in-tree coordinate at tessaryai/tessary ahead of the cutover. Kept because this is still the development repository's own name on GitHub, which #1293 section G deliberately does not rename|tessaryai|github-repo-private|244997004
+github|tessaryai/plugins|README.md and claude-skill/README.md (the evals plugin install instruction); Taskfile.yml|tessaryai|github-repo|244997004
+github|tessaryai/infrastructure|docker-compose.dev.yml and classify-service/README.md (an issue reference and the ECS memory note; the private infrastructure repository, which CI's repository-scoped token cannot read, so CI reports it UNVERIFIED and an operator's gh verifies it)|tessaryai|github-repo-private|244997004
+github|tessaryai/evals-sample-app|classifiers/data_gen/emit_local.py and classifiers/data_gen/food_delivery/emit.py (the repo_url stamped on the synthetic demo corpus's spans). A private sample application, not a publish target; it entered this list when #1293 dropped the classifiers delete row from the export denylist and the demo emitter became part of the published tree|tessaryai|github-repo-private|244997004
+huggingface|tessaryai|the organization the classifier heads sit under|tessaryai|hf-org|6a5711cdb681b58c40682de9
+huggingface|tessaryai/frustration-detector|classify-service/README.md, and tessary-paid/classify-service/models.json since #1293 emptied the open manifest (a gated head the classify image build downloads with the operator's token; the coordinate itself still publishes, through the README)|tessaryai|hf-model|
+huggingface|tessaryai/frustration-attribution|tessary-paid/classify-service/models.json only, since #1293 emptied the open manifest — no public file names this coordinate today (a gated head the classify image build downloads with the operator's token)|tessaryai|hf-model|
+huggingface|tessaryai/MiniCheck-RoBERTa-Large-onnx|tessary-paid/.env.example (the open .env.example was cut to the required set and no longer names it), docker-compose.dev.yml, classify-service/README.md, scripts/lib/cloud-credential-denylist.sh (the private ONNX export backing the groundedness head)|tessaryai|hf-model|
+huggingface|tessaryai/frustration-v1|classify-service/README.md (the private training dataset the frustration head cites)|tessaryai|hf-dataset|
+
+# Recheck log (item 8 of the clause: one row per completed recheck, distinct from the launch enumeration)
+#   date|verifier|result
+recheck|2026-09-07|Nidhi Nair (via check-namespaces.sh --negative, gh auth present, no HF_TOKEN)|enumeration run: twelve rows; eight verified to tessaryai with the pinned ids, including the two private GitHub repositories through gh; the four Hugging Face model and dataset rows UNVERIFIED in this run and owed a run with HF_TOKEN

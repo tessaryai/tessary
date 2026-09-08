@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two profiles:
+    - default (dev/test): plain console output, fast to read in a tmux pane.
+    - prod-json (activated by SPRING_PROFILES_ACTIVE containing 'production'):
+      structured JSON, ingested by Grafana Alloy → Loki. Trace/span IDs come
+      from MDC (Micrometer-Tracing puts them there for every Spring request).
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- Single knob for our own code's log level, INFO by default. Set APP_LOG_LEVEL=DEBUG to turn
+         up ai.tessary logging — e.g. to surface the content-free WARNs' DEBUG detail lines locally.
+         Source the env var directly (not app.log-level): springProperty resolution of the yaml
+         intermediary has been observed to stick at defaultValue=INFO even when APP_LOG_LEVEL=DEBUG
+         is in the process env, which silently suppresses DEBUG including classify request bodies.
+         Prod never sets APP_LOG_LEVEL, so it stays INFO there. -->
+    <springProperty scope="context" name="APP_LOG_LEVEL" source="APP_LOG_LEVEL" defaultValue="INFO"/>
+
+    <!-- HikariCP's housekeeper WARNs "Thread starvation or clock leap detected" whenever it
+         doesn't run on schedule — routine on a CPU-steal-prone small instance, not an actionable
+         ops signal (com.zaxxer.hikari.pool.PoolBase, which logs real connection-validation
+         failures, is a separate logger and is untouched). -->
+    <logger name="com.zaxxer.hikari.pool.HikariPool" level="ERROR"/>
+
+    <springProfile name="!production">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <!-- %kvp is load-bearing, not decoration. StructuredLog attaches its fields as
+                     SLF4J key-value pairs rather than interpolating them into the message (see
+                     that class), so without %kvp every field would vanish from local output and
+                     the console would show bare event names with no context. -->
+                <pattern>${CONSOLE_LOG_PATTERN} %kvp</pattern>
+            </encoder>
+        </appender>
+        <logger name="ai.tessary" level="${APP_LOG_LEVEL}"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="production">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- Caller data is OFF for the same reason captureCodeAttributes is (see the OTEL
+                     appender below): the fluent builder makes every caller StructuredLog$Builder.
+                     It also costs a stack capture per line. The full throwable still ships as
+                     "stack_trace" by default.
+                     <includeCallerData>true</includeCallerData> -->
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>spanId</includeMdcKeyName>
+                <!-- Business context bound by obs/LogContext (see that class for
+                     the key constants). orgId is reserved but not yet bound. -->
+                <includeMdcKeyName>runId</includeMdcKeyName>
+                <includeMdcKeyName>projectId</includeMdcKeyName>
+                <includeMdcKeyName>graderId</includeMdcKeyName>
+                <includeMdcKeyName>jobId</includeMdcKeyName>
+                <includeMdcKeyName>classifierKey</includeMdcKeyName>
+                <includeMdcKeyName>callSiteId</includeMdcKeyName>
+                <includeMdcKeyName>subjectTraceId</includeMdcKeyName>
+                <customFields>{"service.name":"tessary-backend"}</customFields>
+            </encoder>
+        </appender>
+        <!-- Logback events -> OpenTelemetry Logs SDK -> OTLP -> Alloy -> Loki.
+             The SB4-autoconfigured SDK is attached post-refresh via
+             OpenTelemetryAppender.install() in OtelExportConfig; until then this
+             appender buffers events internally so startup logs aren't lost. -->
+        <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+            <!--
+              Ship WARN+ OR OPS-marked events to Loki. INFO logs frequently
+              interpolate user-supplied fields (vendor trace names, model
+              identifiers, exception messages) and leaving those bound for an
+              external backend is a needless data-egress surface — so plain
+              INFO stays local. The obs/Markers.OPS marker opts a hand-picked,
+              PII-free operational event (run lifecycle, counts, durations)
+              into egress so it can drive Grafana Cloud dashboards.
+
+              OpsOrWarnLogFilter ACCEPTs WARN+ or OPS-marked events and DENYs
+              the rest (logback's MarkerFilter is a global TurboFilter, not an
+              appender filter, and EvaluatorFilter needs Janino which the native
+              image can't run). The local JSON appender still captures all INFO
+              for ops debugging on the box.
+            -->
+            <filter class="ai.tessary.evals.open.obs.OpsOrWarnLogFilter"/>
+            <!-- code.* capture is OFF. It was meant to say where a line came from, but every
+                 StructuredLog call now routes through the fluent builder, so the appender records the
+                 IMMEDIATE caller — always StructuredLog$Builder.log() at the same line number. Four
+                 fields on every record, all pointing at the logging helper rather than the code that
+                 logged. `scope` still carries the real logger name (e.g. ClassifierWorker), and a
+                 throwable's stacktrace is captured regardless.
+                 <captureCodeAttributes>true</captureCodeAttributes> -->
+            <captureMarkerAttribute>true</captureMarkerAttribute>
+            <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+            <captureMdcAttributes>traceId,spanId,runId,projectId,graderId,jobId,classifierKey,callSiteId,subjectTraceId</captureMdcAttributes>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+            <appender-ref ref="OTEL"/>
+        </root>
+        <logger name="ai.tessary" level="${APP_LOG_LEVEL}"/>
+        <logger name="org.springframework" level="WARN"/>
+    </springProfile>
+</configuration>

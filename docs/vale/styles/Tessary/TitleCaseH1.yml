@@ -1,0 +1,38 @@
+extends: capitalization
+message: "Use title case for this top-level page title: '%s'."
+link: /handbook/writing-style-guide.md#top-level-page-titles
+level: warning
+scope: heading.h1
+match: $title
+exceptions:
+  - Tessary
+  - Mintlify
+  - Vale
+  - API
+  - CLI
+  - CI
+  - CD
+  - SDK
+  - MCP
+  - RCA
+  - SLO
+  - URL
+  - URLs
+  - JSON
+  - YAML
+  - SQL
+  - HTTP
+  - HTTPS
+  - ID
+  - IDs
+  - UUID
+  - AWS
+  - S3
+  - OAuth
+  - SSO
+  - TLS
+  - SSL
+  - JWT
+  - GitHub
+  - Slack
+  - Docker

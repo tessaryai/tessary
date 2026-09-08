@@ -1,0 +1,15 @@
+# pnpm settings for this package. NOT a workspace definition — no `packages:` key. Exists because
+# pnpm 11 removed the `pnpm` field in package.json and reads .npmrc for auth/registry only.
+#
+# pnpm disallows dependency build scripts by default:
+#   re2      install builds/fetches the native RE2 binding the analyzer's codegen path requires;
+#            scripts/dev.sh probes it with a real require() and reinstalls if it cannot load
+#   esbuild  postinstall fetches the platform binary (pulled in via tsx, used by `pnpm run build`)
+allowBuilds:
+  esbuild: true
+  re2: true
+# 1.18.13 is younger than pnpm's release-age gate. Excluded rather than pinned lower: it is the
+# version this was exercised against, and it must match the `opencode` CLI in template.ts. Names
+# one exact version, so it lapses on the next bump.
+minimumReleaseAgeExclude:
+  - '@opencode-ai/sdk@1.18.13'

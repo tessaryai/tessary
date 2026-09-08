@@ -1,0 +1,79 @@
+# Local continuous-profiling overlay — OPT-IN, layered on docker-compose.dev.yml.
+#
+#   task dev:profiling      (fetches the agent jar, then starts the stack with this overlay)
+#
+# Why an overlay instead of folding this into docker-compose.dev.yml: attaching a
+# -javaagent changes how every backend JVM in dev starts. Making that the default
+# would put a profiler in the path of everyone's edit/reload loop to serve a task
+# most sessions never do. Opt-in keeps the normal dev stack byte-identical.
+#
+# What you get: a local Pyroscope at http://localhost:4040 with its own flame-graph
+# UI — no Grafana Cloud account, no credentials, nothing leaves the machine. The
+# backend pushes to Alloy, which relays to that container, mirroring the production
+# path (backend -> Alloy -> Pyroscope) rather than short-circuiting it.
+
+services:
+  pyroscope:
+    # NO `v` prefix. The server image publishes plain semver tags (2.2.0); `v2.2.0` is a 404 and the
+    # stack fails to start with an opaque "failed to resolve reference". The Java AGENT is the other
+    # way round — grafana/pyroscope-java tags its GitHub releases `v2.8.0` — so the two versions in
+    # this setup look inconsistent and both are correct. They are also different version lines
+    # entirely (server 2.x vs agent 2.8.x) and are not meant to match.
+    image: grafana/pyroscope:2.2.0
+    ports:
+      # The UI. Flame graphs, the tag explorer, and the comparison/diff view all
+      # live here; the diff view is the one that matters, since a flame graph read
+      # in isolation just shows you your hottest *normal* code.
+      - "127.0.0.1:4040:4040"
+    restart: unless-stopped
+    networks:
+      - evals
+
+  backend:
+    volumes:
+      # Directory mount, not a file mount: bind-mounting a file that does not exist
+      # makes Docker silently create a DIRECTORY at that path, and the JVM then dies
+      # with an opaque agent-load error. Mounting the parent directory fails loudly
+      # and legibly instead. `task dev:profiling` guarantees the jar is present.
+      - ./.local/pyroscope:/profiler:ro
+    environment:
+      # JAVA_TOOL_OPTIONS rather than -Dspring-boot.run.jvmArguments: MAVEN_ARGS is
+      # whitespace-split by the mvn launcher, so a multi-token jvmArguments value
+      # does not survive it. The trade-off is that the Maven JVM is profiled too —
+      # harmless, since with the default fork it idles while the app runs in a child
+      # and therefore contributes almost no samples.
+      #
+      # -XX:+DebugNonSafepoints is what makes the flame graph trustworthy: without it
+      # the JIT only records line numbers at safepoints and samples are attributed to
+      # the wrong frame, so you chase the wrong method.
+      JAVA_TOOL_OPTIONS: "-javaagent:/profiler/pyroscope.jar -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints"
+      PYROSCOPE_AGENT_ENABLED: "true"
+      PYROSCOPE_APPLICATION_NAME: tessary-backend
+      PYROSCOPE_SERVER_ADDRESS: http://alloy:4040
+      PYROSCOPE_PROFILER_EVENT: itimer
+      # See the long note on this key in docker-compose.yml: a finer threshold
+      # (512k) overruns Pyroscope's 4 MiB decompressed-JFR ingest limit and every
+      # upload is silently rejected with a 422. Measured here: 512k -> 1.2-1.4 MiB
+      # per upload and nothing stored; 4m -> ~138 KB and clean ingest.
+      PYROSCOPE_PROFILER_ALLOC: 4m
+      PYROSCOPE_FORMAT: jfr
+      # Faster than production's 15s so a local experiment shows up while you still
+      # remember what you were testing.
+      PYROSCOPE_UPLOAD_INTERVAL: 10s
+      PYROSCOPE_LABELS: deployment_environment=development
+    depends_on:
+      - pyroscope
+
+  alloy:
+    environment:
+      # Where config.dev.alloy's pyroscope.write sends profiles. Defaults to the
+      # local container; point at Grafana Cloud (with GRAFANA_CLOUD_PYROSCOPE_*) to
+      # rehearse the production path end to end.
+      DEV_PYROSCOPE_ENDPOINT: ${DEV_PYROSCOPE_ENDPOINT:-http://pyroscope:4040}
+      # Trace fan-out flag. Langfuse stays on regardless; set true to ALSO ship
+      # traces to Grafana Cloud Tempo. See the grafana_gate block in config.dev.alloy.
+      DEV_GRAFANA_EXPORT: ${DEV_GRAFANA_EXPORT:-false}
+      GRAFANA_CLOUD_TEMPO_URL: ${GRAFANA_CLOUD_TEMPO_URL:-}
+      GRAFANA_CLOUD_TEMPO_USERNAME: ${GRAFANA_CLOUD_TEMPO_USERNAME:-}
+      GRAFANA_CLOUD_PYROSCOPE_USERNAME: ${GRAFANA_CLOUD_PYROSCOPE_USERNAME:-}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:-}

@@ -1,0 +1,207 @@
+# Grafana unified-alerting rules for CPU saturation and its causes.
+#
+# These are DIAGNOSTIC alerts, not just a threshold: the four rules deliberately
+# fire on different *causes* so the notification itself narrows the RCA before
+# anyone opens a dashboard. "CPU is high" plus "steal is high" means stop looking
+# at the code; "CPU is high" plus "GC fraction is high" means stop looking at the
+# host.
+#
+# Each rule carries __dashboardUid__ / __panelId__ annotations. That is what makes
+# Grafana write alert-state annotations onto the matching panel of the CPU
+# dashboard, so past firing windows render as shaded regions over the graphs —
+# the "what was different that time" view. The `cpu` label additionally feeds the
+# dashboard's tag-matched annotation query.
+#
+# Import (folder must already exist):
+#   Grafana Cloud UI -> Alerting -> Alert rules -> New -> Import from file
+# or via the provisioning API:
+#   curl -X POST -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+#        -H "Content-Type: application/yaml" \
+#        --data-binary @observability/grafana/alerts/cpu-alerts.yaml \
+#        https://<stack>.grafana.net/api/v1/provisioning/alert-rules
+#
+# NOTE: `datasourceUid` below is a placeholder. Replace PROM_DS_UID with your
+# stack's Prometheus datasource UID (Connections -> Data sources -> the URL
+# segment after /datasources/edit/). Contact points / notification policies are
+# deliberately NOT provisioned here — they need your credentials and routing
+# preferences; wire them in the UI once and every rule below inherits them.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: cpu
+    folder: tessary
+    # Evaluate every minute; each rule's own `for` supplies the debounce, so a
+    # 30-second scrape blip cannot page anyone.
+    interval: 1m
+    rules:
+
+      # ----------------------------------------------------------------------
+      # 1. The primary "something is wrong" alert.
+      # ----------------------------------------------------------------------
+      - uid: evals-cpu-high
+        title: Host CPU saturated
+        condition: threshold
+        for: 10m
+        labels:
+          severity: warning
+          # Matches the CPU dashboard's tag-based annotation query (tags: ["cpu"]).
+          cpu: "true"
+        annotations:
+          summary: "Host CPU is {{ printf \"%.0f\" (mulf $value 100) }}% on {{ $labels.deployment_environment }}"
+          description: >-
+            Sustained >85% CPU for 10 minutes. Open the CPU root-cause dashboard and read
+            the "CPU by mode" panel FIRST — the cause is determined by which mode dominates
+            (user = our code, system = syscall overhead, iowait = disk/Postgres, steal = the
+            EC2 host). If this fired alone, check whether the steal and GC alerts also fired;
+            if neither did, the cause is our own userspace work and the flame graph will name it.
+          __dashboardUid__: tessary-cpu
+          __panelId__: "8"
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: PROM_DS_UID
+            model:
+              refId: query
+              editorMode: code
+              instant: true
+              expr: 1 - avg by (deployment_environment) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+          - refId: threshold
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: threshold
+              type: threshold
+              expression: query
+              conditions:
+                - evaluator: { type: gt, params: [0.85] }
+        noDataState: NoData
+        execErrState: Alerting
+
+      # ----------------------------------------------------------------------
+      # 2. Not our fault — the hypervisor or exhausted burst credits.
+      # ----------------------------------------------------------------------
+      # Deliberately a SEPARATE alert rather than a dashboard panel, because this
+      # is the cause most likely to be misdiagnosed as an application regression.
+      # On a burstable (t3/t4g) instance a depleted CPU credit balance presents
+      # as steal, and no amount of code profiling will explain it.
+      - uid: evals-cpu-steal
+        title: CPU steal — host contention or exhausted burst credits
+        condition: threshold
+        for: 10m
+        labels:
+          severity: warning
+          # Matches the CPU dashboard's tag-based annotation query (tags: ["cpu"]).
+          cpu: "true"
+        annotations:
+          summary: "CPU steal at {{ printf \"%.1f\" (mulf $value 100) }}% on {{ $labels.deployment_environment }}"
+          description: >-
+            The hypervisor is taking our vCPU, or this instance has exhausted its burstable
+            CPU credit balance. This is NOT an application problem — do not profile the JVM.
+            Check the EC2 CPUCreditBalance metric; if it is at zero, the fix is an instance
+            type change (t-family -> m-family) or unlimited-mode burst, not a code change.
+          __dashboardUid__: tessary-cpu
+          __panelId__: "3"
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: PROM_DS_UID
+            model:
+              refId: query
+              editorMode: code
+              instant: true
+              expr: avg by (deployment_environment) (rate(node_cpu_seconds_total{mode="steal"}[5m]))
+          - refId: threshold
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: threshold
+              type: threshold
+              expression: query
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+        noDataState: NoData
+        execErrState: Alerting
+
+      # ----------------------------------------------------------------------
+      # 3. The JVM is collecting, not working.
+      # ----------------------------------------------------------------------
+      - uid: evals-jvm-gc-thrash
+        title: Backend JVM spending >10% of wall clock in GC
+        condition: threshold
+        for: 10m
+        labels:
+          severity: warning
+          # Matches the CPU dashboard's tag-based annotation query (tags: ["cpu"]).
+          cpu: "true"
+        annotations:
+          summary: "GC is consuming {{ printf \"%.0f\" (mulf $value 100) }}% of wall clock"
+          description: >-
+            The JVM is spending more than a tenth of its life in garbage collection, so a
+            CPU spike right now is the collector, not application logic. Look at the
+            allocation-rate panel for the step change that caused it, then use the alloc
+            profile (not the CPU profile) to find the allocating call path. If heap is also
+            pinned near max, this is the pre-OOM death spiral — the host has OOM-looped before.
+          __dashboardUid__: tessary-cpu
+          __panelId__: "11"
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: PROM_DS_UID
+            model:
+              refId: query
+              editorMode: code
+              instant: true
+              expr: sum by (deployment_environment) (rate(jvm_gc_pause_seconds_sum{application="tessary-backend"}[5m]))
+          - refId: threshold
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: threshold
+              type: threshold
+              expression: query
+              conditions:
+                - evaluator: { type: gt, params: [0.1] }
+        noDataState: NoData
+        execErrState: Alerting
+
+      # ----------------------------------------------------------------------
+      # 4. Disk-bound, not CPU-bound.
+      # ----------------------------------------------------------------------
+      - uid: evals-cpu-iowait
+        title: High iowait — disk/Postgres bound
+        condition: threshold
+        for: 15m
+        labels:
+          severity: info
+          cpu: "true"
+        annotations:
+          summary: "iowait at {{ printf \"%.0f\" (mulf $value 100) }}% on {{ $labels.deployment_environment }}"
+          description: >-
+            Cores are idling while blocked on disk. Adding CPU will not help. Pair with the
+            HikariCP pending-connections panel: sustained pending plus high iowait means slow
+            queries are the bottleneck. Longer `for` than the other rules because batch work
+            (dataset runs, embed-on-ingest) legitimately drives short iowait bursts.
+          __dashboardUid__: tessary-cpu
+          __panelId__: "4"
+        data:
+          - refId: query
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: PROM_DS_UID
+            model:
+              refId: query
+              editorMode: code
+              instant: true
+              expr: avg by (deployment_environment) (rate(node_cpu_seconds_total{mode="iowait"}[5m]))
+          - refId: threshold
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: threshold
+              type: threshold
+              expression: query
+              conditions:
+                - evaluator: { type: gt, params: [0.2] }
+        noDataState: NoData
+        execErrState: Alerting

@@ -1,0 +1,649 @@
+# Development stack. Four services + bind-mounted source + named volumes for
+# heavyweight build caches (maven local repo, node_modules, postgres data).
+#
+# - postgres  Postgres 16, named-volume data dir, exposed on localhost:5433 for psql
+# - backend   JVM mode (Spring Boot + devtools), source bind-mounted, talks to postgres
+# - frontend  Vite dev server with HMR, source bind-mounted
+# - caddy     reverse proxy on :8000 (the entry point you hit in the browser)
+#
+# Usage:
+#   echo "EVALS_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
+#   task docker:dev:tmux         # launches tmux + compose up
+# or (PNPM_VERSION defaults to the Taskfile's pin; a raw compose call needs nothing exported):
+#     docker compose -f docker-compose.dev.yml up -d --build
+#   open http://localhost:8000
+
+# Pin the Compose project name so the stack is identical from any directory
+# (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
+# duplicate set of containers/volumes per worktree.
+name: tessary
+
+services:
+  postgres:
+    # pgvector/pgvector:pg16 = Postgres 16 with the pgvector extension preinstalled, so
+    # `CREATE EXTENSION vector` (migration 042) works. Same image the test suite uses.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: evals
+      POSTGRES_USER: evals
+      POSTGRES_PASSWORD: evals
+    ports:
+      # Exposed on host so devs can psql in: psql -h localhost -p 5433 -U evals.
+      # NOT loopback-bound, unlike every other publish in this file, and that is a known gap
+      # rather than an oversight: tessary-paid/scripts/apply-overlay-changelog.sh (task
+      # overlay:apply-changelog) reaches this port from INSIDE a throwaway container through
+      # host.docker.internal. On Docker Desktop that resolves to the host and a loopback publish
+      # would still answer; on Linux Docker Engine host-gateway is 172.17.0.1 and a loopback
+      # publish refuses it. Closing this means first moving that script onto the stack network to
+      # talk to postgres:5432 directly, which is its own change.
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evals -d evals"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - evals
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    image: evals-dev:latest
+    # Fork the Spring Boot app JVM with a JDWP agent so a Java IDE can attach a
+    # Remote JVM Debug config to localhost:5005. Passing -Dspring-boot.run.jvmArguments
+    # makes the plugin fork, so the agent binds in the app JVM only (not the Maven
+    # JVM) — no double-bind on 5005. suspend=n: boot normally so the healthcheck
+    # still passes; switch to suspend=y to debug startup itself. The agent survives
+    # devtools in-process restarts (task dev:reload-backend).
+    # Two steps (see Dockerfile.dev): install app's whole dependency chain into the cached
+    # local repo, then run ONLY the app module (spring-boot:run can't run reactor-wide — it dies on
+    # the non-executable parent pom — and app-only can't resolve its siblings unless installed).
+    command:
+      - sh
+      - -c
+      - >-
+        mvn -B -q -pl app -am install -DskipTests
+        -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
+        mvn -B -pl app spring-boot:run
+        -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+    expose:
+      - "8080"
+      # OTLP/gRPC trace receiver (#235) — reachable on the internal `evals` network. Inert unless
+      # evals.ingest.otlp.enabled=true AND evals.ingest.otlp.transport is grpc|both.
+      - "4317"
+    ports:
+      # Publish only the debug port to the host; HTTP still flows through Caddy (:8000). JDWP has no
+      # authentication of any kind -- reaching this port is arbitrary code execution in the backend
+      # JVM -- so the publish is pinned to host loopback. The agent itself stays address=*:5005:
+      # Docker forwards a published port to the container's bridge IP, so an in-container loopback
+      # bind would refuse the forwarded connection and the debugger would never attach.
+      - "127.0.0.1:5005:5005"
+      # Publish the OTLP/gRPC receiver to the host so a local exporter can push to localhost:4317 when
+      # the receiver is enabled (#235). A compose `ports:` mapping works without a Dockerfile `EXPOSE`
+      # (EXPOSE is metadata only); the `EXPOSE 4317` line in backend/Dockerfile is a protected path
+      # handed off to a human (see decision.md).
+      - "127.0.0.1:4317:4317"
+    env_file:
+      # Pass the entire repo-root .env into the container. Optional — if absent
+      # the stack still starts and falls back to the application.yaml defaults
+      # (which require an ambient AWS_REGION for the platform-Bedrock judge default
+      # at request time, but the boot itself works).
+      # EVALS_SECRET_KEY (AES-256 base64) belongs here if you use ingestion sources.
+      - path: ./.env
+        required: false
+    environment:
+      # Container-internal config — not in .env because these are wiring, not secrets.
+      EVALS_JDBC_URL: jdbc:postgresql://postgres:5432/evals
+      EVALS_DB_USERNAME: evals
+      EVALS_DB_PASSWORD: evals
+      # The dev stack runs unauthenticated, and since #924 it has to SAY so. Absent WorkOS
+      # credentials used to be the off switch by themselves; they now fail closed, because
+      # "no provider configured" is the normal state of a self-hosted open-edition instance
+      # and must not be read as consent to serve it open. Set here rather than in .env so a
+      # fresh clone's `task dev` works with no manual step -- it is wiring, not a secret.
+      #
+      # Parameterized (#878), default UNCHANGED: every existing caller (`task dev`, `task
+      # dev:slim`, this file's other consumers) still gets "true" with zero config, same as
+      # before. The one caller that overrides it is scripts/check-open-boot.sh, which exports
+      # EVALS_AUTH_DISABLED=false on its own compose invocation ONLY -- the epic-2 gate needs to
+      # exercise a REAL authenticated session (AuthFilter actually resolving a TenantContext from
+      # the signed session cookie), and AuthFilter.shouldNotFilter bypasses itself for EVERY path
+      # when this is set, which would make GET /auth/me (and everything past it) 401 unconditionally
+      # regardless of whether the signup/login flow itself worked -- silently defeating the exact
+      # authenticated-flow proof #924 added to the gate. A hardcoded "true" literal cannot be
+      # overridden by any caller's env, which is what forced this one-line change.
+      EVALS_AUTH_DISABLED: ${EVALS_AUTH_DISABLED:-true}
+      # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
+      # with no .env and mints run-scoped random values for both (see its boot-recipe comment).
+      # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`;
+      # unset everywhere, these bind blank exactly as before.
+      EVALS_SECRET_KEY: ${EVALS_SECRET_KEY:-}
+      # EVALS_PLATFORM_BEDROCK_ENABLED lived here until #939 D4 — see docker-compose.yml's
+      # identical removal note; the switch it fed had zero production callers.
+      EVALS_AUTH_COOKIE_PASSWORD: ${EVALS_AUTH_COOKIE_PASSWORD:-}
+      # Local dev: behavior-drift profiles re-fit after ≤10 min of idleness (prod: 6h) so a
+      # finished test burst arms within minutes instead of hours. The worker tick drops to 1 min
+      # to match — at the prod 15-min tick a 10-min idle deadline can overshoot by a full tick.
+      EVALS_CLASSIFIER_BEHAVIOR_FIT_IDLE_INTERVAL_MS: "600000"
+      EVALS_CLASSIFIER_BEHAVIOR_FIT_MS: "60000"
+      # Local dev: turn ai.tessary logging up to DEBUG (logback-spring.xml + logging.level.ai.tessary).
+      # INFO everywhere by default; prod never sets this. Framework logs stay at their defaults.
+      APP_LOG_LEVEL: DEBUG
+      SPRING_DEVTOOLS_LIVERELOAD_ENABLED: "false"
+      # Pre-wired target for OTLP traces to the local Alloy agent (below), which forwards the
+      # gen_ai (judge) spans on to Langfuse — so prompt-cache token usage is inspectable on
+      # local runs, same as prod. Off by default though (#864): the base application.yaml sets
+      # management.tracing.export.otlp.enabled: false, and nothing here overrides that, so with
+      # no opt-in this is dead config the exporter never reads. Bring up Alloy AND flip the
+      # enabled flag to actually ship: `COMPOSE_PROFILES=observability
+      # MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED=true
+      # task dev` (task dev:profiling / dev:local:profiling does all of this for you already —
+      # scripts/dev.sh's EVALS_PROFILING branch sets both the Compose profile and these flags).
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_SERVICE_NAME: tessary-backend
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_NAME:-development},service.namespace=tessary
+      # The Spring Boot OTLP trace-export ENDPOINT wiring lives in application-production.yaml,
+      # which only loads under the `production` profile. Local dev runs profile-less, so without
+      # these the autoconfig defaults to localhost:4317 @ 10% sampling. Set the Spring properties
+      # directly (relaxed-binding env) so the endpoint is right in dev — without pulling in the
+      # production profile's prod-only bits (HTTPS-only cookie, forwarded headers). Spring Boot's
+      # OTel starter reads THESE, not the OTEL_* SDK env vars above. Whether export actually
+      # fires is a separate flag (MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED, see above) — these two
+      # lines are pre-filled values, inert until that flag is also set.
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://alloy:4317
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT: grpc
+      # The actual enable/disable flags the comment above refers to. Compose only forwards a host
+      # env var into the container when the compose YAML itself references it (crew review, PR
+      # #1013) — task dev:profiling exporting these into the shell does nothing on its own without
+      # this line. Defaults to the base application.yaml's own "false" so plain `task dev` is
+      # unaffected; task dev:profiling's EVALS_PROFILING branch sets the shell var to "true" before
+      # `docker compose up`, which this then passes through.
+      MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED:-false}
+      MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED:-false}
+      # Host-launcher wiring for `task dev:local` (EVALS_LOCAL_AGENT=1): scripts/dev.sh
+      # exports these into the shell env, which compose interpolation reads here (outranking
+      # .env). The two launcher settings below are inert when empty, so the backend keeps its
+      # .env/default config on plain `task dev`.
+      #
+      # The analyzer type is NOT, which is why it defaults to a value rather than to empty: Spring
+      # binds "" over the Java default ("anchor") and ObserverProcessor's fail-fast rejects it, so
+      # `:-` killed the backend at boot on any host whose .env did not set this.
+      EVALS_OBSERVER_AGENTIC_LAUNCHER_URL: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_URL:-}
+      EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
+      # RCA — defaults onto the observer's launcher/key so `task dev:local` (host launcher +
+      # local opencode) powers both lanes with one setup. Without a launcher URL every
+      # "Run RCA" press fails: the sandboxed agent is RCA's only analysis path.
+      EVALS_RCA_AGENTIC_LAUNCHER_URL: ${EVALS_RCA_AGENTIC_LAUNCHER_URL:-${EVALS_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
+      EVALS_RCA_AGENTIC_LAUNCHER_API_KEY: ${EVALS_RCA_AGENTIC_LAUNCHER_API_KEY:-${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}}
+      # The evidence door, for BOTH agent lanes, and neither has another one: their dossiers carry
+      # the detector's claim and every row behind it is fetched over MCP, so a blank value here is a
+      # broken deployment rather than a degraded mode (the engines refuse to run). Defaulted to the
+      # dev API origin — Caddy on :8000 — which is what a HOST launcher (`task dev:local`) reaches.
+      # E2B dev is the exception: the microVM cannot see your localhost, so point this at a tunnel.
+      EVALS_RCA_AGENTIC_MCP_BASE_URL: ${EVALS_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}
+      EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${EVALS_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}}
+      # Encoder classification — the classify service below. Same service that runs on
+      # ECS Fargate in production; the dev key just has a working default.
+      EVALS_OBSERVER_ENCODER_URL: http://classify:8080
+      EVALS_OBSERVER_ENCODER_API_KEY: ${EVALS_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
+    volumes:
+      # The reactor is twelve modules under backend/. The dev boot installs app's whole dependency
+      # chain into the cached .m2 and then runs app alone, so EVERY module's src must be mounted —
+      # a pom without its src installs a class-less jar and app fails with "cannot find symbol".
+      # A module added to the aggregator must be added here too.
+      - ./backend/shared/src:/app/shared/src
+      - ./backend/contract/src:/app/contract/src
+      - ./backend/test-support/src:/app/test-support/src
+      - ./backend/core/src:/app/core/src
+      - ./backend/tenancy/src:/app/tenancy/src
+      - ./backend/substrate/src:/app/substrate/src
+      - ./backend/product/src:/app/product/src
+      - ./backend/llm-runtime/src:/app/llm-runtime/src
+      - ./backend/analysis/src:/app/analysis/src
+      - ./backend/surfaces/src:/app/surfaces/src
+      - ./backend/app/src:/app/app/src
+      - ./backend/pom.xml:/app/pom.xml:ro
+      - ./backend/shared/pom.xml:/app/shared/pom.xml:ro
+      - ./backend/contract/pom.xml:/app/contract/pom.xml:ro
+      - ./backend/test-support/pom.xml:/app/test-support/pom.xml:ro
+      - ./backend/core/pom.xml:/app/core/pom.xml:ro
+      - ./backend/tenancy/pom.xml:/app/tenancy/pom.xml:ro
+      - ./backend/substrate/pom.xml:/app/substrate/pom.xml:ro
+      - ./backend/product/pom.xml:/app/product/pom.xml:ro
+      - ./backend/llm-runtime/pom.xml:/app/llm-runtime/pom.xml:ro
+      - ./backend/analysis/pom.xml:/app/analysis/pom.xml:ro
+      - ./backend/surfaces/pom.xml:/app/surfaces/pom.xml:ro
+      - ./backend/app/pom.xml:/app/app/pom.xml:ro
+      # config/ holds the shared PMD ruleset + SpotBugs exclusions the parent's pluginManagement
+      # points every module at; core/tools/ holds the build-time schema-column generator that the
+      # generate-sources phase runs over core's Liquibase changelog. .mvn/jvm.config carries the
+      # --add-exports/--add-opens Error Prone needs to compile on JDK 25. All are build inputs the
+      # prod Dockerfile COPYs — the dev stack mounts them so the in-container build matches.
+      - ./backend/config:/app/config:ro
+      - ./backend/core/tools:/app/core/tools:ro
+      - ./backend/.mvn:/app/.mvn:ro
+      - maven-cache:/root/.m2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # /dev/tcp is a bash builtin — no curl/wget needed in the maven image.
+      # Spring Boot binds :8080 only after the app is fully started.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    networks:
+      - evals
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      # The Taskfile exports PNPM_VERSION (mirrored by the PNPM_VERSION Actions variable in CI);
+      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh (#1190).
+      args:
+        PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
+    image: evals-frontend-dev:latest
+    expose:
+      - "5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public:ro
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/package.json:/app/package.json:ro
+      - ./frontend/pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
+      # pnpm 11 keeps settings (this package's overrides) here rather than in package.json, and the
+      # container's startup `pnpm install --frozen-lockfile` reads it. Without this mount the
+      # container resolves a different tree than the host and CI do.
+      - ./frontend/pnpm-workspace.yaml:/app/pnpm-workspace.yaml:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      # node_modules lives in a named volume; otherwise the host's empty (or
+      # mismatched-arch) node_modules would shadow what the image build installed.
+      - frontend-node-modules:/app/node_modules
+    networks:
+      - evals
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      # HOST_BIND, not a bare publish: docker-compose.dev.yml sets EVALS_AUTH_DISABLED=true by
+      # default, so this port is the entire application with authentication switched off. On
+      # 0.0.0.0 that is every trace, every credential and every admin surface offered to whoever
+      # shares the network. Set HOST_BIND=0.0.0.0 to test from a phone on the same wifi.
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-8000}:8000"
+    environment:
+      BACKEND_URL: backend:8080
+      FRONTEND_URL: frontend:5173
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - evals
+
+  # Optional telemetry agent for local runs: receives the backend's OTLP traces and
+  # forwards just the gen_ai (judge) spans on to Langfuse, so you can inspect prompt-cache
+  # token usage (cache_read / cache_creation) per generation.
+  #
+  # Uses a DEV-ONLY config (config.dev.alloy) with only the Langfuse trace branch. It does
+  # NOT reuse the prod config.alloy: that file also runs the host-metrics exporter (needs
+  # /host/proc + /host/sys bind-mounts) and a Grafana Cloud Tempo basic-auth block (needs
+  # non-empty creds) — both are *fatal config-load errors* without the prod mounts/creds,
+  # so reusing it crashed the agent on startup (exit 1) instead of backing off. The dev
+  # config drops all of that.
+  #
+  # Requires LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in .env (the same keys the
+  # pull-ingest adapter already uses). Without them the gen_ai push 401s and backs off.
+  # Note: caching only produces non-zero cache tokens once the shared system prefix clears
+  # the provider's minimum cacheable length (OpenAI 1024, Anthropic Sonnet/Opus 1024, Haiku
+  # 2048, Bedrock ~1024); small traces cache nothing and show 0 — that's expected.
+  #
+  # Opt-in (#864): gated behind the `observability` Compose profile, so this is absent from a
+  # default `task dev` / detached boot — that's exactly the path scripts/check-open-boot.sh
+  # exercises, so this one gate is what actually satisfies "no Alloy container by default"
+  # against the check that enforces it. Bring it up with `COMPOSE_PROFILES=observability
+  # task dev` (task dev:profiling already does this for you — see scripts/dev.sh).
+  alloy:
+    profiles: ["observability"]
+    image: grafana/alloy:latest
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      DEPLOYMENT_NAME: ${DEPLOYMENT_NAME:-development}
+      # Langfuse OTLP target for the gen_ai-only trace branch. Endpoint + keys are read
+      # from ./.env via Compose interpolation (the same values the ingest adapter uses).
+      # Off by default (#864): blank endpoint means the exporter has nothing to resolve, so
+      # opting into `observability` without Langfuse keys doesn't also start dialing Langfuse
+      # Cloud. Set LANGFUSE_OTLP_ENDPOINT in .env to re-enable.
+      LANGFUSE_OTLP_ENDPOINT: ${LANGFUSE_OTLP_ENDPOINT:-}
+      # Alloy's otelcol.auth.basic rejects EMPTY credentials at config load (exit 1 on the
+      # current image), so default to a clearly-fake placeholder when unset — the langfuse
+      # push then 401s and backs off (the intended no-op) instead of crash-looping dev for
+      # anyone without Langfuse keys. Real keys in .env override these.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-dev-unset}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-dev-unset}
+    volumes:
+      # Dev-only trimmed config (Langfuse branch only) mounted at the path the command
+      # expects. Swapping the source file is all it takes — the command stays generic.
+      - ./observability/alloy/config.dev.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    networks:
+      - evals
+
+  # Agentic launcher (drives E2B microVMs that run OpenCode) — powers the synth
+  # CODE_GROUNDED tiers (/ground) and the observer agentic lane (/analyze). Built
+  # locally so it bundles the current server.js (incl. the /ground route).
+  # Reachable on the internal network at http://sandbox-runner:8080 — point the
+  # backend's EVALS_OBSERVER_AGENTIC_LAUNCHER_URL there (in .env). Optional: omit or
+  # stop it and the backend's code-grounding degrades cleanly to trace/draft.
+  #
+  # Prereq: publish the E2B template first (cd sandbox-runner/agent-sandbox &&
+  # pnpm exec tsx build.ts) under the SAME E2B team as E2B_API_KEY. Agent auth inside the
+  # microVM: set AWS_* in .env (every agentic model is served from our own Bedrock).
+  # ${...} values interpolate from the repo-root ./.env.
+  #
+  # OFF by default locally (unlike prod, where it always runs): it is useless without an
+  # E2B key + a published template, and it builds an image most local work never touches.
+  # Start it with `COMPOSE_PROFILES=launcher task dev`. `task dev:local` does not need it
+  # at all — that path runs a locally installed `opencode` on the host instead of a microVM.
+  sandbox-runner:
+    profiles:
+      - launcher
+    build:
+      context: ./sandbox-runner/launcher
+      # PNPM_VERSION single source — see the frontend service.
+      args:
+        PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
+    image: evals-sandbox-runner-dev:latest
+    expose:
+      - "8080"
+    environment:
+      PORT: "8080"
+      # Empty passthrough, same as docker-compose.yml (#1052): server.js's own default, `docker`
+      # (D7's open default since #855), wins when this is unset — so the dev stack and the
+      # self-host stack agree, and a fresh `.env` never manufactures an E2B_API_KEY dependency.
+      # Until #1052 this defaulted to `e2b` (this service's doc comment above and its Prereq note
+      # are about exercising the E2B template path); to dev against E2B, set SANDBOX_BACKEND=e2b
+      # in .env. The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir
+      # mounts + group_add below) mirrors docker-compose.yml's sandbox-runner service so the
+      # default actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
+      # SANDBOX_WORK_VOLUME (crew review, PR #1081). `task dev:local`'s separate host-process
+      # path is untouched either way.
+      SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
+      # Same tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner
+      # service (D6/D9, #941/#1114) — the tag matches the E2B template alias tessary-agent-sandbox.
+      # Unset floats to `-latest`; the version lives in the git tag, never in a literal here.
+      AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
+      SANDBOX_DOCKER_CONCURRENCY: ${SANDBOX_DOCKER_CONCURRENCY:-1}
+      # Same volume as the `sandbox-work` mount below — see docker-compose.yml's sandbox-runner
+      # service for the full Docker-outside-of-Docker mechanism. A distinct default name from the
+      # prod stack's, so a dev launcher and a prod launcher on one host never share a work volume.
+      SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
+      # Must equal the backend's EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY.
+      SANDBOX_API_KEY: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary-agent-sandbox}
+      # #939 D4: FULL REMOVAL of every deployment-env-var credential this service used to read —
+      # AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole AGENT_PROVIDER
+      # dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY,
+      # GEMINI_API_KEY, GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY, CUSTOM_OPENAI_BASE_URL/
+      # CUSTOM_OPENAI_API_KEY) — see docker-compose.yml's identical removal note and
+      # server.js's file-header doc. MANTLE_PROJECT_ID stays: an attribution scope, not a secret.
+      MANTLE_PROJECT_ID: ${EVALS_MANTLE_PROJECT_ID:-}
+    # docker.sock GID + the two mounts: the docker sandbox default's wiring, mirrored from
+    # docker-compose.yml's sandbox-runner service (see the comments there — same trade-offs, same
+    # `getent group docker` hint for DOCKER_SOCK_GID). Unconditional so switching backends stays
+    # one env var, not a compose edit.
+    group_add:
+      - "${DOCKER_SOCK_GID:-999}"
+    depends_on:
+      sandbox-runner-work-init:
+        condition: service_completed_successfully
+    volumes:
+      # Pick up server.js edits on `--force-recreate` without an image rebuild.
+      - ./sandbox-runner/launcher/server.js:/app/server.js:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-work:/launcher-work
+    networks:
+      - evals
+
+  # Mirrors docker-compose.yml's sandbox-runner-work-init: pre-creates the launcher's work dir
+  # owned by the launcher image's `node` uid (1000), so the docker sandbox default can write
+  # into it. Same profile as the launcher — nothing else needs it.
+  sandbox-runner-work-init:
+    profiles:
+      - launcher
+    image: busybox:1.36
+    command: ["sh", "-c", "mkdir -p /launcher-work && chown 1000:1000 /launcher-work"]
+    volumes:
+      - sandbox-work:/launcher-work
+    restart: "no"
+
+  # Encoder classification for the built-in signal heads — the SAME service that runs on
+  # ECS Fargate in production (classify-service/). First build downloads ~3.6 GB of model
+  # weights into the image layer — the 2 heads, plus the conformance encoder /embed serves
+  # because this dev build passes BAKE_EMBEDDERS=1, as production now does too (see below);
+  # subsequent builds reuse it unless models.json / embedders.json / download.js, the build
+  # args or the lockfile change.
+  classify:
+    build:
+      context: ./classify-service
+      # The groundedness head's weights are a private HF repo — the build needs read access.
+      # `export HF_TOKEN=...` in the SAME shell before building (or any build.secrets/no-cache
+      # rebuild); the token never lands in the image (BuildKit secret mount, not a build ARG).
+      # Putting it in .env is NOT enough on its own: Compose only auto-loads .env for ${...}
+      # substitution in this file's text, not as a real process env var — and the `environment:`
+      # secret source below needs a genuine exported shell variable. `task dev:local` does not
+      # export it for you.
+      # PNPM_VERSION single source — see the frontend service.
+      args:
+        PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
+        # Bake the SOP-conformance encoder (~1.7 GB) into the DEV image, so `task dev` can
+        # run a compile-service fit and a conformance sweep against a real /embed. The
+        # production passes it too, but only after the Fargate task was raised to 8 GB (see
+        # classify-service/README.md) — which is why it stays an opt-in build arg rather than an
+        # unconditional bake: the order is load-bearing. Local cost: a longer first build and
+        # the 8g mem_limit below.
+        BAKE_EMBEDDERS: "1"
+      secrets:
+        - hf_token
+    image: evals-classify-dev:latest
+    expose:
+      - "8080"
+    ports:
+      # Publish to the host so classifiers/ eval scripts (uv run python -m <module>.eval_baseline)
+      # can reach the real served head directly from outside Docker. Dev-only; loopback-bound.
+      - "127.0.0.1:18080:8080"
+    environment:
+      PORT: "8080"
+      # Must equal the backend's EVALS_OBSERVER_ENCODER_API_KEY.
+      CLASSIFY_API_KEY: ${EVALS_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
+    # 3g held the original 4 heads; adding groundedness as a 5th (MiniCheck-RoBERTa-Large fp32,
+    # ~1.4 GB resident) briefly needed 6g on 2026-07-15 — but the 2026-07-16 catalog reduction
+    # dropped refusal/jailbreak/unsafe_text, back down to 2 heads (frustration + groundedness).
+    # Re-measured directly (docker run --memory=Ng): 2g OOM-kills (exit 137), 3g and 4g both hold
+    # comfortably in isolation — but on a busy local VM (classifiers profile / dataset streaming /
+    # concurrent backend) 4g still OOM-kills under load, so dev ran at 6g, matching prod's 6 GB.
+    # 2026-08-11: this DEV image bakes the conformance encoder (BAKE_EMBEDDERS=1 above —
+    # gte-large-en-v1.5, ~1.7 GB fp32) and boot pre-warm loads it too. Re-measured the same way:
+    # 4g is OOM-killed during warmup, 5g and 6g hold, settling at ~4.5 GiB resident. 6g in
+    # isolation is the new 4g — one gap of headroom on a busy VM — so dev goes to 8g. Prod is
+    # unaffected while it keeps building without the arg; turning it on there requires resizing
+    # the ECS task 6 GB -> 8 GB first (infra repo, `classify_memory`; tessaryai/infrastructure#14).
+    # Prod's 6 GB would boot the encoder, but it is sized to leave the onnxruntime arena ~4 GB of
+    # high-water and the encoder eats most of that — hence 8 GB rather than "it fits".
+    mem_limit: 8g
+    volumes:
+      # Pick up server.js edits on `--force-recreate` without an image rebuild.
+      - ./classify-service/server.js:/app/server.js:ro
+    networks:
+      - evals
+
+  # ---------------------------------------------------------------------------
+  # Classifier-training tooling (classifiers/PROGRAM.md §3) — DEV-ONLY, opt-in.
+  #
+  # All six services sit behind the `classifiers` compose profile so plain `task dev`
+  # (and dev:slim) never pays for them; start them with `task classifiers:up` when doing
+  # classifier data/annotation work. NONE of this ever goes to the prod compose/task
+  # definition — prod is deployment-only for classifiers (baked classify image + manifest).
+  #
+  # Argilla topology mirrors the official v2.8.0 example compose (server + background
+  # worker + postgres + single-node Elasticsearch + redis). UIs are loopback-bound:
+  #   Argilla http://localhost:16900   (SDK: ARGILLA_API_URL=http://localhost:16900,
+  #                                     ARGILLA_API_KEY=argilla.apikey — dev defaults,
+  #                                     override via .env)
+  #   MLflow  http://localhost:15000   (MLFLOW_TRACKING_URI=http://localhost:15000;
+  #                                     host port 15000 because macOS AirPlay squats :5000)
+  argilla:
+    image: argilla/argilla-server:v2.8.0
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16900:6900"
+    environment: &argilla-env
+      ARGILLA_HOME_PATH: /var/lib/argilla
+      ARGILLA_ELASTICSEARCH: http://argilla-elasticsearch:9200
+      ARGILLA_DATABASE_URL: postgresql+asyncpg://argilla:argilla@argilla-postgres:5432/argilla
+      ARGILLA_REDIS_URL: redis://argilla-redis:6379/0
+      # First-boot owner user (dev defaults; loopback-only service).
+      USERNAME: ${ARGILLA_USERNAME:-argilla}
+      PASSWORD: ${ARGILLA_PASSWORD:-argilla-dev-password}
+      API_KEY: ${ARGILLA_API_KEY:-argilla.apikey}
+      WORKSPACE: classifiers
+    volumes:
+      - argilla-data:/var/lib/argilla
+    depends_on:
+      - argilla-postgres
+      - argilla-elasticsearch
+      - argilla-redis
+    networks:
+      - evals
+
+  # Runs Argilla's RQ background jobs (dataset import/export etc.). Same image + env,
+  # worker entrypoint — the official compose's split.
+  argilla-worker:
+    image: argilla/argilla-server:v2.8.0
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    command: sh -c 'python -m argilla_server worker --num-workers $${BACKGROUND_NUM_WORKERS}'
+    environment:
+      <<: *argilla-env
+      BACKGROUND_NUM_WORKERS: "2"
+    volumes:
+      - argilla-data:/var/lib/argilla
+    depends_on:
+      - argilla-postgres
+      - argilla-elasticsearch
+      - argilla-redis
+    networks:
+      - evals
+
+  # Argilla's own metadata DB — deliberately NOT the platform postgres (separate lifecycle,
+  # disposable annotation-tool state, and the platform volume is already initialized so it
+  # can't grow a second database via env alone). postgres:14 = what upstream tests against.
+  argilla-postgres:
+    image: postgres:14
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: argilla
+      POSTGRES_PASSWORD: argilla
+      POSTGRES_DB: argilla
+    volumes:
+      - argilla-postgres-data:/var/lib/postgresql/data
+    networks:
+      - evals
+
+  argilla-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    mem_limit: 1g
+    volumes:
+      - argilla-elastic-data:/usr/share/elasticsearch/data
+    networks:
+      - evals
+
+  argilla-redis:
+    image: redis:7-alpine
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    networks:
+      - evals
+
+  # Experiment tracking + model registry (registry aliases @shadow/@beta/@ga mirror the
+  # ClassifierModule Lifecycle ladder). SQLite backend + local artifact store in a named
+  # volume — single-user dev tracking, nothing shared. The publish below is LOOPBACK-only:
+  # when the WSL2 training box needs to log here, tunnel (ssh -L 15000:localhost:15000 to
+  # this machine) or deliberately rebind the publish to a LAN interface at that point —
+  # don't widen it by default. (Alternative: train logs to a local file store and syncs.)
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.14.0
+    profiles: ["classifiers"]
+    restart: unless-stopped
+    command: >-
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    ports:
+      - "127.0.0.1:15000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    networks:
+      - evals
+
+networks:
+  evals:
+    driver: bridge
+
+volumes:
+  maven-cache:
+  frontend-node-modules:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  alloy-data:
+  # The launcher's work volume, shared with every sibling agent container it spawns. Explicit
+  # `name:` for the same reason as docker-compose.yml's — the launcher hands this exact string to
+  # the Engine API, and a project prefix would break the match. See that file for the mechanism.
+  sandbox-work:
+    name: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
+  # classifiers profile (dev-only tooling)
+  argilla-data:
+  argilla-postgres-data:
+  argilla-elastic-data:
+  mlflow-data:
+
+secrets:
+  # Sourced from the HF_TOKEN env var at BUILD time — read access to the private
+  # tessaryai/MiniCheck-RoBERTa-Large-onnx repo backing classify-service's groundedness head.
+  # Only needed for a classify image build/rebuild, not for `docker compose up` on an
+  # already-built image. MUST be a real exported shell variable (`export HF_TOKEN=...`) in the
+  # same shell running `docker compose build`/`up --build` — Compose's `environment:` secret
+  # source reads the invoking process's actual env, NOT .env-file interpolation, so having it
+  # only in .env silently resolves to an empty secret (confirmed: this is exactly what broke a
+  # `task dev:local` run on 2026-07-15 — "Unauthorized access" pulling the private repo).
+  hf_token:
+    environment: HF_TOKEN

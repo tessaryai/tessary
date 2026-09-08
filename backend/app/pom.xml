@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.tessary</groupId>
+        <artifactId>backend</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>app</artifactId>
+    <description>
+        The assembly module: EvalsApplication, the Spring configuration that boots it, and every
+        @SpringBootTest integration test (they need the @SpringBootConfiguration only this module
+        has). It declares the runtime starters the application needs and no library APIs of its own
+        - the layers below own those. See docs/modules.md.
+    </description>
+
+    <dependencies>
+        <!-- The top of the layer chain: `surfaces` transitively carries every module below it,
+             which is what makes this module pure assembly. See docs/modules.md. -->
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>surfaces</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Declared directly, not just inherited through the chain: app itself uses open.* types
+             (errors, jobqueue, obs) in ~39 places, and a module should declare what it compiles
+             against. This is the one place the "depend on the layer below" shorthand is widened. -->
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>shared</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+        <!-- JSpecify nullness annotations (@Nullable) — the contract NullAway checks. -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-parameter-names</artifactId>
+        </dependency>
+        <!-- Anthropic via AWS Bedrock. Pulls the AWS SDK v2 Bedrock-runtime
+             client transitively; auth defaults to the SDK's DefaultCredentialsProvider
+             (env vars, instance profile, etc.) and a per-model_config row can override
+             with sealed access-key fields. -->
+        <!-- AWS Lambda Invoke client for deterministic-grader execution
+             (LambdaSandboxRunner). Reuses the AWS SDK v2 core + apache sync
+             client + DefaultCredentialsProvider (instance profile) already
+             pulled by langchain4j-bedrock. Version comes from the awssdk BOM
+             above, so it stays aligned with the Bedrock-runtime client. -->
+        <!-- SigV4 signing for the bedrock-mantle endpoint (MantleHttpClient). Mantle speaks the
+             OpenAI wire, so its requests are made by langchain4j's HTTP client rather than an AWS
+             SDK client — which means we sign them ourselves with AwsV4HttpSigner instead of getting
+             it for free. Both of these arrive transitively today (http-auth-aws via the Bedrock
+             client, http-client-jdk via langchain4j-open-ai), but they are compile-time imports now,
+             so they are declared rather than relied on. Versions come from the BOMs above. -->
+        <!-- Postgres + JdbcClient for all persistence. We use JdbcClient directly
+             (not JPA) — fits the YAML-first ethos and keeps persistence simple.
+             Liquibase manages schema migrations. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Liquibase: portable schema migrations. Migrations live in
+             classpath:/db/changelog/. -->
+        <dependency>
+            <groupId>org.liquibase</groupId>
+            <artifactId>liquibase-core</artifactId>
+        </dependency>
+
+
+        <!-- Observability: export traces + metrics + logs via OTLP to the
+             on-host Grafana Alloy agent (see observability/alloy/config.alloy).
+             Spring Boot 4 split observability autoconfig into per-feature
+             modules; spring-boot-starter-actuator no longer pulls tracing/OTel.
+             spring-boot-starter-opentelemetry is the unified bundle — it brings
+             spring-boot-opentelemetry (SDK + OTLP logs), the OTLP metrics
+             registry, and crucially spring-boot-micrometer-tracing-opentelemetry,
+             which provides the OtelTracer bridge + OTLP span exporter autoconfig
+             (OpenTelemetryTracingAutoConfiguration / OtlpTracingAutoConfiguration).
+             Endpoints are set in application-production.yaml under
+             management.opentelemetry.{tracing,logging}.export.otlp and
+             management.otlp.metrics.export. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
+        <!-- Logback -> OpenTelemetry Logs bridge. Not pulled by the starter; the
+             OTEL appender is declared in logback-spring.xml and attached to the
+             autoconfigured SDK post-refresh in OtelExportConfig (Logback parses
+             its config before Spring beans exist). -->
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+        </dependency>
+        <!-- JSON-formatted logback output for prod. Alloy parses the JSON body
+             to promote level/service/trace fields to Loki stream labels. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>9.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers: the backend test datasource. A JVM-singleton
+             pgvector/pgvector:pg16 container (TestPostgres) backs every @SpringBootTest,
+             so tests run on real Postgres — identical to dev/prod — for the whole substrate.
+             (The image is pgvector/pgvector:pg16 for compose parity, D3, even though the
+             baseline no longer activates the extension and there is no VectorIndex seam any
+             more — both left with the rest of the vector substrate, #1116.) Docker is
+             required to run the suite. Versions come from the testcontainers-bom imported
+             above. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-redpanda</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- ArchUnit: the documented package-by-feature conventions
+             (docs/backend-architecture.md) enforced as JUnit 5 tests. Test-scoped,
+             runs inside `mvn test`; bundles its own ASM (1.4.x reads Java 25 bytecode). -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- springdoc: code-first OpenAPI derived from the controllers. The 3.x line
+             targets Spring Boot 4 / Spring Framework 7 (2.x = Boot 3); pinned explicitly since springdoc
+             is not in the Boot BOM. The -api (not -ui) starter: we generate + check in the spec, we do not
+             ship Swagger-UI. -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+            <version>3.1.0</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <!-- The test tree as a jar, for tessary-paid/assembly (#882): a paid @SpringBootTest reuses the
+                     same fixtures (TenantFixture, SubstrateV2Fixtures, the initializers) the open suite runs on,
+                     without an open module naming the overlay and without moving tenant- or trace-shaped
+                     fixtures below the layer that owns their types (devdocs/modules.md). -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <!-- The repackage goal is bound by the spring-boot-starter-parent default
+                     execution; no explicit execution needed. The prod bootJar no longer
+                     carries any embedded-Postgres binaries — the test datasource is a
+                     Testcontainers pgvector container (test scope), so nothing DB-native
+                     leaks into the shipped artifact. -->
+                <configuration>
+                    <!-- `exec`: the repackaged boot jar becomes app-*-exec.jar and the plain jar stays
+                         the main artifact, so the paid overlay's assembly module (epic 5, #943/#882)
+                         can depend on `app` as an ordinary classpath jar. backend/Dockerfile extracts
+                         the exec jar. -->
+                    <classifier>exec</classifier>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <!-- `evals.plan.default-key=enterprise` used to live here, so the suite ran with
+                     every capability on. It is gone with the plan tiers (open-core epic 1 issue 1):
+                     the open edition has no tiers, and the open default is already every capability
+                     ON except behavior_drift, sop_conformance and triage_automatic. Removing it in
+                     the same commit is deliberate — left in place it would have kept a stale
+                     property deciding nothing while looking like it decided everything, and any
+                     test that had been passing behind the enterprise tier would have gone on
+                     passing for the wrong reason. A test that wants a capability in a non-default
+                     state now writes an org_feature_flag row or stubs FeatureFlags. -->
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>de.thetaphi</groupId>
+                <artifactId>forbiddenapis</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+            </plugin>
+            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+                 from the aggregator's pluginManagement (prepare-agent + report), same
+                 no-configuration pattern as every other plugin above. No coverage gate. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

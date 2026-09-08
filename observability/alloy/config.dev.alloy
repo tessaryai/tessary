@@ -1,0 +1,215 @@
+// =============================================================================
+// Grafana Alloy Configuration for tessary — LOCAL DEV
+// =============================================================================
+// Dev-only, trimmed pipeline: receive OTLP from the backend, keep the gen_ai
+// (judge) + run-root spans, push them to Langfuse. Nothing else.
+//
+// Why a separate file instead of reusing the prod config.alloy: the prod config
+// also ships to Grafana Cloud (Tempo/Loki/Prometheus) and scrapes host metrics.
+// Two of those components are *fatal config-evaluation errors* when run without
+// the prod host mounts / SSM creds — they take the whole agent down on load, not
+// "back off at runtime" as once assumed:
+//   - prometheus.exporter.unix.host  needs /host/proc + /host/sys (prod bind-mounts
+//     /proc and /sys; dev intentionally does not) → "could not read /host/proc".
+//   - otelcol.auth.basic.grafana_cloud_tempo  needs non-empty creds → "no credential
+//     source provided" when GRAFANA_CLOUD_* are blank locally.
+// Dropping both (and the unused Grafana Cloud exporters) leaves a clean local
+// pipeline that boots with just the Langfuse keys.
+//
+// Required environment (from repo-root .env, the same keys the pull-ingest adapter uses):
+//   LANGFUSE_OTLP_ENDPOINT   base OTLP URL, e.g. https://cloud.langfuse.com/api/public/otel
+//   LANGFUSE_PUBLIC_KEY      Langfuse project public key (pk-lf-...)
+//   LANGFUSE_SECRET_KEY      Langfuse project secret key (sk-lf-...)
+//   DEPLOYMENT_NAME          stamped as deployment.environment (defaults to "development")
+//
+// With blank Langfuse keys the push just 401s and backs off — the agent still runs.
+// Note: prompt-cache tokens (cache_read / cache_creation) only show non-zero once the
+// shared system prefix clears the provider's minimum cacheable length (OpenAI 1024,
+// Anthropic Sonnet/Opus 1024, Anthropic Haiku 2048, Bedrock ~1024). Small traces cache
+// nothing and show 0 — that's expected, not a failure.
+
+// =============================================================================
+// OTLP Receiver — accepts telemetry from the backend. Metrics and logs are
+// dropped here (empty output); only traces flow onward to the Langfuse branch.
+// =============================================================================
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = []
+    logs    = []
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+// =============================================================================
+// Batch Processor
+// =============================================================================
+otelcol.processor.batch "default" {
+  timeout         = "1s"
+  send_batch_size = 1024
+
+  output {
+    traces = [otelcol.processor.attributes.default.input]
+  }
+}
+
+// =============================================================================
+// Attributes Processor — stamp service namespace + deployment env on every span
+// =============================================================================
+otelcol.processor.attributes "default" {
+  action {
+    key    = "service.namespace"
+    value  = "tessary"
+    action = "upsert"
+  }
+
+  action {
+    key    = "deployment.environment"
+    value  = env("DEPLOYMENT_NAME")
+    action = "upsert"
+  }
+
+  output {
+    // Langfuse is the DEFAULT and is always live. The Grafana Cloud branch runs in
+    // parallel and is gated by DEV_GRAFANA_EXPORT (see below), so "both" is the
+    // enabled state, never "instead of".
+    traces = [
+      otelcol.processor.filter.langfuse_llm_only.input,
+      otelcol.processor.filter.grafana_gate.input,
+    ]
+  }
+}
+
+// =============================================================================
+// Grafana Cloud branch — OFF by default, enabled with DEV_GRAFANA_EXPORT=true
+// =============================================================================
+// Why a filter and not a conditional: Alloy's config language has no `if`, so a
+// component cannot be conditionally instantiated. Two consequences shaped this:
+//
+//  1. The gate must be on the DATA path, not the component graph. The flag's value
+//     is interpolated into the OTTL drop-expression at config-evaluation time:
+//       DEV_GRAFANA_EXPORT=true  -> `"true" != "true"`  = false -> drop nothing
+//       anything else            -> `"<value>" != "true"` = true -> drop everything
+//     (an otelcol filter's `span` list states what to DROP, not what to keep).
+//  2. The credentials must be non-empty even when the branch is disabled, because
+//     otelcol.auth.basic with blank creds is a FATAL config-evaluation error that
+//     takes the whole agent down on load (this is the exact failure documented in
+//     the header of this file). coalesce() substitutes a placeholder so a dev with
+//     no Grafana creds still boots; with the gate closed nothing is ever sent to it.
+otelcol.processor.filter "grafana_gate" {
+  error_mode = "ignore"
+
+  traces {
+    span = ["\"" + env("DEV_GRAFANA_EXPORT") + "\" != \"true\""]
+  }
+
+  output {
+    traces = [otelcol.exporter.otlp.grafana_cloud_tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "grafana_cloud_tempo" {
+  client {
+    endpoint = coalesce(env("GRAFANA_CLOUD_TEMPO_URL"), "tempo-disabled.invalid:443")
+    auth     = otelcol.auth.basic.grafana_cloud_tempo.handler
+  }
+
+  retry_on_failure {
+    max_interval     = "60s"
+    max_elapsed_time = "5m"
+  }
+}
+
+otelcol.auth.basic "grafana_cloud_tempo" {
+  username = coalesce(env("GRAFANA_CLOUD_TEMPO_USERNAME"), "disabled")
+  password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+}
+
+// =============================================================================
+// Profiling receiver — always on in dev
+// =============================================================================
+// Ungated on purpose, and it does NOT follow the DEV_GRAFANA_EXPORT flag: the
+// default target is the local `pyroscope` container from docker-compose.dev.yml,
+// which is the whole point of local profiling — a flame graph you can read at
+// http://localhost:4040 with no cloud account involved. Point
+// DEV_PYROSCOPE_ENDPOINT at Grafana Cloud (with the PYROSCOPE creds) to rehearse
+// the production path instead.
+pyroscope.receive_http "default" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = 4040
+  }
+
+  forward_to = [pyroscope.write.dev.receiver]
+}
+
+pyroscope.write "dev" {
+  endpoint {
+    url = coalesce(env("DEV_PYROSCOPE_ENDPOINT"), "http://pyroscope:4040")
+
+    basic_auth {
+      username = coalesce(env("GRAFANA_CLOUD_PYROSCOPE_USERNAME"), "disabled")
+      password = coalesce(env("GRAFANA_CLOUD_API_KEY"), "disabled")
+    }
+  }
+
+  external_labels = {
+    "deployment_environment" = coalesce(env("DEPLOYMENT_NAME"), "development"),
+    "service_namespace"      = "tessary",
+  }
+}
+
+// =============================================================================
+// Langfuse branch — keep eval spans (LLM generations + named product roots)
+// =============================================================================
+// Platform LLM calls stamp gen_ai.*; non-LLM product roots (agentic sandboxes,
+// deterministic-grader-run) stamp langfuse.trace.name (equal to the static kebab
+// span name — see docs/reference/telemetry-naming.md). Live grading paths pass
+// null parentTrace today (each call is its own Langfuse trace). This filter keeps
+// spans that have EITHER attribute and drops everything else.
+otelcol.processor.filter "langfuse_llm_only" {
+  error_mode = "ignore"
+
+  traces {
+    span = [
+      `attributes["gen_ai.operation.name"] == nil and attributes["langfuse.trace.name"] == nil`,
+    ]
+  }
+
+  output {
+    traces = [otelcol.exporter.otlphttp.langfuse.input]
+  }
+}
+
+// Langfuse ingests OTLP over HTTP/protobuf only (no gRPC). The otlphttp exporter
+// appends /v1/traces to the base endpoint. Auth is HTTP Basic over
+// {public_key}:{secret_key}, the same credential shape the pull-ingest adapter uses.
+otelcol.exporter.otlphttp "langfuse" {
+  client {
+    endpoint = coalesce(env("LANGFUSE_OTLP_ENDPOINT"), "https://langfuse-disabled.invalid")
+    auth     = otelcol.auth.basic.langfuse.handler
+  }
+
+  retry_on_failure {
+    max_interval     = "60s"
+    max_elapsed_time = "5m"
+  }
+}
+
+otelcol.auth.basic "langfuse" {
+  // coalesce()-wrapped like the endpoint above and like config.alloy's parallel block
+  // (config.alloy:155-156) — blank credentials are otherwise a FATAL
+  // config-evaluation error ("no credential source provided"), not a runtime 401,
+  // taking the whole agent down on load exactly like the endpoint bug this file's own
+  // header already documents. Caught by an independent live-boot re-verification with
+  // blank Langfuse env vars during #864's landing, after the endpoint-only fix left
+  // this parallel block unfixed.
+  username = coalesce(env("LANGFUSE_PUBLIC_KEY"), "disabled")
+  password = coalesce(env("LANGFUSE_SECRET_KEY"), "disabled")
+}

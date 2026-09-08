@@ -1,0 +1,46 @@
+# What no OPEN-edition artifact may contain (epic 6 clause 3, #1148). Read by
+# scripts/lib/open-artifact-contents.py over an exported image filesystem. One rule per line:
+#
+#   <kind>|<pattern>|<why>
+#
+# The pattern may itself contain `|` (a regex alternation): readers split the kind off the front
+# and the why off the back, never the middle.
+#
+# kinds:
+#   path      a substring of any file path in the image filesystem
+#   entry     a path substring of any entry inside any .jar/.zip in the image, so it matches at the
+#             root of an extracted jar and under BOOT-INF/classes/ in a fat one (the paid overlay's
+#             whole class tree sits under one package, and its Liquibase lane under one directory)
+#   jar       a substring of a jar's file name, in the image or nested inside another jar (a
+#             dependency only the paid overlay declares)
+#   ext       a file extension that means a trained model weight, in any image (.pth is not
+#             listed: Python's site-packages/*.pth files share it)
+#   text      a Python regular expression that must not match the served frontend bundle (/srv):
+#             the routes only the paid edition's controllers serve, so an open bundle carrying one
+#             is calling a paid surface. Anchored where the open edition has a same-named route at
+#             another level (the open project `/unarchive` versus the paid org `/unarchive`): the
+#             paid client builds `/api/orgs/${enc(orgSlug)}/<route>`, so the rule matches the
+#             template literal `orgs/${...}/<route>`. Derived from the paid OpenAPI spec minus the
+#             open one; `check-open-artifacts.sh --derive` reds this file when that difference
+#             gains a path whose last segment no rule names.
+#
+# What is NOT here, and why: the open capability enum carries paid keys (BEHAVIOR_DRIFT,
+# SOP_CONFORMANCE) on purpose, because the open edition must ANSWER `unavailable` for them; a
+# rule on those names would red the open image for being correct.
+path|tessary-paid|the overlay's own directory name, in any image
+path|/app/paid|where the paid backend image mounts the overlay's jars
+entry|ai/tessary/paid/|every paid class lives under this package
+entry|db/changelog/paid/|the paid Liquibase lane
+jar|launchdarkly|LaunchDarkly is the paid edition's only flag control (epic 5 decision 3); the open edition has DbFeatureFlags
+ext|.onnx|trained model weight
+ext|.safetensors|trained model weight
+ext|.pt|trained model weight
+ext|.gguf|trained model weight
+ext|.ckpt|trained model weight
+text|/behavior/profiles|paid: behaviour-drift profiles (the drift overlay module)
+text|/conformance/fit-report|paid: SOP conformance fit report (the conformance overlay module)
+text|/plan/quotas|paid: plan and quota administration (the plan overlay module)
+text|orgs/\$\{[^}]{1,80}\}/plan\b|paid: an org's plan (the plan overlay module); the open edition has no org-level /plan route
+text|orgs/\$\{[^}]{1,80}\}/(archive|unarchive|transfer-ownership)\b|paid: org lifecycle (the plan overlay module); the open edition's /archive and /unarchive are project-level
+text|/api/me/orgs\b|paid: the multi-org listing (the plan overlay module)
+text|/internal/slack/mention|paid: the Slack app's mention route (the slack overlay module)
