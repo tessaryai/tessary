@@ -14,7 +14,7 @@
     "acorn-walk": "^8.3.5",
     "e2b": "^2.46.1",
     "re2": "^1.26.1",
-    "undici": "^6.28.0"
+    "undici": "^6.28.1"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
