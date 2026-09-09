@@ -338,17 +338,25 @@ public class TenantService {
     }
 
     /**
-     * Run {@code action} once this transaction commits, or immediately when there is no transaction to
-     * wait for. A rollback drops it, which is right: nothing was revoked, so nothing needs evicting.
+     * Run {@code action} once this transaction has finished, whichever way it finished, or immediately
+     * when there is no transaction to wait for.
+     *
+     * <p><b>{@code afterCompletion}, not {@code afterCommit}, and the difference is the whole point.</b>
+     * Spring skips {@code afterCommit} in exactly one case: {@code doCommit} threw while the database had
+     * in fact committed. For a cache eviction that is the worst case to skip — the revocation is durable
+     * and the cache still answers for the key — and it does not self-heal, because the retry finds
+     * {@code markDeleting} already false, returns {@code ALREADY_ACCEPTED}, and never reaches this line
+     * again. {@code afterCompletion} always runs. On a genuine rollback it evicts entries that did not
+     * need evicting, which costs one bcrypt on their next request and nothing else.
      */
-    private static void afterCommit(Runnable action) {
+    private static void afterCompletion(Runnable action) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             action.run();
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
-            public void afterCommit() {
+            public void afterCompletion(int status) {
                 action.run();
             }
         });
@@ -430,7 +438,7 @@ public class TenantService {
             return ProjectDeleteAcceptance.ALREADY_ACCEPTED;
         }
         int revoked = apiKeys.revokeAllForProject(projectId, now);
-        // AFTER the commit, not here. The UPDATE above is deliberately synchronous so nothing new lands
+        // AFTER the transaction, not here. The UPDATE above is deliberately synchronous so nothing new lands
         // in a project on its way out, and the verified-token cache has to be told or it keeps answering
         // for those keys — but evicting inside this transaction reopens the same window from the other
         // side: a verification on another connection reads the bumped generation, then reads the row this
@@ -439,7 +447,7 @@ public class TenantService {
         // authenticate on the key alone, so the stale entry is a writable deleted project for a full TTL.
         // ApiKeyService.revoke is safe from this only because it is NOT transactional — its UPDATE
         // autocommits before it evicts.
-        afterCommit(() -> tokenCache.invalidateProject(projectId));
+        afterCompletion(() -> tokenCache.invalidateProject(projectId));
         deleteJobs.enqueue(projectId, now);
         return new ProjectDeleteAcceptance(true, revoked);
     }

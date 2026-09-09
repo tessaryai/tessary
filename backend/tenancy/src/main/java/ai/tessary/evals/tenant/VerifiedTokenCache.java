@@ -53,6 +53,15 @@ import org.springframework.stereotype.Component;
  * from a read that began before the current generation. The window is small and the consequence was a
  * full TTL of accepting a credential the operator had just withdrawn.
  *
+ * <p><b>If you are adding a revocation path, this is the paragraph you need.</b> Evict as you revoke —
+ * and if your method is {@code @Transactional}, evict <em>after</em> the transaction completes, never
+ * inside it. Evicting inside is not merely early: under READ COMMITTED a verification on another
+ * connection reads the bumped generation, then reads your row as still live because you have not
+ * committed, and caches it with a generation nothing will invalidate again. That is the same window
+ * reopened from the other side, and it is how this class's second bug was written.
+ * {@code TenantService.deleteProjectAsync} is the worked example; {@link ApiKeyService#revoke} needs no
+ * ceremony only because it is not transactional and its UPDATE autocommits before it evicts.
+ *
  * <p>{@link TokenCacheProperties#getTtlSeconds()} is the backstop for changes that reached the database
  * without going through this class at all — a hand-edited row, a restored backup, another replica — and
  * not the primary control. The invalidations scan rather than keeping an id index: the map is bounded at
