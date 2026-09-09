@@ -1,10 +1,9 @@
-<p align="center">
-  <a href="https://tessary.ai"><img src="docs/logo/tessary-logo.png" alt="Tessary" width="88"></a>
-</p>
+<h1 align="center">
+  <img src="docs/logo/tessary-logo.png" alt="" width="48"><br>
+  Tessary
+</h1>
 
-<h1 align="center">Tessary</h1>
-
-<p align="center">Catch the agent failures that sampling misses, then find out why they happened.</p>
+<p align="center">Stop AI agents from failing silently in production.</p>
 
 <p align="center">
   <a href="./docs/index.mdx">Docs</a> ·
@@ -22,8 +21,6 @@
 Tessary is an open-source agent reliability platform for engineering teams running AI agents in production. It watches every trace an agent produces, flags the ones that look wrong with cheap classifiers, groups related findings into a case, and explains the case with an RCA (root-cause analysis) run grounded in your own repository.
 
 Agents develop production issues without crashing or returning an error. A prompt edit shifts how often a tool gets called, a model update changes what a response looks like, and nothing in the logs turns red. Most teams sample a few percent of traffic to look for this. Sampling catches the large regressions and structurally misses the small ones, and once an agent is mature, most issues are small. Tessary reads every trace instead, and keeps the per-trace check cheap enough to afford at production volume.
-
-<!-- Screenshot: a case on the Triage page with its RCA report open. Save it as docs/images/readme-case.png and replace this comment with the image. -->
 
 ## Get running
 
