@@ -86,8 +86,8 @@ public final class QueryDtos {
     /**
      * {@code search()} request: structured/keyword filter search returning matching rows (not
      * aggregated). {@code mode} defaults to, and must be, {@code keyword} — a prior {@code semantic}
-     * mode (kNN over a vector index) was removed along with the rest of the embedding substrate
-     * (#1116); any other {@code mode} value is a {@code 400 UNKNOWN_SEARCH_MODE}. {@code cursor} is
+     * mode (kNN over a vector index) was removed along with the rest of the embedding substrate;
+     * any other {@code mode} value is a {@code 400 UNKNOWN_SEARCH_MODE}. {@code cursor} is
      * the opaque keyset page token returned as {@code next_cursor}.
      */
     public record SearchRequest(

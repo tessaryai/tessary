@@ -88,36 +88,32 @@ public class ClassifierService {
     }
 
     /**
-     * Seed the built-in catalog into a project, idempotently: a missing built-in is inserted enabled;
-     * an existing one whose catalog version advanced has its definition re-synced (enable/disable state
-     * preserved). Returns the number newly inserted.
+     * Seed the built-in catalog into a project, idempotently: a missing built-in is inserted
+     * enabled; an existing one whose catalog version advanced has its definition re-synced
+     * (enable/disable state preserved). Returns the number newly inserted.
      *
-     * <p>Two triggers, both independent of the repo, the grader set AND the trace stream —
-     * auto-classification reads traces, so gating it on the first two would be wrong, and gating it on
-     * the third would make a capability flag unable to reach a project until that project happened to
-     * send a span: {@link ClassifierSeedListener} on project creation, and {@link #resyncBuiltIns} from
-     * {@code ClassifierCatalogWorker} for every ACTIVE project (which self-heals projects created before
-     * the listener existed). The worker's first sweep starts from a null cursor, so pre-existing trace
-     * history is classified immediately. Never called from a read path.
+     * <p>Two triggers: {@link ClassifierSeedListener} on project creation, and {@link
+     * #resyncBuiltIns} from {@code ClassifierCatalogWorker} for every active project, which
+     * self-heals projects created before the listener existed. The worker's first sweep starts
+     * from a null cursor, so pre-existing trace history is classified immediately. Never called
+     * from a read path.
      *
-     * <p><b>Which built-ins are candidates at all is the flag layer's decision</b> ({@link
-     * #availableBuiltIns}): a classifier whose capability is off for this project's org is not seeded, so a
-     * partner's catalog is the launch three and ours is all of them, with no code difference between the two.
-     * A project whose org cannot be resolved seeds nothing rather than seeding everything — the reconcile
-     * retries, and an org-less project is a bug rather than a licence.
+     * <p>Which built-ins are candidates at all is the flag layer's decision ({@link
+     * #availableBuiltIns}): a classifier whose capability is off for this project's org is not
+     * seeded. A project whose org cannot be resolved seeds nothing rather than seeding
+     * everything; the reconcile retries, and an org-less project is a bug, not a licence.
      */
     public int seedBuiltIns(String projectId) {
         return seedBuiltIns(projectId, withheldBuiltInKeys(projectId), signals.listByProject(projectId));
     }
 
     /**
-     * {@link #seedBuiltIns} over an already-resolved flag answer and an already-read row set — the form
-     * the periodic reconcile calls, so that one project costs a bounded number of queries rather than one
-     * per catalog module.
+     * {@link #seedBuiltIns} over an already-resolved flag answer and an already-read row set: the
+     * form the periodic reconcile calls, so one project costs a bounded number of queries rather
+     * than one per catalog module.
      *
-     * <p>The row set is read ONCE and indexed by key here, replacing a {@code findByKey} per built-in.
-     * That is what makes reconciling every project (not merely every project with traffic) affordable at
-     * the heartbeat cadence: the steady-state cost of a project whose catalog is already correct is one
+     * <p>The row set is read once and indexed by key here, replacing a {@code findByKey} per
+     * built-in. The steady-state cost of a project whose catalog is already correct is one
      * {@code classifier} read and one {@code org_plan} read, and it writes nothing.
      */
     private int seedBuiltIns(String projectId, Set<String> withheld, List<ClassifierRow> existingRows) {
@@ -140,13 +136,14 @@ public class ClassifierService {
                         b.defaultConfigJson(),
                         true,
                         b.version(),
-                        // Every built-in seeds ON. A classifier whose numbers we do not trust is held back
-                        // by its capability flag, not by a second switch in the catalog — see BuiltIn.
+                        // Every built-in seeds ON. A classifier whose numbers we do not trust is
+                        // held back by its capability flag, not by a second switch in the
+                        // catalog; see BuiltIn.
                         true,
-                        // The operating point the CATALOG declares for this built-in. It used to be a
-                        // hardcoded DISCOVERY for every one of them, which is right for a classifier
-                        // nobody has characterised — and wrong the moment one has been. Frustration
-                        // now declares TRACKING; see BuiltInClassifierCatalog for the measurement.
+                        // The operating point the catalog declares for this built-in: DISCOVERY
+                        // (high recall) is right for a classifier nobody has characterised yet;
+                        // frustration declares TRACKING once it has been. See
+                        // BuiltInClassifierCatalog for the measurement.
                         b.defaultMode(),
                         now,
                         now));
@@ -175,40 +172,28 @@ public class ClassifierService {
     }
 
     /**
-     * Re-sync a project against the current catalog, heartbeat-safe: a built-in whose catalog version
-     * advanced has its definition updated (state preserved), and a catalog built-in the project has
-     * never seen — including every built-in, for a project that has never been seeded at all — is
-     * inserted. The caller ({@code ClassifierCatalogWorker}) iterates every ACTIVE project, so this is
-     * also the self-heal path for projects created before {@link ClassifierSeedListener}: a project ends
-     * up with the catalog its org is entitled to whether or not anyone ever ran generation, and whether
-     * or not it has ever sent a trace.
+     * Re-sync a project against the current catalog, heartbeat-safe: a built-in whose catalog
+     * version advanced has its definition updated (state preserved), and any catalog built-in
+     * the project has never seen is inserted, including every built-in for a project that has
+     * never been seeded. The caller ({@code ClassifierCatalogWorker}) iterates every active
+     * project, so this also self-heals projects created before {@link ClassifierSeedListener}.
      *
-     * <p><b>Trace traffic is not the trigger and must never become it again.</b> This ran from the sweep
-     * heartbeat's loop over {@code projectsWithObservations()}, which silently coupled catalog
-     * provisioning to ingestion: a project with zero spans was invisible to the scan, so switching a
-     * classifier's capability flag ON did nothing at all until that project's first span landed — at which
-     * point the missing classifiers appeared within a heartbeat and looked, from the outside, like the flag
-     * had taken a day to propagate. Which classifiers an org has is a licensing question and answers to the
-     * flag layer alone; it has no business waiting on telemetry.
+     * <p>Trace traffic is not the trigger and must not become it: which classifiers an org has
+     * is a licensing question the flag layer alone answers, and must not wait on a project's
+     * first span landing.
      *
-     * <p>Retiring a built-in DISABLES its row rather than deleting it, so an unconditional re-seed
-     * cannot resurrect one: a disabled retired row is not "missing" and is left alone.
+     * <p>Also the catalog's retirement path: a seeded {@code built_in=true} row whose
+     * {@code classifier_key} is no longer in the catalog is disabled, never deleted, so its
+     * detection history stays listable.
      *
-     * <p>Also the catalog's <em>retirement</em> path: a seeded {@code built_in=true} row whose
-     * {@code classifier_key} is no longer in the catalog (e.g. the removed {@code wins}/{@code forgetting}
-     * built-ins) is <b>disabled</b> — never deleted, so its detection history stays listable — which
-     * stops the per-heartbeat enqueue/no-op-sweep tax and makes the retirement visible instead of the
-     * signal silently going dark while still rendering as enabled.
-     *
-     * @return how many built-ins this pass newly inserted (0 for the steady state, which is every pass
-     *     after the first on a project whose flags have not moved)
+     * @return how many built-ins this pass newly inserted (0 in the steady state)
      */
     public int resyncBuiltIns(String projectId) {
         return resync(projectId, withheldBuiltInKeys(projectId));
     }
 
     /**
-     * {@link #resyncBuiltIns} for a caller that already holds the {@link Project} row — the periodic
+     * {@link #resyncBuiltIns} for a caller that already holds the {@link Project} row: the periodic
      * reconcile, which got it from {@code findActive()} and would otherwise re-read it per project purely
      * to recover the {@code org_id} the capability lookup needs.
      */
@@ -217,23 +202,21 @@ public class ClassifierService {
     }
 
     /**
-     * Seed-then-retire over ONE read of the project's rows. Both halves want the same row set and neither
-     * invalidates it for the other: seeding only inserts keys that ARE in the catalog, and retirement only
-     * touches keys that are NOT, so a row inserted a line earlier can never be a retirement candidate and
-     * the pre-seed snapshot is exact for both.
+     * Seed-then-retire over one read of the project's rows. Seeding only inserts keys that are
+     * in the catalog and retirement only touches keys that are not, so a row inserted a line
+     * earlier can never be a retirement candidate and the pre-seed snapshot is exact for both.
      */
     private int resync(String projectId, Set<String> withheld) {
         List<ClassifierRow> rows = signals.listByProject(projectId);
-        // Insert-if-missing + version re-sync are exactly seedBuiltIns' semantics, so this is one call.
-        // Unconditional: a never-seeded project is precisely the case that used to be stranded (no
-        // generation run ⇒ no classifiers ⇒ nothing to show).
+        // Insert-if-missing + version re-sync are exactly seedBuiltIns' semantics, so this is one
+        // call, unconditional: a never-seeded project gets the full catalog too.
         int inserted = seedBuiltIns(projectId, withheld, rows);
         retireDroppedBuiltIns(projectId, rows);
         return inserted;
     }
 
     /**
-     * The built-ins an org can have — catalog membership narrowed by the flag layer's {@link
+     * The built-ins an org can have: catalog membership narrowed by the flag layer's {@link
      * #withheldBuiltInKeys} answer. Empty when the project has no resolvable org, which is a data fault,
      * not a reason to hand out every classifier.
      */
@@ -244,22 +227,17 @@ public class ClassifierService {
     }
 
     /**
-     * The catalog keys this project's org does <b>not</b> have — every built-in module whose {@link
-     * ai.tessary.plan.Capability} the flag layer resolves off. The other half of {@link #availableBuiltIns}:
-     * that one decides what gets seeded, this one decides what an already-seeded project can still see and
-     * sweep.
+     * The catalog keys this project's org does <b>not</b> have: every built-in module whose
+     * {@link ai.tessary.plan.Capability} the flag layer resolves off. The other half of {@link
+     * #availableBuiltIns}: that one decides what gets seeded, this one decides what an
+     * already-seeded project can still see and sweep.
      *
-     * <p><b>Withholding never writes.</b> A flagged-off built-in's row keeps its {@code enabled} column
-     * exactly as the project left it and is suppressed at every read and dispatch instead — which is what
-     * makes flipping the flag back on a complete restoration rather than a guess at what the project had
-     * before. Writing {@code enabled=false} here would look identical to {@link #retireDroppedBuiltIns}'
-     * withdrawal, destroy the project's own switch position, and leave nothing to restore; the two stacked
-     * questions ("does this org have it" / "has this project switched it on") stay two, and flag-off wins
-     * the first without answering the second.
+     * <p>Withholding never writes. A flagged-off built-in's row keeps its {@code enabled} column
+     * exactly as the project left it and is suppressed at every read and dispatch instead, which
+     * is what makes flipping the flag back on a complete restoration rather than a guess.
      *
-     * <p>Fail-closed on an unresolvable project, matching seeding: a project with no org yields every
-     * catalog key withheld rather than every catalog key granted. In practice {@code project.org_id} is
-     * non-null, so this is the "project does not exist" case, which no caller reaches with a real id.
+     * <p>Fail-closed on an unresolvable project, matching seeding: a project with no org yields
+     * every catalog key withheld rather than every catalog key granted.
      */
     private Set<String> withheldBuiltInKeys(String projectId) {
         return projects.findById(projectId)
@@ -273,9 +251,9 @@ public class ClassifierService {
     }
 
     /**
-     * {@link #withheldBuiltInKeys} once the org is known — the capability layer's whole answer for one org,
-     * which is the part that actually costs anything ({@code CapabilityService#resolve} reads the org's
-     * overrides once, and the ten-second per-org cache in the adapter means it usually reads nothing).
+     * {@link #withheldBuiltInKeys} once the org is known: the capability layer's whole answer
+     * for one org, which is the part that actually costs anything ({@code
+     * CapabilityService#resolve} reads the org's overrides once, cached for ten seconds per org).
      */
     private Set<String> withheldForOrg(String orgId) {
         CapabilityService.CapabilitySet enabled = capabilities.resolve(orgId);
@@ -288,25 +266,23 @@ public class ClassifierService {
     /**
      * Whether a stored row reaches its project at all, given {@link #withheldBuiltInKeys}.
      *
-     * <p>Two kinds of row are always reachable and neither is an oversight. A <b>user-authored</b> row
-     * ({@code built_in=false}) is not in the catalog and so has no capability to be gated by — a promoted
-     * search belongs to the project that made it. A <b>retired</b> built-in — one whose key has left the
-     * catalog entirely — is likewise absent from the withheld set, so its already-disabled row stays
-     * listable and its detection history stays readable, which is the whole point of retiring rather than
-     * deleting.
+     * <p>Two kinds of row are always reachable. A user-authored row ({@code built_in=false}) is
+     * not in the catalog, so it has no capability to be gated by. A retired built-in, one whose
+     * key has left the catalog entirely, is likewise absent from the withheld set, so its
+     * already-disabled row stays listable and its detection history stays readable.
      */
     private static boolean reaches(ClassifierRow row, Set<String> withheldBuiltInKeys) {
         return !row.builtIn() || !withheldBuiltInKeys.contains(row.classifierKey());
     }
 
     /**
-     * Whether one stored classifier reaches this project's org — the boolean form of {@link #get}'s guard,
-     * for callers outside this slice that must SKIP rather than 404.
+     * Whether one stored classifier reaches this project's org: the boolean form of {@link #get}'s
+     * guard, for callers outside this slice that must skip rather than 404.
      *
-     * <p>The caller that needs it is alerting: a rule pointing at a classifier the org no longer has must
-     * stop evaluating, and it has to stop by being passed over rather than by an exception, because one bad
-     * rule cannot be allowed to take the whole heartbeat's rule loop down with it. Returns {@code false} for
-     * a classifier id that does not exist, which is the same skip and the same reason.
+     * <p>The caller that needs it is alerting: a rule pointing at a classifier the org no longer
+     * has must stop evaluating by being passed over rather than by an exception, so one bad rule
+     * cannot take the whole heartbeat's rule loop down with it. Returns {@code false} for a
+     * classifier id that does not exist, for the same reason.
      */
     public boolean reachesProject(String projectId, String classifierId) {
         return signals.findById(projectId, classifierId)
@@ -315,13 +291,13 @@ public class ClassifierService {
     }
 
     /**
-     * The DETECTOR KINDS whose classifier this org does not have — {@link #withheldBuiltInKeys} keyed the
-     * other way, for surfaces that hold a classifier's OUTPUT rather than the classifier itself.
+     * The detector kinds whose classifier this org does not have: {@link #withheldBuiltInKeys}
+     * keyed the other way, for surfaces that hold a classifier's output rather than the
+     * classifier itself.
      *
-     * <p>Findings are the case in point: {@code behavior_finding} carries no classifier column (three
-     * classifiers share the table), so the only exact way to ask "may this org see this row" is to derive
-     * the row's detector and look it up here. Resolved once per request and asked per row, never the
-     * reverse.
+     * <p>Findings are the case in point: the shared {@code finding} table carries no classifier
+     * column, so the only exact way to ask "may this org see this row" is to derive the row's
+     * detector and look it up here.
      */
     public Set<String> unavailableDetectorKinds(String projectId) {
         Set<String> withheldKeys = withheldBuiltInKeys(projectId);
@@ -334,17 +310,15 @@ public class ClassifierService {
     /**
      * Disable (never delete) enabled {@code built_in=true} rows whose key left the catalog.
      *
-     * <p>KEYS ON CATALOG MEMBERSHIP ONLY, and must keep doing so. {@code catalog.builtIns()} is every module
-     * the platform defines, unfiltered — deliberately NOT {@link #availableBuiltIns}. Retirement means "this
-     * classifier no longer exists"; a flag being off means "this org doesn't have it", and the two want
-     * opposite endings. Narrowing this set by the flag layer would disable a partner's flagged-off rows as
-     * though they had been withdrawn, and re-enabling the flag would not bring them back: the rows are no
-     * longer "missing", so the seeding path leaves them alone forever.
+     * <p>Keys on catalog membership only, deliberately not {@link #availableBuiltIns}: retirement
+     * means "this classifier no longer exists," a flag being off means "this org doesn't have it,"
+     * and the two want opposite endings. Narrowing this set by the flag layer would disable a
+     * partner's flagged-off rows as though they had been withdrawn, and re-enabling the flag
+     * would not bring them back.
      *
-     * <p>The flag-off ending is {@link #withheldBuiltInKeys}, which is a separate method on purpose and
-     * <b>writes nothing</b>. That is the structural reason the two cannot be confused: withdrawal is the only
-     * path here that touches a row, so any future edit that tries to express "flagged off" by disabling a row
-     * has to come through this method and past this paragraph.
+     * <p>The flag-off ending is {@link #withheldBuiltInKeys}, a separate method that writes
+     * nothing. Withdrawal is the only path here that touches a row, so any future edit that
+     * tries to express "flagged off" by disabling a row has to come through this method.
      */
     private void retireDroppedBuiltIns(String projectId, List<ClassifierRow> rows) {
         Set<String> catalogKeys =
@@ -362,28 +336,26 @@ public class ClassifierService {
     }
 
     /**
-     * A call-site fact a detector gates on has landed or changed — rewind every enabled signal that
-     * declares it, so the next sweep re-reads history that was scored {@code none()} only because the
-     * fact was missing at the time.
+     * A call-site fact a detector gates on has landed or changed: rewind every enabled signal
+     * that declares it, so the next sweep re-reads history that was scored {@code none()} only
+     * because the fact was missing at the time.
      *
-     * <p>This is the platform side of an ordering the product cannot avoid. The plugin refuses to
-     * assess a repo until correctly-tagged traces have reached the platform, and {@code
-     * call_site.output_schema}/{@code call_site.shape} are captured from the repo — so the traffic
-     * that unblocks synthesis is, always, traffic these built-ins could not score. Left alone the
-     * sweep cursor moves past it once and never returns, which reads in the product as "nothing
-     * malformed" rather than "never checked".
+     * <p>The traffic that unblocks the plugin's assessment of a repo is, always, traffic these
+     * built-ins could not score yet ({@code call_site.output_schema}/{@code call_site.shape} are
+     * captured from the repo). Left alone, the sweep cursor moves past it once and never returns,
+     * which reads in the product as "nothing malformed" rather than "never checked".
      *
-     * <p>Rewinding is whole-signal because the cursor is: one {@code (project, signal)} high-water mark
-     * covers every call site. Over-scanning is the deliberate trade — the worker's detection write is
-     * idempotent, so a re-sweep re-scores cheaply and writes nothing twice, whereas a per-call-site
-     * cursor would be a schema change for a case that fires a handful of times per project.
+     * <p>Rewinding is whole-signal because the cursor is: one {@code (project, signal)}
+     * high-water mark covers every call site. Over-scanning is the deliberate trade: the
+     * worker's detection write is idempotent, so a re-sweep re-scores cheaply and writes nothing
+     * twice.
      *
-     * <p>Disabled signals are rewound too. Re-enabling one does NOT reset its cursor — {@link
-     * ClassifierJobRepository#enqueue} re-pends "without disturbing its cursor or attempts" — so a
-     * signal that was disabled when the fact landed would otherwise resume from its old high-water
-     * mark and re-strand exactly the history this exists to recover.
+     * <p>Disabled signals are rewound too. Re-enabling one does not reset its cursor ({@link
+     * ClassifierJobRepository#enqueue} re-pends without disturbing it), so a signal disabled when
+     * the fact landed would otherwise resume from its old high-water mark and re-strand the
+     * history this exists to recover.
      *
-     * @param callSiteIds the call sites that changed — logged for provenance, not used for targeting.
+     * @param callSiteIds the call sites that changed, logged for provenance and not used for targeting
      */
     public void rewindForCallSiteFact(String projectId, CallSiteFact fact, Set<String> callSiteIds) {
         for (ClassifierRow row : signals.listByProject(projectId)) {
@@ -398,10 +370,9 @@ public class ClassifierService {
                         fact,
                         callSiteIds);
             } else {
-                // A sweep in flight (or a dead-lettered job) keeps its cursor, so this fact's history
-                // stays unscored until something rewinds it again. Silence here would make that
-                // indistinguishable from a successful rewind — the exact failure mode this feature exists
-                // to remove, one level up.
+                // A sweep in flight (or a dead-lettered job) keeps its cursor, so this fact's
+                // history stays unscored until something rewinds it again. Silence here would
+                // make that indistinguishable from a successful rewind.
                 log.warn(
                         Markers.OPS,
                         "signal sweep NOT rewound (job in flight, dead-lettered, or absent) "
@@ -415,9 +386,8 @@ public class ClassifierService {
     }
 
     /**
-     * The project's classifier list as the org may see it — every stored row minus the built-ins the flag
-     * layer withholds ({@link #withheldBuiltInKeys}). A partner's list is the launch catalog and ours is all
-     * of it, and neither is a different code path.
+     * The project's classifier list as the org may see it: every stored row minus the built-ins
+     * the flag layer withholds ({@link #withheldBuiltInKeys}).
      */
     public List<ClassifierRow> list(String projectId) {
         Set<String> withheld = withheldBuiltInKeys(projectId);
@@ -427,10 +397,10 @@ public class ClassifierService {
     }
 
     /**
-     * One classifier by id — the tenant + existence guard every per-classifier endpoint funnels through,
-     * which is also where a withheld built-in becomes a <b>404</b> rather than a 403. There is no such
-     * classifier from this org's point of view, and a "you can't have this" would be a mention of a
-     * capability the org doesn't have.
+     * One classifier by id: the tenant + existence guard every per-classifier endpoint funnels
+     * through, which is also where a withheld built-in becomes a <b>404</b> rather than a 403.
+     * There is no such classifier from this org's point of view, and a "you can't have this"
+     * would itself be a mention of a capability the org doesn't have.
      */
     public ClassifierRow get(String projectId, String id) {
         ClassifierRow row =
@@ -442,8 +412,8 @@ public class ClassifierService {
     }
 
     /**
-     * Sweep-job health for every signal in the project — gh#545. One row per signal definition
-     * regardless of whether a job has ever been enqueued for it, so a brand-new/disabled signal reads as
+     * Sweep-job health for every signal in the project. One row per signal definition regardless
+     * of whether a job has ever been enqueued for it, so a brand-new or disabled signal reads as
      * healthy rather than absent from the response.
      */
     public List<ClassifierDtos.ClassifierHealthView> health(String projectId) {
@@ -455,8 +425,8 @@ public class ClassifierService {
     }
 
     /**
-     * Enable/disable a signal definition (the lifecycle the acceptance asks for). Guarded by {@link #get}
-     * FIRST so a withheld built-in 404s instead of being written and then 404ing on the read back.
+     * Enable or disable a signal definition. Guarded by {@link #get} first, so a withheld
+     * built-in 404s instead of being written and then 404ing on the read back.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
         get(projectId, id); // tenant + existence + capability guard
@@ -468,7 +438,7 @@ public class ClassifierService {
 
     /**
      * Set the classifier's operating point: {@code discovery} (high recall) or {@code tracking}
-     * (high precision). One definition, two modes — the mode filters detections at read time, so
+     * (high precision). One definition, two modes: the mode filters detections at read time, so
      * switching it never loses history and the differing precision/recall stays surfaceable per mode.
      */
     public ClassifierRow setMode(String projectId, String id, String mode) {
@@ -483,7 +453,7 @@ public class ClassifierService {
     }
 
     /**
-     * The current window/threshold operating point for a metric-drift classifier — {@link
+     * The current window/threshold operating point for a metric-drift classifier: {@link
      * MetricDriftConfig#of} over the classifier's {@code config_json}, which is exactly what {@link
      * MetricDriftSweep} reads on its next pass. Throws {@link ClassifierError#NOT_METRIC_DRIFT} for
      * any other detector: the other six built-ins have no window to tune.
@@ -495,12 +465,11 @@ public class ClassifierService {
     }
 
     /**
-     * Tune a metric-drift classifier's operating point. Merges the four edited fields into the classifier's
-     * EXISTING parsed config — never a bare four-field blob — so {@code measures} and the other fields an
-     * operator hasn't touched survive the write untouched. {@link
-     * MetricDriftConfig}'s own compact constructor clamps every field to a sane range (PROGRAM.md's
-     * "an unclamped w1_floor of 0 turns the detector into a firehose"), so the value read back after a
-     * save is the value actually in effect, not necessarily the one submitted.
+     * Tune a metric-drift classifier's operating point. Merges the four edited fields into the
+     * classifier's existing parsed config, never a bare four-field blob, so {@code measures} and
+     * the other fields an operator hasn't touched survive the write untouched. {@link
+     * MetricDriftConfig}'s compact constructor clamps every field to a sane range, so the value
+     * read back after a save is the value actually in effect, not necessarily the one submitted.
      */
     public ClassifierDtos.TuningView setTuning(
             String projectId, String id, int windowTargetCount, int windowMaxHours, int minSample, double w1Floor) {
@@ -521,17 +490,17 @@ public class ClassifierService {
     }
 
     /**
-     * What the configured move costs in false alarms on this project's own traffic, or null when nothing
-     * has enough traffic to say.
+     * What the configured move costs in false alarms on this project's own traffic, or null when
+     * nothing has enough traffic to say.
      *
-     * <p>The rate a move implies depends on how spread out the traffic is, so it cannot be stated in the
-     * abstract — it has to be read off the buckets this classifier is actually watching. The MEDIAN
-     * bucket's spread is used rather than the mean: one pathological call site (a cache hit and a cold
-     * start sharing a bucket) has a huge σ, and averaging it in would report a rate no ordinary bucket
+     * <p>The rate a move implies depends on how spread out the traffic is, so it has to be read
+     * off the buckets this classifier is actually watching. The median bucket's spread is used
+     * rather than the mean: one pathological call site (a cache hit and a cold start sharing a
+     * bucket) has a huge sigma, and averaging it in would report a rate no ordinary bucket
      * experiences.
      *
-     * <p>Computed against two full windows, because that is the operating point the dial is stated at.
-     * A thinner window is held to a higher bar and so runs quieter than this number, never noisier.
+     * <p>Computed against two full windows, the operating point the dial is stated at. A thinner
+     * window is held to a higher bar, so it runs quieter than this number, never noisier.
      */
     private @Nullable Double impliedFalseAlarmRate(String projectId, ClassifierRow signal, MetricDriftConfig config) {
         List<Double> spreads = new ArrayList<>();
@@ -579,10 +548,10 @@ public class ClassifierService {
     }
 
     /**
-     * Per-tool tool-call failure rates for the project — the rate-bearing surface,
-     * computed live over {@code tool_call} (failed/total grouped by tool name), worst-first. The
-     * {@code classifierId} is a tenant + existence guard (the rates are a project-wide property of the raw
-     * structured data, so the same numbers back any project's {@code tool_error} signal).
+     * Per-tool tool-call failure rates for the project: the rate-bearing surface, computed live
+     * over {@code tool_call} (failed/total grouped by tool name), worst-first. The
+     * {@code classifierId} is a tenant + existence guard (the rates are a project-wide property
+     * of the raw structured data, so the same numbers back any project's {@code tool_error} signal).
      */
     public List<SubstrateReadRepository.ToolErrorRate> toolErrorRates(String projectId, String classifierId) {
         get(projectId, classifierId); // tenant + existence guard
@@ -603,10 +572,10 @@ public class ClassifierService {
     }
 
     /**
-     * The per-mode detection breakdown for a signal — the honest, label-free surfacing of the
-     * discovery-vs-tracking trade, computed live over the detections for this classifier's key. {@code discovery} fires {@code high + low} (recall); {@code tracking} fires
-     * {@code high} only (precision, unbanded NULL reads as high). The {@code low} delta is the recall the
-     * weak band buys.
+     * The per-mode detection breakdown for a signal, computed live over the detections for this
+     * classifier's key. {@code discovery} fires {@code high + low} (recall); {@code tracking}
+     * fires {@code high} only (precision, unbanded NULL reads as high). The {@code low} delta is
+     * the recall the weak band buys.
      */
     public ClassifierMetrics metrics(String projectId, String classifierId) {
         ClassifierRow signal = get(projectId, classifierId); // tenant + existence guard
@@ -623,12 +592,13 @@ public class ClassifierService {
             String classifierId, String mode, long discoveryFired, long trackingFired, long lowConfidence) {}
 
     /**
-     * Per-classifier daily detected-trace volume over the trailing {@code days} window (clamped to
-     * 1–30), plus the per-day project trace totals that make the counts a rate. UTC calendar days,
-     * oldest first, the last bucket being today-so-far; every array is zero-filled and aligned with
-     * {@code days()}, and <em>every</em> classifier definition gets an entry — a silent classifier
-     * shows a flat zero strip, not a missing row. Counts are DISTINCT traces bucketed by detection
-     * time, so a backfill sweep can legitimately push a day's count past that day's trace total.
+     * Per-classifier daily detected-trace volume over the trailing {@code days} window (clamped
+     * to 1-30), plus the per-day project trace totals that make the counts a rate. UTC calendar
+     * days, oldest first, the last bucket being today-so-far; every array is zero-filled and
+     * aligned with {@code days()}, and every classifier definition gets an entry, so a silent
+     * classifier shows a flat zero strip rather than a missing row. Counts are distinct traces
+     * bucketed by detection time, so a backfill sweep can legitimately push a day's count past
+     * that day's trace total.
      */
     public DailyVolume dailyVolume(String projectId, int days) {
         int d = Math.clamp(days, 1, 30);
@@ -672,12 +642,10 @@ public class ClassifierService {
     /**
      * Ensure a pending sweep job exists for every enabled signal in the project (worker entrypoint).
      *
-     * <p><b>Where a flag going off actually bites.</b> Hiding a withheld built-in from the list would leave
-     * it silently sweeping, writing detections and — for the metric classifiers — escalating findings the
-     * org has no surface to read. A withheld built-in is not enqueued, so it stops costing anything within a
-     * heartbeat of the flag flipping, on existing projects and not only on newly created ones. Its
-     * {@code enabled} column is untouched, so the flag coming back on resumes exactly the sweep the project
-     * had configured.
+     * <p>A withheld built-in is not enqueued, so it stops costing anything within a heartbeat of
+     * the flag flipping, on existing projects and not only newly created ones. Its
+     * {@code enabled} column is untouched, so the flag coming back on resumes exactly the sweep
+     * the project had configured.
      */
     public void enqueueEnabled(String projectId) {
         Set<String> withheld = withheldBuiltInKeys(projectId);

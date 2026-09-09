@@ -40,7 +40,7 @@ import org.springframework.test.context.DynamicPropertySource;
 /**
  * End-to-end acceptance for the async signal sweep: with the worker enabled, the structurally-
  * cheap built-ins (Task Failure on a tool error, Frustration on a keyword) detect over the streaming
- * substrate produced by the ingest write path and persist detection {@code verdict}s — off the ingest hot
+ * substrate produced by the ingest write path and persist detection {@code verdict}s, off the ingest hot
  * path, on the worker's own tick. Idempotent: a second tick over the same substrate writes no
  * duplicates. Run against the real pgvector Postgres (Testcontainers), so the signal schema + the
  * {@code FOR UPDATE SKIP LOCKED} queue run for real.
@@ -99,9 +99,9 @@ class ClassifierWorkerIntegrationTest {
 
     @Test
     void sweepDetectsToolFailureAndFrustration_idempotently() {
-        // Frustration is one of the four paid classifiers and OFF by default in an open build
-        // (#887/#888) — this test's whole subject is its own detection behaviour, so it grants the
-        // capability before the project is created (the moment seeding reads it).
+        // Frustration is off by default in this build; this test's whole subject is its own
+        // detection behaviour, so it grants the capability before the project is created (the
+        // moment seeding reads it).
         String pid = TenantFixture.bootstrap(
                         tenants, "signal-sweep", org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
@@ -137,7 +137,7 @@ class ClassifierWorkerIntegrationTest {
 
         service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
         worker.tick();
-        // frustration on the keyword. (tool_error is retired — see the aggregation test below.)
+        // frustration on the keyword; see the aggregation test below for tool_error.
         awaitEvents(pid, 1);
 
         List<ClassifierDtos.ClassifierEventView> all = service.events(pid, 100);
@@ -164,9 +164,8 @@ class ClassifierWorkerIntegrationTest {
         assertEquals(traceId, row.get("subject_trace_id"));
         assertNotNull(row.get("subject_span_id"), "the span the detector read rides along for deep-linking");
 
-        // "No classifier writes an automatic verdict" was asserted here as a COUNT over `verdict`. The
-        // table went with grading in Track A, so the claim is now enforced by the schema rather than by
-        // a query — there is nothing left for a classifier to write into.
+        // No classifier writes an automatic verdict: the `verdict` table is gone, so the claim is
+        // enforced by the schema rather than by a query.
 
         // Idempotency: a second tick over the same substrate writes no new events.
         int before = service.events(pid, 100).size();
@@ -182,11 +181,9 @@ class ClassifierWorkerIntegrationTest {
                         .single(),
                 "re-sweeping writes no duplicate detection (ON CONFLICT DO NOTHING)");
 
-        // The detection is where the sweep STOPS. It used to escalate every fresh firing into a
-        // grader_run over the flagged trace, which at production firing rates is a grader call per
-        // detection for a judgement nobody asked for — a Layer-1 flag is a filter, not evidence. That
-        // spend now needs a person: `POST /classifiers/{id}/events/{detectionId}/analysis`. This
-        // asserts the absence because the regression is silent — it does not break a request or a
+        // The detection is where the sweep stops: a flag is a filter, not evidence, so escalating it
+        // needs a person, through `POST /classifiers/{id}/events/{detectionId}/analysis`. This
+        // asserts the absence because the regression is silent: it does not break a request or a
         // row, it just quietly starts billing again.
         assertEquals(
                 0L,
@@ -201,11 +198,9 @@ class ClassifierWorkerIntegrationTest {
      * The per-tool failure-rate aggregation reports failed/total/rate grouped by tool name over the
      * raw tool_call data.
      *
-     * <p>The {@code tool_error} CLASSIFIER that used to be asserted here is deleted (migration 0030):
-     * it wrote a per-observation detection, and every detection enqueues a grader run, so a failing
-     * tool escalated a call site's whole grader set per failing span for a fact already sitting in
-     * {@code tool_call.error_type}. The rate is now an aggregate read (the {@code vitals} slice). This
-     * aggregation is the substrate both surfaces read, so it keeps its coverage.
+     * <p>{@code tool_error} no longer writes a per-observation detection over this data; the rate is
+     * an aggregate read (the {@code vitals} slice) instead. This aggregation is the substrate both
+     * surfaces read, so it keeps its coverage.
      */
     @Test
     void perToolFailureRatesAggregateOverRawToolCalls() {
@@ -231,10 +226,8 @@ class ClassifierWorkerIntegrationTest {
         service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
         worker.tick();
 
-        // tool_error is a classifier again (segment C), but it still writes NOTHING through this worker:
-        // it has no sweep and no per-observation detector, so the row exists and the tick leaves it alone.
-        // That is the property migration 0030 was protecting — the old version enqueued a grader run per
-        // failing span — and it is what this assertion now guards.
+        // tool_error is a classifier again, but it still writes nothing through this worker: it has
+        // no sweep and no per-observation detector, so the row exists and the tick leaves it alone.
         assertTrue(signals.findByKey(pid, "tool_error").isPresent(), "tool_error is a classifier again");
         assertEquals(
                 0L,

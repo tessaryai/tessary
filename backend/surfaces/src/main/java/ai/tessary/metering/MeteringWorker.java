@@ -168,7 +168,7 @@ public class MeteringWorker {
      * Aggregate one closed (project, bucket) and upsert one row per metered unit, then mark the job done.
      * Re-running a closed bucket overwrites each row with the same stable count — a no-op.
      *
-     * <p><b>Four units left with Track A</b> and are not re-sourced: {@code l2_evals},
+     * <p><b>Four units were dropped</b> and are not re-sourced: {@code l2_evals},
      * {@code llm_tokens} and both {@code llm_cost_micro_usd_*} were all aggregated {@code FROM verdict},
      * a table grading took with it. Per-lane, per-model LLM spend is unaffected — that view reads the
      * {@code llm_call} ledger through {@code LlmUsageQueryRepository}, which this worker never touched.

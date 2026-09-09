@@ -16,43 +16,20 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Keeps every active project's built-in classifier catalog matching what its org is entitled to —
+ * Keeps every active project's built-in classifier catalog matching what its org is entitled to:
  * {@link ClassifierService#resyncBuiltIns} on a heartbeat, over {@code ProjectRepository#findActive()}.
  * The second of catalog provisioning's two triggers; {@link ClassifierSeedListener} is the first and
- * fires once, at project creation, against the capabilities of that moment.
+ * fires once, at project creation.
  *
- * <h2>Why this is its own worker</h2>
+ * <p>This scans the project table rather than the sweep tick's list of projects with observations,
+ * because catalog membership must not wait on trace ingestion: a project with zero spans would
+ * otherwise keep a stale catalog until its first span landed. It runs on its own schedule
+ * ({@code tessary.classifier.catalog-resync-ms}) rather than widening the sweep tick, since nothing
+ * downstream waits on a reconcile and the two want different cadences as the project count grows.
  *
- * This ran inside {@code ClassifierWorker}'s sweep heartbeat, in its loop over {@code
- * substrate.projectsWithObservations()} — {@code SELECT DISTINCT project_id FROM span}. That made
- * catalog provisioning a silent function of trace ingestion. A project with zero spans was not in the
- * scan at all, so switching a classifier's capability flag ON for it changed nothing: the org kept the
- * platform-default three built-ins until its first production span landed, at which point the missing
- * classifiers appeared within a heartbeat with no further action, which reads like a flag that took a
- * day to propagate rather than a scope bug. Which classifiers an org has is a licensing answer owned by
- * the flag layer; it must not wait on telemetry.
- *
- * <p>The scan therefore moved to the project table, and moved OFF the sweep tick rather than merely
- * widening it. Two reasons. The sweep tick's job is claiming and dispatching due jobs, and a scan that
- * now grows with total projects rather than with active ones must not sit in front of that. And the two
- * want different cadences as a deployment grows: {@code tessary.classifier.catalog-resync-ms} can be
- * dialled back to minutes without slowing detection by a single tick, because nothing downstream waits
- * on a reconcile — the worst case of a slower cadence is that a flag flipped seconds ago takes one
- * interval to reach an idle project.
- *
- * <h2>What a pass costs</h2>
- *
- * Per project: one {@code classifier} row read and at most one {@code org_feature_flag} read (cached per
- * org for ten seconds, so usually none), and zero writes in the steady state — the catalog is
- * already correct, so every comparison matches and nothing is issued. Reconciling a project used to
- * cost a {@code findByKey} per catalog module on top of that; {@code seedBuiltIns} now indexes one row
- * read instead, which is what makes "every project" affordable where "every project with traffic" was.
- *
- * <p>Sweep ENQUEUE deliberately did not move and still keys on projects with observations: a job row
- * per enabled classifier on a project that has never sent a span would be claimed, dispatched, and
- * sweep an empty window every tick forever, which is exactly the load this split exists to avoid. A
- * project therefore gets its catalog on this cadence and its first sweep on the tick after its first
- * span, which is the correct ordering — there is nothing to sweep before then.
+ * <p>Sweep enqueue still keys on projects with observations: a job row per classifier on a project
+ * that has never sent a span would be claimed and dispatched to sweep an empty window every tick,
+ * which is the load this split avoids.
  */
 @Component
 public class ClassifierCatalogWorker {
@@ -95,10 +72,9 @@ public class ClassifierCatalogWorker {
             try {
                 seeded += classifiers.resyncBuiltIns(project);
             } catch (RuntimeException e) {
-                // One project's catalog failing must not strand every other project's. Nothing downstream
-                // waits on a reconcile, so the next tick simply tries again — but a project that fails
-                // every tick is invisible without this line, and its symptom (a classifier the org paid
-                // for never appearing) looks like a flag problem rather than a backend one.
+                // One project's catalog failing must not strand every other project's; the next tick
+                // simply tries again. Without this line a project that fails every tick is invisible,
+                // and its symptom looks like a flag problem rather than a backend one.
                 failed++;
                 StructuredLog.warn(log, Markers.OPS, "classifier.catalog.resync-failed")
                         .field("project", project.id())
@@ -108,10 +84,9 @@ public class ClassifierCatalogWorker {
             }
         }
 
-        // The steady state is "scanned N, changed nothing", every minute, forever — DEBUG, per the
-        // logging policy that cost `signal.sweep.empty` its INFO. A pass that actually provisioned
-        // something, or failed on a project, is the outcome an operator wants at INFO. Both carry
-        // `projects` and `durationMs` because this scan's cost grows with the project table.
+        // The steady state is "scanned N, changed nothing", every minute, forever: DEBUG. A pass
+        // that actually provisioned something, or failed on a project, is the outcome an operator
+        // wants at INFO.
         StructuredLog.Builder line = seeded > 0 || failed > 0
                 ? StructuredLog.info(log, Markers.OPS, "classifier.catalog.reconciled")
                 : StructuredLog.debug(log, "classifier.catalog.reconciled");

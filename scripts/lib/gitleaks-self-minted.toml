@@ -1,15 +1,15 @@
-# gitleaks rules for the credential formats this product itself mints or accepts (epic 6 clause 1,
-# #1146). Extends the built-in rule set rather than replacing it, so every third-party vendor key
-# shape gitleaks already knows stays covered; what is added is what no vendor list will ever carry.
+# gitleaks rules for the credential formats this product itself mints or accepts. Extends the
+# built-in rule set rather than replacing it, so every third-party vendor key shape gitleaks
+# already knows stays covered; what is added is what no vendor list will ever carry.
 # The enumeration these rules implement is scripts/lib/self-minted-credential-formats.txt, and
 # the export-candidate scrub gate's `--prove-rules` mode plants one synthetic instance per rule and
-# requires a hit. That gate moved into the paid overlay with #1293 (it is the only thing that reads
-# the export-candidate tree); this ruleset stayed open, and TWO gates read it now. The overlay's
-# gate scans the export candidate. The open repo's own secret scan
-# (.github/workflows/secret-scan.yml, through .gitleaks.toml) scans the checkout itself: #1293's
-# review added that extension, because the two subjects overlap almost exactly — the candidate IS
-# root-minus-overlay — but run on different cadences, and only the public repo's own scan sees a
-# contributor's push the moment it lands. Nothing stock matches `tsy_w_…`.
+# requires a hit. That gate moved elsewhere, into the tree that reads the export-candidate build
+# (it is the only thing that reads the export-candidate tree); this ruleset stayed open, and TWO
+# gates read it now. The other build's gate scans the export candidate. The open repo's own secret
+# scan (.github/workflows/secret-scan.yml, through .gitleaks.toml) scans the checkout itself: that
+# move added this extension, because the two subjects overlap almost exactly — the candidate IS
+# this repo minus that other build — but run on different cadences, and only the public repo's own
+# scan sees a contributor's push the moment it lands. Nothing stock matches `tsy_w_…`.
 title = "tessary self-minted credential formats"
 
 [extend]

@@ -34,24 +34,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * A case opened from a finding in the SHARED {@code finding} table, rendered whole: the Layer-2 ruling
+ * A case opened from a finding in the shared {@code finding} table, rendered whole: the Layer-2 ruling
  * that opened it, the exemplar trace the finding recorded, and the absorb affordance.
  *
- * <p><b>This is the surviving half of {@code ConformanceCaseRenderingIntegrationTest}.</b> That file
- * held seven cases about a conformance case's zones, and it existed because conformance kept its
- * findings in a table of its own: a lookup that resolved every case against the shared table returned
- * nothing for them, and the failure was silent — the ruling zone simply disappears from a case that
- * exists BECAUSE a Layer-2 run ruled it a deviation, and the recorded violating turns are replaced by a
- * time-window sample presented in the same slot. Filler wearing evidence's clothes.
- *
- * <p>Six of those seven drove {@code ConformanceCaseSource} and seeded through
- * {@code conformance_rule} / {@code conformance_finding}, and #841 took all of that to
- * {@code tessary-paid/conformance}; they run as {@code ConformanceCaseRenderingIntegrationTest} in
- * {@code tessary-paid/assembly}, the overlay's harness (#882). This one was the file's own CONTROL — "the behaviour-table arm
- * is unchanged" — and it names no conformance type at all. It seeds a {@code TOOL_ERROR} case through
- * the open {@code FindingRepository} and {@code FindingEvidenceRepository} and asserts on
- * {@code CaseService.detail}, so it is the shared-table zone contract stated on its own, one arm of
- * which the deleted six were the contrast for. It sits beside {@code MetricDriftCaseGateIntegrationTest},
+ * <p>It seeds a {@code TOOL_ERROR} case through the open {@code FindingRepository} and
+ * {@code FindingEvidenceRepository} and asserts on {@code CaseService.detail}, stating the
+ * shared-table zone contract on its own. It sits beside {@code MetricDriftCaseGateIntegrationTest},
  * the other open-classifier case test.
  */
 @SpringBootTest
@@ -158,11 +146,7 @@ class ToolErrorCaseRenderingIntegrationTest {
     // Fixture
     // -----------------------------------------------------------------------------------------------
 
-    /**
-     * A plain tenant. The old helper also stubbed {@code sop_conformance_enabled} ON through the flag
-     * adapter, because the six conformance cases each needed the capability granted before they could
-     * render anything. Nothing here reads a capability: a tool-error case is open in every edition.
-     */
+    /** A plain tenant. Nothing here reads a capability: a tool-error case is always open. */
     private Project project(String slug) {
         return TenantFixture.bootstrap(tenants, slug).project();
     }

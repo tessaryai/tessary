@@ -23,9 +23,9 @@ task caddy              # :8000 (canonical entry)
 `task node:install` / `frontend:install` self-heal a pre-pnpm checkout (clears npm's flat
 `node_modules` when the `.pnpm/` marker is missing).
 
-Auth is bypassed locally because `TESSARY_AUTH_DISABLED=true` is set for you — in `docker-compose.dev.yml` for the Docker stack, and in the `backend` task itself for the bare-metal one. Unsetting WorkOS is no longer enough on its own (#924): without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated).
+Auth is bypassed locally because `TESSARY_AUTH_DISABLED=true` is set for you — in `docker-compose.dev.yml` for the Docker stack, and in the `backend` task itself for the bare-metal one. Unsetting WorkOS is no longer enough on its own: without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated).
 
-To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `TESSARY_AUTH_COOKIE_PASSWORD`, `WORKOS_REDIRECT_URI`, and `SPRING_PROFILES_ACTIVE=production` before `task backend` — **and also edit the `backend` task's hardcoded `TESSARY_AUTH_DISABLED: "true"` to `"false"`, or unset it.** (Corrected 2026-09-01, #996 review: this used to say a configured provider always wins over the flag, so unsetting it wasn't needed — that precedence was retired by #852/#996. The flag is authoritative on its own now; a configured WorkOS provider no longer overrides it.)
+To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `TESSARY_AUTH_COOKIE_PASSWORD`, `WORKOS_REDIRECT_URI`, and `SPRING_PROFILES_ACTIVE=production` before `task backend` — **and also edit the `backend` task's hardcoded `TESSARY_AUTH_DISABLED: "true"` to `"false"`, or unset it.** (Corrected 2026-09-01: this used to say a configured provider always wins over the flag, so unsetting it wasn't needed — that precedence was retired. The flag is authoritative on its own now; a configured WorkOS provider no longer overrides it.)
 
 ## Docker (dev)
 
@@ -49,7 +49,7 @@ task dev:up:slim                                           # = TESSARY_SKIP_CLAS
 | `backend` | ✅ | Spring Boot + devtools, JDWP on `:5005` |
 | `frontend` | ✅ | Vite dev server, HMR over the bind mount |
 | `caddy` | ✅ | Reverse proxy on `:8000` — the entry point, unchanged |
-| `alloy` | ❌ | Opt-in (#864): behind the `observability` Compose profile, off by default. `COMPOSE_PROFILES=observability` to forward `gen_ai` judge spans to Langfuse |
+| `alloy` | ❌ | Opt-in: behind the `observability` Compose profile, off by default. `COMPOSE_PROFILES=observability` to forward `gen_ai` judge spans to Langfuse |
 | `classify` | ❌ | Encoder service. Build downloads gated HF weights (`BAKE_EMBEDDERS` bakes ~1.7 GB into the dev image); container capped at 8 GB |
 | `compile` | ❌ | SOP-conformance fitter. `depends_on: classify`, and every fit calls its `/embed` — without classify it can only dead-letter, so it goes too |
 
@@ -81,8 +81,8 @@ then `task rf:full`).
 
 ### Agent credentials — org-scoped, no dev overrides any more
 
-**#939 D4 removed `AGENT_PROVIDER` and every deployment-env-var credential path the sandboxed
-agent lanes (RCA, Layer-2 triage) used to read** — there is no dev-only override any more. Every
+**`AGENT_PROVIDER` and every deployment-env-var credential path the sandboxed
+agent lanes (RCA, Layer-2 triage) used to read were removed** — there is no dev-only override any more. Every
 RCA/TRIAGE run now resolves the org's own `ProviderCredential` (Settings → Providers) for whichever
 provider that project's lane is pointed at, decrypts it in the backend, and injects it into the
 launcher request directly (`AgenticCredentialResolver`) — the launcher itself reads no provider
@@ -90,7 +90,7 @@ secret from its own process env at all. To develop against a non-Bedrock provide
 org credential for it (Gemini/GLM/Grok/Custom are all reachable this way, same as production) and
 point the RCA or TRIAGE lane at a model from that provider under Settings → Models — there is no
 separate dev-only knob, because the real per-request path already covers this case. Ollama (the
-platform's one credential-free provider) was removed by #939 D6, so every provider, dev included,
+platform's one credential-free provider) was removed, so every provider, dev included,
 needs a configured key.
 
 Stop everything:
@@ -112,10 +112,8 @@ task prod:up       # starts postgres + backend + frontend (alloy is not in the p
 task prod:down
 ```
 
-Alloy (OTLP/Langfuse/Grafana Cloud export) moved to the paid overlay (`tessary-paid/docker-compose.yml`) and is absent from the open prod compose — no Grafana Cloud or Langfuse
-account required to boot the open edition. When the `tessary-paid/` overlay is present, bring it up with `COMPOSE_PROFILES=observability task prod:up`, and set
-the `MANAGEMENT_*_OTLP_ENABLED` / `LANGFUSE_OTLP_ENDPOINT` vars in `tessary-paid/.env.example` to make the
-backend actually send it anything.
+Alloy (OTLP/Langfuse/Grafana Cloud export) is absent from the open prod compose — no Grafana Cloud or Langfuse
+account required to boot the open edition.
 
 ## Without Docker, prod-style
 

@@ -22,14 +22,13 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
- * The four-way posture table of {@link AuthFilter#shouldNotFilter}, held here because #924's whole
- * subject is one of those four cells changing.
+ * The four-way posture table of {@link AuthFilter#shouldNotFilter}.
  *
  * <p>Plain JUnit with hand-built collaborators, on the {@code AbsentSopIntakeTest} /
- * {@code AbsentSlackMentionSourceTest} precedent: this needs no database, no Spring context and no
- * Docker, so it runs everywhere and it runs fast. It also cannot be weakened by the suite-wide
- * {@code TestAuthDisabledInitializer}, which is the point — a test asserting the closed default
- * must not sit in the module where the default is globally flipped open.
+ * {@code AbsentSlackMentionSourceTest} precedent: no database, no Spring context, no Docker, so it
+ * runs everywhere and fast. It also cannot be weakened by the suite-wide {@code
+ * TestAuthDisabledInitializer}, since a test asserting the closed default must not sit in the
+ * module where the default is globally flipped open.
  */
 class AuthFilterPostureTest {
 
@@ -49,12 +48,10 @@ class AuthFilterPostureTest {
     }
 
     /**
-     * Full-control overload for the #935 authorization-boundary tests below, which need to drive a
-     * genuinely non-null {@link TenantContext} through {@code doFilterInternal} (via a stubbed
-     * {@code bearerAuth}) and a specific {@link PlatformStaff#isStaff} answer. The other overloads
-     * default to "not staff" — harmless to every {@code shouldNotFilter}-only test above, since none
-     * of them populate a ctx, but it is what makes the new tests actually exercise the new branch
-     * instead of passing vacuously through the pre-existing {@code ctx == null} 401 arm.
+     * Full-control overload for the authorization-boundary tests below, which drive a genuinely
+     * non-null {@link TenantContext} through {@code doFilterInternal} (via a stubbed {@code
+     * bearerAuth}) and a specific {@link PlatformStaff#isStaff} answer. The other overloads default
+     * to "not staff", harmless above since none of those tests populate a ctx.
      */
     private static AuthFilter filter(
             boolean providerConfigured,
@@ -66,10 +63,9 @@ class AuthFilterPostureTest {
         when(provider.isEnabled()).thenReturn(providerConfigured);
         AuthProperties auth = new AuthProperties();
         auth.setDisabled(authDisabled);
-        // Everything after the two property/provider objects is unreachable from shouldNotFilter, which reads
-        // only the path, those two, and (for the paid-bypass cases below) paidBypasses. Bare mocks
-        // rather than nulls: the constructor's parameters are not @Nullable, and NullAway is on for test
-        // compilation too.
+        // Everything after the two property/provider objects is unreachable from shouldNotFilter,
+        // which only reads the path, those two, and paidBypasses. Bare mocks rather than nulls: the
+        // constructor's parameters are not @Nullable, and NullAway checks test compilation too.
         return new AuthFilter(
                 auth,
                 provider,
@@ -96,9 +92,9 @@ class AuthFilterPostureTest {
         return staff;
     }
 
-    /** A bearer authenticator stubbed to resolve every request to the same fixed context —
-     * enough to drive a request through the cookie-miss/bearer-fallback path in doFilterInternal
-     * without a real ApiKeyService or ProjectRepository. */
+    /** A bearer authenticator stubbed to resolve every request to the same fixed context: drives
+     * the cookie-miss/bearer-fallback path in doFilterInternal without a real ApiKeyService or
+     * ProjectRepository. */
     private static BearerTokenAuthenticator authenticatingAs(TenantContext ctx) {
         BearerTokenAuthenticator bearerAuth = mock(BearerTokenAuthenticator.class);
         when(bearerAuth.authenticate(org.mockito.ArgumentMatchers.any())).thenReturn(java.util.Optional.of(ctx));
@@ -106,9 +102,9 @@ class AuthFilterPostureTest {
     }
 
     /**
-     * An empty {@code ObjectProvider} — the open edition's own state, with zero
-     * {@link SelfAuthenticatingPath} implementations on the classpath. Same convention
-     * {@code AbsentSlackMentionSourceTest.noSource()} established one module over (#920).
+     * An empty {@code ObjectProvider}, with zero {@link SelfAuthenticatingPath} implementations on
+     * the classpath. Same convention {@code AbsentSlackMentionSourceTest.noSource()} established
+     * one module over.
      */
     @SuppressWarnings("unchecked")
     private static ObjectProvider<SelfAuthenticatingPath> noPaidBypasses() {
@@ -122,7 +118,7 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("no provider and no explicit opt-in: the request is FILTERED, i.e. 401 — the #924 fix")
+    @DisplayName("no provider and no explicit opt-in: the request is FILTERED, i.e. 401")
     void absentProviderFailsClosed() {
         assertFalse(
                 filter(false, false).shouldNotFilter(guarded()),
@@ -137,16 +133,12 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("the flag bypasses regardless of provider state — re-decided by #852/#996")
+    @DisplayName("the flag bypasses regardless of provider state")
     void flagWinsRegardlessOfProviderState() {
-        // Was "a configured provider always enforces, even with the opt-in set": #852 added
-        // PasswordAuthProvider, unconditionally enabled, which made "no provider configured" a
-        // state the open edition can no longer be in — the old precedence's provider check could
-        // never fire again, silently retiring the operator's own TESSARY_AUTH_DISABLED escape hatch
-        // (the dev stack and #996's own crew review both hit this). The flag is now authoritative
-        // on its own, full stop; a test that wants enforcement despite the suite's global
-        // disabled=true default must say so explicitly (see TestAuthDisabledInitializer's javadoc)
-        // rather than lean on provider-configured precedence, which no longer exists.
+        // PasswordAuthProvider is unconditionally enabled, so "no provider configured" is no
+        // longer a reachable state. The flag is authoritative on its own; a test that wants
+        // enforcement despite the suite's global disabled=true default must say so explicitly
+        // (see TestAuthDisabledInitializer's javadoc).
         assertTrue(filter(true, true).shouldNotFilter(guarded()));
     }
 
@@ -167,13 +159,12 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("/auth/mode is unauthenticated like /auth/me: not bypassed, and not hard-401'd (#853)")
+    @DisplayName("/auth/mode is unauthenticated like /auth/me: not bypassed, and not hard-401'd")
     void authModeIsNotBypassedButAlsoNotHard401d() throws ServletException, IOException {
-        // Same shape as /auth/me (see the NOTE at the top of AuthFilter.shouldNotFilter): the
-        // filter doesn't add /auth/mode to the bypass list, but it also doesn't hard-401 a null
-        // context for it -- only /api/** and actuator paths get that treatment. The controller
-        // answers unconditionally either way, so a signed-out visitor can still learn which auth
-        // flow to render.
+        // Same shape as /auth/me: the filter doesn't add /auth/mode to the bypass list, but it
+        // also doesn't hard-401 a null context for it -- only /api/** and actuator paths get that
+        // treatment. The controller answers unconditionally, so a signed-out visitor can still
+        // learn which auth flow to render.
         assertFalse(
                 filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", "/auth/mode")),
                 "/auth/mode must not be in the bypass list, exactly like /auth/me");
@@ -188,13 +179,12 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("with no paid-contributed bypass, the old Slack path is filtered like any other path (#920)")
+    @DisplayName("with no paid-contributed bypass, the old Slack path is filtered like any other path")
     void withNoPaidBypassTheSlackPathIsFiltered() {
         assertFalse(
                 filter(true, false).shouldNotFilter(new MockHttpServletRequest("POST", "/internal/slack/mention")),
                 "AuthFilter no longer hard-codes this path; an edition with no SelfAuthenticatingPath "
-                        + "implementation must not bypass it either — the coverage that did not exist "
-                        + "anywhere before #920 added it");
+                        + "implementation must not bypass it either");
     }
 
     @Test
@@ -203,8 +193,8 @@ class AuthFilterPostureTest {
         SelfAuthenticatingPath stub = path -> "/internal/slack/mention".equals(path);
         @SuppressWarnings("unchecked")
         ObjectProvider<SelfAuthenticatingPath> provider = mock(ObjectProvider.class);
-        // thenAnswer, not thenReturn: shouldNotFilter is called twice below, and a Stream can only be
-        // consumed once — a fixed instance would throw IllegalStateException on the second call.
+        // thenAnswer, not thenReturn: shouldNotFilter is called twice below, and a Stream can only
+        // be consumed once. A fixed instance would throw IllegalStateException on the second call.
         when(provider.orderedStream()).thenAnswer(invocation -> Stream.of(stub));
 
         AuthFilter withBypass = filter(true, false, provider);
@@ -229,7 +219,7 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("every other actuator endpoint is filtered, exposed or not (#929)")
+    @DisplayName("every other actuator endpoint is filtered, exposed or not")
     void actuatorNonHealthIsFiltered() {
         // Not currently exposed -- Spring Boot's default is `health` alone. That is the point: the
         // guarantee must hold for the endpoint a self-hoster adds tomorrow, not just the ones
@@ -242,11 +232,10 @@ class AuthFilterPostureTest {
     }
 
     /**
-     * Not being bypassed is only half of it, and on its own it is the cosmetic half: a path that
-     * escapes {@code shouldNotFilter} still reaches {@code chain.doFilter} unless something rejects
-     * it. The bare {@code /actuator} index passed the {@code shouldNotFilter} assertion above while
-     * being served unauthenticated, because {@code "/actuator".startsWith("/actuator/")} is false
-     * and the 401 arm used a bare prefix. These tests assert the response, which is the half that
+     * A path that escapes {@code shouldNotFilter} still reaches {@code chain.doFilter} unless
+     * something rejects it. The bare {@code /actuator} index passed {@code shouldNotFilter} above
+     * while being served unauthenticated, because {@code "/actuator".startsWith("/actuator/")} is
+     * false and the 401 arm used a bare prefix. These tests assert the response, the half that
      * would have caught it.
      */
     @Test
@@ -292,18 +281,17 @@ class AuthFilterPostureTest {
     }
 
     // ---------------------------------------------------------------------------------------
-    // #935: authentication alone (a non-null ctx) is no longer enough for a guarded actuator
-    // path -- the caller must also be platform staff. Every case here drives a genuinely
-    // non-null TenantContext through doFilterInternal via a stubbed bearerAuth, unlike the
-    // ctx==null cases above, so it actually exercises the new branch rather than passing
-    // vacuously through the pre-existing 401 arm.
+    // Authentication alone (a non-null ctx) is not enough for a guarded actuator path: the
+    // caller must also be platform staff. Every case here drives a genuinely non-null
+    // TenantContext through doFilterInternal via a stubbed bearerAuth, so it exercises the
+    // staff-check branch rather than the ctx == null 401 arm above.
     // ---------------------------------------------------------------------------------------
 
     private static final TenantContext SOME_AUTHENTICATED_USER =
             new TenantContext("user-1", "someone@example.com", null, null, null, null);
 
     @Test
-    @DisplayName("an authenticated, non-staff caller is rejected 403, not served (#935)")
+    @DisplayName("an authenticated, non-staff caller is rejected 403, not served")
     void actuatorGuardedPathsRejectNonStaffWithForbidden() throws ServletException, IOException {
         for (String path : ACTUATOR_GUARDED) {
             AuthFilter filter =
@@ -321,7 +309,7 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("an authenticated, platform-staff caller reaches the chain (#935)")
+    @DisplayName("an authenticated, platform-staff caller reaches the chain")
     void actuatorGuardedPathsPassStaff() throws ServletException, IOException {
         for (String path : ACTUATOR_GUARDED) {
             AuthFilter filter =
@@ -338,7 +326,7 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("the CSRF rejection body is unchanged by the reject403(code, message) refactor (#935)")
+    @DisplayName("the CSRF rejection body is unchanged by the reject403(code, message) refactor")
     void csrfRejectionBodyIsUnchanged() throws ServletException, IOException {
         // Drives the pre-existing CSRF arm for real: a cookie-authed, mutating /api/ request with
         // no X-Requested-With header. Step 3 only changed reject403's signature (a hardcoded
@@ -384,7 +372,7 @@ class AuthFilterPostureTest {
                 403,
                 res.getStatus(),
                 "a cookie-authed mutating /api/ request with no X-Requested-With "
-                        + "header must still be rejected by the CSRF arm, not the new #935 actuator arm");
+                        + "header must still be rejected by the CSRF arm, not the actuator arm");
         assertNull(chain.getRequest());
         String body = res.getContentAsString();
         org.junit.jupiter.api.Assertions.assertTrue(

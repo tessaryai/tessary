@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * <p>Its original justification — that {@code AuthFilter} bypassed everything when
  * {@code WorkOsProperties.isEnabled()} was false, so a missing
  * {@code WORKOS_API_KEY}/{@code WORKOS_CLIENT_ID} would silently open every {@code /api/**} and
- * {@code /mcp} endpoint — stopped being true at #924: absent configuration now fails closed on its
+ * {@code /mcp} endpoint — stopped being true: absent configuration now fails closed on its
  * own, in every profile, so this guard is no longer the only thing standing between a missing
  * credential and an open platform.
  *
@@ -35,8 +35,8 @@ public class AuthRequiredInProdGuard {
     @PostConstruct
     void verify() {
         if (!provider.isEnabled()) {
-            // Do NOT offer "remove the production profile" here, which is what this message said
-            // before #924. That is the exact move that used to open the platform: dropping the
+            // Do NOT offer "remove the production profile" here, which is what this message used to
+            // say. That is the exact move that used to open the platform: dropping the
             // profile skipped this guard, and an unconfigured AuthFilter then served every path.
             // It no longer does -- absent configuration fails closed in every profile -- so the
             // old advice now buys an operator a stack that 401s instead of one that is open, and

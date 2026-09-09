@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * The {@code home.tessary.ai} heartbeat ping (devdocs/reference/telemetry-contract.md §1), replacing the
- * Mixpanel per-event stream (#858). Backend-only per the contract's §4 scope note — there is no
+ * Mixpanel per-event stream. Backend-only per the contract's §4 scope note — there is no
  * frontend leg, and none is added here.
  *
  * <p>Lives in {@code surfaces}, next to {@link ai.tessary.metering.MeteringWorker} — the existing
@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * <p><b>The enabled-gate is checked FIRST, before {@link InstallIdRepository} or {@link HomeTessaryClient}
  * are touched at all.</b> This is the single choke point that makes the contract's §3 guarantee true —
  * "zero outbound calls, including DNS resolution, when disabled" — and what a future {@code
- * check-open-boot.sh} deny-list (#878, named explicitly in the contract, not built by this issue) will
+ * check-open-boot.sh} deny-list (named explicitly in the contract, not yet built) will
  * point at.
  */
 @Component

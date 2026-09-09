@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>One pass is: read the hourly aggregate, replay it, and upsert one finding per tool currently in a
  * spell. There is no cursor, no watermark and no transaction spanning passes, because nothing carries
- * over between them — the numbers are re-derived from source every time, so running this twice on
+ * over between them, the numbers are re-derived from source every time, so running this twice on
  * unchanged traffic leaves the same rows it left the first time.
  *
  * <p><b>The write is the only place this design can still go wrong</b>, and §5.1 names how: assign
@@ -62,7 +62,7 @@ public class ToolErrorService {
     /**
      * How long a confirmed shift may go unrefreshed before it counts as recovered.
      *
-     * <p>Short, and it can be — unlike metric drift, which must wait for a bucket's next window to close
+     * <p>Short, and it can be, unlike metric drift, which must wait for a bucket's next window to close
      * and so derives its horizon from {@code window_max_hours}, this detector re-evaluates every tool on
      * every pass. A tool that has recovered stops appearing immediately, so the horizon only has to
      * outlast the interval between passes (the case heartbeat, five minutes) rather than the detector's
@@ -72,7 +72,7 @@ public class ToolErrorService {
      * {@code ToolErrorCaseSource} uses to decide a case has recovered, AND the gap past which
      * {@link FindingRepository#recordRecomputedCause} treats the next firing as a new spell. Two
      * separate values could disagree, and the shape of the disagreement is a case that closed as
-     * recovered but whose finding still carries the old spell's onset — which is the reopen blind spot
+     * recovered but whose finding still carries the old spell's onset, which is the reopen blind spot
      * this pairing exists to close.
      */
     public static final Duration QUIET_WINDOW = Duration.ofHours(6);
@@ -161,8 +161,8 @@ public class ToolErrorService {
             if (installPendingPin(projectId, advanced, config, now)) absorbed.add(advanced.toolKey());
         }
         // A tool whose absorb has been ruled on is not written, whether the pin landed on this pass or is
-        // still waiting for the run to thicken. Both are the same fact — a human has already accepted this
-        // rate — and writing the spell hands them back the finding they accepted.
+        // still waiting for the run to thicken. Both are the same fact, a human has already accepted this
+        // rate, and writing the spell hands them back the finding they accepted.
         //
         // The pending arm is not belt-and-braces. `resolve` sets the finding ALLOWLISTED, and
         // `ux_finding_live` covers only ('open','blocked'), so the ON CONFLICT in `recordRecomputedCause`
@@ -202,7 +202,7 @@ public class ToolErrorService {
      *
      * <p><b>What a negative means.</b> Triage ruled the claim does not hold: the rows do not carry what
      * the detector asserted, so the traffic it fired on was ordinary. Until now that wrote three columns
-     * on the finding and nothing else — the accumulator kept the value it fired at, above its own
+     * on the finding and nothing else, the accumulator kept the value it fired at, above its own
      * threshold, so the spell went on firing on evidence a ruling had already dismissed. Those firings
      * land in {@code recurrences_since_verdict}, which the re-open rule reads as "the traffic
      * contradicted the ruling", so a dismissed finding re-triaged itself and eventually opened a case
@@ -210,8 +210,8 @@ public class ToolErrorService {
      *
      * <p><b>Why the window folds into the reference rather than replacing it.</b> Absorb REPLACES: a
      * human pressing "legitimate" is saying this run is the normal, and the run is the whole of it. A
-     * negative is a weaker statement — nobody said the old normal was wrong, only that this stretch was
-     * not the departure from it the detector claimed — so its counts are ADDED to what was already
+     * negative is a weaker statement, nobody said the old normal was wrong, only that this stretch was
+     * not the departure from it the detector claimed, so its counts are ADDED to what was already
      * there. On the websearch finding that prompted this, 503 calls / 0 failures plus a judged 336 / 5
      * gives 839 / 5, moving the expected rate from 0.10% to 0.66%. The same burst then reads as
      * ordinary; a worse one still fires.
@@ -224,7 +224,7 @@ public class ToolErrorService {
      * <p><b>Only on a negative, and this is the whole of the gate.</b> A {@code positive} opens a case:
      * the regression is real, and moving the bar to accommodate it would be the platform quietly
      * agreeing to a rate a human is about to be asked about. An {@code unclear} closes the finding
-     * without establishing anything at all — it is the verdict for a run that read the evidence and
+     * without establishing anything at all, it is the verdict for a run that read the evidence and
      * could not settle the question, and one that reads no evidence has even less standing to move a
      * reference. Folding on it treated "we do not know" as "we checked, it was fine".
      *
@@ -255,7 +255,7 @@ public class ToolErrorService {
 
         // A blob written before the onset rework counts nCur over the tool's WHOLE history, baseline
         // included, so adding it to the baseline counts that history twice and moves the bar to a number
-        // nothing measured. The arm still clears — the ruling stands either way — but the reference is
+        // nothing measured. The arm still clears, the ruling stands either way, but the reference is
         // left alone, which is the same refusal absorption makes on these blobs.
         if (!read.countsAreOnsetRun() || baseline == null) {
             states.reset(projectId, toolKey, null, foldNote(findingId, "arm cleared; counts not fold-safe"), now);
@@ -294,7 +294,7 @@ public class ToolErrorService {
      * holds {@code minBaselineCalls}, those calls ARE the new normal and the reference installs itself.
      *
      * <p>Pins from the up arm's run only. Down-arm spells are improvements, and a human absorbing one is
-     * saying the lower rate is the new normal — which is the same arithmetic, but the run to measure is
+     * saying the lower rate is the new normal, which is the same arithmetic, but the run to measure is
      * still the one that alarmed, and the up arm is what the finding was written about.
      */
     private boolean installPendingPin(String projectId, CarriedState carried, ToolErrorConfig config, String now) {
@@ -361,7 +361,7 @@ public class ToolErrorService {
      *
      * <p><b>The two are the rate's denominator and numerator.</b> A reader handed only the failures
      * cannot check what they were a fraction OF, and one handed only the population cannot tell which
-     * of it failed — {@code finding_evidence} carries no outcome column, so the role is what says so.
+     * of it failed, {@code finding_evidence} carries no outcome column, so the role is what says so.
      * Both are enumerated in full: a cap here would be a sample with an undeclared selection rule.
      *
      * <p><b>No baseline.</b> A CUSUM has one reference and it is a fitted rate, not a window of rows
@@ -427,15 +427,15 @@ public class ToolErrorService {
      *
      * @param traceIds up to {@link #WITNESS_TRACES} distinct failing traces, for the dossier blob's
      *     reading aid. The finding's own evidence enumerates the failing calls in full and at span
-     *     grain — this is a preview, not the claim
+     *     grain, this is a preview, not the claim
      */
     private record Failures(List<ToolErrorRate.Pattern> patterns, List<String> traceIds) {}
 
     /**
      * The failure patterns behind one alarming tool, ranked by what changed, and the traces to point at.
      *
-     * <p>Read only for a tool that has already alarmed — that is what makes inspecting the result payload
-     * affordable at all — and only over the observed side, since the reference side's raw rows are not
+     * <p>Read only for a tool that has already alarmed, that is what makes inspecting the result payload
+     * affordable at all, and only over the observed side, since the reference side's raw rows are not
      * what a reader is asking about when a rate has moved.
      *
      * <p>{@code toolNames} are the bucket's RAW names, carried down from the same read that produced the

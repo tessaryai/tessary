@@ -55,7 +55,7 @@ public class PipelineService implements CallSiteRegistry {
     /**
      * Persist the bundle's committed knowledge index. No-op when absent.
      *
-     * <p><b>Write-only since Track A</b>, and deliberately kept: the index powered the observer's Tier-1
+     * <p><b>Write-only now</b>, and deliberately kept: the index powered the observer's Tier-1
      * anchor mapping, and the observer was removed. The bundle still carries the shard and the plugin
      * still publishes it, so dropping the write would silently discard data an unchanged producer sends.
      * {@link #currentKnowledgeIndex} is its read side and currently has no caller.
@@ -84,7 +84,7 @@ public class PipelineService implements CallSiteRegistry {
     /**
      * Materialize a minimal call site for a resolved-but-unknown id so plain-OTLP telemetry (explicit
      * {@code tessary.call_site_id}, no plugin pipeline) is gradable and visible in the Pipeline — call sites
-     * emerge from traffic (see docs/reference/ingestion-contract/README.md). Idempotent.
+     * emerge from traffic (see devdocs/reference/ingestion-contract/README.md). Idempotent.
      */
     /**
      * See {@link PipelineRepository#setCallSiteOutputSchema}. A genuine change announces itself as a
@@ -114,8 +114,8 @@ public class PipelineService implements CallSiteRegistry {
 
     /**
      * The project's committed knowledge index JSON (regions + prompt-content hashes), empty when the
-     * bundle predates the KB. Its one consumer was the observer's Tier-1 anchor mapping, removed by
-     * Track A — see {@link #storeKnowledgeIndex} for why the pair is kept rather than deleted.
+     * bundle predates the KB. Its one consumer was the observer's Tier-1 anchor mapping, since
+     * removed — see {@link #storeKnowledgeIndex} for why the pair is kept rather than deleted.
      */
     public Optional<String> currentKnowledgeIndex(String projectId) {
         return pipelines.currentKnowledgeIndex(projectId);

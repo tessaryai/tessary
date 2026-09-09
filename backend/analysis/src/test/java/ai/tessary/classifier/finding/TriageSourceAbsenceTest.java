@@ -44,30 +44,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * What an ABSENT adapter does — the assertion that carries #840 and #841.
+ * What an ABSENT adapter does.
  *
- * <p>Both extractions end with an edition whose classpath holds no drift adapter and no conformance
- * adapter. If that state is a wiring failure, a 500, or an {@code Optional.get()} on an empty, the
- * extraction is not a package move and nobody finds out until a container starts. So the degradation is
- * pinned here, without Spring: an absent port produces what the surface already shows for a classifier
- * with no data.
+ * <p>An edition whose classpath holds no drift adapter and no conformance adapter must degrade to what
+ * the surface already shows for a classifier with no data, not throw. Pinned here without Spring, so a
+ * wiring failure shows up here instead of at container start.
  *
- * <p>It also holds the two routing asymmetries #839 lifted verbatim rather than tidied, so that the next
- * reader meets them as decisions rather than as bugs.
- *
- * <p><b>Every assertion here drives a production class.</b> Not a rule of taste: an earlier draft of this
- * file restated four of these degradations as stream expressions over locally-built empty lists, which
- * asserted {@code java.util.stream} and would have stayed green through the exact tightening
- * ({@code .orElse(null)} to {@code .orElseThrow()}) it claimed to forbid. A file whose job is to say
- * "absence is safe" is worth nothing unless the absent-collaborator list is handed to the real
- * constructor. Mockito supplies the collaborators the exercised paths reach; the rest are null, so a path
- * that starts touching one fails loudly instead of passing on a default.
+ * <p>Every assertion runs against the real constructor: unreached collaborators are left null rather than
+ * mocked, so a path that starts touching one fails loudly instead of passing on a default.
  */
 class TriageSourceAbsenceTest {
 
     private static final String PROJECT = "prj_1";
 
-    // ---- (f) an absent adapter degrades, on every port -------------------------------------------
+    // ---- absent adapters degrade, on every port -----------------------------------------------
 
     @Test
     @DisplayName("no TriageSource at all: the page is empty and the withheld count is zero, not a failure")
@@ -123,8 +113,7 @@ class TriageSourceAbsenceTest {
         when(evidence.exemplarTraceId(PROJECT, "f1")).thenReturn(Optional.of("tr_1"));
         when(substrate.traceSessionId(PROJECT, "tr_1")).thenReturn(Optional.of("ses_1"));
 
-        // The EDITION under test: the shared source with an empty resolver list, which is what the
-        // container wires once the drift adapter is not on the classpath.
+        // Shared source with an empty resolver list, as the container wires it without the drift adapter.
         BehaviorTriageSource source =
                 driftSource(findings, evidence, classifiers, annotations, events, substrate, List.of());
 
@@ -165,10 +154,8 @@ class TriageSourceAbsenceTest {
     @DisplayName("a registered contributor IS matched — on the Family string the service computed, not on a "
             + "detector kind that merely reads the same today")
     void a_registered_debug_contributor_fills_the_block() {
-        // The control for the test above, and the reason it is not vacuous: ClassifierDebugService filters
-        // contributors on ClassifierDebugView.Family.BEHAVIOR_DRIFT while BuiltInDetector.Kind.BEHAVIOR_DRIFT
-        // is a SEPARATE constant that happens to carry the same value. Asserting null alone would stay green
-        // if the two ever diverged, because nothing would match either way.
+        // Control for the test above: Family and Kind are separate constants that only share a value
+        // today; a null-only assertion wouldn't catch them diverging.
         ClassifierDebugView view = debug(List.of(new StubDebugContributor()));
 
         assertEquals(
@@ -178,7 +165,7 @@ class TriageSourceAbsenceTest {
                         + "the adapter have stopped agreeing on the family string");
     }
 
-    // ---- (e) the two asymmetries, preserved verbatim ---------------------------------------------
+    // ---- two deliberate routing asymmetries ---------------------------------------------------
 
     @Test
     @DisplayName("detail disclaims an id the source does not project; the next source is asked")
@@ -192,12 +179,9 @@ class TriageSourceAbsenceTest {
     @DisplayName("resolve claims where detail disclaims — the asymmetry is deliberate and is why conformance's "
             + "resolve arm is unreachable")
     void resolve_and_detail_disagree_on_purpose() {
-        // Stated as a test so the next reader meets it as a decision. BehaviorTriageSource.detail routes
-        // on classifier_key and hands an SOP-keyed row to conformance; BehaviorTriageSource.resolve routes
-        // on presence in the shared table, where conformance rows also live, so it claims them and 404s
-        // them on its own profile guard. Both were true before the seam, for the same reasons. Asserted on
-        // the real source against ONE row, because the whole content of the asymmetry is that the same row
-        // gets two different answers.
+        // detail() routes on classifier_key and defers SOP-keyed rows to conformance; resolve() routes on
+        // presence in the shared table, so it claims those same rows and 404s them instead. Both predate
+        // this seam and are deliberate; one row is enough since the point is that it gets two answers.
         FindingRepository findings = mock(FindingRepository.class);
         ClassifierService classifiers = mock(ClassifierService.class);
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(sopRow("f1")));
@@ -222,17 +206,16 @@ class TriageSourceAbsenceTest {
                 claimed.error(),
                 "resolve routes on PRESENCE, so it claims the same row and 404s it on its own profile guard "
                         + "instead of returning empty and letting conformance answer — which is exactly why "
-                        + "conformance's resolve arm is unreachable (parked for #841, not fixed here)");
+                        + "conformance's resolve arm stays unreachable here");
     }
 
-    // ---- (g) a job no source claims ---------------------------------------------------------------
+    // ---- a job no source claims ---------------------------------------------------------------
 
     @Test
     @DisplayName("a job no source briefs is done, not failed — the finding was resolved while it waited")
     void an_unclaimed_job_is_marked_done() {
-        // Driven through the worker's own package-private seam rather than restated, because the property
-        // is what the WORKER does with a brief nobody returned. Both pre-seam branches did exactly this on
-        // a vanished finding, so the seam adds no new state and no new error code.
+        // Driven through the worker's package-private seam: the property is what the worker does with a
+        // brief nobody returned. Both pre-seam branches already did this, so the seam adds no new state.
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         BehaviorTriageWorker worker = worker(jobs, engine, List.of(new DisclaimingSource(), new ClaimingSource()));
@@ -252,9 +235,8 @@ class TriageSourceAbsenceTest {
     }
 
     /**
-     * The shared source as an edition that ships no drift adapter would wire it. The collaborators the
-     * exercised paths never reach are null rather than mocked, so a path that starts touching one fails
-     * loudly here instead of quietly returning a default.
+     * The shared source as an edition without the drift adapter would wire it: unreached collaborators
+     * are null rather than mocked, so touching one fails loudly instead of quietly returning a default.
      */
     @SuppressWarnings("NullAway") // deliberate: the null collaborators are unreachable on detail/resolve
     private static BehaviorTriageSource driftSource(

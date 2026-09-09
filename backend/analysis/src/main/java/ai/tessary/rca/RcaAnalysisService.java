@@ -237,7 +237,7 @@ public class RcaAnalysisService {
         // and an absent `baseline` — correct for three of the five detectors — reads as a lost write.
         String method = ClassifierMethodCard.forClassifier(finding.classifierKey());
         if (method != null) files.put("method.md", method);
-        // D (#994): a dedicated per-shape assembler when this classifier's payload matches one (see
+        // A dedicated per-shape assembler when this classifier's payload matches one (see
         // ClassifierDossierAssembler's dispatch-by-shape note) — the same one BehaviorTriageEngine.
         // dossier() uses, so triage and RCA never disagree about what a classifier's evidence looks
         // like. DossierPayload.forAgent's strip-only pass is still the fallback for everything else.

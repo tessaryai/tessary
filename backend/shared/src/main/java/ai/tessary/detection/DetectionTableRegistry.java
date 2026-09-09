@@ -10,20 +10,17 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
- * Every {@link DetectionTable} on the classpath, indexed by the detector kind it claims — the same
+ * Every {@link DetectionTable} on the classpath, indexed by the detector kind it claims, the same
  * {@code ObjectProvider} + {@code toUnmodifiableMap} idiom {@code ClassifierSweepRegistry} (backend/
  * analysis) already uses for sweep dispatch, copied here rather than reused because that class lives
  * in a module {@code backend/shared} cannot depend on.
  *
- * <p>Replaces the six-arm {@code UNION ALL} view that used to live in
- * {@code 0000-baseline.sql}) as the stitching mechanism: {@link #unionSql()} builds the identical
- * shape at query time from whatever tables are actually registered on this classpath, so a paid
- * table simply not being present (open edition) removes its arm instead of leaving the view
- * referencing a relation that was never created. The view itself is left in the baseline changelog,
- * physically unread, until the partition commit (a separate, later issue) deletes it.
+ * <p>{@link #unionSql()} builds the same shape a hand-written {@code UNION ALL} view would, at
+ * query time, from whatever tables are actually registered on this classpath: a table that isn't
+ * present just drops its arm instead of the query referencing a relation that was never created.
  *
  * <p>Two beans registering the same {@code detectorKind} fail the context at boot
- * ({@code toUnmodifiableMap} throws {@code IllegalStateException} on a duplicate key) — the same
+ * ({@code toUnmodifiableMap} throws {@code IllegalStateException} on a duplicate key), the same
  * "loud, not silently-last-wins" contract {@code ClassifierSweepRegistry} chose, for the same reason:
  * which of two conflicting detection tables "wins" must never depend on classpath order.
  */
@@ -49,8 +46,8 @@ public class DetectionTableRegistry {
     }
 
     /**
-     * The distinct {@link DetectionTable}s registered, deduplicated by table name (two kinds — e.g.
-     * {@code CLASSIFIER} and {@code REGEX} — legitimately share one table) and sorted by table name
+     * The distinct {@link DetectionTable}s registered, deduplicated by table name (two kinds, e.g.
+     * {@code CLASSIFIER} and {@code REGEX}, legitimately share one table) and sorted by table name
      * for determinism. {@code RetentionRepository}'s sweep iterates this list; nothing should rely on
      * incidental Spring bean-registration order, which is not guaranteed stable.
      */
@@ -65,9 +62,9 @@ public class DetectionTableRegistry {
     }
 
     /**
-     * The stitched union over every registered table, in the old baseline view's exact
-     * twelve-column shape per arm. Callers wrap this in parentheses with an alias — {@code "(" +
-     * unionSql() + ") d"} — the same way a view name would be referenced.
+     * The stitched union over every registered table, twelve columns per arm. Callers wrap this
+     * in parentheses with an alias, {@code "(" + unionSql() + ") d"}, the same way a view name
+     * would be referenced.
      */
     public String unionSql() {
         return tables().stream()

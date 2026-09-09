@@ -21,24 +21,18 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * What happens when a cause a human called a DEVIATION happens again.
+ * What happens when a cause a human called a deviation happens again.
  *
- * <p>This is the strongest claim the feature can make — the agent is doing something its owner
- * explicitly said it must not do — and it used to arrive as the weakest: the uniqueness index was
- * partial on {@code status='open'}, so a blocked row no longer matched it and the next firing
- * inserted a fresh finding, resetting {@code first_seen_at}, restarting the count, and discarding
- * the human's verdict. It then re-enqueued a Layer-2 microVM to re-litigate a settled question.
+ * <p>This is the strongest claim the feature can make: the agent is doing something its owner
+ * explicitly said it must not do. The uniqueness index is partial on {@code status='open'}, so
+ * without care a blocked row no longer matches it and the next firing would insert a fresh finding,
+ * resetting {@code first_seen_at}, restarting the count, discarding the human's verdict, and
+ * re-enqueuing a Layer-2 microVM to re-litigate a settled question.
  *
- * <p><b>Why this sits in {@code classifier/finding/} and not with the drift classifier.</b> Every
- * assertion below is on {@link FindingRepository} — the conflict target, the recurrence arithmetic, the
- * verdict stamp, the Layer-2 gate on the default view — and that repository is open and shared: metric
- * drift, tool error and SOP conformance all write the same table through it. #840 took the drift
- * classifier to {@code tessary-paid/} and this test did not go with it, because it was never testing
- * drift. It used to seed a {@code BehaviorProfileRow} first, on the strength of a comment claiming
- * {@code behavior_finding.profile_id} was a real FK; the post-cutover {@code finding} table has no
- * {@code profile_id} column at all and its only foreign key is {@code finding_project_id_fkey}, so the
- * epoch was scaffolding for a constraint that does not exist. {@code recordFiring} writes the subject id
- * into {@code subject_id}, an unconstrained column, and a bare ULID stands in for it here.
+ * <p>Every assertion below is on {@link FindingRepository}: the conflict target, the recurrence
+ * arithmetic, the verdict stamp, the Layer-2 gate on the default view. {@code recordFiring} writes
+ * the subject id into {@code subject_id}, an unconstrained column, so a bare ULID stands in for it
+ * here.
  */
 @SpringBootTest
 class BehaviorBlockedRecurrenceIntegrationTest {
@@ -199,15 +193,13 @@ class BehaviorBlockedRecurrenceIntegrationTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has behaviour drift switched ON <b>before its project is created</b>.
+     * Bootstrap a tenant whose org has behavior drift switched on before its project is created.
      *
-     * <p>Two things make this necessary. The open-edition default has behavior_drift OFF
-     * (the paid classifiers {@code CapabilityService} reports as unavailable), so without a grant these cases
-     * would assert the capability default rather than the behaviour they name. And the grant has to precede the
-     * project, because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project does not
-     * have. The suite used to get all of this ambiently from {@code tessary.plan.default-key=enterprise} in
-     * surefire, which went away with plan tiers (open-core epic 1 issue 1).
+     * <p>Behavior drift defaults off, so without a grant these cases would assert the capability
+     * default rather than the behaviour they name. The grant must precede the project because
+     * project creation is what seeds the built-in classifiers: grant afterwards and the classifier
+     * row is never inserted, leaving the test hunting findings from a classifier the project does
+     * not have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

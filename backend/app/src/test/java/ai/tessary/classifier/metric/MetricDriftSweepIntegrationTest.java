@@ -46,22 +46,20 @@ import org.springframework.test.context.DynamicPropertySource;
  * {@link MetricDriftSweep} end to end against the real Postgres, for the two things a sweep has to get
  * right before anything it computes can be believed.
  *
- * <p><b>The cursor advances.</b> A sweep that scores traffic and leaves its cursor behind re-reads the
- * same page every heartbeat forever; one that advances past traffic it could not read loses that traffic
- * permanently. Both are invisible in a unit test.
+ * <p>The cursor advances: a sweep that scores traffic and leaves its cursor behind re-reads the same
+ * page every heartbeat forever, and one that advances past traffic it could not read loses that
+ * traffic permanently. Both are invisible in a unit test.
  *
- * <p><b>A replayed page is not counted twice.</b> The keyset cursor lives on the JOB row and the counters
- * live on the baseline, and those two have different lifetimes: clearing a stuck queue, or a call-site
- * fact arriving late, rewinds the cursor to null and re-offers the whole history. The
- * {@code counted_through_*} watermark is what makes that safe, and behaviour drift only learned it was
- * needed after production reported {@code trace_count} 565 for a project holding 443 distinct traces.
- * The replay below is exactly that scenario, and it asserts that the page really was re-READ — the
- * watermark, not a shrinking query, is what stops the double count.
+ * <p>A replayed page is not counted twice. The keyset cursor lives on the job row and the counters
+ * live on the baseline, and those two have different lifetimes: clearing a stuck queue, or a
+ * call-site fact arriving late, rewinds the cursor to null and re-offers the whole history. The
+ * {@code counted_through_*} watermark is what makes that safe. The replay test below asserts that the
+ * page really was re-read: the watermark, not a shrinking query, is what stops the double count.
  *
  * <p>The signal is the seeded {@code duration_drift} row wearing a config blob shrunk to fixture sizes.
  * The sweep is invoked directly rather than through {@link ClassifierWorker}'s {@code Grain.WINDOW}
- * branch, so nothing here depends on the classifier being ENABLED — which it is not, and deliberately
- * so until PLAN.md §9's null case sets a measured {@code w1_floor}.
+ * branch, so nothing here depends on the classifier being enabled, which it is not until
+ * PLAN.md §9's null case sets a measured {@code w1_floor}.
  */
 @SpringBootTest
 class MetricDriftSweepIntegrationTest {
@@ -513,11 +511,8 @@ class MetricDriftSweepIntegrationTest {
      * One trace whose spans have landed but whose ROOT has not: a single span naming a parent nothing
      * resolves to, which is what a trace looks like between a batch exporter's flushes.
      *
-     * <p>In v2 that is a plain statement rather than an inference. {@code parent_span_id} is the
-     * producer's own word, stored verbatim and never repaired, so a span naming an absent parent is not
-     * and cannot be mistaken for a root — where v1 had to keep the claimed parent in a second column
-     * because it degraded the first one to null, and a reader consulting only that first column measured
-     * this turn as a 400ms one.
+     * <p>{@code parent_span_id} is the producer's own word, stored verbatim and never repaired, so a
+     * span naming an absent parent cannot be mistaken for a root.
      *
      * <p>Started at {@code at}. The trace's own {@code started_at} is what the sweep reads to decide
      * whether the root may still be in flight, so this is the knob the two tests differ on.
@@ -560,11 +555,9 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * The token buckets as v2 STORES them: disjoint, with a null meaning the producer reported nothing.
-     *
-     * <p>v1's fixture wrote a provider's raw blob and let the read carve OpenAI's cache-inclusive input
-     * count down. That correction moved to write time, so what a fixture must now seed is the corrected
-     * value — and passing a still-inclusive one here would be seeding a row ingest never produces.
+     * The token buckets as they are stored: disjoint, with a null meaning the producer reported
+     * nothing. OpenAI's cache-inclusive input count is carved down at ingest, so a fixture must seed
+     * the already-corrected value; a still-inclusive one would be seeding a row ingest never produces.
      */
     private static TokenUsage usage(long input, long cacheRead, long output, @Nullable Long cacheCreation) {
         return new TokenUsage(input, output, cacheRead, cacheCreation == null ? 0 : cacheCreation);
@@ -651,10 +644,9 @@ class MetricDriftSweepIntegrationTest {
         return finding.payload();
     }
 
-    /** Parse a persisted sketch, failing the test rather than the null check when the column is empty. */
     /**
      * The one day the control ring holds after a single close. Asserted through the ring rather than
-     * through a resolved control because the resolved view is WEIGHTED — a same-day slot weighs 1 and a
+     * through a resolved control because the resolved view is weighted — a same-day slot weighs 1 and a
      * test asserting exact counts should not depend on that staying true tomorrow.
      */
     private static MetricSketch controlDay(MetricBaselineRow row) {
@@ -663,6 +655,7 @@ class MetricDriftSweepIntegrationTest {
         return sketch(day.sketchJson());
     }
 
+    /** Parse a persisted sketch, failing the test rather than the null check when the column is empty. */
     private static MetricSketch sketch(@Nullable String json) {
         assertNotNull(json, "expected a persisted sketch, found none");
         return MetricSketch.fromJson(json);

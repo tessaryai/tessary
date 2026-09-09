@@ -3,41 +3,33 @@
 # Conformance parity-fixture freshness gate. Single source of truth: invoked by both the Taskfile
 # (`task conformance:parity`) and the CI `conformance-parity` job.
 #
-# WHY THIS EXISTS. `backend/analysis/src/test/resources/conformance_parity.json` is what pins the
-# Java conformance port (#841 took the port into the paid overlay; the fixture stayed OPEN, because
-# classify-service's `/embed` tests and `check-classify-service.sh` read it too and the public export
-# deletes the overlay) to the Python engine
-# (classifiers/experiments/engine). ConformanceParityTest reads it on every backend run — but
-# NOTHING regenerated it. So the fixture only ever caught a Java change; a PYTHON change that
-# moved the engine's semantics left the fixture pinning the port to an engine that no longer
-# exists, and the suite stayed green while the two implementations diverged. This project has
-# already been burned once by exactly that failure mode (classifiers/behavior_drift/PROGRAM.md
-# §12.5), which is why the fixture exists at all.
+# WHY THIS EXISTS. `backend/analysis/src/test/resources/conformance_parity.json` pins the Java
+# conformance port to the Python engine (classifiers/experiments/engine).
+# ConformanceParityTest reads it on every backend run, but nothing regenerated it. So the fixture
+# only ever caught a Java change; a Python change that moved the engine's semantics left the
+# fixture pinning the port to an engine that no longer exists, and the suite stayed green while the
+# two implementations diverged. This is why the fixture exists at all.
 #
 # WHAT IT DOES. Reruns the generator in memory and diffs it against the checked-in file, failing
 # on any difference. It writes nothing, so a red run leaves the tree untouched and the fix is the
 # developer's own regeneration plus whatever the Java tests then report.
 #
-# The one block that legitimately cannot be regenerated everywhere is `encoder_smoke` — reference
+# The one block that legitimately cannot be regenerated everywhere is `encoder_smoke`: reference
 # embeddings from the real GTE checkpoint, which needs torch and a multi-GB download. The
 # generator fails soft on it and carries the checked-in block forward unchanged, so this gate is
-# honest on a runner with no model: it compares everything that IS reproducible, and a machine
-# that CAN produce the block still diffs it.
+# honest on a runner with no model: it compares everything that is reproducible, and a machine
+# that can produce the block still diffs it.
 #
-# EDITIONS (#875). Unlike check-classifier-parity.sh there is no narrowed form here: the generator
-# IS the paid half (`experiments.engine`, in the overlay since #843), so an open-edition run has
-# nothing to regenerate and skips whole. Two things it now decides for itself rather than having a
-# caller decide for it:
+# EDITIONS. The generator (`experiments.engine`) may not be present in every checkout, so a
+# checkout without it has nothing to regenerate against and skips whole. Two things this script
+# decides for itself rather than having a caller decide for it:
 #
 #   --edition open   skip, with the reason printed.
 #   --edition all    run when the generator is importable; skip, named, when it is not.
 #
-# And the guard moved onto the RIGHT predicate. Every caller used to ask whether the paid overlay
-# directory was on disk, which was correct only by accident: this script cds into `classifiers/`, a
-# tree the open-core ledger buckets `private` and epic 4's export deletes outright. Overlay-present
-# and classifiers-present are different questions, and only the second is this gate's dependency.
-# (This file may not name that directory at all — check-open-boundary.sh rule 5 — which is itself
-# the reason the predicate had to move out of the callers and into the two probes above.)
+# The guard is on the right predicate: whether the generator is importable, not whether a
+# particular directory exists on disk, since a checkout can carry the classifiers tree without
+# carrying the generator. This file names no fixed directory for that reason.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -61,11 +53,10 @@ if [ "$EDITION" = open ]; then
   exit 0
 fi
 
-# Kept, but not the edition predicate. Since #1293 classifiers/ ships in BOTH editions (the open
-# half — framework/, tool_error/, metric_drift/, data_gen/ — stayed behind when the research half
-# moved into the overlay), so this fires only in a checkout with no classifier tree at all. The
-# `--edition open` skip above is what answers for the export; the importability probe below is what
-# answers for a paid checkout missing its overlay.
+# Kept, but not the edition predicate: classifiers/ can be present without the generator being
+# importable, so this only fires in a checkout with no classifier tree at all. The `--edition open`
+# skip above is a separate answer for a checkout that never carries the generator; the
+# importability probe below is what answers for one that is missing it despite having the tree.
 if [ ! -d "$ROOT/classifiers" ]; then
   echo "conformance:parity skipped — no classifiers/ tree in this checkout at all, so there is no uv project to run the generator from"
   exit 0
@@ -78,20 +69,16 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# Importability, not directory existence — the same probe shape and the same three-way answer as
-# check-classifier-parity.sh, for the same reason: a broken uv environment must never read as an
-# absent paid half and quietly turn a gate into a skip. 0 = present, 3 = absent, anything else is
-# a hard failure. Path entries come out of pyproject.toml so this file names no overlay directory
-# (check-open-boundary.sh rule 5) and stays true if the layout moves.
+# Importability, not directory existence: the same probe shape and the same three-way answer as
+# check-classifier-parity.sh, for the same reason. A broken uv environment must never read as an
+# absent generator and quietly turn a gate into a skip. 0 = present, 3 = absent, anything else is
+# a hard failure. Path entries come out of pyproject.toml so this file names no fixed directory
+# and stays true if the layout moves.
 #
-# THE SAME ENTRIES ARE EXPORTED AS PYTHONPATH FOR THE RUN, and #1293 is why. This used to be a
-# probe-only concern: `experiments` resolved from this directory, and the open
-# classifiers/experiments/__init__.py appended the overlay to its own `__path__` on an is_dir()
-# test, so `python -m experiments.engine...` found the generator with no path help at all. #1293
-# moved e01-e30 into the overlay beside engine/ and shared/, which made that shim pointless and
-# deleted it — and with it the only thing making the RUN below resolve. The probe still passed
-# (it inserts the entries itself), so the failure mode was the worst kind: a gate that says the
-# generator is present and then dies on ModuleNotFoundError. One derivation now feeds both.
+# The same entries are exported as PYTHONPATH for the run below, so the probe and the run resolve
+# `experiments.engine` identically. A probe that passes with its own inserted paths but a run that
+# resolves the module differently is the worst failure mode: a gate that says the generator is
+# present and then dies on ModuleNotFoundError.
 _PYPATH="$(uv run --quiet python -c '
 import pathlib, tomllib
 cfg = tomllib.loads(pathlib.Path("pyproject.toml").read_text())

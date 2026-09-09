@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Primary;
 
 /**
  * An {@link EncoderScorer} whose failure is switchable mid-test, for exercising the signal
- * sweep's fast-fail dead-letter path (gh#531: {@code /classify} launcher transport failure)
+ * sweep's fast-fail dead-letter path ({@code /classify} launcher transport failure)
  * without a running launcher. Throws while {@link Toggle#isThrowing()} is true (transport down);
  * flip it off to simulate the launcher recovering.
  */

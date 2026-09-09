@@ -40,8 +40,8 @@ import org.springframework.web.server.ResponseStatusException;
  * <b>replace</b> is a full sync that deletes entities absent from the upload.
  * Both commit inside one transaction so a partial-import state is never observable.
  *
- * <p><b>No capability gate.</b> This surface was gated on {@code GRADERS} until Track A retired that
- * capability; bundle import is now plain pipeline authoring, and the sibling pipeline write surfaces
+ * <p><b>No capability gate.</b> This surface was gated on {@code GRADERS} until that
+ * capability was retired; bundle import is now plain pipeline authoring, and the sibling pipeline write surfaces
  * ({@code PipelineController}) carry no gate either. Re-pointing it at another capability would have
  * been an arbitrary choice, not a preserved one.
  */

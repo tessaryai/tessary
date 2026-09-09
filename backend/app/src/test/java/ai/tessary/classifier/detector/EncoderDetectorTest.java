@@ -191,7 +191,7 @@ class EncoderDetectorTest {
 
     @Test
     void configMinPriorUserTurnsReachesTheAssemblerAndSuppressesTheOpener() {
-        // Same bug class #639 shipped: `ignoreUnknown = true` plus a swallowed parse error means a
+        // Guards against a bug class where `ignoreUnknown = true` plus a swallowed parse error means a
         // MISBOUND key degrades silently to gate-off — the head keeps scoring, nothing errors, and every
         // integration fixture still passes because their preamble scores below the band either way. Only
         // an assertion on the scorer's actual input can tell a working binding from a dead one.

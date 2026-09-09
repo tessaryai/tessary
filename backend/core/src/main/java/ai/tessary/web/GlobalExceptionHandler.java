@@ -85,8 +85,7 @@ public class GlobalExceptionHandler {
     // Spring's own binding failures for a missing query parameter, a missing multipart part or an
     // unconvertible path variable used to fall through to the 500 fallback below, so a callback hit
     // without its `code`, an import with no `files` part, or a provider path segment that is not an
-    // enum constant, answered "internal server error" for what is a bad request. Epic 6's exposure
-    // sweep (#1153) found this class on a fresh boot.
+    // enum constant, answered "internal server error" for what is a bad request.
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException ex) {
         return build(

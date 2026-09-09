@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 
-/** The {@code ingest} health component (#984, criterion 4): the spool's numbers, DOWN on a dead drainer or a stale backlog. */
+/** The {@code ingest} health component: the spool's numbers, DOWN on a dead drainer or a stale backlog. */
 class IngestHealthIndicatorTest {
 
     private final SubstrateWriter writer = mock(SubstrateWriter.class);

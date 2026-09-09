@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Static design for the ZipEats food-delivery support agent — the reference corpus's fixture.
+"""Static design for the ZipEats food-delivery support agent: the reference corpus's fixture.
 
 Everything here is descriptive, not executable behavior: the tool catalogue, RAG collections, and
 intent mix are handed to Claude Haiku as generation instructions (see ``generate.py``) and to the
@@ -260,6 +260,6 @@ RAG_SUMMARIES: dict[str, str] = {
     ),
 }
 
-# Synthetic. Do not put a person's name here: this module publishes in the open edition
-# (#1293 kept classifiers/data_gen/ public), so every literal in it is a public string.
+# Synthetic. Do not put a person's name here: this module is public, so every literal in it
+# is a public string.
 DEPLOYMENT_ENVIRONMENT = "local-run-1"

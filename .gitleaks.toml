@@ -1,8 +1,8 @@
-# gitleaks configuration for the OPEN tree's own secret scan (#1293, C5).
+# gitleaks configuration for this tree's own secret scan.
 #
 # WHAT THIS IS AND IS NOT. This file configures .github/workflows/secret-scan.yml, which scans THIS
 # checkout in filesystem mode. It is not the export-candidate scrub: that gate, its forbidden-string
-# list and its trufflehog leg are overlay-owned (tessary-paid/scripts/check-scrub.sh) precisely
+# list and its trufflehog leg run separately, outside this checkout, precisely
 # because publishing a list of the strings we scan for would be self-defeating. What is left here is
 # the half that can be public without paradox — a stock rule set, plus the exemptions, each with the
 # reason it was granted.
@@ -15,21 +15,21 @@
 # keep them in step by hand, and keep the reasons.
 #
 # WHAT IS EXTENDED, AND THE REASON THAT WAS WRONG. `useDefault = true` adds gitleaks' built-in rules
-# rather than replacing them, and `path` adds scripts/lib/gitleaks-self-minted.toml (epic 6 clause 1,
-# #1146) — the five formats THIS PRODUCT mints or accepts: `tsy_<scope>_` API keys and MCP tokens,
+# rather than replacing them, and `path` adds scripts/lib/gitleaks-self-minted.toml — the five
+# formats THIS PRODUCT mints or accepts: `tsy_<scope>_` API keys and MCP tokens,
 # `link_` device codes, and the sealing-key, service-key and db-password env assignments.
 #
 # An earlier revision of this file left that ruleset out, on the stated ground that a self-minted
-# rule set "cannot publish without publishing the strings it looks for". That reason does not hold
-# and was corrected in #1293's review: gitleaks-self-minted.toml and its enumeration
+# rule set "cannot publish without publishing the strings it looks for". That reason does not hold:
+# gitleaks-self-minted.toml and its enumeration
 # scripts/lib/self-minted-credential-formats.txt are BOTH open files on no denylist row, so they
 # publish either way — what would have been withheld is the detection, not the disclosure. The
 # reason it does hold for is the FORBIDDEN-CONTENT sweep, which is a list of specific secrets rather
-# than of shapes; that stays overlay-owned and this file runs none of it.
+# than of shapes; that runs separately and this file runs none of it.
 #
-# The coverage this closes is the public repo's alone. The overlay's scrub gate already runs these
-# same rules over the export candidate — root-minus-overlay, i.e. exactly this tree's content — but
-# it runs on the overlay's cadence, so between a contributor's push and the next scrub the public
+# The coverage this closes is the public repo's alone. A separate scrub gate already runs these
+# same rules over the export candidate, i.e. exactly this tree's content, but
+# on its own cadence, so between a contributor's push and the next scrub the public
 # repo's own scan was the only thing looking, and no stock rule matches `tsy_w_…`.
 #
 # The top-level `[[allowlists]]` below apply to the extended rules too, so the fifteen reviewed
@@ -109,7 +109,7 @@ description = "WorkOS placeholders (sk_test_placeholder, client_test_placeholder
 paths = ['''^backend/tenancy/src/test/java/ai/tessary/auth/PublicOriginGuardTest\.java$''']
 
 [[allowlists]]
-description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it, and #1044); it exists so the secret_leak detector has something to catch"
+description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it); it exists so the secret_leak detector has something to catch"
 paths = ['''^classifiers/data_gen/emit_local\.py$''']
 
 [[allowlists]]

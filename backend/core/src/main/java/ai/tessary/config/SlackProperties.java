@@ -6,21 +6,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * How the backend reaches {@code tessary-paid/slack-service/}, bound from {@code tessary.slack.*}.
+ * How the backend reaches the Slack adapter service, bound from {@code tessary.slack.*}.
  *
- * <p><b>These are no longer Slack's credentials.</b> The signing secret, the bot token and the Web API
- * base moved to the adapter service when Slack left the Java deployable — the backend now holds nothing
- * that could post to Slack, which is most of the point of extracting it. What is left is the address of
- * the adapter and the key the two use to authenticate to each other.
+ * <p>These aren't Slack's own credentials: the signing secret, the bot token and the Web API base live
+ * in the adapter. This holds only the adapter's address and the key the two use to authenticate to
+ * each other.
  *
- * <p>Default-OFF is preserved and means something slightly different: with no base URL and key
- * configured the Slack path is INERT — no outbound call is attempted and the mention callback authorizes
- * nobody. A deployment opts in by pointing at the service and injecting the shared key.
+ * <p>Default-off: with no base URL and key configured, the Slack path is inert, no outbound call is
+ * attempted and the mention callback authorizes nobody. A deployment opts in by pointing at the service
+ * and injecting the shared key.
  *
- * <p>Per-tenant routing (which project a workspace's {@code @mention} resolves to, which channel receives
- * digests) still lives in {@code slack_install}, and whether an organization may use Slack at all is
- * {@code Capability.SLACK} — a different question from whether the adapter is deployed, and answered
- * somewhere else on purpose.
+ * <p>Per-tenant routing (which project a workspace's {@code @mention} resolves to, which channel
+ * receives digests) lives in {@code slack_install}; whether an organization may use Slack at all is
+ * {@code Capability.SLACK}, a different question from whether the adapter is deployed.
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.slack")
@@ -32,7 +30,7 @@ public class SlackProperties {
     /**
      * The shared key both directions of the link authenticate with; env-injected, never committed. The
      * backend presents it on {@code POST /deliver}, and the adapter presents the same one on the mention
-     * callback. Symmetric because it is one private link between two of our own processes — the same
+     * callback. Symmetric because it is one private link between two of our own processes, the same
      * posture {@code classify-service} takes with its API key.
      */
     private @Nullable String serviceKey;

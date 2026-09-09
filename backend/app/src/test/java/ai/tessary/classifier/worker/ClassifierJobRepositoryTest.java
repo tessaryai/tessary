@@ -21,12 +21,12 @@ import org.springframework.test.context.DynamicPropertySource;
 /**
  * Exercises the signal sweep queue's dead-letter budget against the real pgvector
  * Postgres (Testcontainers), on both exhaustion legs: a sweep job that keeps throwing (the {@code
- * /classify} transport-failure case — gh#531) must dead-letter after {@code maxAttempts} consecutive
+ * /classify} transport-failure case) must dead-letter after {@code maxAttempts} consecutive
  * failures instead of being silently resurrected by every heartbeat's re-pend forever; a sweep job whose
- * worker keeps hanging (lease expiry, crash-reclaim — gh#543) must get the same treatment. Both must
+ * worker keeps hanging (lease expiry, crash-reclaim) must get the same treatment. Both must
  * still recover automatically once the backend is healthy again.
  *
- * <p>Also covers {@link ClassifierJobRepository#listByProject} — the read behind gh#545's sweep-job health
+ * <p>Also covers {@link ClassifierJobRepository#listByProject} — the read behind the sweep-job health
  * endpoint: it must return a signal's job row scoped to its project, reflect a failure's
  * {@code status}/{@code attempts}/{@code lastError}, and never leak a job belonging to a different
  * project.
@@ -208,7 +208,7 @@ class ClassifierJobRepositoryTest {
                 isClaimable(classifierId, "w2"),
                 "at the cap the reclaim leg must stop re-claiming and leave the row for failExhausted");
 
-        // The heartbeat's dead-letter sweep: gh#543 — this must park the job in the cooldown-gated 'dead'
+        // The heartbeat's dead-letter sweep must park the job in the cooldown-gated 'dead'
         // state, not 'failed' (which the very next heartbeat's re-pend would resurrect: a retry loop with
         // no backoff, exactly what the fast-fail leg already prevents).
         assertTrue(jobs.failExhausted(MAX_ATTEMPTS) >= 1, "the exhausted job is dead-lettered");

@@ -25,7 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * First test coverage for {@link ProjectModelSettingController} — confirmed absent before this
  * file ({@code find backend -iname "*ProjectModelSettingController*Test*"} returned nothing).
  *
- * <p>The gap this closes: {@link ProjectModelSettings#validate}/{@code set} accept the #939
+ * <p>The gap this closes: {@link ProjectModelSettings#validate}/{@code set} accept the
  * {@code "<PROVIDER>:<model_name>"} catalog key for an {@link LaneGroup#AGENT_VM} lane (RCA,
  * TRIAGE) — proven by {@link ProjectModelSettingsTest} — but that write path was never checked
  * against the read path that actually feeds the settings page's only model picker
@@ -79,7 +79,7 @@ class ProjectModelSettingControllerTest {
         var resolved = new TenantPathResolver.Resolved(org, project, "owner");
         when(resolver.requireProject(ctx, ORG_SLUG, PROJECT_SLUG)).thenReturn(resolved);
         when(settings.list(PROJECT_ID)).thenReturn(List.of());
-        // #939 D3: configuredProviders — empty org, no credentials configured. Individual tests
+        // configuredProviders — empty org, no credentials configured. Individual tests
         // that need a configured provider override this.
         when(providerCredentials.findByOrg(ORG_ID)).thenReturn(List.of());
     }
@@ -88,7 +88,7 @@ class ProjectModelSettingControllerTest {
     void getOffersEveryAgenticCatalogEntryOnBothAgentVmLanes() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
-        // catalog_models: the non-Bedrock half of the #939 union, present at all — this is the field
+        // catalog_models: the non-Bedrock half of the union, present at all — this is the field
         // that did not exist before the fix.
         assertEquals(
                 List.of(

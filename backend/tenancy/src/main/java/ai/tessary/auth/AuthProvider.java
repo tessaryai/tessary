@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
  * {@link WorkOsClient} or {@link WorkOsProperties} any more.
  *
  * <p>{@link WorkOsClient} (BYO WorkOS credentials) and {@link PasswordAuthProvider} (the
- * dependency-free open-edition default, #852) are the two implementations, wired via
+ * dependency-free open-edition default) are the two implementations, wired via
  * {@link AuthProviderConfig}. Session sealing ({@link SealedSession}, {@link SessionCipher}) stays
  * on the provider-agnostic side of this seam — a {@code SealedSession} is built from an
  * {@link AuthResult}, which this interface owns, not from anything WorkOS-shaped directly.
@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * same order, same nullability — so every existing call site's accessor chain (notably
  * {@link AuthFilter}'s refresh-path null-coalescing over {@code r.workosUserId()/email()/...})
  * keeps compiling and behaving unchanged. The field names still say "workos" because that is the
- * wire shape WorkOS returns and the DB column {@link PasswordAuthProvider} (#852) also populates,
+ * wire shape WorkOS returns and the DB column {@link PasswordAuthProvider} also populates,
  * with a synthetic id, for its own principals; renaming them is out of scope here.
  */
 public interface AuthProvider {
@@ -55,7 +55,7 @@ public interface AuthProvider {
     /**
      * Whether this provider drives the OAuth redirect dance ({@code authorizationUrl}/
      * {@code authenticateWithCode}, called from {@code GET /auth/login}/{@code /auth/callback}).
-     * True for every provider until {@code PasswordAuthProvider} (#852), which overrides this to
+     * True for every provider until {@code PasswordAuthProvider}, which overrides this to
      * {@code false} so {@link AuthController} degrades those two GET routes to a frontend redirect
      * instead of calling a method that provider has no way to implement.
      */

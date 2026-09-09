@@ -41,7 +41,7 @@ import org.springframework.stereotype.Service;
  * clones the repo, materializes the evidence dossier as files, runs the agent (optionally wired
  * to the platform's MCP surface via a short-lived key), and tears the sandbox down.
  *
- * <p><b>#939 D4: model credentials are resolved and decrypted HERE</b> (via {@link
+ * <p><b>Model credentials are resolved and decrypted HERE</b> (via {@link
  * AgenticCredentialResolver}), not in the launcher — the launcher reads no provider secret from
  * its own process env any more (the deployment-wide {@code AGENT_PROVIDER} path was FULLY
  * REMOVED). The org's own credential rides on the {@code credential} field below, injected on
@@ -76,7 +76,7 @@ public class E2bRcaSandbox implements RcaSandbox {
     private final ObserverProperties observerProps;
 
     private final ProjectModelSettings modelSettings;
-    /** #939 D4: resolves + decrypts the org's own credential for the sandbox request body. */
+    /** Resolves + decrypts the org's own credential for the sandbox request body. */
     private final AgenticCredentialResolver credentials;
 
     private final LlmUsageAccountant usage;
@@ -128,7 +128,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                 projectId,
                 ModelLane.RCA.wire(),
                 model(projectId),
-                // #939 D4: never platform-funded any more — the run carries the org's own injected
+                // Never platform-funded any more — the run carries the org's own injected
                 // credential (AgenticCredentialResolver), so this lane's spend belongs to the org's
                 // bill, not the platform's.
                 false,
@@ -141,11 +141,11 @@ public class E2bRcaSandbox implements RcaSandbox {
     }
 
     /**
-     * The project's {@link ModelLane#RCA} choice — Bedrock/mantle inference-profile id or, since
-     * #939, a bare {@link ai.tessary.llm.ModelCatalog} model name for one of the four new
-     * providers — or empty when the project has chosen nothing (a project older than lane seeding;
-     * every seeded project has a row). See {@link #providerFor} for how D4 resolves that gap now
-     * that there is no deployment-level default provider left to fall through to.
+     * The project's {@link ModelLane#RCA} choice — Bedrock/mantle inference-profile id or a bare
+     * {@link ai.tessary.llm.ModelCatalog} model name for one of the four new providers — or empty
+     * when the project has chosen nothing (a project older than lane seeding; every seeded project
+     * has a row). See {@link #providerFor} for how that gap is resolved now that there is no
+     * deployment-level default provider left to fall through to.
      */
     private Optional<ProjectModelSettings.ResolvedAgenticModel> resolvedModel(String projectId) {
         return modelSettings.resolveAgenticModel(projectId, ModelLane.RCA);
@@ -159,7 +159,7 @@ public class E2bRcaSandbox implements RcaSandbox {
     }
 
     /**
-     * The provider whose org credential this run must carry (#939 D4). A resolved lane names its
+     * The provider whose org credential this run must carry. A resolved lane names its
      * own provider directly; an unresolved one (no stored row — only a project older than lane
      * seeding) defaults to {@link ModelProvider#BEDROCK}, this lane's historical default endpoint
      * (SigV4 Converse), since that is the only honest translation of "no explicit choice" left once
@@ -230,11 +230,11 @@ public class E2bRcaSandbox implements RcaSandbox {
                     "model",
                     resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                             .orElseGet(() -> model(req.projectId())));
-            // #939 D4: full removal of the launcher's deployment-env-var credential path — the org's
+            // Full removal of the launcher's deployment-env-var credential path — the org's
             // own credential now travels ON the request, decrypted here and never logged (see
             // AgenticCredentialResolver's class javadoc). Throws MISSING_CREDENTIALS /
             // AGENTIC_IAM_ROLE_UNSUPPORTED BEFORE the launcher is ever called when there is no usable
-            // credential, per D4's "fail closed before calling the launcher" rule. `provider` is also
+            // credential, per the "fail closed before calling the launcher" rule. `provider` is also
             // sent plainly (it is not a secret) — the launcher's providerConfig()/toProviderModel()
             // still key off it to pick which OpenCode provider block to build.
             ModelProvider provider = providerFor(req.projectId());
@@ -246,7 +246,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                 mcp.put("token", req.mcpToken());
             }
             body.put("timeout_ms", cfg.getTimeoutMs());
-            // B (#994): a soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
+            // A soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
             // (not yet live-verified) caveat.
             body.put("max_turns", cfg.getMaxTurns());
 

@@ -9,30 +9,17 @@ import org.springframework.stereotype.Component;
 /**
  * Says the instance's authentication posture out loud at startup.
  *
- * <p>Sibling of {@link AuthRequiredInProdGuard}, and the same shape: a bean whose only job is to
- * look at the resolved configuration once and tell the operator what it means. The guard refuses
- * the boot in the one state that must never reach production; this one narrates the states that
- * are allowed but worth knowing about.
+ * <p>Sibling of {@link AuthRequiredInProdGuard}: a bean whose only job is to look at the resolved
+ * configuration once and tell the operator what it means. The guard refuses the boot in the one
+ * state that must never reach production; this one narrates the states that are allowed but worth
+ * knowing about. It lives outside {@link AuthFilter} because a one-shot startup announcement and a
+ * per-request filter are different lifecycles, and because the whole posture table reads better as
+ * one small file than folded into the filter.
  *
- * <p><b>Why not inside {@link AuthFilter}.</b> It first lived there, on the reasoning that the fact
- * belongs next to the behaviour it describes. That put a one-shot startup announcement inside a
- * per-request filter, which is a different lifecycle and a different job — and it made
- * {@code AuthFilter} the answer to two questions instead of one. Splitting it also lets this bean
- * be read on its own: the whole posture table is in one twenty-line file.
- *
- * <p><b>Why warn at all in the enforced case.</b> Silence is what made the pre-#924 behaviour
- * dangerous rather than merely permissive: nothing anywhere told you the door was open. Saying the
- * posture out loud at startup turns a confusing incident into a log line.
- *
- * <p><b>Re-decided by #852/#996: {@code tessary.auth.disabled} is now authoritative on its own,
- * regardless of which {@link AuthProvider} is active.</b> Before #852, {@code provider.isEnabled()}
- * being {@code true} meant enforcement no matter what the flag said — that branch was this class's
- * ordinary, no-warning case. #852 added {@link PasswordAuthProvider}, unconditionally enabled,
- * which made {@code provider.isEnabled()} true in essentially every real deployment and broke that
- * branch's premise: it kept announcing "enforced" even when {@code tessary.auth.disabled=true} was
- * ALSO set and {@link AuthFilter#shouldNotFilter} was actually bypassing everything — the one
- * operator-facing safety signal for exactly that risk was saying the opposite of the truth (caught
- * by #996's crew review, not by any test). The flag alone now decides which branch this announces.
+ * <p>{@code tessary.auth.disabled} is checked first and is authoritative on its own, regardless of
+ * which {@link AuthProvider} is active: a provider can report itself enabled while
+ * {@link AuthFilter#shouldNotFilter} is bypassing everything, so checking the provider first would
+ * announce "enforced" while auth is actually off.
  */
 @Component
 public class AuthPostureAnnouncer {
@@ -61,10 +48,10 @@ public class AuthPostureAnnouncer {
                     "Auth: {} active; /api/** and /mcp are enforced.",
                     provider.getClass().getSimpleName());
         } else {
-            // Only WorkOsClient can ever be unenabled here — PasswordAuthProvider (#852) has no
-            // external config to be missing, so it is unconditionally enabled. This branch is
-            // therefore dead in the open edition today, but stays: a future third AuthProvider
-            // could reintroduce a real "misconfigured, no provider works" state.
+            // Only WorkOsClient can ever be unenabled here: PasswordAuthProvider has no external
+            // config to be missing, so it is unconditionally enabled. This branch is dead today,
+            // but stays: a future third AuthProvider could reintroduce a real "misconfigured, no
+            // provider works" state.
             log.warn("No identity provider is configured, so /api/** and /mcp will answer 401. Configure one, "
                     + "or set tessary.auth.disabled=true to serve this instance unauthenticated on purpose.");
         }

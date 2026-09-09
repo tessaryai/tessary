@@ -25,23 +25,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * What the write path now records about a span's images and about its failure — the two halves of the
- * same batch write, and the two things that were being thrown away.
+ * Covers what the write path records for a span's images and its failure: an externalized image
+ * gets a {@code media_ref} row (hung off the payload, not the span, so it cascades with the
+ * payload's text), and a failing span splits its class into {@code error_type} from its prose
+ * into {@code error_message}.
  *
- * <p><b>Images (#761).</b> Externalizing an inline base64 image stores bytes in {@code media_object} and
- * leaves an {@code image_ref} string in the payload JSON. That string is the whole reference: no FK, no
- * join, no cascade could see it, so nothing could tell whether an image was still in use and retention
- * had no media step at all. The {@code media_ref} rows asserted here are that reference made visible, and
- * the cascade test is the reason they hang off the PAYLOAD rather than the span.
- *
- * <p><b>Failure (#762).</b> {@code error_type} used to be written from the producer's status message, so
- * the column every facet and {@code GROUP BY} treats as a type held prose. Here the class goes to
- * {@code error_type} and the prose to {@code error_message}, at both grains.
- *
- * <p>It shares {@link SpanBatchWriterIntegrationTest}'s property fingerprint deliberately: same context,
- * same database, no second Liquibase run — and, less obviously, the writer enqueues an embedding job per
- * span it writes, which in the default context would be claimed out from under
- * {@code JobRepositoryTest}'s globally-scoped claim assertion.
+ * <p>Shares {@link SpanBatchWriterIntegrationTest}'s property fingerprint (same context, same
+ * database, no second Liquibase run). The writer also enqueues an embedding job per span, which
+ * in the default context would race {@code JobRepositoryTest}'s globally-scoped claim assertion.
  */
 @SpringBootTest(
         properties = {
@@ -86,7 +77,7 @@ class SpanMediaAndErrorWriteIntegrationTest {
                 1L,
                 mediaRefs(p, mediaId),
                 "the reference the payload carries as a string must also exist as a row, or nothing can"
-                        + " tell whether these bytes are still in use (#761)");
+                        + " tell whether these bytes are still in use.");
     }
 
     @Test
@@ -101,7 +92,7 @@ class SpanMediaAndErrorWriteIntegrationTest {
                 .single();
         assertEquals(1L, mediaRefs(p, mediaId));
 
-        // Exactly what retention's first tier does — payloads age ahead of spans.
+        // Matches retention's first tier: payloads age ahead of spans.
         jdbc.sql("DELETE FROM span_payload WHERE project_id = :pid AND trace_id = :tid")
                 .param("pid", p.id())
                 .param("tid", traceId)
@@ -203,8 +194,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
         assertEquals(Boolean.TRUE, row.get("is_error"), "the flag the classifier keys off is unchanged");
     }
 
-    // ---- fixtures ------------------------------------------------------------------------------
-
     private Project project(String name) {
         return TenantFixture.bootstrap(tenants, name).project();
     }
@@ -218,7 +207,7 @@ class SpanMediaAndErrorWriteIntegrationTest {
         return n == null ? 0L : n;
     }
 
-    /** A 1×1 PNG, base64 — small enough to inline here, real enough to decode. */
+    /** A 1x1 PNG, base64: small enough to inline, real enough to decode. */
     private static String oneRedPixel() {
         return Base64.getEncoder()
                 .encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4});

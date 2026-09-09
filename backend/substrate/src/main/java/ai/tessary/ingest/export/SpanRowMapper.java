@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Turns one v2 {@code (span, span_payload)} pair — the shape {@link TracesController}'s existing detail
  * read already fetches — into the {@link RawEntry} {@link TraceSpanMapper} consumes, for the trace export
- * endpoint (#986). Mirrors {@code ingest/substrate/SubstrateSource#toRawEntry}'s field mapping exactly
+ * endpoint. Mirrors {@code ingest/substrate/SubstrateSource#toRawEntry}'s field mapping exactly
  * (same producer-id-preserving identity: {@code sourceExternalId} is the composite
  * {@code "<trace_id>:<span_id>"} handle, {@code parentId} is the parent's handle in the same trace) —
  * that mapper reads {@code SpanRepository.SpanEntry} (a joined row), this one reads the two rows

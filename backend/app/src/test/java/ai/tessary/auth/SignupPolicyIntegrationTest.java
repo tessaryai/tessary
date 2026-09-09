@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * The sign-up policy (#1226) end to end through the real {@link PasswordAuthProvider}: an owner
+ * The sign-up policy end to end through the real {@link PasswordAuthProvider}: an owner
  * tightens the policy, strangers are refused with nothing created, invitations win in every mode,
  * a listed domain is admitted, and existing members keep signing in. The policy is instance-wide
  * (the install's first organization's), so the methods run in order on one shared database.

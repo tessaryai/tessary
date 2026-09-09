@@ -295,8 +295,8 @@ class TracesControllerTest {
     @Test
     @DisplayName("export preserves real image and document bytes as inline data: URIs, one JSONL span per line")
     void exportRoundTripsRealMediaBytes() throws Exception {
-        // #986: the endpoint TraceSpanMapper.toSpan/toSpanLine had zero production callers before this
-        // issue. Base64 media needs no MediaStore round trip (the bytes are already inline), so this
+        // The endpoint TraceSpanMapper.toSpan/toSpanLine had zero production callers before this test.
+        // Base64 media needs no MediaStore round trip (the bytes are already inline), so this
         // exercises the export wiring end to end without a separate media-store seeding step.
         Tenant t = tenant("traces-export");
         Instant t0 = Instant.parse("2026-09-02T12:00:00Z");

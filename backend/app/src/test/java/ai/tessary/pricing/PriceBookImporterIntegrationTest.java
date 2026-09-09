@@ -71,8 +71,8 @@ class PriceBookImporterIntegrationTest {
     @Test
     @DisplayName("a model resolves to the vendored book's own rate")
     void rateFor_resolvesFromTheVendoredBook() {
-        // The mantle route-prefixed spelling BedrockModelProfile.MANTLE_ROUTE_PREFIX reports — see
-        // #1032 — resolving without any override, straight off the imported vendored book.
+        // The mantle route-prefixed spelling BedrockModelProfile.MANTLE_ROUTE_PREFIX reports
+        // resolves without any override, straight off the imported vendored book.
         ModelRate mantle = books.rateFor("bedrock_mantle/openai.gpt-5.6-luna").orElseThrow();
         assertEquals(versionOf(PriceBook.SOURCE_LITELLM), mantle.priceBookVersion());
         assertEquals(

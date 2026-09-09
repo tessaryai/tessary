@@ -24,9 +24,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * The live model catalog, fetched from each configured provider's own API and cached — the piece of
- * #939 D6 the earlier pass of this issue did not build. {@link ai.tessary.llm.ModelCatalog}
- * stays the static per-model CAPABILITY table (agentic, effort levels, strict JSON schema); this
+ * The live model catalog, fetched from each configured provider's own API and cached. {@link
+ * ai.tessary.llm.ModelCatalog} stays the static per-model CAPABILITY table (agentic, effort levels, strict JSON schema); this
  * service answers the orthogonal question, "what models does this org's credential actually see
  * right now" — {@code ModelCatalog#mergeLive} is where the two are reconciled into what the settings
  * page and {@code ChatModelFactory} actually use.
@@ -132,7 +131,7 @@ public class ModelCatalogFetchService {
         ProviderCredential cred =
                 credentials.findByOrgAndProvider(orgId, provider).orElse(null);
         // Mandatory property (iv): no credential contributes nothing, not an error — same as an
-        // unconfigured provider is treated everywhere else in #939 (D3's disabled-option pattern).
+        // unconfigured provider is treated everywhere else (the disabled-option pattern).
         if (cred == null) return List.of();
         CacheKey key = new CacheKey(provider, regionFor(provider, cred));
         CacheEntry entry = cache.get(key);
@@ -183,7 +182,7 @@ public class ModelCatalogFetchService {
 
     /**
      * {@code (provider, region)} — mandatory property (i). Bedrock/mantle key on the credential's own
-     * AWS region (never an env var — {@code MANTLE_REGION} and friends are gone under D4); CUSTOM
+     * AWS region (never an env var — {@code MANTLE_REGION} and friends are gone); CUSTOM
      * keys on the credential's endpoint, since two orgs' custom endpoints are unrelated data sources;
      * every other provider collapses to {@link #SINGLE_REGION}.
      */

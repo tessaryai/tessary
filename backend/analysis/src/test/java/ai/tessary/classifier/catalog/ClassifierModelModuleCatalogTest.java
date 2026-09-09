@@ -33,14 +33,12 @@ import org.mockito.Mockito;
 class ClassifierModelModuleCatalogTest {
 
     /**
-     * The catalog every other test in this file builds against, with ONE discovered {@link
-     * DetectorSupplier} stubbed in for {@code groundedness} — standing in for {@code
-     * tessary-paid/groundedness}'s {@code GroundednessAutoConfiguration}, which is what supplies the
-     * real detector in a running backend since #887/#888. Stubbed rather than real: the actual
-     * detector class now lives in the paid overlay, outside this module's test classpath, and this
-     * file's job is to pin the CATALOG's wiring, not re-prove the detector's own behaviour (that lives
-     * in {@code tessary-paid/groundedness}'s relocated {@code GroundednessDetectorTest}). The stub
-     * answers {@code callSiteFactsRead()} with the real detector's declared set so {@link
+     * The catalog every other test in this file builds against, with one discovered {@link
+     * DetectorSupplier} stubbed in for {@code groundedness}, standing in for the auto-configuration
+     * that supplies the real detector in a running backend. Stubbed rather than real: the actual
+     * detector class lives outside this module's test classpath, and this file's job is to pin the
+     * catalog's wiring, not re-prove the detector's own behavior. The stub answers {@code
+     * callSiteFactsRead()} with the real detector's declared set so {@link
      * #callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem} still exercises a true fact.
      */
     private BuiltInClassifierCatalog catalog() {
@@ -52,7 +50,7 @@ class ClassifierModelModuleCatalogTest {
 
     /**
      * A catalog built with whatever {@link DetectorSupplier}s the test wants to prove something about
-     * the discovery seam itself — the two tests below construct one directly rather than going through
+     * the discovery seam itself. The two tests below construct one directly rather than going through
      * {@link #catalog()}'s groundedness stub, since they are pinning the seam's own contract (no
      * membership guard, fail-loud on a duplicate kind) rather than the shipped catalog's shape.
      */
@@ -67,11 +65,11 @@ class ClassifierModelModuleCatalogTest {
 
     @Test
     void discoveredSupplierNeedsNoInTreeManifestEntry() {
-        // The generic seam has NO membership check against MODULES (#887/#888's fork decision):
-        // a DetectorSupplier claiming a kind the catalog manifest never declared is folded into the
-        // dispatch map all the same. That is the trade documented on DetectorSupplier's class comment
-        // — such a detector builds and registers, but nothing ever routes a sweep to it, because
-        // seeding, the capability gate and grainFor all still read MODULES independently of this seam.
+        // The generic seam has no membership check against MODULES: a DetectorSupplier claiming a
+        // kind the catalog manifest never declared is folded into the dispatch map all the same.
+        // That is the trade documented on DetectorSupplier's class comment: such a detector builds
+        // and registers, but nothing ever routes a sweep to it, because seeding, the capability gate
+        // and grainFor all still read MODULES independently of this seam.
         BuiltInDetector stub = Mockito.mock(BuiltInDetector.class);
         Mockito.when(stub.kind()).thenReturn("example_kind");
         BuiltInClassifierCatalog catalog = catalogWithDiscovered(deps -> stub);
@@ -83,8 +81,8 @@ class ClassifierModelModuleCatalogTest {
     @Test
     void discoveredSupplierCollidingWithAnInTreeKindFailsLoud() {
         // The same invariant ClassifierSweepRegistry enforces for ClassifierSweep, now proven for
-        // DetectorSupplier too: two sources claiming one kind — here, a discovered supplier colliding
-        // with secret_leak's in-tree MODULES factory, which is never nulled — means two analyses would
+        // DetectorSupplier too: two sources claiming one kind (here, a discovered supplier colliding
+        // with secret_leak's in-tree MODULES factory, which is never nulled) means two analyses would
         // write findings under one classifier row, and the constructor must fail rather than let
         // classpath order pick a silent winner.
         BuiltInDetector discovered = Mockito.mock(BuiltInDetector.class);
@@ -125,17 +123,13 @@ class ClassifierModelModuleCatalogTest {
     /**
      * Duration drift's operating point, and the one guard left in front of it.
      *
-     * <p>This test used to assert the classifier seeded DISABLED, derived from an {@code EXPERIMENTAL}
-     * lifecycle. That axis is gone: a classifier we do not trust is one we do not flag on outside our own
-     * orgs, and expressing the same intent twice meant two places to get it wrong. So the only thing
-     * standing between {@code w1_floor = 0.139} — a 15% move, set from a synthetic null run, which
-     * {@code classifiers/metric_drift/PLAN.md} §9's run against real traffic has not yet replaced — and a
-     * partner's Triage is {@code duration_drift_enabled}.
+     * <p>The only thing standing between {@code w1_floor = 0.139} (a 15% move, set from a synthetic
+     * null run) and a partner's Triage is {@code duration_drift_enabled}.
      *
-     * <p><b>That guard is a console setting and cannot be asserted here</b>, which is worth stating
-     * plainly rather than leaving as a gap someone discovers later. What this test still pins is that the
-     * classifier declares a capability at all, so it is governed by a flag rather than ungoverned, and
-     * that the numbers below are the ones the sweep will actually read.
+     * <p>That guard is a console setting and cannot be asserted here, which is worth stating
+     * plainly rather than leaving as a gap someone discovers later. What this test still pins is
+     * that the classifier declares a capability at all, so it is governed by a flag rather than
+     * ungoverned, and that the numbers below are the ones the sweep will actually read.
      */
     @Test
     void durationDriftIsFlagGovernedAndCarriesItsMeasures() {
@@ -144,29 +138,32 @@ class ClassifierModelModuleCatalogTest {
                 Capability.DURATION_DRIFT,
                 durationDrift.capability(),
                 "the flag is now the only thing holding an unmeasured detector back — it must exist");
-        // The measures ride in the config blob rather than being separate modules — that is what makes
-        // ONE switch govern both grains of the same question (PROGRAM.md §3.1): a turn's own duration and
-        // the duration of each tool call inside it are two halves of one thing a human decides about.
+        // The measures ride in the config blob rather than being separate modules: that is what
+        // makes one switch govern both grains of the same question, a turn's own duration and the
+        // duration of each tool call inside it being two halves of one thing a human decides about.
         String config = configOf(catalog().builtIns(), "duration_drift");
         assertNotNull(config);
         assertTrue(config.contains("\"measures\":[\"turn_duration\",\"tool_duration\"]"), config);
         assertTrue(config.contains("\"w1_floor\":0.139"), config);
-        // Shipping tool_duration without this dial would ship the second grain without the §6.1 rule that
-        // keeps one event to one finding — two rows, in a stream with no alert budget to absorb the second.
+        // Shipping tool_duration without this dial would ship the second grain without the rule that
+        // keeps one event to one finding: two rows, in a stream with no alert budget to absorb the second.
         assertTrue(config.contains("\"explained_by_fraction\":0.5"), config);
     }
 
     /**
-     * Cost drift is the second switch, and the token buckets are deliberately NOT under it as measures.
+     * Cost drift is the second switch, and the token buckets are deliberately not under it as
+     * measures.
      *
-     * <p>Only measures that can OPEN a finding are listed in {@code measures}, because that list is what
-     * {@code MetricDriftConfig}'s registry resolves against — so PROGRAM.md §6.1's rule ("the four token
-     * buckets are evidence, never findings") is enforced by the config rather than remembered by whoever
-     * edits it next. A prompt edit that kills caching moves cost, input tokens and cache reads at once;
-     * naming them here would turn that one cause into five rows in a stream with no alert budget.
+     * <p>Only measures that can open a finding are listed in {@code measures}, because that list is
+     * what {@code MetricDriftConfig}'s registry resolves against, so the rule that the four token
+     * buckets are evidence, never findings, is enforced by the config rather than remembered by
+     * whoever edits it next. A prompt edit that kills caching moves cost, input tokens and cache
+     * reads at once; naming them here would turn that one cause into five rows in a stream with no
+     * alert budget.
      *
-     * <p>Like duration drift, it is held back only by {@code cost_drift_enabled} — the same unmeasured
-     * {@code w1_floor}, and the same guard that lives in a console rather than in this test.
+     * <p>Like duration drift, it is held back only by {@code cost_drift_enabled}: the same
+     * unmeasured {@code w1_floor}, and the same guard that lives in a console rather than in this
+     * test.
      */
     @Test
     void costDriftIsASecondSwitchWhoseTokenBucketsAreEvidenceOnly() {
@@ -180,33 +177,24 @@ class ClassifierModelModuleCatalogTest {
             assertFalse(
                     config.contains(bucket), bucket + " is evidence on the cost finding, never a measure: " + config);
         }
-        // Cost SUMS over a trace's spans, so it waits for them; duration is read off one span whose
-        // arrival is its own completion signal and ignores this. Two paths, deliberately (PROGRAM.md §5).
+        // Cost sums over a trace's spans, so it waits for them; duration is read off one span whose
+        // arrival is its own completion signal and ignores this. Two paths, deliberately.
         assertTrue(config.contains("\"settle_seconds\":300"), config);
     }
 
     /**
-     * SOP conformance is flag-governed like every built-in — it seeds ENABLED, and the only thing
-     * between it and an org is {@code sop_conformance_enabled}, which is targeted on for NOBODY yet
-     * (both named enablement blockers — the classify-service {@code /embed} endpoint and
-     * intent-at-ingest — have since landed; what holds it off now is that no per-project bundle
-     * exists until one is deployed, and the compile worker behind that is still a stub). Its config keys must also
-     * actually bind — this repo's known bug class is a config_json key that silently no-ops because
-     * nothing asserts it reaches what it configures (it survived three green {@code task check}s in
-     * a row once). What is asserted HERE is the half that belongs to the catalog: the flag, the
-     * fitting-tier shape, the seeded version, and that {@code measures} reaches
-     * {@code MetricDriftConfig} as the EXPLICIT empty list, because this module is WINDOW-grain and an
-     * ABSENT measures list falls back to the duration measures, which would open duration findings
+     * SOP conformance is flag-governed like every built-in: it seeds enabled, and the only thing
+     * between it and an org is {@code sop_conformance_enabled}, which stays off for everyone until a
+     * per-project bundle exists to deploy. Its config keys must also actually bind: this repo's
+     * known bug class is a config_json key that silently no-ops because nothing asserts it reaches
+     * what it configures. What is asserted here is the half that belongs to the catalog: the flag,
+     * the fitting-tier shape, the seeded version, and that {@code measures} reaches {@code
+     * MetricDriftConfig} as an explicit empty list, because this module is window-grain and an
+     * absent measures list falls back to the duration measures, which would open duration findings
      * under the conformance switch.
      *
-     * <p><b>The other half moved, and on purpose.</b> The assertions that the drift knobs reach
-     * {@code ConformanceConfig} live in {@code ConformanceCatalogConfigTest}, inside the package they
-     * are about — which #841 took to the paid overlay, so this file may not even spell its
-     * fully-qualified name any more: {@code scripts/check-open-boundary.sh} rule 1 is a text grep over
-     * every open source file and does not exempt javadoc. This test is in the OPEN catalog package and
-     * the enforcer bans an open module from ever declaring a dependency on a paid jar — test scope
-     * included — so an assertion here that names a conformance type is one that could not have survived
-     * the extraction by being re-pointed. It travelled with the directory, and it is worth keeping.
+     * <p>The other half lives elsewhere: the assertions that the drift knobs reach {@code
+     * ConformanceConfig} sit in the package they are about, which this file has no dependency on.
      */
     @Test
     void sopConformanceIsFlagGovernedAndItsConfigKeysBind() {
@@ -225,13 +213,13 @@ class ClassifierModelModuleCatalogTest {
         ObjectMapper mapper = new ObjectMapper();
 
         // The seeded blob's own text, which the catalog owns and can assert without naming a
-        // conformance type. That the values PARSE into ConformanceConfig is ConformanceCatalogConfigTest's.
+        // conformance type. That the values parse into ConformanceConfig is proven elsewhere.
         assertTrue(config.contains("\"alpha\":0.01"), config);
         assertTrue(config.contains("\"min_activations\":30"), config);
         assertTrue(config.contains("\"settle_seconds\":300"), config);
         assertTrue(config.contains("\"drift_window_turns\":2000"), config);
         // shadow_mode (v3): a project opts into shadow, and a detector silently muted by a default
-        // would be the worst version of this bug class, so the seeded blob must SURFACE.
+        // would be the worst version of this bug class, so the seeded blob must surface it.
         assertTrue(config.contains("\"shadow_mode\":false"), config);
 
         // Binding 2: measures is present, empty, and keeps the WINDOW dispatch inert.
@@ -254,33 +242,32 @@ class ClassifierModelModuleCatalogTest {
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
         // key -> version, exactly as declared (bumped keys re-sync onto seeded projects).
         assertEquals("frustration", builtIns.get(0).classifierKey());
-        // 8: the attribution gate switched on, and the user-facing description changed with it
-        // because HIGH now means emotion AND agent-attribution rather than emotion alone.
+        // 8: the attribution gate switched on, and the user-facing description changed with it,
+        // because "high" now means emotion and agent-attribution rather than emotion alone.
         assertEquals(8, versionOf(builtIns, "frustration"));
         assertEquals(2, versionOf(builtIns, "secret_leak"));
         assertEquals(1, versionOf(builtIns, "malformed_output"));
         // 2: evidence-as-premise + per-sentence claims + the abstain filter. 3: tool results dropped
-        // as evidence, so tool-backed turns are out of scope. 4: the HEAD changed — MiniCheck (binary,
-        // "supported yes/no") to bart-large-mnli (three-way), so a finding now means CONTRADICTED
-        // rather than "not supported", and a claim the source is silent on is exempt instead of
-        // flagged. That is a change in what the classifier asserts, not a threshold move, which is
-        // exactly when the user-facing description has to re-sync onto already-seeded projects.
+        // as evidence, so tool-backed turns are out of scope. 4: the head changed from a binary
+        // "supported yes/no" model to a three-way one, so a finding now means contradicted rather
+        // than "not supported", and a claim the source is silent on is exempt instead of flagged.
+        // That is a change in what the classifier asserts, not a threshold move, which is exactly
+        // when the user-facing description has to re-sync onto already-seeded projects.
         assertEquals(4, versionOf(builtIns, "groundedness"));
-        // 2: tool_duration joined the measure list. The bump is not cosmetic — resyncBuiltIns rewrites an
-        // already-seeded project's definition only when the catalog version exceeds the stored one, so
-        // without it the second grain would reach fresh installs and nothing else. 3: the escalation cap
-        // joined the blob. 4: it left again, once #684 made every escalation hand-pressed and
-        // MetricDriftConfig dropped the component — the bump is what clears the dead key off the
-        // projects already carrying it.
+        // 2: tool_duration joined the measure list. The bump is not cosmetic: resyncBuiltIns rewrites
+        // an already-seeded project's definition only when the catalog version exceeds the stored
+        // one, so without it the second grain would reach fresh installs and nothing else. 3: the
+        // escalation cap joined the blob. 4: it left again, once escalation became fully hand-pressed
+        // and MetricDriftConfig dropped the component; the bump clears the dead key off projects
+        // already carrying it.
         assertEquals(4, versionOf(builtIns, "duration_drift"));
         // 3: the same escalation cap, joined and then removed, kept in step with duration drift's blob.
         assertEquals(3, versionOf(builtIns, "cost_drift"));
-        // 4: the USER-FACING description gained the second gate annotation (gate precision
-        // degraded (PACC), frozen decision 15) — description re-sync rides the same version gate
-        // as the blob. 3: shadow_mode joined the blob (the validation-ladder switch). 2 was the
-        // serving knobs (settle_seconds, drift_window_turns) when ConformanceSweep took over the
-        // dispatch. Any future change to its config blob must bump this or already-seeded
-        // projects never see it.
+        // 4: the user-facing description gained the second gate annotation (gate precision
+        // degraded); description re-sync rides the same version gate as the blob. 3: shadow_mode
+        // joined the blob. 2 was the serving knobs (settle_seconds, drift_window_turns) when
+        // ConformanceSweep took over the dispatch. Any future change to its config blob must bump
+        // this or already-seeded projects never see it.
         assertEquals(4, versionOf(builtIns, "sop_conformance"));
         // frustration and groundedness carry a shifted operating point; the others use detector defaults.
         assertNotNull(configOf(builtIns, "frustration"));
@@ -291,22 +278,23 @@ class ClassifierModelModuleCatalogTest {
     @Test
     void grainIsDeclaredPerClassifierAndDefaultsToObservation() {
         BuiltInClassifierCatalog catalog = catalog();
-        // Frustration is the one TURN-grain built-in: its subject is the user's message, and the user
-        // says it once per turn however many spans the turn fans out into.
+        // Frustration is the one turn-grain built-in: its subject is the user's message, and the
+        // user says it once per turn however many spans the turn fans out into.
         assertEquals(Grain.TURN, catalog.grainFor(BuiltInDetector.Kind.FRUSTRATION));
         assertEquals(Grain.TRACE, catalog.grainFor(BuiltInDetector.Kind.BEHAVIOR_DRIFT));
-        // Duration drift's scored unit is a WINDOW of one bucket's traffic summarized as a distribution:
-        // not a span, not a turn, not a trace. It also spans two candidate grains (turns and tool calls)
-        // under one switch, which a single catalog grain could not have expressed — the per-measure grain
-        // lives in MetricDriftConfig and MetricDriftSweep reads it from there.
+        // Duration drift's scored unit is a window of one bucket's traffic summarized as a
+        // distribution: not a span, not a turn, not a trace. It also spans two candidate grains
+        // (turns and tool calls) under one switch, which a single catalog grain could not have
+        // expressed; the per-measure grain lives in MetricDriftConfig and MetricDriftSweep reads it
+        // from there.
         assertEquals(Grain.WINDOW, catalog.grainFor(BuiltInDetector.Kind.DURATION_DRIFT));
         assertEquals(Grain.WINDOW, catalog.grainFor(BuiltInDetector.Kind.COST_DRIFT));
         // The per-span classifiers: each of these genuinely evaluates one call's own output.
         assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.SECRET_LEAK));
         assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.MALFORMED_OUTPUT));
         assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.GROUNDEDNESS));
-        // Undeclared kinds — user-authored regex signals, and anything unknown — sweep at
-        // the historical per-span grain rather than silently inheriting a narrower candidate set.
+        // Undeclared kinds (user-authored regex signals, and anything unknown) sweep at the
+        // historical per-span grain rather than silently inheriting a narrower candidate set.
         assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.REGEX));
         assertEquals(Grain.OBSERVATION, catalog.grainFor("no-such-detector"));
     }
@@ -314,10 +302,10 @@ class ClassifierModelModuleCatalogTest {
     @Test
     void callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem() {
         BuiltInClassifierCatalog catalog = catalog();
-        // The two built-ins that abstain when a code-derived call-site column is missing must SAY so:
-        // ClassifierService#rewindForCallSiteFact rewinds off this declaration, and a detector that
-        // reads a call-site column without declaring it silently keeps the stranded-history bug (its
-        // pre-synthesis observations stay scored none() behind a cursor that only moves forward).
+        // The two built-ins that abstain when a code-derived call-site column is missing must say
+        // so: ClassifierService#rewindForCallSiteFact rewinds off this declaration, and a detector
+        // that reads a call-site column without declaring it silently keeps the stranded-history bug
+        // (its pre-synthesis observations stay scored none() behind a cursor that only moves forward).
         assertEquals(
                 Set.of(CallSiteFact.OUTPUT_SCHEMA),
                 detector(catalog, BuiltInDetector.Kind.MALFORMED_OUTPUT).callSiteFactsRead());
@@ -330,13 +318,13 @@ class ClassifierModelModuleCatalogTest {
         // one that should fail.
         //
         // The three fitting-tier classifiers are absent from this loop because they carry no
-        // BuiltInDetector object to ask — there is nothing to declare a fact ON. All read observation
+        // BuiltInDetector object to ask: there is nothing to declare a fact on. All read observation
         // columns and the trace spine only (the metric classifiers' bucket key is
         // observation.call_site_id, an ingest fact present from the first trace, and cost reads
-        // observation.usage and observation.model), so their empty declared set is stated in the module
-        // comments in BuiltInClassifierCatalog rather than asserted here. Cost drift's analogous
-        // late-arriving-fact hazard is the price book, which is not a call-site fact and is handled by
-        // resolving rates at sweep time.
+        // observation.usage and observation.model), so their empty declared set is stated in the
+        // module comments in BuiltInClassifierCatalog rather than asserted here. Cost drift's
+        // analogous late-arriving-fact hazard is the price book, which is not a call-site fact and
+        // is handled by resolving rates at sweep time.
         for (String kind : List.of(
                 BuiltInDetector.Kind.FRUSTRATION, BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.REGEX)) {
             assertEquals(
@@ -355,9 +343,7 @@ class ClassifierModelModuleCatalogTest {
     @Test
     void dispatchOnlyDetectorsAreRegisteredButNotCatalogBuiltIns() {
         BuiltInClassifierCatalog catalog = catalog();
-        // user regex dispatches, but is not a built-in. (The centroid user-classifier dispatch-only
-        // detector this test used to also pin here was removed with the rest of the vector substrate,
-        // #1116 — Kind.CLASSIFIER no longer exists.)
+        // user regex dispatches, but is not a built-in.
         assertNotNull(catalog.detectorFor(BuiltInDetector.Kind.REGEX));
         assertEquals(
                 0,
@@ -369,9 +355,9 @@ class ClassifierModelModuleCatalogTest {
 
     @Test
     void frustrationShipsTheAttributionGateAndABumpedVersionToCarryIt() {
-        // THE config-key-binding regression. A new key in defaultConfigJson is a silent no-op unless
-        // TWO things hold: the key is actually in the default config, and the catalog version was
-        // bumped — ClassifierService re-syncs a built-in onto an already-seeded project only when the
+        // The config-key-binding regression: a new key in defaultConfigJson is a silent no-op unless
+        // two things hold, the key is actually in the default config, and the catalog version was
+        // bumped. ClassifierService re-syncs a built-in onto an already-seeded project only when the
         // catalog version exceeds the stored one, so an un-bumped change reaches fresh installs only.
         // This repo has shipped that bug before; assert both halves rather than either.
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
@@ -389,7 +375,7 @@ class ClassifierModelModuleCatalogTest {
     @Test
     void frustrationsUserFacingDescriptionDescribesTheGate() {
         // The description is re-synced onto every seeded project by the same version bump, so it is
-        // written into production rows as fact. HIGH now means emotion AND agent-attribution; a
+        // written into production rows as fact. "High" now means emotion and agent-attribution; a
         // description still claiming plain emotion would be actively wrong, not merely stale.
         String description = catalog().builtIns().stream()
                 .filter(b -> b.classifierKey().equals("frustration"))
@@ -420,16 +406,13 @@ class ClassifierModelModuleCatalogTest {
 
     @Test
     void frustrationSeedsAtTheTrackingBarAndEveryOtherBuiltInStaysWide() {
-        // `mode` is the operating point a signal is READ at: discovery surfaces the high+low union,
-        // tracking the HIGH band alone. Discovery is the right default for a classifier nobody has
-        // characterised — you cannot narrow a band you have never seen fire — and frustration is the
-        // one that HAS been. Measured in production 2026-08-20: discovery surfaced 67.4% of
-        // interview-coach turns against 18.6% for the high band, 28.5%/14.6% on zipeats,
-        // 20.5%/3.5% on policy-gpt.
+        // `mode` is the operating point a signal is read at: discovery surfaces the high+low union,
+        // tracking the high band alone. Discovery is the right default for a classifier nobody has
+        // characterized, since you cannot narrow a band you have never seen fire, and frustration is
+        // the one that has been.
         //
-        // The assertion is deliberately two-sided. Moving the others on frustration's argument would
-        // be asserting a measurement nobody has made, so this fails if a future edit widens
-        // frustration OR quietly narrows a built-in that has no numbers behind it.
+        // The assertion is deliberately two-sided: it fails if a future edit widens frustration or
+        // quietly narrows a built-in that has no numbers behind it.
         for (BuiltInClassifierCatalog.BuiltIn b : catalog().builtIns()) {
             String expected = "frustration".equals(b.classifierKey())
                     ? ClassifierRow.Mode.TRACKING
@@ -440,7 +423,7 @@ class ClassifierModelModuleCatalogTest {
                     b.classifierKey() + " seeds at the wrong operating point — see the catalog comment. "
                             + "(The one-time migration that graduated existing tenants,"
                             + " changeset 0010 (the frustration tracking default), was a data UPDATE on `classifier`,"
-                            + " not schema, so the 2026-09 baseline squash [#1074] folded it away without a"
+                            + " not schema, so the 2026-09 baseline squash folded it away without a"
                             + " successor file; BuiltInClassifierCatalog's TRACKING default is now the only"
                             + " place this fact lives, for new and existing tenants alike.)");
         }

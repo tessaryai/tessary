@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * High-level tenancy operations: ensure-user-on-login, ensure-org, create-project,
  * resolve-by-slug, plus the organization/project lifecycle (rename, archive, default-project
- * guarantee, transfer-ownership, delete). Stays thin — controllers compose at the boundary,
+ * guarantee, transfer-ownership, delete). Stays thin: controllers compose at the boundary,
  * this class owns the "what does it mean to be a tenant" semantics.
  */
 @Service
@@ -38,7 +38,7 @@ public class TenantService {
      * Self-reference through the Spring proxy. Two callers need it, for the same reason. {@link
      * #ensureDefaultProject} is intentionally non-transactional so it can catch a concurrent
      * first-login's unique-index violation, and the 3-arg {@link #createProject(String, String,
-     * String)} only picks the {@code makeDefault} flag before handing off — but the mint they
+     * String)} only picks the {@code makeDefault} flag before handing off, but the mint they
      * delegate to must still run in its own transaction. A plain {@code this.createProject(...)}
      * would be a self-invocation that bypasses the proxy and therefore the {@code @Transactional}
      * boundary, leaving the mint's inserts to autocommit one at a time, so both route through
@@ -84,10 +84,10 @@ public class TenantService {
                     existing.get().createdAt(),
                     now);
         }
-        // No row for this WorkOS id, but the email may already be on file — the
-        // same person after a WorkOS environment switch, which mints a fresh user
-        // id for an unchanged email. Re-bind the existing row to the new id; a
-        // plain insert would violate UNIQUE(email) and lock the user out.
+        // No row for this WorkOS id, but the email may already be on file: the same
+        // person after a WorkOS environment switch, which mints a fresh user id for
+        // an unchanged email. Re-bind the existing row to the new id; a plain insert
+        // would violate UNIQUE(email) and lock the user out.
         Optional<Principal> byEmail = users.findByEmail(email);
         if (byEmail.isPresent()) {
             users.rebindWorkosId(byEmail.get().id(), workosUserId, displayName, avatarUrl, now);
@@ -124,7 +124,7 @@ public class TenantService {
                 ensureMembership(existing.get().id(), user.id(), OrgMembership.MEMBER);
                 return existing.get();
             }
-            // WorkOS org we haven't mirrored yet — create with WorkOS id as the link
+            // WorkOS org we haven't mirrored yet: create with WorkOS id as the link
             String slug = uniqueSlug(workosOrgId.toLowerCase(Locale.ROOT).replace("org_", "org-"));
             Organization fresh = newOrg(Ids.ulid(), workosOrgId, slug, slug);
             orgs.insert(fresh);
@@ -148,20 +148,17 @@ public class TenantService {
     }
 
     /**
-     * Atomically bootstrap a freshly-named organization: insert the org, add the creator as owner,
-     * and mint the guaranteed default project — all in one transaction, so a partial failure can
-     * never leave an org with no membership or no default project. Returns the persisted org.
+     * Atomically bootstraps a freshly-named organization: insert the org, add the creator as
+     * owner, and mint the guaranteed default project, all in one transaction, so a partial
+     * failure can never leave an org with no membership or no default project.
      *
-     * <p>The owned-org cap is enforced HERE, inside the transaction, not by the caller (#1019): the
-     * count and the insert must be one atomic step or two concurrent requests from the same user
-     * both pass the count and the cap is exceeded. {@link OrganizationRepository#lockOrgCreationFor}
-     * serializes creates per owner for the rest of this transaction, so the count that follows is
-     * exact. Rejection is the same 429 the controller used to raise, so the HTTP contract (and
-     * {@code OrgCreationBoundaryTest}) is unchanged.
+     * <p>The owned-org cap is enforced inside the transaction: {@link
+     * OrganizationRepository#lockOrgCreationFor} serializes creates per owner first, so the
+     * count that follows is exact even under concurrent requests from the same user.
      *
-     * <p>The default-project mint here is contention-free: the org row isn't visible to other
-     * sessions until this transaction commits, so no concurrent login can race it (unlike the
-     * login-path {@link #ensureDefaultProject}, which must tolerate that race).
+     * <p>The default-project mint here is contention-free, since the org row isn't visible to
+     * other sessions until commit; the login-path {@link #ensureDefaultProject} has no such
+     * guarantee and must tolerate the race.
      */
     @Transactional
     public Organization bootstrapOrg(Organization org, String ownerUserId, int maxOwnedOrgs) {
@@ -179,7 +176,7 @@ public class TenantService {
     /**
      * Guarantee the organization has exactly one default project. Promotes the existing default
      * if present; otherwise promotes the earliest-created project, or mints a starter project
-     * when the organization has none. Idempotent — safe to call on every login.
+     * when the organization has none. Idempotent: safe to call on every login.
      *
      * <p>Not {@code @Transactional} itself: the starter-project mint runs in its own transaction
      * (via {@link #createProject}), so when two concurrent first-logins race to create the
@@ -192,11 +189,10 @@ public class TenantService {
         if (current.isPresent()) return current.get();
 
         try {
-            // The sample project (#1227, Project#isSample) is filtered out here even though nothing
-            // wires it through this path today: it is a lazily-created, deletable demo row, never the
-            // org's routing target, and a future org that somehow reaches this branch with only a
-            // sample project on the books (e.g. a real project deleted after the sample was created)
-            // must mint a genuine default rather than promote a project full of generated data.
+            // The sample project (Project#isSample) is filtered out here: it's a lazily-created,
+            // deletable demo row, never the org's routing target, and an org that somehow reaches
+            // this branch with only a sample project on the books must mint a genuine default
+            // rather than promote a project full of generated data.
             List<Project> existing = projects.findByOrg(orgId).stream()
                     .filter(p -> !p.isSample())
                     .toList();
@@ -205,7 +201,7 @@ public class TenantService {
             }
             return self.createProject(orgId, "Default", null, true);
         } catch (DuplicateKeyException raced) {
-            // Concurrent first-login already created/promoted the default — re-resolve to it.
+            // Concurrent first-login already created/promoted the default: re-resolve to it.
             return projects.findDefaultForOrg(orgId).orElseThrow(() -> raced);
         }
     }
@@ -238,7 +234,7 @@ public class TenantService {
         if (raw == null) return;
         String now = Instant.now().toString();
         // Invitations are stored lower-cased (OrganizationController#addMember); the principal's
-        // email is whatever the provider gave, so match the way the sign-up policy does (#1226).
+        // email is whatever the provider gave, so match case the same way the sign-up policy does.
         String email = raw.trim().toLowerCase(Locale.ROOT);
         for (OrgInvitation inv : invitations.findPendingByEmail(email)) {
             ensureMembership(inv.orgId(), user.id(), inv.role());
@@ -247,16 +243,15 @@ public class TenantService {
     }
 
     /**
-     * Transfer ownership of an organization to one of its members, atomically: promote the
-     * recipient to owner (bounded by the recipient's owned-org cap) and step the transferrer down to
-     * member, in one transaction. The recipient-side cap is a check-then-update and was a race in
-     * the paid controller that used to inline it (#1028, the sibling of #1019): two concurrent
-     * transfers to one recipient both passed the count. {@link OrganizationRepository#lockOrgCreationFor}
-     * keys on the OWNER whose count is being bounded — for a transfer that is the recipient — so the
-     * count that follows is exact, and the same lock also serializes against concurrent creates by
-     * that user. Semantics are otherwise unchanged from the controller: 404 if the recipient is not
-     * a member, 429 at the cap, no-op promotion if already owner, no demotion when transferring to
-     * oneself. The "never orphan an organization" invariant (&gt;= 1 owner) holds at every step.
+     * Transfers ownership of an organization to one of its members, atomically: promotes the
+     * recipient to owner (bounded by their owned-org cap) and steps the transferrer down to
+     * member, in one transaction. {@link OrganizationRepository#lockOrgCreationFor} keys on the
+     * recipient, whose count is being bounded, so the cap check is exact even under concurrent
+     * transfers, and the same lock serializes against concurrent creates by that user.
+     *
+     * <p>404 if the recipient is not a member, 429 at the cap, no-op if already owner, no
+     * demotion when transferring to oneself. The "never orphan an organization" invariant
+     * (&gt;= 1 owner) holds at every step.
      */
     @Transactional
     public void transferOwnership(String orgId, String fromUserId, String toUserId, int maxOwnedOrgs) {
@@ -338,16 +333,16 @@ public class TenantService {
     }
 
     /**
-     * Run {@code action} once this transaction has finished, whichever way it finished, or immediately
-     * when there is no transaction to wait for.
+     * Runs {@code action} once this transaction has finished, whichever way it finished, or
+     * immediately when there is no transaction to wait for.
      *
-     * <p><b>{@code afterCompletion}, not {@code afterCommit}, and the difference is the whole point.</b>
-     * Spring skips {@code afterCommit} in exactly one case: {@code doCommit} threw while the database had
-     * in fact committed. For a cache eviction that is the worst case to skip — the revocation is durable
-     * and the cache still answers for the key — and it does not self-heal, because the retry finds
-     * {@code markDeleting} already false, returns {@code ALREADY_ACCEPTED}, and never reaches this line
-     * again. {@code afterCompletion} always runs. On a genuine rollback it evicts entries that did not
-     * need evicting, which costs one bcrypt on their next request and nothing else.
+     * <p>Uses {@code afterCompletion}, not {@code afterCommit}: Spring skips {@code afterCommit}
+     * when {@code doCommit} throws but the database had in fact committed. For a cache eviction
+     * that is the worst case to skip, since the revocation is durable but the cache still answers
+     * for the key, and it does not self-heal, because a retry finds {@code markDeleting} already
+     * false and returns {@code ALREADY_ACCEPTED} without reaching this line again. {@code
+     * afterCompletion} always runs; on a genuine rollback it evicts entries that did not need
+     * evicting, which costs one bcrypt on the next request and nothing else.
      */
     private static void afterCompletion(Runnable action) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -363,20 +358,15 @@ public class TenantService {
     }
 
     /**
-     * Lazily create the org's quiet "sample project" (#1227) — a real, deletable project row marked
-     * via {@code settings: {"sample": true}} ({@link Project#isSample()}), never wired through {@link
-     * #ensureDefaultOrg} or the signup tail. It exists only once a user follows the connect gate's
-     * "Start with a sample project" link, so an org that never asks for one never carries a second
-     * project to reason about.
+     * Lazily creates the org's "sample project": a real, deletable project row marked via {@code
+     * settings: {"sample": true}} ({@link Project#isSample()}), never wired through {@link
+     * #ensureDefaultOrg} or the signup tail. It exists only once a user follows the connect
+     * gate's "Start with a sample project" link.
      *
-     * <p>Idempotent: a second call (a double click, a stale tab reloaded after the first click already
-     * landed) finds the existing sample project rather than minting a duplicate, the same
-     * find-before-insert shape {@link #ensureDefaultProject} uses for the same reason.
-     *
-     * <p>Delegates the mint to {@link #createProject(String, String, String, boolean)} with {@code
-     * makeDefault=false} — a sample project must never become the org's routing target — then stamps
-     * the marker with a follow-up {@code UPDATE} rather than teaching the insert path a settings
-     * parameter every other caller would have to pass {@code null} for.
+     * <p>Idempotent: a second call finds the existing sample project rather than minting a
+     * duplicate. Delegates the mint to {@link #createProject(String, String, String, boolean)}
+     * with {@code makeDefault=false}, since a sample project must never become the org's
+     * routing target, then stamps the marker with a follow-up {@code UPDATE}.
      */
     @Transactional
     public Project ensureSampleProject(String orgId) {
@@ -421,32 +411,28 @@ public class TenantService {
     }
 
     /**
-     * Accept a project deletion: mark it doomed, revoke every API key that could still write to it, and
-     * queue the purge — all three in one transaction.
-     *
-     * <p>These three used to be sequential statements in the controller with no transaction boundary. A
-     * process that died between the mark and the revoke left a project locked out of every project-scoped
-     * route (the mark alone is enough for {@link ai.tessary.auth.TenantPathResolver} to refuse it)
-     * while its API keys stayed live — the exact security guarantee this endpoint exists to give was the
-     * one window it didn't cover. Wrapping the three in a transaction makes that window disappear: either
-     * all three land, or none do and the next retry starts clean.
+     * Accepts a project deletion: marks it doomed, revokes every API key that could still write
+     * to it, and queues the purge, all three in one transaction, so either all three land or none
+     * do and the next retry starts clean. Without the transaction, a process that died between
+     * the mark and the revoke could leave a project locked out of every project-scoped route
+     * (the mark alone is enough for {@link ai.tessary.auth.TenantPathResolver} to refuse it)
+     * while its API keys stayed live.
      */
     @Transactional
     public ProjectDeleteAcceptance deleteProjectAsync(String projectId, String now) {
         if (!projects.markDeleting(projectId, now)) {
-            // Already accepted — a double click or a retry of a request that did land.
+            // Already accepted: a double click or a retry of a request that did land.
             return ProjectDeleteAcceptance.ALREADY_ACCEPTED;
         }
         int revoked = apiKeys.revokeAllForProject(projectId, now);
-        // AFTER the transaction, not here. The UPDATE above is deliberately synchronous so nothing new lands
-        // in a project on its way out, and the verified-token cache has to be told or it keeps answering
-        // for those keys — but evicting inside this transaction reopens the same window from the other
-        // side: a verification on another connection reads the bumped generation, then reads the row this
-        // transaction has not committed yet, sees it still live, and caches it with a generation nothing
-        // will invalidate again. READ COMMITTED is what makes that reachable, and the ingest front doors
-        // authenticate on the key alone, so the stale entry is a writable deleted project for a full TTL.
-        // ApiKeyService.revoke is safe from this only because it is NOT transactional — its UPDATE
-        // autocommits before it evicts.
+        // AFTER the transaction, not here. The UPDATE above is deliberately synchronous so nothing
+        // new lands in a project on its way out, but evicting the token cache inside this
+        // transaction reopens the same window: a verification on another connection could read
+        // the bumped generation, then read the row before this transaction commits, see it still
+        // live, and cache it with a generation nothing will invalidate again. READ COMMITTED
+        // makes that reachable, and ingest authenticates on the key alone, so the stale entry
+        // would be a writable deleted project for a full TTL. ApiKeyService.revoke is safe from
+        // this only because it isn't transactional: its UPDATE autocommits before it evicts.
         afterCompletion(() -> tokenCache.invalidateProject(projectId));
         deleteJobs.enqueue(projectId, now);
         return new ProjectDeleteAcceptance(true, revoked);

@@ -18,38 +18,37 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The daily platform-spend report — the thing that makes launch requirement H answerable.
+ * The daily platform-spend report: what did last week cost, and which org drove it, without reading a
+ * provider invoice.
  *
- * <p>H is done when we can answer <i>"what did last week cost, and which org drove it"</i> without
- * reading a provider invoice. Every other usage read in this package is scoped to a single org, because
- * every one of them answers a customer's question; none of them can answer a question whose whole
- * subject is the comparison <em>between</em> orgs. There is no platform-admin role to hang an endpoint
- * on either, so the operator's view is emitted rather than served: once per closed UTC day, one
- * structured line per org that spent platform money, plus a total. Loki already receives these as
- * queryable key-value pairs (see {@link StructuredLog}), so "last week, by org" is a range query over
+ * <p>Every other usage read in this package is scoped to a single org, because every one of them
+ * answers a customer's question; none of them can answer a question whose whole subject is the
+ * comparison <em>between</em> orgs. There is no platform-admin role to hang an endpoint on either, so
+ * the operator's view is emitted rather than served: once per closed UTC day, one structured line per
+ * org that spent platform money, plus a total. Loki already receives these as queryable key-value
+ * pairs (see {@link StructuredLog}), so "last week, by org" is a range query over
  * {@code event="llm.spend.daily"} and needs nothing built.
  *
- * <p><b>It reports, it does not enforce.</b> Decision D6 leaves platform-paid LLM uncapped at launch, and
- * H4 asks only that a cap be a decision we can take on evidence rather than one we are forced into. The
- * threshold in {@link MeteringProperties#getSpendWarnUsdPerOrgPerDay()} therefore changes a log level and
- * nothing else — no request is refused, no lane is stopped. The lever that does exist is elsewhere and is
- * deliberate: {@code triage_automatic_enabled} is off by default, and when it is on the recurrence
- * bar decides what is worth a ruling. The per-tick and per-project caps that used to sit above it are
- * gone — they rationed which findings existed as work rather than what reached the launcher.
+ * <p><b>It reports, it does not enforce.</b> Platform-paid LLM spend is uncapped, and the threshold in
+ * {@link MeteringProperties#getSpendWarnUsdPerOrgPerDay()} only changes a log level: no request is
+ * refused, no lane is stopped. The lever that does exist is elsewhere and is deliberate:
+ * {@code triage_automatic_enabled} is off by default, and when it is on the recurrence bar decides
+ * what is worth a ruling.
  *
  * <p><b>Closed days only.</b> The report covers the UTC day strictly before today, so a day's number is
  * stable once printed and re-running the process cannot produce two different figures for the same day.
- * Re-emission on restart is harmless — this writes nothing.
+ * Re-emission on restart is harmless: this writes nothing.
  *
- * <p><b>Platform funding only.</b> BYO spend is the customer's own provider bill; folding it into a report
- * about our costs would overstate them, which is the same reason {@code llm_call} keeps the two apart.
+ * <p><b>Platform funding only.</b> BYO spend is the customer's own provider bill; folding it into a
+ * report about our costs would overstate them, which is the same reason {@code llm_call} keeps the two
+ * apart.
  */
 @Component
 public class PlatformSpendReporter {
 
     private static final Logger log = LoggerFactory.getLogger(PlatformSpendReporter.class);
 
-    /** Money is rendered to the cent — this is an operator's read, not an accounting export. */
+    /** Money is rendered to the cent: this is an operator's read, not an accounting export. */
     private static final int CENTS = 2;
 
     private final LlmUsageQueryRepository usage;
@@ -136,7 +135,7 @@ public class PlatformSpendReporter {
                 .field("triageRuns", r.triageRuns())
                 .field("triageCostUsd", money(r.triageCostUsd()))
                 // The size of the blind spot behind the figure: calls the pricing catalog held no rate
-                // for. Non-zero means the real cost is HIGHER than the number on this line.
+                // for. Non-zero means the real cost is higher than the number on this line.
                 .field("unpricedCalls", r.unpricedCalls())
                 .field("warnThresholdUsd", warnAt, loud)
                 .message(

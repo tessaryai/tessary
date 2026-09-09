@@ -23,9 +23,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * Criterion 4 of #984 over HTTP: {@code /actuator/health/ingest} answers a platform-staff session
- * with the spool's numbers, stays closed to an anonymous caller, and the public top-level document
- * still renders no component detail.
+ * The staff-only ingest health surface over HTTP: {@code /actuator/health/ingest} answers a
+ * platform-staff session with the spool's numbers, stays closed to an anonymous caller, and the
+ * public top-level document still renders no component detail.
  */
 @SpringBootTest
 class IngestHealthGroupTest {

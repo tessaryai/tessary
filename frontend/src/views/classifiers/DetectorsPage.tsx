@@ -2,22 +2,20 @@
 /*
  * Detectors: the catalog, and everything about one detector.
  *
- * <h2>Why this is its own page</h2>
- * It used to be the top half of the findings queue: eight rows of clamped description with a toggle
- * each, above the work. Enabling a detector and tuning its bar are things you do when you set the
- * product up and then rarely again, while clearing findings is daily, so the catalog moved here and
- * the queue kept one card naming what is switched on.
+ * Enabling a detector and tuning its bar are things you do when you set the product up and then
+ * rarely again, while clearing findings is daily, so the catalog lives on its own page and the
+ * queue keeps one card naming what is switched on.
  *
- * Row click opens the detail rail (URL-addressable via `?classifier=<id>`), which is unchanged: the
- * description in full, status, this detector's own findings un-gated, tuning, the traces it tripped on,
- * and the baseline changelog. The rail's Findings block stays un-gated on purpose: the queue is the
- * alert list, this is the lead list for one detector, and a gated rail would be empty forever.
+ * Row click opens the detail rail (URL-addressable via `?classifier=<id>`): the description in
+ * full, status, this detector's own findings un-gated, tuning, the traces it tripped on, and the
+ * baseline changelog. The rail's Findings block stays un-gated on purpose: the queue is the alert
+ * list, this is the lead list for one detector, and a gated rail would be empty forever.
  *
  * NOTHING ESCALATES ON ITS OWN, unless an org has asked it to. A classifier firing writes a row and
- * stops: grading a flagged trace costs a grader call and ruling a finding costs an E2B microVM, so the
- * sweep is not entitled to spend either. That makes this rail the place both escalations start, from a
- * person who has looked. (`triage_automatic_enabled` presses the second button unattended, off by
- * default and bounded when on; nothing on this page changes when it is.)
+ * stops: grading a flagged trace costs a grader call and ruling a finding costs an E2B microVM, so
+ * the sweep is not entitled to spend either. That makes this rail the place both escalations start,
+ * from a person who has looked. (`triage_automatic_enabled` presses the second button unattended,
+ * off by default and bounded when on; nothing on this page changes when it is.)
  */
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,7 +43,7 @@ import {
   chainWords,
   firstSentence,
 } from "./shared";
-// The paid seam (open-core D2): `null` in this build, the SOP rulebook block in a paid one.
+// This build's `@paid` alias; see src/paid/index.ts for the mechanism.
 import { paid } from "@paid";
 
 // A separate lazy chunk, not a static import: nobody opening the Classifiers page pays for the
@@ -219,7 +217,7 @@ function DetectorRow({
  * This classifier's findings: everything it has opened, with its ruling.
  *
  * <p>Ungated, like the page-level list. The gate's whole job was to hide leads until a machine
- * confirmed them, and every finding now carries its own ruling — so the thing to show is what triage
+ * confirmed them, and every finding now carries its own ruling, so the thing to show is what triage
  * made of this detector's output, which is also the only calibration signal it has. A detector
  * producing nothing but `negative` rulings is one measuring the wrong thing.
  */
@@ -280,7 +278,7 @@ function RailFindings({ classifier }: { classifier: Classifier }) {
  * One finding in the rail: what moved, where triage left it, and the three things you can do about it.
  *
  * <p>The machine action and the two human verdicts sit on opposite ends of the row because they are
- * different kinds of act: <em>Run triage</em> spends a microVM to audit the claim, the other two ARE
+ * different kinds of act: <em>Run triage</em> spends a microVM to audit the claim, the other two are
  * the decision, and stacking all three as peers invited pressing the expensive one by reflex.
  */
 function RailFindingRow({
@@ -380,10 +378,10 @@ function truncate(s: string, max: number): string {
  * context-grain detection (no trace_id) has nothing to open and stays inert rather than
  * pretending to be a link.
  *
- * <p>There is no per-detection "Run analysis" any more. A detection is a Layer-1 flag — a filter,
- * not evidence — and running graders on one bought confirmation of something nobody had decided was
- * worth confirming. Analysis is offered on the FINDING, where the cause has already been made, and
- * the grader lane is one of the choices there.
+ * <p>There is no per-detection "Run analysis". A detection is a Layer-1 flag, a filter, not
+ * evidence, and running graders on one would confirm something nobody had decided was worth
+ * confirming. Analysis is offered on the finding, where the cause has already been made, and the
+ * grader lane is one of the choices there.
  */
 function DetectionRow({ event }: { event: ClassifierEvent }) {
   const summary = evidenceSummary(event.evidence_json);
@@ -512,13 +510,9 @@ function ClassifierRail({
       {/* Above Findings on purpose: whether a rule is armed decides whether the absence of findings
           under it means anything, so it has to be read first.
 
-          PAID (#846, and #918 which moved the seam further): the block is conformance-only, so it
-          lives in the overlay and reaches back through paid.classifierRail(). Since #918, the overlay
-          owns its own typed fetch to /conformance/fit-report directly (the overlay's own
-          ConformanceRulebookRail) rather than going through the open API client — getConformanceFitReport
-          and ConformanceRuleFit no longer exist on the open side at all. The `isConformance` guard stays
-          open — the detector key is open vocabulary — so an open build simply renders no Rulebook block
-          on a conformance rail it can never have anyway. */}
+          This build renders no Rulebook block: paid.classifierRail() returns null here. The
+          `isConformance` guard stays in this file since the detector key is open vocabulary, so a
+          build with no rulebook implementation simply shows nothing in its place. */}
       {isConformance && paid.classifierRail(SOP_CONFORMANCE_DETECTOR)}
 
       {hasFindings && <RailFindings classifier={classifier} />}
@@ -557,12 +551,9 @@ function ClassifierRail({
         )}
       </RailBlock>
 
-      {/* PAID (#919): the block reads the paid `ProfileSource` port and renders paid-only DTOs, so it
-          lives in the overlay and reaches back through paid.classifierRail(). The overlay owns its own
-          typed fetch to /behavior/profiles directly (the overlay's own BehaviorBaselinesRail)
-          rather than going through the open API client, since #919 also moved BehaviorProfile off it.
-          The `isBehavior` guard stays open — the detector key is open vocabulary — so an open build
-          simply renders no Baselines block on a behaviour-drift rail it can never have anyway. */}
+      {/* This build renders no Baselines block: paid.classifierRail() returns null here. The
+          `isBehavior` guard stays in this file since the detector key is open vocabulary, so a
+          build with no baselines implementation simply shows nothing in its place. */}
       {isBehavior && paid.classifierRail(BEHAVIOR_DETECTOR)}
 
       {isBehavior && (
@@ -570,9 +561,9 @@ function ClassifierRail({
           {changelogQ.isLoading && <LoadingRow />}
           {changelogQ.isError && <ErrorNote error={changelogQ.error} />}
           {/*
-            * `isSuccess`, not "no rows and not loading": a failed read also has no rows, and the old
-            * condition turned it into "Nothing has changed the baseline yet." — an assertion about the
-            * baseline made from the absence of an answer about it.
+            * `isSuccess`, not "no rows and not loading": a failed read also has no rows too, and
+            * rendering "Nothing has changed the baseline yet." there would be an assertion about
+            * the baseline made from the absence of an answer about it.
             */}
           {changelogQ.isSuccess && (changelogQ.data ?? []).length === 0 && (
             <p className="text-subtle m-0 text-small">

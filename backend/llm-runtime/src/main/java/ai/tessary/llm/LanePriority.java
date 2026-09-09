@@ -56,7 +56,7 @@ import java.util.Optional;
  * {@link ModelProvider#MOONSHOT} were absent from both lanes until this change, for a reason that
  * was never a decision about the models: {@code sandbox-runner/launcher/server.js} had no provider
  * mode for them, so a lane pointed at one would have failed at launch. Since
- * {@link LaneGroup#LLM_CALLS} has had no members since #1117, that left an org holding only one of
+ * {@link LaneGroup#LLM_CALLS} has had no members, that left an org holding only one of
  * those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
  * on its own wire, the other two as OpenAI-compat — so the coverage rule reaches every provider the
  * Providers page will sell you. Adding an eleventh still means adding it to the launcher first.

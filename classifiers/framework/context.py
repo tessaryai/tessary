@@ -47,7 +47,7 @@ _PREFIXES = {"user": USER_PREFIX, "assistant": ASSISTANT_PREFIX}
 # present, so a message's non-text parts render as typed placeholders instead of being dropped.
 _IMAGE_TYPES = {"image", "image_url", "input_image", "output_image", "image_ref"}
 # "file"/"document"/"input_file" is the third-party/OTel placeholder vocabulary; the platform's own
-# document_ref/document_b64/document_url kinds (#985) route here too, mirroring Java
+# document_ref/document_b64/document_url kinds route here too, mirroring Java
 # ContentExtractor.partPlaceholder's identical reconciliation.
 _FILE_TYPES = {"file", "document", "input_file", "document_ref", "document_b64", "document_url"}
 _TOOL_CALL_TYPES = {"tool_call", "tool_use"}

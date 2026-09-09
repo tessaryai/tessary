@@ -17,7 +17,7 @@ import org.testcontainers.utility.DockerImageName;
  *
  * <p>The image is {@code pgvector/pgvector:pg16} — the same Postgres 16 image dev and prod run —
  * for full test==dev==prod parity, even though the schema no longer activates the {@code vector}
- * extension (the embedding substrate it backed was removed, #1116; D3 keeps the image anyway
+ * extension (the embedding substrate it backed was removed; the image is kept anyway
  * rather than fork the compose stack over one dropped extension). Docker must be available to
  * run the suite. Wired into every test context by {@link TestcontainersPostgresInitializer}.</p>
  */

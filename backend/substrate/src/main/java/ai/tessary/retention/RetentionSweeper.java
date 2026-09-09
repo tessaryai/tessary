@@ -109,8 +109,8 @@ public class RetentionSweeper {
      * <p>This is garbage collection, not retention. An image whose payload has been deleted (or whose
      * batch never committed) cannot be reached, named or rendered by anything: no TTL makes it useful and
      * no policy is expressed by keeping it. Gating it on a bounded traces policy the way the classes above
-     * are gated would leave every keep-forever project accumulating unreachable bytes for ever, which is
-     * the half of #761 that is a disk-space bug and the half that is a deletion-promise bug at once.
+     * are gated would leave every keep-forever project accumulating unreachable bytes for ever — both
+     * a disk-space bug and a deletion-promise bug at once.
      *
      * <p>Bounded like everything else, and logged only when it actually removed something.
      */

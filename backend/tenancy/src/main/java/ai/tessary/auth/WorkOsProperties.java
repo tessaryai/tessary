@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * class is WorkOS-specific only, and only {@link WorkOsClient} (via {@link AuthProviderConfig})
  * depends on it directly.
  *
- * <p>When {@code apiKey} or {@code clientId} is blank there is no identity provider. Since #924 that
+ * <p>When {@code apiKey} or {@code clientId} is blank there is no identity provider. That
  * alone does NOT open the instance: {@link AuthFilter} additionally requires
  * {@link AuthProperties#isDisabled()}, and without it every guarded path answers 401. Production
  * must set both regardless -- {@link AuthRequiredInProdGuard} refuses to start without them.

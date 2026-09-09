@@ -14,11 +14,11 @@ const { windowsFor, premiseChunksFor, deBlob, classify, headResidency } = requir
 
 const OPTS = { windowChars: 100, overlap: 20, maxWindows: 4 };
 
-// Which edition is this checkout? #1293 moved models.json — the manifest binding each head to a
-// pinned checkpoint — into the paid overlay, and the OPEN tree ships `{}` in its place. The two
+// Which edition is this checkout? models.json — the manifest binding each head to a
+// pinned checkpoint — lives outside this tree, which ships `{}` in its place. The two
 // residency tests below assert against real manifest entries (a model id to build a fixture path
 // from, a `gated` flag to expect), so they are meaningful only where the manifest is populated;
-// the open edition gets the third test instead, which pins the behavior that replaces them.
+// when it's empty the third test runs instead, which pins the behavior that replaces them.
 // Read directly rather than via classify.js so this is a statement about the FILE, not about the
 // registry classify.js derives from it.
 const OPEN_EDITION = Object.keys(require('./models.json')).length === 0;
@@ -105,7 +105,7 @@ test('a pair head rejects a malformed pairs array', async () => {
 
 // deBlob — the unbroken-run breaker that keeps SentencePiece/Unigram tokenization off a single
 // multi-KB blob (base64, minified code). Shared by classifyTexts AND classifyPairs (premise +
-// claim) — regression coverage for the pair path having once omitted this (crew review, PR #567).
+// claim) — regression coverage for the pair path having once omitted this.
 test('deBlob inserts a space after every 256-char unbroken run', () => {
   const blob = 'a'.repeat(300);
   const out = deBlob(blob);
@@ -121,7 +121,7 @@ test('deBlob leaves ordinary prose untouched', () => {
   assert.equal(deBlob(prose), prose);
 });
 
-// headResidency() / gated-head "unavailable" (#877: the open-edition build has no HF_TOKEN,
+// headResidency() / gated-head "unavailable" (this build has no HF_TOKEN,
 // so frustration + attribution never get baked). No model download needed — this only
 // touches the filesystem marker check (residentModelDir), the same one embed.js's
 // checkpointResidency() uses for /embed. Restores HF_CACHE_DIR in a `finally` so this test
@@ -162,12 +162,13 @@ test('classify() throws statusCode 400 for a gated head with no weights on disk 
   }
 });
 
-// The open edition's counterpart to the two tests above (#1293). With an empty models.json every
-// scorer in classify.js is UNBACKED: still resolvable by name — the open backend's
+// This build's counterpart to the two tests above. With an empty models.json every
+// scorer in classify.js is UNBACKED: still resolvable by name — the backend's
 // BuiltInClassifierCatalog / EncoderDetector ask for these heads by name and must not be told
 // they are unknown — but unservable, and saying so in a way a caller can tell apart from a
-// serving failure. Runs in BOTH editions: in the paid one it asserts the opposite, that no head
-// is unbacked, so a manifest entry silently disappearing can never pass as "open edition".
+// serving failure. Runs whether or not the manifest is populated: when it is, this test asserts
+// the opposite, that no head is unbacked, so a manifest entry silently disappearing can never
+// pass unnoticed.
 //
 // UNAVAILABLE_IN_OPEN_EDITION is asserted as a LITERAL here on purpose. It is a cross-boundary
 // contract, not prose: scripts/check-classify-service.sh branches on that exact spelling, so a

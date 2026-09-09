@@ -13,21 +13,21 @@ import org.jspecify.annotations.Nullable;
  * Translate an arbitrary upstream "output" payload (text or JSON-serialized
  * message structure) into a list of {@link ContentBlock}.
  *
- * <p>Shapes recognised (vendor-neutral — keyed on the JSON structure, not the source):
+ * <p>Shapes recognised (vendor-neutral, keyed on the JSON structure, not the source):
  * <ol>
- *   <li>Plain string — emits a single text block verbatim.</li>
+ *   <li>Plain string, emits a single text block verbatim.</li>
  *   <li>OpenAI-style messages array: {@code [{role, content: ... }]}.
  *       Each message's {@code content} is flattened: a string becomes a text block;
  *       an array of {@code {type:"text"|"image_url", ...}} parts becomes the
  *       respective blocks. Non-assistant turns are still included so the judge
- *       sees the whole transcript when present (we don't strip user turns —
+ *       sees the whole transcript when present (we don't strip user turns,
  *       upstream stored what it stored).</li>
- *   <li>OTel gen_ai semconv messages array: {@code [{role, parts:[{type, ...}]}]} —
+ *   <li>OTel gen_ai semconv messages array: {@code [{role, parts:[{type, ...}]}]},
  *       the shape stored from {@code gen_ai.input.messages}/{@code gen_ai.output.messages}.
  *       Each part is unwrapped to a first-class typed block: {@code text}→text,
  *       {@code reasoning}→reasoning (empty dropped), {@code tool_call}→tool_call,
  *       {@code tool_result}/{@code tool_call_response}→tool_result, image refs→image.
- *       See {@link #genAiPartsBlocks} — the same helper ingest uses to persist message
+ *       See {@link #genAiPartsBlocks}, the same helper ingest uses to persist message
  *       blocks, so the persisted view and the judge view never diverge.</li>
  *   <li>Anthropic-style content array: {@code [{type:"text"|"image"|"tool_use"|
  *       "tool_result"|"thinking", ...}]}. {@code image.source.type=="base64"} becomes an
@@ -49,7 +49,7 @@ public final class ContentExtractor {
 
     /**
      * True when {@code node} is a gen_ai message envelope: a non-empty array carrying at least one
-     * role-tagged object ({@code [{"role":…,"content"|"parts":…}, …]}) — the shape the OTLP receiver
+     * role-tagged object ({@code [{"role":…,"content"|"parts":…}, …]}), the shape the OTLP receiver
      * stores verbatim in {@code observation.input}/{@code output} from {@code gen_ai.input.messages}
      * / {@code gen_ai.output.messages}. The single definition of "is this the envelope", shared by
      * the text view ({@link #columnText}) and schema validation ({@code MalformedOutputDetector}).
@@ -65,7 +65,7 @@ public final class ContentExtractor {
     /**
      * String overload of {@link #isMessageEnvelope(JsonNode)}: true when {@code raw} parses to a
      * role-tagged gen_ai message envelope. A plain-string blob or unparseable / non-envelope JSON is
-     * {@code false} — used by the judge-view builder to decide whether to unwrap into typed blocks or
+     * {@code false}, used by the judge-view builder to decide whether to unwrap into typed blocks or
      * ride the payload through verbatim.
      */
     public static boolean isMessageEnvelope(@Nullable String raw) {
@@ -86,7 +86,7 @@ public final class ContentExtractor {
      * throws; {@code ""} for null/blank.
      *
      * <p>This is the ONE place the role-tagged envelope is unwrapped for text consumers, so no
-     * downstream text feature — encoder classifiers, regex signals, embeddings — ever scores the raw
+     * downstream text feature (encoder classifiers, regex signals, embeddings) ever scores the raw
      * {@code [{"role":…}]} JSON. That is the class of bug where a prompt-injection encoder reads the
      * envelope <em>structure itself</em> as an injection and fires on benign traffic.
      */
@@ -96,7 +96,7 @@ public final class ContentExtractor {
 
     /**
      * The {@link #columnText} generalization for callers that need MORE than one role's text
-     * combined — e.g. the Groundedness built-in's premise, where source content commonly lives in
+     * combined, e.g. the Groundedness built-in's premise, where source content commonly lives in
      * either the system message ("Here is the document: …") or the user message (pasted inline),
      * and dropping whichever one isn't the single matched role would silently starve the premise.
      * Matches any message whose role is in {@code roles} (falling back to every message when NONE
@@ -109,7 +109,7 @@ public final class ContentExtractor {
         try {
             node = MAPPER.readTree(raw);
         } catch (JsonProcessingException e) {
-            return raw; // a plain-string blob from a provider adapter — already text, not JSON
+            return raw; // a plain-string blob from a provider adapter, already text, not JSON
         }
         if (!isMessageEnvelope(node)) return flattenContentText(node);
         StringBuilder matched = new StringBuilder();
@@ -124,7 +124,7 @@ public final class ContentExtractor {
         return matched.length() > 0 ? matched.toString() : all.toString();
     }
 
-    /** One role-tagged message's flattened text — the ordered element of {@link #columnMessages}. */
+    /** One role-tagged message's flattened text, the ordered element of {@link #columnMessages}. */
     public record RoleMessage(String role, String text) {}
 
     /**
@@ -132,7 +132,7 @@ public final class ContentExtractor {
      * gen_ai column, keeping only messages whose role is in {@code roles} and preserving message
      * order. Unlike {@link #columnText} (which collapses one role's text to a single string and falls
      * back to <em>every</em> message when that role is absent), this keeps each message distinct and
-     * NEVER falls back to unlisted roles — so a caller asking for {@code {user, assistant}} reliably
+     * NEVER falls back to unlisted roles, so a caller asking for {@code {user, assistant}} reliably
      * excludes {@code system}/{@code developer}/tool messages. A plain-string blob or unrecognized
      * JSON yields a single message under {@code fallbackRole} (the column's default speaker). Empty
      * messages are dropped; {@code []} for null/blank.
@@ -166,7 +166,7 @@ public final class ContentExtractor {
 
     /**
      * A message's text for the conversation-thread view: like {@link #messageContentText} but
-     * multimodal-aware — non-text parts (images, files, tool calls/results, unknown structured parts)
+     * multimodal-aware, non-text parts (images, files, tool calls/results, unknown structured parts)
      * render as typed placeholders ({@link #partPlaceholder}) instead of being dropped, so a text
      * encoder scoring the thread still sees that an attachment was present in that turn. Contract v2;
      * the placeholder/marker vocabulary is shared with Python {@code render_part}.
@@ -196,7 +196,7 @@ public final class ContentExtractor {
 
     /**
      * One content part rendered for the conversation-thread view (contract v2): text parts return their
-     * text; tool parts return a terse outcome marker ({@link #toolMarker} — {@code [tool:<name> ok]} or
+     * text; tool parts return a terse outcome marker ({@link #toolMarker}, {@code [tool:<name> ok]} or
      * {@code [tool:<name> error: <snippet>]}, a successful {@code tool_result} collapsing to {@code ""});
      * every other non-text part returns a typed placeholder so the encoder knows it was present without
      * the raw payload. Handles both the normalized contract shape ({@code {type,caption/name/text}}) and
@@ -219,11 +219,11 @@ public final class ContentExtractor {
             // "file"/"document"/"input_file" is the third-party/OTel placeholder vocabulary; the three
             // ContentBlock document kinds route here too (mirroring Python's _FILE_TYPES) so a persisted
             // document_ref/document_b64/document_url node renders the same terse placeholder rather than
-            // falling to "default" — document_url in particular carries only a "url" field, never
+            // falling to "default", document_url in particular carries only a "url" field, never
             // "text"/"content", so leaving it out of this list means partTextField finds nothing and it
             // silently degrades to "[unsupported]" instead of "[file]", a train/serve divergence from the
             // Python mirror. Neither node carries a "name"/"filename" JSON key (ContentBlock has no
-            // filename field — see its class doc), so this bottoms out at the bare "[file]" label, exactly
+            // filename field, see its class doc), so this bottoms out at the bare "[file]" label, exactly
             // mirroring image_ref's bare "[image]" fallback just above (image_ref carries no
             // "caption"/"alt" key either).
             case "file",
@@ -255,7 +255,7 @@ public final class ContentExtractor {
     private static final int ERROR_SNIPPET_MAX = 120;
 
     // UNICODE_CHARACTER_CLASS so \s matches the full Unicode whitespace set (NBSP, etc.), like Python's
-    // re \s on a str pattern — ASCII-only \s would leave NBSP intact and diverge from the Python renderer.
+    // re \s on a str pattern, ASCII-only \s would leave NBSP intact and diverge from the Python renderer.
     private static final java.util.regex.Pattern WHITESPACE =
             java.util.regex.Pattern.compile("\\s+", java.util.regex.Pattern.UNICODE_CHARACTER_CLASS);
 
@@ -277,7 +277,7 @@ public final class ContentExtractor {
     /**
      * A tool error rendered terse: whitespace-collapsed (Unicode-aware), stripped, head-truncated to
      * {@value #ERROR_SNIPPET_MAX} CODE POINTS. Truncation counts and splits by code point (Python slices
-     * {@code [:120]} by code point), so an emoji at the boundary is kept or dropped whole — a UTF-16
+     * {@code [:120]} by code point), so an emoji at the boundary is kept or dropped whole, a UTF-16
      * {@code substring} could split its surrogate pair and diverge from the Python renderer.
      */
     public static String errorSnippet(String msg) {
@@ -385,7 +385,7 @@ public final class ContentExtractor {
     }
 
     /**
-     * Extract the {@link ContentBlock}s from an already-parsed message-content node — the
+     * Extract the {@link ContentBlock}s from an already-parsed message-content node, the
      * structured counterpart to {@link #flattenContentText(JsonNode)}, which collapses the
      * same node to plain text and drops images. The export path ({@code TraceSpanMapper})
      * uses this to emit typed/labeled image parts instead of losing them in the text
@@ -427,11 +427,10 @@ public final class ContentExtractor {
 
     /** True if any block carries media (an image or a document). Callers that build a "verbatim"
      *  judge view keep the extracted blocks (with their first-class media parts) for media-bearing
-     *  units rather than splicing raw base64/text-extraction into a text block. Renamed from
-     *  {@code hasImages} when the document modality landed (#985) — {@link ContentBlock#isMedia()} is
-     *  the single source of truth this delegates to, so a document-only unit is no longer
-     *  misclassified as "no media" and routed to the wrong ({@code rawBlocks}) branch by
-     *  {@code TraceTransformer.judgeView}. */
+     *  units rather than splicing raw base64/text-extraction into a text block.
+     *  {@link ContentBlock#isMedia()} is the single source of truth this delegates to, so a
+     *  document-only unit is not misclassified as "no media" and routed to the wrong
+     *  ({@code rawBlocks}) branch by {@code TraceTransformer.judgeView}. */
     public static boolean hasMedia(@Nullable List<ContentBlock> blocks) {
         if (blocks == null) return false;
         for (ContentBlock b : blocks) {
@@ -499,7 +498,7 @@ public final class ContentExtractor {
                 out.addAll(genAiPartsBlocks(parts));
                 return;
             }
-            // The assistant message may have only tool_calls and no content — emit typed tool_call blocks.
+            // The assistant message may have only tool_calls and no content, emit typed tool_call blocks.
             JsonNode toolCalls = msg.get("tool_calls");
             if (toolCalls != null && toolCalls.isArray()) {
                 for (JsonNode tc : toolCalls) {
@@ -545,8 +544,8 @@ public final class ContentExtractor {
             }
             // OpenAI document input: {type:"input_file"|"file", file_data:"data:<mime>;base64,..."} (a
             // data: URI, parsed the same way image_url's data-URI path is) or a bare url/file_url field.
-            // file_id (the OpenAI Files API) is unsupported and falls through to `default` unchanged —
-            // same as any other unrecognized shape today (#985: PDF-bytes/URL only, no Files API).
+            // file_id (the OpenAI Files API) is unsupported and falls through to `default` unchanged,
+            // same as any other unrecognized shape today: PDF bytes or a URL only, no Files API.
             case "input_file", "file" -> {
                 String fileData = part.path("file_data").asText("");
                 DataUriPart du = parseDataUriPart(fileData);
@@ -556,23 +555,23 @@ public final class ContentExtractor {
                 } else if (!url.isEmpty()) {
                     out.add(ContentBlock.documentUrl(url));
                 } else {
-                    // Neither a data: URI nor a URL — e.g. file_id (OpenAI Files API), unsupported for
-                    // this run (#985: PDF-bytes/URL only). Same fallback as `default`: JSON-dumped text
-                    // so the judge can still see it, rather than silently dropping the part.
+                    // Neither a data: URI nor a URL, e.g. file_id (OpenAI Files API), unsupported today
+                    // (PDF bytes or a URL only). Same fallback as `default`: JSON-dumped text so the
+                    // judge can still see it, rather than silently dropping the part.
                     out.add(ContentBlock.text(part.toString()));
                 }
             }
             case ContentBlock.TYPE_IMAGE_REF -> flattenImageRefPart(part, out);
             case ContentBlock.TYPE_DOCUMENT_REF -> flattenDocumentRefPart(part, out);
             default -> {
-                // Unknown part type — fall back to JSON-serialized text so the judge can still see it.
+                // Unknown part type, fall back to JSON-serialized text so the judge can still see it.
                 out.add(ContentBlock.text(part.toString()));
             }
         }
     }
 
     /** A parsed {@code data:<mime>;base64,<payload>} URI's declared mime + raw base64 payload
-     *  (NOT decoded — {@link ContentBlock#documentB64} stores base64 verbatim, unlike
+     *  (NOT decoded, {@link ContentBlock#documentB64} stores base64 verbatim, unlike
      *  {@code MediaExternalizer} which decodes for storage). Null when {@code uri} is not a base64
      *  data URI. */
     private record DataUriPart(String mime, String data) {}
@@ -590,16 +589,16 @@ public final class ContentExtractor {
     // --- OTel gen_ai `parts` shape --------------------------------------------
 
     /**
-     * Typed blocks from the OTel gen_ai {@code parts:[{type,content|text|arguments,…}]} shape — the
+     * Typed blocks from the OTel gen_ai {@code parts:[{type,content|text|arguments,…}]} shape, the
      * canonical unwrap of the {@code [{role, parts:[…]}]} envelope. Structured parts
-     * ({@code tool_call}/{@code tool_result}/{@code reasoning}) become first-class typed blocks — the
+     * ({@code tool_call}/{@code tool_result}/{@code reasoning}) become first-class typed blocks, the
      * structured JSON is carried in {@link ContentBlock#data} and a readable summary in {@code text};
      * empty reasoning is dropped. Plain text parts stay text; an unrecognised part is preserved whole as
      * text (never dropped).
      *
-     * <p>The canonical unwrap of the OTel gen_ai {@code parts} shape, shared by every reader of it —
+     * <p>The canonical unwrap of the OTel gen_ai {@code parts} shape, shared by every reader of it,
      * the judge view ({@link #extract} via {@link #flattenOpenAiMessage}) and the ingest edge's
-     * tool-call extraction — so the two can never diverge.
+     * tool-call extraction, so the two can never diverge.
      */
     public static List<ContentBlock> genAiPartsBlocks(JsonNode parts) {
         List<ContentBlock> out = new ArrayList<>();
@@ -679,8 +678,8 @@ public final class ContentExtractor {
                 }
             }
             // Anthropic document part: {type:"document", source:{type:"base64"|"url", ...}}. Only the
-            // base64/url PDF sources are handled — Anthropic's text-source and content-array (citations)
-            // document sources are explicitly out of scope for this run (PDF-bytes/URL only, #985).
+            // base64/url PDF sources are handled; Anthropic's text-source and content-array (citations)
+            // document sources are explicitly out of scope today (PDF bytes or a URL only).
             case "document" -> {
                 JsonNode src = part.get("source");
                 if (src != null && src.isObject()) {
@@ -719,12 +718,11 @@ public final class ContentExtractor {
     }
 
     /**
-     * An externalized image part ({@code {type:"image_ref", data:"<mediaId>", mediaType:"<mime>"}}) —
+     * An externalized image part ({@code {type:"image_ref", data:"<mediaId>", mediaType:"<mime>"}}),
      * the {@link ContentBlock}-shaped node {@code MediaExternalizer} writes in place of inline base64 at
      * ingest. Both vendor branches route here so the persisted substrate's ref form re-parses back
-     * into a {@link ContentBlock#imageRef}. The judge boundary used to re-hydrate that ref to bytes;
-     * Track A removed grading, so the only re-hydration left is the media serve endpoint the trace
-     * viewer calls with the id.
+     * into a {@link ContentBlock#imageRef}; re-hydrating the ref to bytes is the media serve endpoint
+     * the trace viewer calls with the id.
      */
     private static void flattenImageRefPart(JsonNode part, List<ContentBlock> out) {
         String mediaId = part.path("data").asText("");
@@ -735,10 +733,10 @@ public final class ContentExtractor {
 
     /**
      * An externalized document part ({@code {type:"document_ref", data:"<mediaId>", text:"<extracted
-     * text>", mediaType:"<mime>"}}) — {@link #flattenImageRefPart}'s document counterpart. Without this
+     * text>", mediaType:"<mime>"}}), {@link #flattenImageRefPart}'s document counterpart. Without this
      * case a persisted {@code document_ref} node would fall to the {@code default} branch and re-parse
-     * as a raw JSON-dumped text block instead of a real {@link ContentBlock#documentRef}, reintroducing
-     * the #761-class round-trip bug for the new modality. {@code text} (the extracted PDF text, or a
+     * as a raw JSON-dumped text block instead of a real {@link ContentBlock#documentRef}, a round-trip
+     * bug for this modality. {@code text} (the extracted PDF text, or a
      * failure marker) rides through unchanged so the judge boundary never needs a MediaStore round trip
      * for the common already-extracted case.
      */

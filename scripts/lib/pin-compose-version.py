@@ -14,7 +14,7 @@ Why the artifact must be pinned when the repository file is not: a clone has the
 the operator and a `.env` to write TESSARY_VERSION into, so a floating default there is a
 followable stack. A remote `docker compose -f oci://...:compose up -d -y` has neither, and the
 published config must be able to name only images from its own release or newer — which is
-epic 7 clause 1's pinning requirement, discharged here rather than by a hand-typed fallback.
+The one-command install's pinning requirement, discharged here rather than by a hand-typed fallback.
 
 The transform is line-based and deliberately narrow, for the same reason the build strip is: a
 YAML round-trip would reformat the file and discard every comment, and those comments are the

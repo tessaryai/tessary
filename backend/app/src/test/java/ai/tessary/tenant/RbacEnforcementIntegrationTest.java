@@ -132,11 +132,9 @@ class RbacEnforcementIntegrationTest {
                 () -> billingController.getBilling(session(admin), fix.org().slug(), null, null));
         assertEquals(HttpStatus.FORBIDDEN, billing.getStatusCode());
 
-        // Admin cannot perform owner-only lifecycle (rename the organization). archive/delete/
-        // transfer-ownership moved to tessary-paid/plan's MultiOrgController with #862 — this
-        // RBAC check now exercises updateOrg instead, since it runs through the same
-        // requireOwner()/ORG_ADMIN gate deleteOrg used to and stayed on the open controller.
-        // MultiOrgControllerTest (tessary-paid) covers the moved methods' own RBAC.
+        // Admin cannot perform owner-only lifecycle (rename the organization). This RBAC check
+        // exercises updateOrg, which runs through the same requireOwner()/ORG_ADMIN gate as the
+        // rest of the org lifecycle actions on this controller.
         ResponseStatusException del = assertThrows(
                 ResponseStatusException.class,
                 () -> orgController.updateOrg(

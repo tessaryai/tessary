@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
  * The capability gate on the MCP surface: which tools an org is <b>offered</b>, and what a call to a tool it
  * is not offered does.
  *
- * <p>This is launch requirement K6 on the MCP side, and it had no test. Every other MCP test stubs every
+ * <p>This surface's capability gate had no test. Every other MCP test stubs every
  * capability on — deliberately, and each says so ("these tests exercise the tools themselves, not the
  * gate") — so nothing anywhere asserted that a partner's {@code tools/list} is the short list. The registry
  * makes the argument for why that matters in its own javadoc: offering a tool to an org that cannot use it is
@@ -61,11 +61,11 @@ import org.junit.jupiter.api.Test;
  *       the catalogue withholds.</li>
  * </ul>
  *
- * <p><b>The surface is read-only and, since Track A, entirely ungated.</b> {@code Capability.RCA} used to
+ * <p><b>The surface is read-only and entirely ungated.</b> {@code Capability.RCA} used to
  * gate five tools here; it now gates none, because a case carries its own RCA report inline and an org
  * without RCA has no report rows to inline — the gate moved from the tool to the data. {@code GRADERS}
- * gated the last two, {@code list_graders} and {@code get_grader}; Track A deleted grading and the
- * capability with it. {@link #theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix} is the invariant that keeps
+ * gated the last two, {@code list_graders} and {@code get_grader}; grading was deleted from the platform,
+ * taking the capability with it. {@link #theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix} is the invariant that keeps
  * the surface read-only: it walks the full catalogue rather than a list maintained here, so a future write
  * tool fails this test at registration instead of shipping.
  */
@@ -78,7 +78,7 @@ class McpCapabilityGateTest {
      * The tools deleted from this surface. Named here so that re-adding one under its old name fails a
      * test rather than quietly restoring a surface we argued our way out of: five were the triage/RCA pair
      * (spend, and reports that now ride on the case that owns them), one was the last write, and three
-     * went with grading in Track A.
+     * went with grading when it was removed.
      */
     private static final Set<String> REMOVED_TOOLS = Set.of(
             "propose_grader_edit",
@@ -87,7 +87,7 @@ class McpCapabilityGateTest {
             "latest_triage",
             "list_rca_reports",
             "get_rca_report",
-            // Track A: grading left the platform, so the two grader reads and the quality-dimension list
+            // Grading left the platform, so the two grader reads and the quality-dimension list
             // have nothing behind them. Named here for the same reason as the other six.
             "list_graders",
             "get_grader",
@@ -138,7 +138,7 @@ class McpCapabilityGateTest {
 
     @Test
     void launchPartnerIsOfferedOnlyTheOpenTools() throws Exception {
-        // The launch configuration: no capability at all. Since Track A no tool on this surface is gated,
+        // The launch configuration: no capability at all. No tool on this surface is gated,
         // so the open set IS the catalogue — which the next test asserts from the other direction.
         Fixture f = fixture(EnumSet.noneOf(Capability.class));
 

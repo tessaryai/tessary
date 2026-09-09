@@ -80,7 +80,7 @@ public class OrganizationController {
     public record SignupPolicyRequest(String mode, List<String> domains) {}
 
     /**
-     * The {@code GET /api/orgs/{slug}/signup-policy} view (#1226). The policy is instance-wide and
+     * The {@code GET /api/orgs/{slug}/signup-policy} view. The policy is instance-wide and
      * lives on the install's first organization; {@code governing} says whether the addressed
      * organization is that one, and {@code governing_org_slug} names it either way.
      */
@@ -143,7 +143,7 @@ public class OrganizationController {
         // Insert org + owner membership + the guaranteed default project atomically, so a partial
         // failure can't leave an org with no membership or no default project. The owned-org cap
         // is checked in there too, under a per-owner lock, so a concurrent second request from
-        // the same user cannot slip past it (#1019).
+        // the same user cannot slip past it.
         return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsPerUser()));
     }
 
@@ -393,7 +393,7 @@ public class OrganizationController {
     }
 
     /**
-     * The connect gate's quiet escape hatch (#1227): lazily create (or return the existing) sample
+     * The connect gate's quiet escape hatch: lazily create (or return the existing) sample
      * project for this org. Gated on {@code ORG_MANAGE}, the same permission {@link #createProject}
      * requires two methods above — this is a genuine mutation (a project row, plus every table
      * {@code SampleProjectSeedListener} seeds after commit), and {@code Role.VIEWER}'s contract is

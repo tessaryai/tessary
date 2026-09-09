@@ -19,13 +19,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * The dependent side of the substrate: producer-key columns on the tables that point at spans, and the
  * additively widened subject/grain vocabulary the v2 writers use.
  *
- * <p><b>Post-teardown, this asserts the destination rather than the preparation.</b> 0077 added the
- * producer keys beside the surrogates under {@code v2_*} names, because both had to be readable at once
- * while the sweep translated between them. 0083 finished the swap: the surrogates are gone and the
+ * <p><b>Post-teardown, this asserts the destination rather than the preparation.</b> The producer keys
+ * were added beside the surrogates under {@code v2_*} names, because both had to be readable at once
+ * while the sweep translated between them; the swap finished later: the surrogates are gone and the
  * producer keys carry the canonical names. What is asserted here is that end state.
  *
  * <p>{@code dataset_item} was a third table in both lists, and its {@code source_session_id} the one
- * deliberate surviving pointer. Track A dropped the table, so neither has anything left to assert.
+ * deliberate surviving pointer. The table was dropped, so neither has anything left to assert.
  *
  * <p><b>Why the widening is asserted as constraint text.</b> The vocabulary widening is a property of the
  * constraint, not of any row: a CHECK that still rejects {@code 'span'} is broken whether or not a test
@@ -131,11 +131,11 @@ class SubstrateV2DependentPrepTest {
     // ---- vocabulary widening -----------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0} names the v2 vocabulary and only the v2 vocabulary")
-    // Four names left this list with Track A (0016): verdict, annotation, annotation_queue_item and
+    // Four names left this list: verdict, annotation, annotation_queue_item and
     // label were dropped outright, so their CHECKs cannot be inspected and their absence is asserted
     // by theV1SubstrateAndItsSuccessorsWorkingNameAreGone's sibling in check-migrations-populated.sh
     // rather than here. The one carrier that survives still has to name the v2 vocabulary
-    // (embedding_subject_kind_check left with the embedding lane, #1116).
+    // (embedding_subject_kind_check left with the embedding lane).
     @ValueSource(strings = {"failure_mode_instance_subject_kind_check"})
     void subjectKindVocabularyIsV2Only(String constraint) {
         String def = constraintDef(constraint);
@@ -148,7 +148,7 @@ class SubstrateV2DependentPrepTest {
     }
 
     // A @ParameterizedTest over ck_verdict_grain / ck_annotation_grain / ck_annotation_queue_item_grain
-    // / ck_label_grain used to sit here. All four went with their tables in 0016 (Track A), and the
+    // / ck_label_grain used to sit here. All four went with their tables, and the
     // claim they encoded — a span-grain subject must carry its trace id, because span identity is
     // (project_id, trace_id, id) — now has exactly one carrier left. The next test is its only guard.
 

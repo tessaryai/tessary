@@ -264,15 +264,15 @@ public class TracesController {
     }
 
     /**
-     * Real binary preservation for a trace's export (#986, Epic 8 Track B) — one OTel GenAI span per
-     * JSONL line, in the shape the evals plugin's Path A consumes ({@link TraceSpanMapper}). This is the
-     * caller {@code TraceSpanMapper.toSpan}/{@code toSpanLine} had none of before this issue: those
+     * Real binary preservation for a trace's export — one OTel GenAI span per
+     * JSONL line, in the shape the evals plugin's Path A consumes ({@link TraceSpanMapper}). This is a
+     * caller {@code TraceSpanMapper.toSpan}/{@code toSpanLine} had none of before: those
      * methods existed only for {@code OpenInferenceNormalizerTest}/{@code TraceSpanMapperTest} to call.
      *
      * <p>Deliberately the existing, already-authenticated per-project route (this class's own
      * convention for a per-trace read), not a new public/token-scoped endpoint — that would be new
-     * auth/DoS surface this issue never asked for. Deliberately not a referenced {@code /media/{id}}
-     * export either (Epic 8 Track B Fork 2): media is inlined as a base64 {@code data:} URI inside the
+     * auth/DoS surface this endpoint does not need. Deliberately not a referenced {@code /media/{id}}
+     * export either: media is inlined as a base64 {@code data:} URI inside the
      * existing plain-string {@code content} field ({@link TraceSpanMapper#toSpan}), so this response
      * carries no separate media URLs and needs no org/project-slug-to-URL plumbing.
      *

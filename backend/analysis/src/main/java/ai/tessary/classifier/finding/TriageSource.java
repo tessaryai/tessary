@@ -15,8 +15,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><b>It is a full adapter, not a triage hook.</b> The seam started as {@code analyze} alone, with the
  * list merge, the detail projection and the resolve branch left inline in what is now
- * {@link FindingService} — three conformance-shaped special cases inside the generic service, which is
- * the coupling #839 removed. Every one of them is a method below, so the service iterates uniformly and
+ * {@link FindingService} — three conformance-shaped special cases inside the generic service.
+ * Every one of them is a method below, so the service iterates uniformly and
  * a third store is an implementation rather than three more branches.
  *
  * <p>Everything downstream of the press is shared and stays shared: one job kind ({@code triage}), one

@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Settings → Data retention (#1205): how long this project keeps traces and detections. The
+ * Settings → Data retention: how long this project keeps traces and detections. The
  * install-wide default comes from {@code tessary.retention.*}; a project override is a
  * {@code retention_policy} row, and clearing the override returns the project to the default.
  * {@code 0} means keep forever. The sweeper reads the same {@link RetentionResolver}, so what this

@@ -334,7 +334,7 @@ public class PipelineRepository {
     /**
      * Materialize a minimal {@code call_site} row (just its slug id) when none exists — so a plain-OTLP
      * observation that resolved an explicit {@code tessary.call_site_id} but has no plugin-published pipeline
-     * is not orphaned ("call sites emerge from traffic" — see docs/reference/ingestion-contract/README.md).
+     * is not orphaned ("call sites emerge from traffic" — see devdocs/reference/ingestion-contract/README.md).
      * Idempotent: a plugin- or
      * previously-created call site is left untouched.
      */

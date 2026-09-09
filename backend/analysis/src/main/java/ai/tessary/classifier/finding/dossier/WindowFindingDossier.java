@@ -6,7 +6,7 @@ import java.util.Iterator;
 import java.util.Map;
 
 /**
- * D (#994): the generic "window finding" shape — any classifier whose payload publishes a {@code
+ * The generic "window finding" shape — any classifier whose payload publishes a {@code
  * window} block but matches neither {@code tool_error}'s {@code patterns[]} shape nor {@code
  * metric_drift}'s {@code bucket}+{@code ratio} shape (today: {@code tool_error} and {@code
  * metric_drift} themselves already have dedicated, more specific assemblers ahead of this one in

@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
  * {@code media_object} turned each of 8,210 media rows into two sequential scans of a 700 MB
  * {@code tool_call} — while holding a pooled connection and blocking the job queue's own INSERT. The
  * request timed out, the single-statement cascade rolled back whole, and the user's retry started again
- * from nothing. {@code 0001-drop-dead-media-ref-columns} (#761/#762) already fixed that specific cost by
+ * from nothing. An earlier migration already fixed that specific cost by
  * removing the four dangling columns in favor of an indexed join table; this class fixes the shape —
  * a delete no longer runs inside the request at all.
  *

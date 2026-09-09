@@ -34,7 +34,7 @@ import { Button, CopyButton, cn, useToast } from "../../ui";
 export const INSTRUMENT_DOC_URL = "https://github.com/tessaryai/tessary/blob/main/instrument.md";
 
 /**
- * The connect prompt (#1227). It is one sentence pointing at {@link INSTRUMENT_DOC_URL}, because a
+ * The connect prompt. It is one sentence pointing at {@link INSTRUMENT_DOC_URL}, because a
  * prompt is a bad place to keep a spec: the previous paragraph-long version had to restate the
  * exporter rules AND the `tessary.call_site.id` ask in the copy field itself, could not say
  * anything about WHERE a given repository keeps credentials, and drifted from the docs the moment
@@ -264,7 +264,7 @@ function ExporterSnippets({ endpoint, token }: { endpoint: string; token: string
  *
  * <p>{@link OtlpConnect} only ever calls the returned `issue` from the visible "Create a connection
  * token" button — a revisitable settings surface must not mint a fresh key on every render.
- * `ConnectGate` (the first-run gate, #1227) is the one caller that auto-issues on mount instead,
+ * `ConnectGate` (the first-run gate) is the one caller that auto-issues on mount instead,
  * because its design has no button for it: the header field is always populated, never a
  * call-to-action. Exported for that one caller; every other consumer of this file keeps using
  * {@link OtlpConnect} whole.

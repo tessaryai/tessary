@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.CacheTTL;
  * the matrix accidentally said Haiku's floor was the same.
  *
  * <p>Amazon Nova 2 Lite (the {@code NOVA} constant below) was removed from {@link
- * BedrockModelProfile#PROFILES} by #939 D6 — Amazon is not one of D6's six supported makers. The
+ * BedrockModelProfile#PROFILES} — Amazon is not one of the six supported makers. The
  * constant survives here only because two tests use it as a known-removed-model probe: {@code
  * onlyAnthropicModelsCanDriveTheSandboxLanes} asserts {@code isAgentic(NOVA) == false} (fails closed
  * for a model with no profile), and {@code normalizeKeyStripsRegionScopeAndVersionSuffixAndNothingElse}
@@ -42,7 +42,7 @@ class BedrockModelProfileTest {
         assertFalse(BedrockModelProfile.supports(HAIKU, ServiceTier.PRIORITY));
     }
 
-    // novaSupportsFlex lived here until #939 D6 removed Nova, the only platform model that ever
+    // novaSupportsFlex lived here until Nova was removed, the only platform model that ever
     // offered Flex/Priority. All four surviving profiles are Set.of(STANDARD) only (see
     // haikuIsStandardOnlyOnBedrock and batchIsNeverSelectableEvenWhereTheModelIsCapable's loop), so
     // there is no surviving contrast to pin — deleted rather than weakened into a tautology.
@@ -58,8 +58,8 @@ class BedrockModelProfileTest {
     void batchIsNeverSelectableEvenWhereTheModelIsCapable() {
         // Batch is a separate Bedrock API, not a serviceTier value, so it must never appear as an
         // option however the matrix evolves. Looped over every surviving profile rather than
-        // hardcoded to two models (Nova used to be the FLEX-capable contrast; #939 D6 removed it and
-        // left no model that selects FLEX at all) — a matrix-size-independent version of the original
+        // hardcoded to two models (Nova used to be the FLEX-capable contrast; removing it left no
+        // model that selects FLEX at all) — a matrix-size-independent version of the original
         // intent, per this file's own stated design philosophy.
         for (BedrockModelProfile.ModelDescriptor p : BedrockModelProfile.platformModels()) {
             assertFalse(
@@ -83,7 +83,7 @@ class BedrockModelProfileTest {
      * Clamping to "the model's shortest supported TTL" looked right and put the fatal field on the
      * wire anyway; null is the only value langchain4j turns into a ttl-less cache point. (This used to
      * be pinned against Nova, whose ttl field was Anthropic-only on Bedrock Converse for a different
-     * reason — #939 D6 removed Nova; Luna carries the same "empty explicitCacheTtls means implicit
+     * reason — removing Nova left Luna carrying the same "empty explicitCacheTtls means implicit
      * caching, not no caching" contrast against Haiku/Sonnet's {@code {5m,1h}}.)
      */
     @Test
@@ -103,7 +103,7 @@ class BedrockModelProfileTest {
         assertTrue(luna.explicitCacheTtls().isEmpty());
     }
 
-    // structuredOutputModeDiffersBetweenTheTwoModels lived here until #939 D6 removed Nova, the only
+    // structuredOutputModeDiffersBetweenTheTwoModels lived here until Nova was removed, the only
     // platform model whose structuredOutput was StructuredOutput.Mode.TOOL_CALL. All four surviving
     // profiles are NATIVE (Haiku, Sonnet: Converse outputConfig; Luna, Terra: mantle's native
     // text.format json_schema) — unknownModelsDefaultToNativeStructuredOutput already covers the
@@ -136,7 +136,7 @@ class BedrockModelProfileTest {
     void cacheFloorsDifferBetweenTheTwoModels() {
         // 4,096 vs 1,024 — a quarter of Haiku's floor — the same prompt can be uncacheable on Haiku
         // and cacheable on Sonnet, which is what ChatJudgeRunner's cache-inactive warning reports off.
-        // (Nova's 4,096-vs-1,000 contrast is gone with #939 D6; Sonnet carries the same shape of fact.)
+        // (Nova's 4,096-vs-1,000 contrast is gone with Nova's removal; Sonnet carries the same shape of fact.)
         assertEquals(4_096, BedrockModelProfile.find(HAIKU).orElseThrow().minCacheCheckpointTokens());
         assertEquals(1_024, BedrockModelProfile.find(SONNET).orElseThrow().minCacheCheckpointTokens());
     }
@@ -172,7 +172,7 @@ class BedrockModelProfileTest {
                 "anthropic.claude-haiku-4-5",
                 BedrockModelProfile.normalizeKey("au.anthropic.claude-haiku-4-5-20251001-v1:0"));
         // Mantle's own route-prefixed pricing id (see BedrockModelProfile.MANTLE_ROUTE_PREFIX) strips
-        // back to the same logical key normalizeKey produces for every other Bedrock id shape — #1032.
+        // back to the same logical key normalizeKey produces for every other Bedrock id shape.
         assertEquals("openai.gpt-5.6-luna", BedrockModelProfile.normalizeKey("bedrock_mantle/openai.gpt-5.6-luna"));
         // Ids that need no normalization pass through untouched — including a mantle bare id and a name
         // whose "-v1:0" is mid-string rather than a suffix.

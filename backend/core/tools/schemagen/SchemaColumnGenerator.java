@@ -20,10 +20,10 @@ import java.util.regex.Pattern;
  * those constants instead of bare column-name literals, so a renamed or dropped column becomes a
  * compile error rather than a runtime failure.
  *
- * <p>No database is started and no Liquibase runtime is used — this is pure text parsing of the
+ * <p>No database is started and no Liquibase runtime is used: this is pure text parsing of the
  * checked-in SQL. The changelog files are a protected, read-only input.
  *
- * <p>Scope: it understands the DDL shapes the project's migrations actually use —
+ * <p>Scope: it understands the DDL shapes the project's migrations actually use:
  * {@code CREATE TABLE}, {@code DROP TABLE [IF EXISTS]}, {@code ALTER TABLE ... ADD COLUMN},
  * {@code ALTER TABLE ... DROP COLUMN}, {@code ALTER TABLE ... RENAME TO},
  * {@code ALTER TABLE ... RENAME COLUMN ... TO}. Index/constraint/UPDATE/ALTER-COLUMN statements
@@ -39,10 +39,9 @@ public final class SchemaColumnGenerator {
         }
         Path changesDir = Path.of(args[0]);
         Path outDir = Path.of(args[1]);
-        // Third argument is optional so backend/core/pom.xml's existing two-arg invocation is
-        // byte-identical: the paid db module is the first caller to ever pass a third argument
-        // (its own output package, ai.tessary.paid.db.schema), and every other caller keeps
-        // emitting into the open ai.tessary.db.schema package it always has.
+        // Third argument is optional so backend/core/pom.xml's existing two-arg invocation stays
+        // byte-identical: a caller may pass its own output package instead of the default, and
+        // every other caller keeps emitting into ai.tessary.db.schema as before.
         String outPackage = args.length == 3 ? args[2] : DEFAULT_PACKAGE;
 
         Map<String, LinkedHashSet<String>> tables = parseAll(changesDir);
@@ -67,7 +66,7 @@ public final class SchemaColumnGenerator {
      * Delete generated interfaces for tables the changelog no longer has.
      *
      * <p>Without this the output directory only ever grows, and a table rename leaves BOTH names on
-     * disk — {@code SignalColumns} beside {@code ClassifierColumns}. A repository still referencing
+     * disk: {@code SignalColumns} beside {@code ClassifierColumns}. A repository still referencing
      * the dead one then compiles green on the incremental build that produced it and fails only on a
      * clean checkout, which is CI's machine and not the author's. Renames are exactly when this guard
      * carries weight, so it runs on every generation rather than on a clean build.
@@ -96,7 +95,7 @@ public final class SchemaColumnGenerator {
      *
      * <p>This runs at {@code generate-sources} on EVERY Maven invocation. Writing unconditionally
      * reset the mtime of all ~95 generated files each time, which invalidated the compiler
-     * plugin's staleness check and forced a full recompile of them and everything downstream —
+     * plugin's staleness check and forced a full recompile of them and everything downstream,
      * about 50 seconds added to every build, including each `task check`. Preserving the mtime of
      * unchanged files is what keeps incremental compilation working.
      */
@@ -196,7 +195,7 @@ public final class SchemaColumnGenerator {
             String table = m.group(1).toLowerCase(Locale.ROOT);
             LinkedHashSet<String> cols = new LinkedHashSet<>();
             for (String col : parseColumnDefs(m.group(2))) cols.add(col);
-            tables.put(table, cols); // CREATE replaces (handles 004's drop+recreate)
+            tables.put(table, cols); // CREATE replaces, so a drop-and-recreate migration works
             return;
         }
         if ((m = DROP_TABLE.matcher(stmt)).matches()) {
@@ -228,9 +227,9 @@ public final class SchemaColumnGenerator {
             set.addAll(rebuilt);
             return;
         }
-        // Statements that legitimately don't change the column-name set — CREATE/ALTER/DROP INDEX,
+        // Statements that legitimately don't change the column-name set (CREATE/ALTER/DROP INDEX,
         // ADD/DROP/ALTER CONSTRAINT, ALTER COLUMN (type/default/nullability), and value-only DML
-        // (UPDATE/INSERT/DELETE) — leave the model untouched and are deliberately ignored.
+        // such as UPDATE/INSERT/DELETE) leave the model untouched and are deliberately ignored.
         if (IGNORABLE_DDL.matcher(stmt).find()) {
             return;
         }
@@ -266,11 +265,11 @@ public final class SchemaColumnGenerator {
 
     /**
      * The column set for an ADD/DROP/RENAME COLUMN target, or a loud failure when the table was
-     * never {@code CREATE}d in this run — silently manufacturing a table entry here (the old
+     * never {@code CREATE}d in this run: silently manufacturing a table entry here (the old
      * {@code computeIfAbsent} behaviour) would let an ALTER against a mistyped or already-partitioned
      * table name mint an interface for a relation that does not exist, and no one would notice until
      * a repository compiled against a phantom column constant. Table names ARE case-sensitive here in
-     * the sense that they must already be lower-cased keys — {@link #applyStatement} always
+     * the sense that they must already be lower-cased keys: {@link #applyStatement} always
      * lower-cases before calling this, so this is a straight map lookup, not a second normalization.
      */
     private static LinkedHashSet<String> requireTable(
@@ -286,8 +285,8 @@ public final class SchemaColumnGenerator {
     }
 
     /**
-     * Split a CREATE TABLE body on top-level commas (commas inside parens — e.g.
-     * {@code CHECK (kind IN ('a','b'))} or {@code PRIMARY KEY (a, b)} — don't separate columns),
+     * Split a CREATE TABLE body on top-level commas (commas inside parens, e.g.
+     * {@code CHECK (kind IN ('a','b'))} or {@code PRIMARY KEY (a, b)}, don't separate columns),
      * then take the leading identifier of each definition that isn't a table-level constraint.
      */
     private static List<String> parseColumnDefs(String body) {

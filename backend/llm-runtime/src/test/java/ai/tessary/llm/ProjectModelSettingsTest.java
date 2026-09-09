@@ -31,9 +31,9 @@ class ProjectModelSettingsTest {
     private static final String PID = "p1";
     private static final String ORG = "org1";
     private static final String HAIKU = "anthropic.claude-haiku-4-5";
-    /** Removed by #939 D6 (Amazon is not one of the six supported makers) — kept as a string
+    /** Removed (Amazon is not one of the six supported makers) — kept as a string
      *  constant purely so the "unknown model key" tests below still exercise a Bedrock-SHAPED
-     *  (dotted) key that resolves nowhere, the same failure class a stale pre-D6 row would hit. */
+     *  (dotted) key that resolves nowhere, the same failure class a stale removed-model row would hit. */
     private static final String NOVA = "amazon.nova-2-lite";
 
     private static final String TERRA = "openai.gpt-5.6-terra";
@@ -261,7 +261,7 @@ class ProjectModelSettingsTest {
     }
 
     /**
-     * #939 D6 removed Nova (Amazon is not a supported maker), and every model left in
+     * Nova was removed (Amazon is not a supported maker), and every model left in
      * {@link BedrockModelProfile#PROFILES} is agentic=true — there is no findable, non-agentic
      * Bedrock model left to exercise {@code MODEL_NOT_AGENTIC} through the Bedrock half of
      * {@link ProjectModelSettings#validate} any more. {@code aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane}
@@ -279,7 +279,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void theAgentVmOfferListNowIncludesHaiku45AndLuna() {
-        // A (#994) widened OFFERED_BY_GROUP[AGENT_VM] to include Haiku 4.5 and Luna. Both land on BOTH
+        // OFFERED_BY_GROUP[AGENT_VM] was widened to include Haiku 4.5 and Luna. Both land on BOTH
         // AGENT_VM lanes at once, not TRIAGE alone: the offer list is keyed by LaneGroup
         // (ModelLane#group), and RCA and TRIAGE both share LaneGroup.AGENT_VM — there is no mechanism
         // to offer a model on one lane of a group but not its siblings.
@@ -293,7 +293,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aStoredRowForARemovedModelFallsBackToTheOrder() {
-        // A row written before the validator existed (or, since #939 D6, before Nova was removed
+        // A row written before the validator existed (or before Nova was removed
         // entirely) must not pin a sandbox to a model that no longer resolves anywhere.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, NOVA, ServiceTier.STANDARD)));
         assertTrue(settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic());
@@ -336,7 +336,7 @@ class ProjectModelSettingsTest {
         assertTrue(settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic());
     }
 
-    // ---- #939: the non-Bedrock model_key union (GEMINI/GLM/GROK/CUSTOM) ----
+    // ---- the non-Bedrock model_key union (GEMINI/GLM/GROK/CUSTOM) ----
 
     @Test
     void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {

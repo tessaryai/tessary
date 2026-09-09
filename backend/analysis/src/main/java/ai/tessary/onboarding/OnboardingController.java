@@ -108,7 +108,7 @@ public class OnboardingController {
      * @param findings findings written by any detector
      * @param firstFindingAt event time of the earliest, null before any
      * @param cases cases opened, by any arm including a human pressing <i>Real deviation</i>
-     * @param triagedCases cases whose finding Layer 2 ruled on — the milestone (decision D9)
+     * @param triagedCases cases whose finding Layer 2 ruled on — the milestone
      * @param firstTriagedCaseAt when the first of those opened; the instant TTFV stops
      */
     public record OnboardingView(

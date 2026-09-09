@@ -121,20 +121,20 @@ The gate is applied in three places, and the third is the one that is easy to fo
    so the refusal lands in front of the person rather than in a log.
 2. **Delivering to one** (`AlertDeliveryDispatcher`) — a Slack channel created *before* the flag flipped is
    skipped at fan-out. Refusing only at write would leave every existing channel delivering forever; this
-   is the same reasoning segment D applies to a withdrawn classifier's output. No delivery-attempt row is
+   is the same reasoning applied to a withdrawn classifier's output. No delivery-attempt row is
    written, because nothing was attempted — a withheld transport is not a failed send.
 3. **The native app**, outbound (`SlackBriefPublisher`) and inbound (`SlackMentionService`), both through
-   `SlackCapability` — all in `tessary-paid/slack` since #842, joined by the route itself
-   (`SlackMentionController`) and its `SlackMentionSource` port in #920, so an open build simply has no
+   `SlackCapability` — live in the paid overlay, joined by the route itself
+   (`SlackMentionController`) and its `SlackMentionSource` port, so an open build simply has no
    native app at all: without this jar the endpoint does not exist, and `AuthFilter` does not bypass its
    path either — an open-only `auth/SelfAuthenticatingPath` port (`tenancy`) replaces the hard-coded
-   bypass #920 removed, empty by default. Webhook-channel delivery
+   bypass, empty by default. Webhook-channel delivery
    (item 2, `SlackDelivery`) is a different feature and stays open. The inbound gate is checked *after* the workspace install resolves, because the
    install is what names the organization, and it stays silent rather than replying — posting "you do not
    have Slack" into Slack is the one message the gate exists to prevent.
 
 **Slack runs out of process.** The protocol — signature verification, bot tokens, Web API calls, webhook
-posts — lives in the Slack adapter service (`tessary-paid/slack-service/`, a Python service using `slack_sdk`; not
+posts — lives in the Slack adapter service (a Python service using `slack_sdk`; not
 part of the public export).
 The backend holds no Slack credential and cannot reach Slack directly; it POSTs a composed message to the
 adapter's `/deliver`, and the adapter calls back to `/internal/slack/mention` for the one thing it cannot

@@ -8,7 +8,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** #939 D1: org-keyed, not project-keyed — see {@link ProviderCredential}'s class javadoc. */
+/** Org-keyed, not project-keyed — see {@link ProviderCredential}'s class javadoc. */
 @Repository
 public class ProviderCredentialRepository {
 

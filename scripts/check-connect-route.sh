@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The route the setup page names is a route the app has (epic 7 clause 5, #1193), proven
+# The route the setup page names is a route the app has, proven
 # statically: every control or destination docs/self-hosting/setup.mdx tells a reader to use is a
 # string the frontend actually renders or routes, and the page names no React component as a place
 # to go. The repo has no browser driver, so this is grep over two greppable sources, which reds the

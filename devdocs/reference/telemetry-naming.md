@@ -24,7 +24,7 @@ conventions*.
    `tessary.project.id` / `langfuse.observation.metadata.project_id`.
 4. **Carve-out — agentic child turns:** the sandbox lanes emit a dotted child
    `agent.llm_request`, one per agent turn (`agent.author`/`agent.codegen` were
-   retired with Track A — see Inventory below). The dotted form is the carve-out;
+   retired — see Inventory below). The dotted form is the carve-out;
    the prefix deliberately names the ROLE, not the harness, so swapping the
    coding agent out again never renames a span customers have dashboards on.
    (These were `claude_code.*` while Claude Code was the harness.) Document any
@@ -43,7 +43,7 @@ A new non-LLM product span that should reach Langfuse **must** stamp
 
 No platform LLM path currently calls `LlmCaller` at all: RCA and TRIAGE resolve their
 model via `ProjectModelSettings#resolveAgenticModel` and the sandbox launcher, bypassing
-it entirely, and Track A removed the grading/judge callers that used to. So `parentTrace`
+it entirely, and the grading/judge callers that used to were removed. So `parentTrace`
 is unexercised today rather than uniformly null-in-practice. Restoring run-level parent
 traces (wiring the classifier/RCA workers through `LlmCaller` with a non-null
 `parentTrace`) is a follow-up — see below.
@@ -56,7 +56,7 @@ traces (wiring the classifier/RCA workers through `LlmCaller` with a non-null
 | `E2bTriageSandbox` | `layer2-triage` | `layer2-triage` | The Layer-2 ruling, on `ModelLane.TRIAGE`. Metadata: `tessary.triage.finding_id`, which is also the ledger subject the run's spend is booked against, so a cost per ruling is a join rather than an estimate. There is no lane attribute: the repo-grounded lane is gone and every run now rules on the evidence, so recording it would stamp a constant. |
 | `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under agentic roots (carve-out) |
 
-**Span names Track A retired, deliberately not re-homed:** `llm-grader-run`,
+**Span names retired, deliberately not re-homed:** `llm-grader-run`,
 `llm-grader-applies-when`, `deterministic-grader-run`, `agentic-synthesis`, `agentic-codegen`,
 `agentic-drift-analysis`, `synth-automap`, `intent-name`, `intent-derive`, `cluster-name`. Their
 emitters are deleted; a dashboard filtering on any of them goes empty rather than wrong. `agent.author`
@@ -81,7 +81,7 @@ as an MDC key rename below, and gets the same treatment: recorded here, no dual-
 | `tessary.triage.finding_id` | observation metadata | The finding a Layer-2 ruling is about, and the ledger subject its spend books against |
 | `tessary.project.id` / `project_id` | span attribute; `langfuse.observation.metadata.project_id` (LlmCaller) or `langfuse.trace.metadata.project_id` (agentic sandbox roots) | Tenant join key |
 
-The `grader_id` / `grader_name` / `grader_kind` / `phase` keys went with grading in Track A.
+The `grader_id` / `grader_name` / `grader_kind` / `phase` keys were removed with grading.
 
 **Renaming a metadata key is an external break of the same class as an MDC key rename**, and the
 build cannot see it either. Record every rename here:
@@ -112,7 +112,7 @@ matching, silently, at deploy. So record every rename here:
 
 | Old field | New field | Release |
 |---|---|---|
-| `signalKey` | `classifierKey` | 2026-08 cleanup release (`0093`, PLAN-1 phase B1) — the signal vocabulary left the schema, and the log field with it. No dual-emit window: production is frozen until reset day, so nothing was reading the old field across the change. |
+| `signalKey` | `classifierKey` | 2026-08 cleanup release — the signal vocabulary left the schema, and the log field with it. No dual-emit window: production is frozen until reset day, so nothing was reading the old field across the change. |
 
 ## Do / don't
 

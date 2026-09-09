@@ -49,7 +49,7 @@ public final class TraceSpanMapper {
     private TraceSpanMapper() {}
 
     /** {@link #toSpanLine(RawEntry, String, MediaStore, String)} with no media preservation — media
-     *  blocks fall straight to their labeled placeholder (the pre-#986 behavior). Kept for the existing
+     *  blocks fall straight to their labeled placeholder (the previous behavior). Kept for the existing
      *  test call sites and any caller with no {@link MediaStore}/project id to hand; a real caller
      *  should use the four-arg overload so {@code image_ref}/{@code document_ref} blocks can inline. */
     public static String toSpanLine(RawEntry raw, String serviceName) {
@@ -79,7 +79,7 @@ public final class TraceSpanMapper {
     /**
      * Build the span. {@code mediaStore} + {@code projectId} are threaded through to
      * {@link #mediaPart} so an externalized {@code image_ref}/{@code document_ref} block can rehydrate
-     * to real bytes for the export (#986) rather than staying a bare label; pass {@code null} for both
+     * to real bytes for the export rather than staying a bare label; pass {@code null} for both
      * when no store is available (the block then keeps its honest {@code omitted} label — still
      * lossless-or-labeled, never a silent collapse).
      */
@@ -167,13 +167,13 @@ public final class TraceSpanMapper {
 
     /**
      * Build one {@code {role, parts:[…]}} message from a content node, preserving media as real
-     * inlined bytes where possible and a labeled placeholder otherwise (#986 — the lossless-or-labeled
+     * inlined bytes where possible and a labeled placeholder otherwise (the lossless-or-labeled
      * invariant this class has always documented, now backed by real preservation instead of always a
      * label).
      *
      * <p>The consuming evals-plugin's documented Path-A input format ({@code contract/output_format.md})
      * carries message {@code content} as a plain string, so this does not introduce a new typed part —
-     * per Epic 8 Track B Fork 2, a real media byte payload is inlined as a base64 {@code data:} URI
+     * a real media byte payload is inlined as a base64 {@code data:} URI
      * <em>inside that same plain-string content field</em> (see {@link #mediaPart}), never a new
      * part-shape or a bundled/referenced export. The message is flagged {@code has_media:true}
      * (renamed from {@code has_image} now that documents are covered too; zero known consumers, per
@@ -310,7 +310,7 @@ public final class TraceSpanMapper {
         return b.isDocument() ? "application/pdf" : "image/png";
     }
 
-    /** The pre-#986 honest placeholder label — still emitted whenever {@link #inlineDataUri} can't
+    /** The honest placeholder label — still emitted whenever {@link #inlineDataUri} can't
      *  recover real bytes (see its doc for the three cases). A URL-bearing block labels with the URL; a
      *  bytes-bearing block labels with its media type. */
     private static String fallbackLabel(ContentBlock b, String kind) {

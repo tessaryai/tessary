@@ -11,11 +11,9 @@ import { Template } from 'e2b';
  *
  * Build/publish with the sibling build.ts (see README): `pnpm exec tsx build.ts`.
  *
- * BASE IMAGE PARITY (#1017): this template and the sibling Dockerfile (the Docker-backend agent
+ * BASE IMAGE PARITY: this template and the sibling Dockerfile (the Docker-backend agent
  * image) both compile re2@1.26.1, whose engines range starts at node 22.22.2. Both are
- * node:22-alpine3.24 for that one reason. Do not bump one without the other. A third recipe,
- * sandbox-runner/template/e2b.Dockerfile, was in this pairing until Track A deleted the grader
- * sandbox it built.
+ * node:22-alpine3.24 for that one reason. Do not bump one without the other.
  *
  * ALPINE, AND THE TWO THINGS IT FORCES. E2B supports Alpine as a base (their docs list
  * Debian/Ubuntu, Fedora/RHEL, Arch and Alpine; only images with no /etc/os-release — scratch,
@@ -40,7 +38,7 @@ export const template = Template()
   // node 22, not 20: re2@1.26.1 (pinned below, byte-identical to the sibling Dockerfile) declares
   // engines.node "^22.22.2 || ^24.15.0 || >=26.0.0", and npm's resolved node-gyp fails to even
   // configure under Node 20 (`TypeError: webidl.util.markAsUncloneable is not a function`,
-  // verified on linux/amd64 and linux/arm64 in #855). The E2B build was unbuildable on 20 (#1017).
+  // verified on linux/amd64 and linux/arm64). The E2B build was unbuildable on 20.
   //
   // Alpine, not Debian: every CRITICAL left on the Debian recipe was an unfixable Debian package.
   // bookworm carried 16; trixie cleared libsqlite3-0 and zlib1g and left 13 — all perl
@@ -98,7 +96,7 @@ export const template = Template()
   )
   // Modules the in-VM scripts require from /home/user — @opencode-ai/sdk drives that server.
   //
-  // acorn/acorn-walk/re2 backed the codegen self-correction harness, which Track A deleted. They
+  // acorn/acorn-walk/re2 backed the codegen self-correction harness, which has since been deleted. They
   // are LEFT IN the install line on purpose: changing it changes the built image, and the published
   // cloud template can only be rebuilt by a human with the team's E2B key (see build.ts). Trimming
   // them is a follow-up for whoever next runs that build, not a change to make blind here.

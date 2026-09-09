@@ -19,7 +19,7 @@ import {
 import { CopyButton, Spinner, useToast } from "../../ui";
 
 /**
- * The first-run gate (#1227, design-spec.md Screen 2): stands in place of the whole shell
+ * The first-run gate: stands in place of the whole shell
  * (sidebar included) until this project has landed a span carrying `tessary.call_site.id`.
  * Mounted by `ProjectShell` in App.tsx, which decides WHETHER to render this instead of
  * `<ShellChrome>` — this component owns only what the gate looks like, not the decision to show it.

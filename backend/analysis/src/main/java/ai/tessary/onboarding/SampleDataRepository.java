@@ -19,7 +19,7 @@ import org.springframework.stereotype.Repository;
  * JdbcClient} on the listener itself: {@code ArchitectureRulesTest#jdbc_client_only_in_repositories}
  * requires raw JdbcClient access to live behind a class named {@code *Repository}.
  *
- * <p>The showcase project's {@code trace}/{@code span}/{@code span_payload} volume (#1230) is also
+ * <p>The showcase project's {@code trace}/{@code span}/{@code span_payload} volume is also
  * inserted from here, as multi-row batched SQL rather than through {@code TraceV2Repository}'s /
  * {@code SpanRepository}'s single-row upsert methods — those exist for live ingest's replay
  * semantics (last-write-wins on a natural key), which a one-shot fabricated seed does not need and

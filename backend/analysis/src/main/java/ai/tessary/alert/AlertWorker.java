@@ -24,24 +24,16 @@ import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
 
 /**
- * The async alerting worker. On an operational heartbeat it (1) scans enabled per-project roll-up rules
- * (digest/brief) and, for each whose cron is now due, assembles a roll-up via {@link AlertAssembler},
- * persists it idempotently, publishes the event, and advances that rule's anchor; and (2) notifies on
- * cases that opened since its last pass.
+ * The async alerting worker. On each heartbeat it scans enabled per-project roll-up rules
+ * (digest/brief), assembles a roll-up via {@link AlertAssembler} for any whose cron is due,
+ * persists it idempotently, publishes the event, and advances that rule's anchor. It also
+ * notifies on cases that opened since its last pass.
  *
- * <p><b>Threshold rules are no longer evaluated here.</b> Counting a classifier's detections over a
- * window and paging someone was the alerting subsystem reaching into another slice's data to make a
- * judgement about it. That judgement moved to the classifier itself — {@code ClassifierArming} files a
- * finding, a case opens from it, and {@code case_opened} carries it to the same channels — so alerting
- * is back to delivering what other slices decided. Migration {@code 0089} translated every enabled
- * threshold rule's numbers onto its classifier and disabled the rules.
- *
- * <p>Strictly off the ingest hot path: it reads cases and roll-ups (read-only) and the
- * {@code alert_rule} table.
- * Alerts is a paid capability: the worker runs unconditionally and skips non-entitled orgs per-project
- * ({@code Capability.ALERTS}). The idempotent {@code (alert_rule_id, window_start)} insert is the
- * multi-instance double-fire guard; the {@code AlertFiredEvent} is published ONLY when the insert wrote a
- * new row.
+ * <p>Strictly off the ingest hot path: it reads cases, roll-ups, and the {@code alert_rule}
+ * table, all read-only. The worker runs unconditionally and skips projects whose org lacks the
+ * alerts capability ({@code Capability.ALERTS}). The idempotent
+ * {@code (alert_rule_id, window_start)} insert guards against double-firing across instances;
+ * {@code AlertFiredEvent} publishes only when the insert wrote a new row.
  */
 @Component
 public class AlertWorker {
@@ -88,9 +80,9 @@ public class AlertWorker {
     }
 
     /**
-     * Alerts are a paid capability ({@link Feature#ALERTS}). Resolve the project's org and consult
-     * {@link CapabilityService} so no alert is evaluated or delivered for a free org. Unknown project →
-     * not entitled (fail closed).
+     * Resolves the project's org and consults {@link CapabilityService} so no alert is evaluated
+     * or delivered for an org without the alerts capability enabled. An unknown project is
+     * treated as not entitled.
      */
     private boolean entitledForAlerts(String projectId) {
         return projects.findById(projectId)
@@ -101,14 +93,10 @@ public class AlertWorker {
     /**
      * Whether a rule still has a classifier behind it that this org has.
      *
-     * <p>A rule counts one classifier's detections over a rolling window, so a classifier whose capability
-     * went off would go quiet on its own eventually — as the window rolls past its last detection. That is
-     * not good enough: the window can be days long, and until it empties the rule can still breach and page
-     * someone about a detector their organization no longer has. It is also the one flag-off consequence
-     * that reaches a human at 3am rather than a screen they chose to open.
-     *
-     * <p>Rules with no {@code classifier_id} (roll-ups, and thresholds on something other than a classifier)
-     * are unaffected — there is no classifier to withhold.
+     * <p>A rule counts one classifier's detections over a rolling window: if the classifier's
+     * capability goes off, the rule keeps breaching, and can page someone about a detector their
+     * org no longer has, until the window rolls past the last detection (which can take days).
+     * Rules with no {@code classifier_id} are unaffected.
      */
     private boolean classifierStillReaches(AlertRuleRow rule) {
         String classifierId = rule.classifierId();
@@ -127,17 +115,15 @@ public class AlertWorker {
     }
 
     /**
-     * Fire about the cases that opened since each case-opened rule last delivered (launch requirement I2).
+     * Fires on cases that opened since each case-opened rule last delivered.
      *
-     * <p><b>The anchor is the whole mechanism, and it advances only on delivery.</b> A tick that is
-     * inside the rule's quiet hours, or too soon under its cadence, returns without touching
-     * {@code last_evaluated_at} — so everything that opened while it was held is still "since the anchor"
-     * when the window reopens and goes out then. Quiet hours therefore DEFER rather than drop, which is
-     * the difference between a partner who is not woken at 3am and a partner who is never told
-     * ({@link AlertPolicy}).
+     * <p>The anchor advances only on delivery. A tick inside quiet hours, or too soon under the
+     * rule's cadence, leaves {@code last_evaluated_at} untouched, so anything that opened while
+     * held is still "since the anchor" and goes out once the window reopens ({@link AlertPolicy}
+     * defers rather than drops).
      *
-     * <p>It advances to the last case actually delivered rather than to {@code now}, so the per-tick cap
-     * is a pacing device and not a data loss: the next tick resumes exactly where this one stopped.
+     * <p>It advances to the last case actually delivered, not to {@code now}, so the per-tick cap
+     * is a pacing device: the next tick resumes exactly where this one stopped.
      */
     private void notifyOpenedCases(Instant now) {
         List<AlertRuleRow> enabled;
@@ -150,7 +136,7 @@ public class AlertWorker {
             return;
         }
         for (AlertRuleRow rule : enabled) {
-            if (!entitledForAlerts(rule.projectId())) continue; // paid capability — skip non-entitled orgs
+            if (!entitledForAlerts(rule.projectId())) continue; // org lacks the alerts capability
             try (LogContext ignored = LogContext.with(LogContext.PROJECT_ID, rule.projectId())) {
                 notifyOne(rule, now);
             } catch (RuntimeException e) {
@@ -196,7 +182,7 @@ public class AlertWorker {
             return;
         }
         for (AlertRuleRow rule : enabled) {
-            if (!entitledForAlerts(rule.projectId())) continue; // paid capability — skip non-entitled orgs
+            if (!entitledForAlerts(rule.projectId())) continue; // org lacks the alerts capability
             if (!classifierStillReaches(rule)) continue; // its classifier is flagged off for this org
             try (LogContext ignored = LogContext.with(LogContext.PROJECT_ID, rule.projectId())) {
                 maybeRollup(rule, now);

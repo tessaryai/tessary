@@ -40,7 +40,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [reference/test-suite.md](./reference/test-suite.md) | Backend test shape (unit vs `@SpringBootTest`), cost model, contract/OpenAPI gates, and why slices are packages. |
 | [reference/config-keys.md](./reference/config-keys.md) | Every config prefix → `@ConfigurationProperties` class, the `@Value` exceptions, and the yaml-declared env vars. |
 | [reference/telemetry-naming.md](./reference/telemetry-naming.md) | Platform-emitted OTel / Langfuse span & trace names: kebab product verbs, metadata keys, Alloy filter, inventory. |
-| [reference/telemetry-contract.md](./reference/telemetry-contract.md) | The home.tessary.ai ping shape, license-check endpoint, opt-out env var, and versioning rules D6 commits to — the heartbeat client (#858) and the `telemetry` package it lives in. |
+| [reference/telemetry-contract.md](./reference/telemetry-contract.md) | The home.tessary.ai ping shape, license-check endpoint, opt-out env var, and versioning rules — the heartbeat client and the `telemetry` package it lives in. |
 | [reference/media-contract.md](./reference/media-contract.md) | The media contract: supported modalities (images and PDFs), storage, and export. |
 
 ## Concepts — *understand why/how* (subsystems)

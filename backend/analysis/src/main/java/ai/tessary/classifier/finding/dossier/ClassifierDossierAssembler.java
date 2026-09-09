@@ -10,7 +10,7 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * D (#994): per-classifier-shape dossier assemblers, replacing {@code DossierPayload.forAgent}'s
+ * Per-classifier-shape dossier assemblers, replacing {@code DossierPayload.forAgent}'s
  * strip-only pass for the classifiers whose payload has enough structure to build a genuinely richer
  * evidence section from — implementing the revised contract {@code DossierPayload}'s class javadoc
  * states: <b>complete enumeration when the evidence set is small, or a declared deterministic
@@ -27,7 +27,7 @@ import org.jspecify.annotations.Nullable;
  * DossierPayload.forAgent}, unchanged: this class is additive, never a replacement for a classifier it
  * does not recognise.
  *
- * <h2>The token budget (D.3)</h2>
+ * <h2>The token budget</h2>
  *
  * <p>Every assembled dossier is capped at {@link #CHAR_BUDGET} — a ~30k-token budget converted via a
  * documented ~4-chars/token heuristic (English prose/JSON averages close to that; being off by 20% here
@@ -98,7 +98,7 @@ public final class ClassifierDossierAssembler {
      * Truncate the ENUMERATION section only, keeping the shape-specific summary above it whole. Cuts at
      * the last full line inside budget rather than mid-line, and always appends a stated truncation
      * note with the real character counts — a silently clipped file is exactly the undeclared-sample
-     * failure D's contract exists to end, just moved from "which trace ids" to "how much of the dossier".
+     * failure this format exists to end, just moved from "which trace ids" to "how much of the dossier".
      */
     static String budget(String full) {
         if (full.length() <= CHAR_BUDGET) return full;

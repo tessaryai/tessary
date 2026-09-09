@@ -43,11 +43,11 @@ class OpenApiSpecDriftTest {
         r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Matches the app's normal (auth-enforced) posture rather than the suite's global
         // unauthenticated default -- say so directly rather than configuring a fake
-        // external-provider key as an indirect toggle. See TestAuthDisabledInitializer's javadoc
-        // (#852/#996). NOTE: this test's own MockMvc is built via webAppContextSetup(wac).build()
+        // external-provider key as an indirect toggle. See TestAuthDisabledInitializer's javadoc.
+        // NOTE: this test's own MockMvc is built via webAppContextSetup(wac).build()
         // with no .addFilters(...), so AuthFilter is not actually in this test's filter chain
         // regardless of this property, and /v3/api-docs bypasses auth unconditionally in
-        // AuthFilter anyway (crew review, #996) -- this override documents the intended posture,
+        // AuthFilter anyway -- this override documents the intended posture,
         // it does not itself prove the endpoint is served authenticated.
         r.add("tessary.auth.disabled", () -> "false");
     }

@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
  * through <em>reciprocal-rank fusion</em> (RRF) — each hit contributes {@code 1/(k + rank)}, summed across
  * occurrences — which for a single input list is exactly a stable dedup-and-resort by rank, not a scoring
  * change. This platform previously also blended in a semantic (vector) leg here by the same RRF merge;
- * that leg was removed with the rest of the embedding substrate (#1116), and lexical was always what the
+ * that leg was removed with the rest of the embedding substrate, and lexical was always what the
  * merge degenerated to whenever the semantic leg had nothing to contribute, so this is that same output,
  * now the only path rather than the default one.
  */

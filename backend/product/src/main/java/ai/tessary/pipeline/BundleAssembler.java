@@ -47,8 +47,8 @@ import org.springframework.stereotype.Component;
  * Nesting is transparent here because {@link #classify} matches by substring and the canonical {@code id}
  * is read from the file body, not the path.
  *
- * <p><b>The grader and quality-dimension shards are IGNORED, not rejected.</b> Track A removed grading
- * from the platform, and the vendored plugin contract still publishes both shards — a bundle written by
+ * <p><b>The grader and quality-dimension shards are IGNORED, not rejected.</b> This platform has no
+ * grading, and the vendored plugin contract still publishes both shards — a bundle written by
  * any current plugin carries them. Failing the import on a shard we no longer store would break every
  * existing repo; skipping it lets an unchanged producer keep uploading and simply drops what has no
  * home. See {@link Shard#IGNORE}.
@@ -239,7 +239,7 @@ public class BundleAssembler {
             return Shard.IGNORE;
         }
         if (lower.startsWith("datasets/") || lower.contains("/datasets/")) return Shard.IGNORE;
-        // Grading left the platform with Track A; the plugin still writes these two shards, so they are
+        // Grading is gone from the platform; the plugin still writes these two shards, so they are
         // skipped here rather than rejected — see the class javadoc.
         if (lower.contains("graders/")) return Shard.IGNORE;
         if (lower.contains("pipeline/quality_dimensions/")) return Shard.IGNORE;

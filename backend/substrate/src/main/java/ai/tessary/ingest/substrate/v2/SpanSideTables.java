@@ -179,7 +179,7 @@ class SpanSideTables {
      * {@code error.type}, and the prose of its {@code statusMessage}. No interpretation of outputs.
      *
      * <p>The two used to be one column. {@code error_type} carried the status message verbatim, which is
-     * how the column the tool-error classifier groups by came to hold multi-kilobyte prose (#762). See
+     * how the column the tool-error classifier groups by came to hold multi-kilobyte prose. See
      * {@link SpanErrors} for how the class is derived.
      *
      * <p>The type is never null here, unlike on the span: {@code is_error} is written from it, and a

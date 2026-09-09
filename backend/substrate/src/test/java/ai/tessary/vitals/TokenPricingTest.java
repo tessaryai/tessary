@@ -140,7 +140,7 @@ class TokenPricingTest {
     @DisplayName("the cache-creation convention is read straight off the rate table")
     void billsCacheCreationReadsTheRateTable() {
         // No Nova generation, at any scope, has ever carried cache_creation_input_token_cost upstream —
-        // #1032 retired a hand-maintained guess at one rather than reconcile it. tok_cache_write now
+        // a hand-maintained guess at one was retired rather than reconciled. tok_cache_write now
         // abstains for Nova turns rather than being scored, which is the correct behavior for a
         // convention this platform genuinely does not know.
         assertFalse(

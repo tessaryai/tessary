@@ -117,7 +117,7 @@ two of them. No Spring, no database, no project concepts.
 
 - `db/changelog/changes/NNNN-metric-baseline.sql` (number it from whatever is next) + master yaml entry.
 - `classifier/metric/MetricBaselineRow.java`, `classifier/metric/MetricBaselineRepository.java`.
-- `docs/reference/data-model.md` — same-PR co-update, per the documentation policy.
+- `devdocs/reference/data-model.md` — same-PR co-update, per the documentation policy.
 
 **Design notes.**
 
@@ -194,7 +194,7 @@ double-counting on replay.
 - `BuiltInClassifierCatalog.java` — the `duration_drift` module. `detectorFactory = null`,
   `Grain.WINDOW`, measures in `defaultConfigJson`. (Seeds ENABLED as of the catalog's lifecycle
   removal; the flag is what holds it back.)
-  Comment must state that `callSiteFactsRead()` is deliberately empty (#654's seam) — these read
+  Comment must state that `callSiteFactsRead()` is deliberately empty — these read
   `observation` columns only.
 - `classifier/finding/FindingRow.java` — `Cause.DISTRIBUTION_SHIFT`.
 - a changeset widening the `cause_kind` CHECK, if one enumerates the kinds.

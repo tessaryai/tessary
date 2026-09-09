@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 /**
- * Pins the boundary that makes #1230's shipped placeholder keys defensible: permitted on a
+ * Pins the boundary that makes the shipped placeholder keys defensible: permitted on a
  * domainless instance, fatal on one that has a hostname.
  *
  * <p>The refuse branch is otherwise reachable only through {@code check-open-boot-selfhost.sh},
@@ -113,8 +113,8 @@ class PlaceholderSecretGuardTest {
 
     @Test
     void verify_readsCaddysInertLoopbackLiteralAsNoDomain() {
-        // The static Caddyfile's old sentinel (#1052) is not a listener and nothing passes it any
-        // more (#1225), but a .env that still carries the literal must not refuse the boot.
+        // The static Caddyfile's old sentinel is not a listener and nothing passes it any
+        // more, but a .env that still carries the literal must not refuse the boot.
         guard("http://127.0.0.1:9443", REAL_KEY, PlaceholderSecretGuard.COOKIE_PLACEHOLDER)
                 .verify();
 

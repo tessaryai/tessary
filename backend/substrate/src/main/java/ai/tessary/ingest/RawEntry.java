@@ -37,7 +37,7 @@ public record RawEntry(
         @Nullable String traceId,
         /** ISO-8601 observation start time, when the provider supplies one. Nullable.
          *  Orders turns within a trace. The trace-grouping transform that consumed that
-         *  ordering to pick the latest turn went with grading in Track A; the ordering
+         *  ordering to pick the latest turn went with grading; the ordering
          *  itself is still what the substrate writes and every read surface sorts on. */
         @Nullable String timestamp,
         /** Normalized OTel operation kind ({@link KindNormalizer}: agent/llm/tool/retrieval/workflow), derived
@@ -65,8 +65,7 @@ public record RawEntry(
 
     /**
      * The version stamp the v2 substrate orders redeliveries by: the span's END time when the producer
-     * sent one, else its start time (substrate-model.md §6.2, resolved by the implementation plan's §3
-     * decision table). A completed version of a span always carries a later end than the partial that
+     * sent one, else its start time (substrate-model.md §6.2). A completed version of a span always carries a later end than the partial that
      * preceded it, so last-write-wins resolves the two correctly; ties go to the latest arrival.
      *
      * <p><b>Derived, not a component, deliberately.</b> A hop on this path rebuilds a {@link RawEntry}

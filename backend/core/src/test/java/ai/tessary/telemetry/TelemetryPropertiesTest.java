@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link TelemetryProperties#isEnabled()} is on-by-default (D6: opt-out) — the ONE fact everything
+ * {@link TelemetryProperties#isEnabled()} is on-by-default — the ONE fact everything
  * downstream in {@code TelemetryHeartbeat} gates on before touching {@link InstallIdRepository} or
  * {@link HomeTessaryClient} at all (see that class's own gate-order test in {@code surfaces}, where the
  * repositories/HTTP client actually live). This test covers only the binding itself: default true,

@@ -59,7 +59,7 @@ class SubstrateWriteIntegrationTest {
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        // No queue override (#984, criterion 6): the burst below runs at the SHIPPED defaults. It is far
+        // No queue override: the burst below runs at the SHIPPED defaults. It is far
         // inside the byte budget (~1%), so it proves the defaults hold a real burst, not where the budget
         // sheds; SubstrateWriterResilienceTest covers the byte accounting at the edge.
     }
@@ -77,7 +77,7 @@ class SubstrateWriteIntegrationTest {
     RedactionService redaction;
 
     /**
-     * Counts JDBC executions (#984 M2, criterion 7): every {@code execute*} on a statement the pool hands
+     * Counts JDBC executions: every {@code execute*} on a statement the pool hands
      * out is one, and a JDBC batch is one, because it is one round trip. Wraps the pool's DataSource in a
      * reflective proxy, so the count is what the driver was asked to run and not what a repository claims.
      */
@@ -522,7 +522,7 @@ class SubstrateWriteIntegrationTest {
     }
 
     /**
-     * Criterion 9 (#984): the same burst drained twice, once on a project with no rules (the guard's
+     * The same burst drained twice, once on a project with no rules (the guard's
      * no-op path) and once with every built-in rule enabled, over bodies large enough for the regexes
      * to matter. The ratio is logged for the runbook's "Redaction is burning CPU" section; the bound
      * is only there so a regression back to a quadratic pattern (the 2026-07-31 incident, 8 KB = 172 ms)
@@ -639,8 +639,8 @@ class SubstrateWriteIntegrationTest {
         long executions = StatementCounting.EXECUTIONS.get() - executionsBefore;
 
         assertEquals(0L, writer.shedBatches() - shedBefore, "shipped defaults hold the whole burst — nothing shed");
-        // The published drain objective (#984, criterion 5): >= 200 spans/s sustained on the reference
-        // Postgres, so 1,000 spans in at most 5 s. Measured 0.5 s on a laptop after M2, so this is a 10x
+        // The published drain objective: >= 200 spans/s sustained on the reference
+        // Postgres, so 1,000 spans in at most 5 s. Measured 0.5 s on a laptop, so this is a 10x
         // headroom for CI, and a collapse to per-span round trips (twice that) still fails it.
         assertTrue(
                 drainMillis <= 5_000, "1000 spans drained in " + drainMillis + " ms, wanted <= 5000 (>= 200 spans/s)");
@@ -648,7 +648,7 @@ class SubstrateWriteIntegrationTest {
         assertEquals(1000, count("span", pid), "every span of the burst landed exactly once");
         // Surface the measured rate for the SLO statement (>= 200 spans/s target, CI headroom above).
         log.info("substrate burst: 1000 spans drained in {} ms, {} JDBC executions", drainMillis, executions);
-        // O(1) statements per batch, not O(spans) (#984 M2): one JDBC batch per table plus the batch-scoped
+        // O(1) statements per batch, not O(spans): one JDBC batch per table plus the batch-scoped
         // reads and updates. 100 batches of 10 spans used to cost well over 2,000 executions.
         assertTrue(
                 executions <= 100 * 15, "JDBC executions for 100 batches: " + executions + ", wanted O(1) per batch");

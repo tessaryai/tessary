@@ -8,10 +8,10 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The buffer between the ingest edge and the substrate write (#984). The edge {@link #append}s a
+ * The buffer between the ingest edge and the substrate write. The edge {@link #append}s a
  * decoded batch and answers the producer from the verdict; a drainer {@link #claim}s batches, writes
  * them, and {@link #ack}s or {@link #nack}s each one. {@link InProcessSpool} is the default (bounded by
- * bytes, in memory, a restart loses what is queued); the Kafka-API spool (#1299) is the opt-in (a
+ * bytes, in memory, a restart loses what is queued); the Kafka-API spool is the opt-in (a
  * persisted publish before the 200, nothing lost on restart). Both share the drain.
  */
 public interface IngestSpool {

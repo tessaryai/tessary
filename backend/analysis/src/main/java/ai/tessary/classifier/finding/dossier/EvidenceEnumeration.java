@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * D.2 (#994)'s fourth shape, cross-cutting rather than classifier-specific: shared by every assembler
+ * Cross-cutting rather than classifier-specific: shared by every assembler
  * in this package, deciding whether the finding's evidence table is small enough to enumerate whole or
  * large enough that only a DECLARED selection is shown.
  *

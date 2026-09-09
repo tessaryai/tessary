@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>No longer a {@code @Component}: it is wired exclusively via {@link AuthProviderConfig}'s
  * single branching {@code @Bean} method, which picks this class when {@link
- * WorkOsProperties#isEnabled()} is true and {@link PasswordAuthProvider} (#852) otherwise — not
+ * WorkOsProperties#isEnabled()} is true and {@link PasswordAuthProvider} otherwise — not
  * {@code @ConditionalOnMissingBean}, since that shape only works with exactly one candidate bean
  * and this method has to choose between two. See {@link AuthProviderConfig}'s class Javadoc for
  * why.

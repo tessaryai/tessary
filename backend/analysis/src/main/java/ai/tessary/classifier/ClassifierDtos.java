@@ -93,10 +93,10 @@ public final class ClassifierDtos {
     public record SetModeRequest(@NotNull String mode) {}
 
     /**
-     * Sweep-job health for one classifier — gh#545: makes a failing sweep observable in the product instead
+     * Sweep-job health for one classifier: makes a failing sweep observable in the product instead
      * of only in Loki. A classifier with no job yet (never enqueued) reports {@link ClassifierJobRow#PENDING} with
      * no failure history. {@code nextAttemptAt} is only populated once the sweep queue tracks a backoff
-     * stamp (gh#531); until then it is always {@code null} — the UI treats a null next-attempt as "next
+     * stamp; until then it is always {@code null} — the UI treats a null next-attempt as "next
      * heartbeat", not an error.
      */
     public record ClassifierHealthView(

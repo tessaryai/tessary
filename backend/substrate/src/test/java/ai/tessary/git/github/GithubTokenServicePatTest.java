@@ -15,7 +15,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The PAT fallback fixed in #860: {@link GithubTokenService#authHeader} must try a sealed
+ * The PAT fallback: {@link GithubTokenService#authHeader} must try a sealed
  * personal-access-token BEFORE gating on {@code GithubAppProperties.isConfigured()} — that gate
  * used to be the unconditional first line, rejecting every PAT-mode integration even though PAT
  * mode exists precisely for the no-App case.
@@ -41,7 +41,7 @@ class GithubTokenServicePatTest {
     void patTokenIsUsedEvenWhenAppIsNotConfigured() throws Exception {
         SecretBox box = secretBox();
         // Unconfigured GithubAppProperties — the exact case the old unconditional isConfigured()
-        // gate rejected before #860.
+        // gate used to reject.
         GithubAppProperties props = new GithubAppProperties();
         GithubTokenService svc = new GithubTokenService(props, box, mapper);
 

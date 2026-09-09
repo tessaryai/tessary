@@ -12,7 +12,7 @@ const { embed, checkpointResidency } = require('./embed');
 
 (async () => {
   // Only smoke-score heads whose weights actually got baked. A gated head (frustration,
-  // attribution) with no HF_TOKEN at build time (#877) never downloaded — there's nothing
+  // attribution) with no HF_TOKEN at build time never downloaded — there's nothing
   // to score offline, and that's expected, not a build failure: unlike BAKE_EMBEDDERS
   // (a flag that can lie — "asked for it, didn't get it"), a gated head's presence or
   // absence IS the download outcome itself. download.js already throws loudly per-head if
@@ -33,7 +33,7 @@ const { embed, checkpointResidency } = require('./embed');
   for (const head of missingHeads) {
     // A missing NON-gated head (groundedness) is not a supported "unavailable" state —
     // its weights are public and download.js always fetches them — so this is a real
-    // build defect, not an opt-out; fail loud exactly as the pre-#877 unconditional loop
+    // build defect, not an opt-out; fail loud exactly as the earlier unconditional loop
     // did, rather than silently skip it like a gated head.
     if (!HEADS[head].gated) {
       throw new Error(`head '${head}' has no baked weights and is not a gated head — the bake is broken`);

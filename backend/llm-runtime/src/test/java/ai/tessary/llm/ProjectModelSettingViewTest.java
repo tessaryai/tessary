@@ -112,7 +112,7 @@ class ProjectModelSettingViewTest {
         // Every option a lane offers must name a model the same payload describes, or the dropdown
         // renders a key with no label — the wrong-label failure this page was rebuilt to end.
         var v = view();
-        // #939: a lane's model keys can name either half of the model_key union — a Bedrock key
+        // A lane's model keys can name either half of the model_key union — a Bedrock key
         // (v.models()) or a "<PROVIDER>:<model_name>" catalog key (v.catalogModels()) — so the
         // catalogue this test checks every offered key against must be the union of both.
         Set<String> catalogue = new java.util.HashSet<>(v.models().stream()
@@ -162,7 +162,7 @@ class ProjectModelSettingViewTest {
         JsonNode json = new ObjectMapper().valueToTree(view());
 
         assertTrue(json.at("/default_model_key").isMissingNode(), "a default named a provider the org may not have");
-        // RCA, not "assistant": #1117 deleted ModelLane.ASSISTANT (the lane that used to ship first),
+        // RCA, not "assistant": ModelLane.ASSISTANT (the lane that used to ship first) is deleted,
         // so RCA is first in declaration order now, and it is an AGENT_VM lane — no tier, no effort.
         JsonNode rca = json.at("/lanes/0");
         assertEquals("rca", rca.at("/id").asText(), "lanes ship in ModelLane declaration order");
@@ -186,8 +186,8 @@ class ProjectModelSettingViewTest {
         assertTrue(json.at("/groups/0/effort_tunable").asBoolean());
         assertFalse(json.at("/groups/1/effort_tunable").asBoolean());
 
-        // Every surviving lane, on the wire name it ships under. Track A deleted "grading" and
-        // "synthesis"; #1117 deleted "assistant"; this set is what a client may now PUT.
+        // Every surviving lane, on the wire name it ships under — "grading", "synthesis" and
+        // "assistant" are gone; this set is what a client may now PUT.
         Set<String> laneIds = json.at("/lanes").findValuesAsText("id").stream().collect(Collectors.toSet());
         assertEquals(Set.of("rca", "triage"), laneIds);
     }

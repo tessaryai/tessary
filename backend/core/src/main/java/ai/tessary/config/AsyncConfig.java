@@ -11,26 +11,16 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * Application task executors.
  *
  * <p>Project Loom posture: the I/O-bound pools (the classifier sweep, the two agentic lanes) run
- * on <b>virtual threads</b> via
- * {@link SimpleAsyncTaskExecutor} with {@code setVirtualThreads(true)}, so a
- * blocking judge/HTTP/E2B call parks cheaply instead of pinning a platform
- * thread. Every pool keeps its previous concurrency <b>bound</b> via
- * {@link SimpleAsyncTaskExecutor#setConcurrencyLimit(int)} (a built-in semaphore
- * throttle) — virtual threads are cheap, but the bounds are deliberate
- * backpressure against Bedrock/Anthropic account RPM/TPM, concurrent E2B
- * microVMs, and the bounded HikariCP pool (production profile:
+ * on <b>virtual threads</b> via {@link SimpleAsyncTaskExecutor} with {@code setVirtualThreads(true)},
+ * so a blocking judge/HTTP/E2B call parks cheaply instead of pinning a platform thread. Every pool
+ * keeps its concurrency <b>bound</b> via {@link SimpleAsyncTaskExecutor#setConcurrencyLimit(int)} —
+ * virtual threads are cheap, but the bounds are deliberate backpressure against Bedrock/Anthropic
+ * account RPM/TPM, concurrent E2B microVMs, and the bounded HikariCP pool (production profile:
  * {@code maximum-pool-size: 10}).
  *
- * <p>Paced-provider (OpenRouter/Moonshot — Ollama was dropped by #939 D6's maker filter) RPM/TPM
- * limiting is owned entirely by {@code
- * LlmPacer}'s own synchronized sliding window — it's correct under any number of concurrent
- * callers, so no executor here needs to single-thread to protect it.
- *
- * <p>Track A removed four pools with the workers they drained: {@code observerTaskExecutor},
- * {@code synthTaskExecutor}, {@code graderRunTaskExecutor} and {@code datasetRunTaskExecutor}, plus
- * {@code compileKickoffExecutor}. A {@code SimpleAsyncTaskExecutor} bean with no injector is inert
- * rather than harmful, which is exactly why they are deleted here instead of left: nothing would
- * have failed to tell us.
+ * <p>Paced-provider (OpenRouter/Moonshot) RPM/TPM limiting is owned entirely by {@code LlmPacer}'s
+ * own synchronized sliding window: it is correct under any number of concurrent callers, so no
+ * executor here needs to single-thread to protect it.
  */
 @Configuration
 @EnableAsync
@@ -56,24 +46,17 @@ public class AsyncConfig {
     }
 
     /**
-     * Pool for the Slack surface's outbound work — today, {@code SlackBriefPublisher} posting a digest,
-     * brief or case opening to a Slack workspace channel through {@code slack-service}.
+     * Pool for the Slack surface's outbound work: posting a digest, brief, or case opening to a
+     * Slack workspace channel. Kept separate from every other pool so a Slack workspace that has
+     * gone slow never steals the classifier sweep's or an agentic lane's slot. Each task blocks on
+     * HTTP, so it runs on a virtual thread; the concurrency limit (2) is deliberate backpressure
+     * against Slack's own rate limits and the bounded HikariCP pool.
      *
-     * <p>The ~3s Slack ack deadline that originally justified this pool now belongs to the adapter, which
-     * ACKs an {@code app_mention} itself and answers on its own background task, and the mention reply on
-     * this side is a fixed sentence rather than the LLM diagnosis it used to be. What remains here is the
-     * channel posts. Kept separate from every other pool for the original reason: a Slack workspace that
-     * has gone slow must never steal the classifier sweep's or an agentic lane's slot. Each task blocks on HTTP, so it
-     * runs on a virtual thread; the concurrency limit (2) is deliberate backpressure against Slack's own
-     * rate limits and the bounded HikariCP pool.
-     *
-     * <p><b>This bean has no consumer in the open build, and it stays anyway.</b> #842 took
-     * {@code SlackBriefPublisher} to {@code tessary-paid/slack}, and it resolves this executor BY STRING
-     * from its {@code @Async("slackTaskExecutor")} — so the reference is invisible to the compiler, to
-     * the enforcer and to {@code check-open-boundary.sh}, and a dead-code sweep that removed this bean
-     * would leave the publisher silently running on Spring's default executor, unbounded, against a
-     * rate-limited API. The name is the contract; do not rename or delete it without changing that
-     * annotation in the same commit.
+     * <p>This bean has no consumer directly in this tree; it is resolved by string,
+     * {@code @Async("slackTaskExecutor")}, from code elsewhere, so the reference is invisible to
+     * the compiler and to a dead-code sweep. Removing it would leave that caller running on
+     * Spring's default executor, unbounded, against a rate-limited API. The name is the contract:
+     * do not rename or delete it without changing that annotation in the same commit.
      */
     @Bean(name = "slackTaskExecutor")
     public SimpleAsyncTaskExecutor slackTaskExecutor() {

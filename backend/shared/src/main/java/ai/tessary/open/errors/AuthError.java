@@ -3,7 +3,7 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Account-creation refusals that are policy, not credentials (#1226). */
+/** Account-creation refusals that are policy, not credentials. */
 public enum AuthError implements ErrorCode {
     SIGNUP_REFUSED(
             HttpStatus.FORBIDDEN, "This instance is not accepting sign-ups; ask an administrator for an invitation");

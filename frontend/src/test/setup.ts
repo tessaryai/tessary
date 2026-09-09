@@ -8,13 +8,13 @@
 //   - Element.prototype.scrollIntoView — CommandPalette.tsx, mounted under every tenant route via
 //     ShellChrome, so this one is hit by nearly the whole route-manifest smoke test, not just one view.
 //
-// window.matchMedia is deliberately NOT stubbed here — verified zero uses anywhere in frontend/src
-// (see #890's plan). Adding an unused stub would just be one more thing to keep in sync with a
+// window.matchMedia is deliberately NOT stubbed here — verified zero uses anywhere in frontend/src.
+// Adding an unused stub would just be one more thing to keep in sync with a
 // property nothing reads.
 //
 // Without these three, any view that calls them during its initial render throws
 // "<X> is not a function" in jsdom, which is a false failure of THIS harness, not of the view —
-// exactly the noise #890's console.error allowlist (in routeManifest.smoke.test.tsx) exists to
+// exactly the noise the console.error allowlist (in routeManifest.smoke.test.tsx) exists to
 // keep separate from a real regression.
 //
 // ALSO A GOTCHA, discovered running this suite: Node (stable as of the Node 25 on this machine)

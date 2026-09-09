@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
  * (key = classifier_key, {@code passed} = the boolean example label, {@code annotatorKind} = human|llm)
  * plus the "mark wrong" correction on a finding ({@code ofFindingId} + {@code agrees}).
  *
- * <p><b>Track A removed the other half.</b> This record also carried {@code ofVerdictId}, the review of
+ * <p><b>The other half of this record is gone.</b> It also carried {@code ofVerdictId}, the review of
  * a grader verdict, and the whole review-queue feature that produced those rows. The table survives
  * because {@code classifier/model/ModelService} and {@code classifier/finding/BehaviorTriageSource}
  * still read and write it; only the verdict pointer left, with the table it pointed at.
@@ -33,7 +33,7 @@ public record AnnotationRow(
         @Nullable String label,
         @Nullable String textValue,
         /**
-         * The finding this correction is about, and since Track A the only anchor there is. It replaced
+         * The finding this correction is about, and now the only anchor there is. It replaced
          * {@code ofVerdictId}, which pointed at a detection verdict: those aged out on the 90-day verdict
          * TTL, so a human's correction outlived the row it was attached to and the training signal was
          * lost by a clock rather than by a decision. A finding lives as long as its cause does.
@@ -57,9 +57,9 @@ public record AnnotationRow(
      * {@code subject_kind} values (the annotated grain) — the same three-level substrate vocabulary
      * every subject-bearing table uses.
      *
-     * <p>The legacy {@code context} / {@code observation} spellings are gone: 0094 migrated the surviving
-     * rows onto this vocabulary and narrowed {@code ck_annotation_grain} to it, so accepting them here
-     * would only let a caller write a value the database refuses.
+     * <p>The legacy {@code context} / {@code observation} spellings are gone: the surviving
+     * rows were migrated onto this vocabulary and {@code ck_annotation_grain} narrowed to it, so accepting
+     * them here would only let a caller write a value the database refuses.
      */
     public static final class SubjectKind {
         private SubjectKind() {}
@@ -112,7 +112,7 @@ public record AnnotationRow(
      * {@code annotatorKind} distinguishes an auto label ({@code llm}) from a user correction ({@code human}).
      *
      * <p>{@code traceId} is required now, not optional: a span subject that does not name its trace
-     * cannot be resolved against the span primary key, and 0077's {@code 'span'} branch rejects it.
+     * cannot be resolved against the span primary key, and the {@code 'span'} branch rejects it.
      */
     public static AnnotationRow example(
             String id,

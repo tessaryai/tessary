@@ -38,7 +38,7 @@ public class OrganizationRepository {
                 .optional();
     }
 
-    /** The install's first organization: the one whose settings govern instance-wide policy (#1226). */
+    /** The install's first organization: the one whose settings govern instance-wide policy. */
     public Optional<Organization> findOldest() {
         return jdbc.sql("SELECT * FROM organization ORDER BY created_at ASC, id ASC LIMIT 1")
                 .query(OrganizationRepository::map)
@@ -54,7 +54,7 @@ public class OrganizationRepository {
     }
 
     /**
-     * Serialize org creation per owner for the rest of the CURRENT transaction (#1019). The
+     * Serialize org creation per owner for the rest of the CURRENT transaction. The
      * owned-org cap ({@code OrgCreationLimit}) is a check-then-insert; without this, two concurrent
      * creates by the same user both pass the count before either inserts and the cap is exceeded.
      * {@code pg_advisory_xact_lock} blocks a second caller with the same key until the first
@@ -64,7 +64,7 @@ public class OrganizationRepository {
      */
     /**
      * How many organizations this user OWNS — one query, not a membership scan plus a lookup per
-     * org (#1019 review). Mirrors {@link #findByUserId}'s own filters so the two never disagree
+     * org. Mirrors {@link #findByUserId}'s own filters so the two never disagree
      * about which orgs count. Meant to run under {@link #lockOrgCreationFor} so the answer is exact.
      */
     public long countOwnedBy(String userId) {

@@ -14,10 +14,10 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Who may create an account on this install (#1226). Lives under the {@code signupPolicy} key of
- * {@link Organization#settings()}; the open edition is one organization per install, so the org's
- * policy is the instance's. {@link Mode#OPEN} is the default, so an install that never touches the
- * setting behaves as before. A pending invitation admits in every mode.
+ * Who may create an account on this install. Lives under the {@code signupPolicy} key of
+ * {@link Organization#settings()}; this build is one organization per install, so the org's
+ * policy is the instance's. {@link Mode#OPEN} is the default, so an install that never touches
+ * the setting behaves as before. A pending invitation admits in every mode.
  */
 public record SignupPolicy(Mode mode, List<String> domains) {
 

@@ -28,9 +28,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The BYO GitHub App setup wizard (#860): a self-hoster registers their OWN App via GitHub's
+ * The BYO GitHub App setup wizard: a self-hoster registers their OWN App via GitHub's
  * manifest flow instead of Tessary handing them one, closing the last Tessary-owned-cloud-credential
- * gap in {@code substrate} for Epic 2. Two endpoints:
+ * gap in {@code substrate}. Two endpoints:
  *
  * <ul>
  *   <li>{@code GET .../git/github/manifest-url} (authenticated, owner-gated, under {@code /api}) —
@@ -42,8 +42,8 @@ import org.springframework.web.server.ResponseStatusException;
  *       persisted by {@link GithubAppConfigService}, then redirected back to Setup.
  * </ul>
  *
- * <p>This mints a deployment-wide (singleton) App, not a per-project one — see
- * {@code 0015-github-app-config.sql}'s header for why. The {@code orgSlug}/{@code projectSlug} in the
+ * <p>This mints a deployment-wide (singleton) App, not a per-project one.
+ * The {@code orgSlug}/{@code projectSlug} in the
  * URL are only where the wizard was launched from and where it redirects back to; they say nothing
  * about which projects the resulting App can be used by (all of them, same as env-configured App
  * credentials always have).
@@ -95,7 +95,7 @@ public class GithubManifestController {
         String base = frontendBase();
 
         // hook_attributes.active = false: the platform has no push-webhook endpoint any more. It had
-        // one — GitWebhookController — and Track A removed it with the observer, so an App minted with
+        // one — GitWebhookController — and it was removed along with the observer, so an App minted with
         // a live hook would tell GitHub to POST every push at a URL that 404s. Declaring the hook
         // inactive says the same thing to GitHub honestly, and leaves the block in place for whoever
         // brings a push-driven feature back. The `url` key is omitted rather than pointed at a dead

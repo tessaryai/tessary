@@ -16,8 +16,8 @@ public enum ModelProvider {
     OPENAI,
     ANTHROPIC,
     OPENROUTER,
-    // OLLAMA lived here until #939 D6: it was the platform's sole credential-free, AUTH_NONE
-    // provider, and D6's maker filter (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) drops it —
+    // OLLAMA was removed: it was the platform's sole credential-free, AUTH_NONE
+    // provider, and the maker filter (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) drops it —
     // Meta is not a supported maker. Removing it also removed the LAST platform-funded path
     // (ChatModelFactory#resolveApiKey now fails closed unconditionally): every provider requires an
     // org credential.

@@ -720,7 +720,7 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        /** The error PROSE. Its own column since 0001, so the class one stays a facet key (#762). */
+        /** The error PROSE. Its own column since 0001, so the class one stays a facet key. */
         public SpanSeed errorMessage(@Nullable String v) {
             this.errorMessage = v;
             return this;

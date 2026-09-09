@@ -1,13 +1,13 @@
 # Bring your own model provider keys
 
 The open build's gate is explicit about this one: a self-hoster's own model provider keys are
-allowed, because they're theirs. This is the setup path issue #861 (epic 2) verified end to end,
-and the seed doc epic 7's self-host docs build on.
+allowed, because they're theirs. This is the setup path verified end to end, and the seed doc the
+self-host docs build on.
 
-**#939 rewrote this doc almost entirely.** Credentials moved from per-project to per-organization
-(D1), the settings page now drops any picker option whose provider has no org credential (D3),
-the platform's old no-key ambient-Bedrock fallback and Ollama (the one credential-free provider)
-are both gone (D4/D6), and every provider now requires an org key with no exceptions.
+Credentials are per-organization, not per-project. The settings page drops any picker option whose
+provider has no org credential. The platform's old no-key ambient-Bedrock fallback and Ollama (the
+one credential-free provider) are both gone, and every provider now requires an org key with no
+exceptions.
 
 ## Adding a key
 
@@ -39,8 +39,8 @@ error, and there is no "no key needed" platform any more (Ollama, the one except
 That is the state a brand-new self-host install starts in, and it is a real, tested state, not a
 placeholder: `BYO_PROVIDER_KEYS` is **on** by default in both editions — the open edition through
 `CapabilityService`'s own default, and the hosted product through `Capability.BYO_PROVIDER_KEYS`. It
-was off for hosted orgs until #1282; #939 (D4) removed the last platform-funded lane, but the flag's
-default was not revisited until #1282, which flipped it once the old off-by-default reasoning no
+was off for hosted orgs previously; once the last platform-funded lane was removed, the flag's
+default was revisited and flipped, once the old off-by-default reasoning no
 longer held (that constant's javadoc carries the reasoning). Nobody has to flip a flag to reach this page; it's there
 from the first boot. **Every org now needs at least one commercial provider key configured before
 the first RCA or Triage run can succeed** — there is no keyless default any more, in either
@@ -81,7 +81,7 @@ before this field existed keeps failing closed with `MISSING_CREDENTIALS` rather
 reaching for an ambient identity nobody asked it to use.
 
 **It does NOT cover RCA or TRIAGE.** Those lanes run the agent in an isolated sandbox launched by
-`sandbox-runner` — a fresh sibling Docker container by default (D7), or an E2B microVM or local
+`sandbox-runner` — a fresh sibling Docker container by default, or an E2B microVM or local
 process if the operator opts into `SANDBOX_BACKEND=e2b`/`local` — and none of the three backends has
 a way to assume your backend process's own AWS identity: every request carries its credential
 explicitly, with no ambient-identity relay for any of them, by design (adding one would be new scope

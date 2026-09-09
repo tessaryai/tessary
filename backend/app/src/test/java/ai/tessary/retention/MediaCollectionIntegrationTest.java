@@ -20,8 +20,8 @@ import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Media garbage collection: bytes nothing references are reclaimed, and bytes something references are
- * not. Before this existed, {@code media_object} only ever grew — 549 MB of it on the corpus that
- * surfaced #761 — and "delete this project's data" left every image behind.
+ * not. Before this existed, {@code media_object} only ever grew, and "delete this project's data" left
+ * every image behind.
  *
  * <p><b>Why the sweep, and not just the statement.</b> This runs {@link RetentionSweeper#sweep()} because
  * the decision under test is not only the SQL: collection is deliberately OUTSIDE the policy classes, so

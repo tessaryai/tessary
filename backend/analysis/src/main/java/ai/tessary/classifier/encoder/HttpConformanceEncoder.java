@@ -30,39 +30,24 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
- * The production {@link ConformanceEncoder}: the classify-service's {@code POST /embed} endpoint,
- * which serves the conformance fit contract (the checkpoint's own {@code tokenizer.json} at
- * truncation 256 → real ONNX session → mask mean pooling → L2 normalisation) inside the process
- * that exists so CPU inference "can only ever kill its own task" — the accepted plan that retires
- * {@code OnnxConformanceEncoder}'s in-JVM interim posture. Selected by
- * {@code tessary.classifier.conformance.encoder-mode=http} (the default); the endpoint and secret
- * are the SAME {@code tessary.observer.encoder.url} / {@code .api-key} the encoder classifiers
- * already reach the service with ({@code LauncherEncoderScorer}) — one service, one config.
+ * The production {@link ConformanceEncoder}: calls the classify-service's {@code POST /embed}
+ * endpoint (checkpoint tokenizer at truncation 256, ONNX inference, mask mean pooling, L2
+ * normalisation) to score conformance embeddings outside this JVM. Selected by
+ * {@code tessary.classifier.conformance.encoder-mode=http} (the default); shares the
+ * {@code tessary.observer.encoder.url} / {@code .api-key} config that {@code LauncherEncoderScorer}
+ * already uses to reach the same service.
  *
- * <p><b>Enablement blockers, for the record:</b> this endpoint removed ONE of the two named
- * {@code sop_conformance_enabled} blockers (embedding ran in the backend JVM); the other,
- * intent-at-ingest, has since shipped too — conversation-grain intent resolution, owned by the
- * conformance classifier (paid-only since #1072).
- * The capability flag nonetheless stays off for every org — what holds it now is that no compiled
- * bundle exists to serve, which is a supply question rather than a capability one (see
- * {@code Capability}'s {@code SOP_CONFORMANCE} note).
+ * <p>Fails loud, end to end: an unconfigured URL, transport failure, non-2xx, a checkpoint echo
+ * that doesn't match the request, a vector count mismatch, inconsistent dimensions, or a
+ * non-numeric component all throw rather than silently score on garbage. There are no in-client
+ * retries; the classifier worker's own heartbeat and dead-letter budget
+ * ({@code tessary.classifier.max-attempts}) is the retry loop, same as every other
+ * {@code /classify} call.
  *
- * <p><b>Fail-loud, end to end.</b> Same posture as {@code OnnxConformanceEncoder} and
- * {@code LauncherEncoderScorer}: an unconfigured URL, transport failure, non-2xx (including the
- * service's 400 refusal of a checkpoint absent from its {@code embedders.json}), a response whose
- * checkpoint echo differs from the requested one, a vector count that doesn't match the request,
- * inconsistent dimensions, or a non-numeric component all throw — the sweep fails loudly and is
- * retried on subsequent heartbeats instead of silently scoring on garbage. There are deliberately
- * no in-client retries: per the classify-service contract ("the backend's sweep retry is the
- * backpressure"), the bounded retry loop is the classifier worker's heartbeat + dead-letter
- * budget ({@code tessary.classifier.max-attempts}), exactly as every other {@code /classify} call.
- *
- * <p><b>Request shaping.</b> Batches are split into sub-requests bounded by
- * {@link #MAX_TEXTS_PER_REQUEST} texts and {@link #MAX_TEXT_BYTES_PER_REQUEST} summed UTF-8 text
- * bytes ({@code LauncherEncoderScorer}'s twin bounds — the service caps bodies at 8&nbsp;MB and
- * embed batches at 256 texts, so every chunk clears both with headroom). A bounded LRU caches
- * embeddings by (checkpoint, text): the sweep re-scores whole conversations as they grow, so the
- * same turn text recurs across passes (the same cache {@code OnnxConformanceEncoder} keeps).
+ * <p>Batches split into sub-requests bounded by {@link #MAX_TEXTS_PER_REQUEST} texts and
+ * {@link #MAX_TEXT_BYTES_PER_REQUEST} summed UTF-8 bytes, matching the service's own body and
+ * batch caps with headroom. A bounded LRU caches embeddings by (checkpoint, text), since the sweep
+ * re-scores growing conversations and the same turn text recurs across passes.
  */
 @Service
 @ConditionalOnProperty(
@@ -77,16 +62,15 @@ public class HttpConformanceEncoder implements ConformanceEncoder {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
     /**
-     * Generous per-request cap, matching {@code LauncherEncoderScorer}: a 32-text chunk through an
-     * fp32 sentence encoder on the service's CPU envelope lands in minutes territory only when the
-     * task is saturated, and the service's own queue timeout (20s default) 429s long before this.
+     * Generous per-request cap: a 32-text chunk on the service's CPU envelope only approaches
+     * this under saturation, and the service's own queue timeout (20s default) 429s well before.
      */
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(5);
 
-    /** Max texts per {@code /embed} request — {@code LauncherEncoderScorer}'s measured bound. */
+    /** Max texts per {@code /embed} request. */
     static final int MAX_TEXTS_PER_REQUEST = 32;
 
-    /** Max summed UTF-8 text bytes per request — half the service's 8 MB body cap. */
+    /** Max summed UTF-8 text bytes per request: half the service's 8 MB body cap. */
     static final long MAX_TEXT_BYTES_PER_REQUEST = 4L * 1024 * 1024;
 
     private static final int EMBED_CACHE_MAX = 4_096;
@@ -179,8 +163,8 @@ public class HttpConformanceEncoder implements ConformanceEncoder {
     /**
      * Split {@code texts} into request-sized sub-batches, preserving order: at most
      * {@code maxCount} texts and {@code maxBytes} summed UTF-8 text bytes per chunk; a single text
-     * over the byte budget goes alone, never dropped or truncated ({@code LauncherEncoderScorer}'s
-     * twin — the serving-side tokenizer owns truncation to the model window).
+     * over the byte budget goes alone, never dropped or truncated: the serving-side tokenizer owns
+     * truncation to the model window.
      */
     static List<List<String>> chunk(List<String> texts, int maxCount, long maxBytes) {
         List<List<String>> chunks = new ArrayList<>();
@@ -292,7 +276,7 @@ public class HttpConformanceEncoder implements ConformanceEncoder {
             for (int j = 0; j < dim; j++) {
                 JsonNode component = vector.get(j);
                 // A NaN in Node serializes to JSON null; asDouble() would coerce it (or any
-                // non-numeric entry) to 0.0 — a silently-zeroed embedding, the exact outcome the
+                // non-numeric entry) to 0.0, a silently-zeroed embedding, which the
                 // ConformanceEncoder contract forbids.
                 if (!component.isNumber()) {
                     warnFailed(checkpoint, count, chunk, chunks, host, 200, "non-numeric", start);

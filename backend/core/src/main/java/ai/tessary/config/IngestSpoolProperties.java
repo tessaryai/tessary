@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Which {@code IngestSpool} buffers accepted batches (#984): {@code memory} (the default: bounded by
+ * Which {@code IngestSpool} buffers accepted batches: {@code memory} (the default: bounded by
  * bytes, a restart loses what is queued) or {@code kafka} (a Kafka-API broker, opt-in: accepted means
  * persisted). {@code max-lag-ms} is the age of the oldest unprocessed batch past which
  * the {@code /actuator/health/ingest} group (and the top-level status) reports DOWN; {@code 0} disables the check.

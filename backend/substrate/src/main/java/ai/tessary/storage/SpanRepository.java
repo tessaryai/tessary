@@ -22,8 +22,8 @@ import org.springframework.stereotype.Repository;
 /**
  * JdbcClient repository for the v2 {@code span} table (substrate-model.md §3, §6.2).
  *
- * <p>One write shape: the last-write-wins upsert. A span is exported when it ENDS, but partial versions
- * do arrive — a streaming span flushed early, a redelivered batch, a producer that emits twice — and a
+ * <p>One write shape: the last-write-wins upsert. A span is exported when it ends, but partial versions
+ * do arrive, a streaming span flushed early, a redelivered batch, a producer that emits twice, and a
  * completed version must be able to replace a partial one. Versioning is by {@code event_ts}.
  *
  * <p>Reads are through the primary-key prefix {@code (project_id, trace_id)}, which is also the physical
@@ -154,7 +154,7 @@ public class SpanRepository {
 
     /**
      * One JDBC batch for a whole batch of spans: the same statement, {@code event_ts} guard, SET list and
-     * re-arm contract as {@link #upsert}, applied per row (#984 M2). This is the production path; {@link #upsert}
+     * re-arm contract as {@link #upsert}, applied per row. This is the production path; {@link #upsert}
      * is the single-row form of it.
      */
     public void upsertAll(List<SpanRow> rows) {
@@ -168,8 +168,8 @@ public class SpanRepository {
      * Last-write-wins upsert against the natural key (§6.2).
      *
      * <p><b>The SET list is every producer-sourced column, including {@code parent_span_id}.</b> It
-     * deliberately EXCLUDES {@code path}, {@code correlation_state} and {@code path_state} — everything the
-     * platform derived rather than received — and {@code created_at}, and it cannot touch {@code depth},
+     * deliberately excludes {@code path}, {@code correlation_state} and {@code path_state}, everything the
+     * platform derived rather than received, and {@code created_at}, and it cannot touch {@code depth},
      * {@code total_tokens} or {@code total_cost}, which are generated. A newer version replaces what the
      * producer said; it never discards what we resolved, which would send an already-resolved span back
      * into the fixpoint's work queue on every replay.
@@ -183,7 +183,7 @@ public class SpanRepository {
      * bounded risk, and the span-lateness histogram measures it as a negative-lateness tail rather than
      * leaving it invisible.
      *
-     * <p>The caller must re-arm the trace timer on BOTH paths — insert and conflict — because a version
+     * <p>The caller must re-arm the trace timer on both paths, insert and conflict, because a version
      * replacement changes token counts and so must un-settle the trace exactly like a new span. And the
      * write must share its transaction with that re-arm (§6.1).
      *
@@ -200,7 +200,7 @@ public class SpanRepository {
      *
      * <p>OTel span ids are hex, so for every span this table is designed around it is the identity
      * function. It exists because an ltree label accepts only {@code [A-Za-z0-9_]}, and a single
-     * non-conforming producer id would otherwise raise on every pass of the fixpoint, forever — a
+     * non-conforming producer id would otherwise raise on every pass of the fixpoint, forever, a
      * permanently wedged resolver rather than one bad row. Deterministic, so a subtree prefix built the
      * same way still matches (§9).
      */
@@ -208,7 +208,7 @@ public class SpanRepository {
 
     /**
      * Give the batch's producer-declared roots the ancestry they already have: their own id, one level
-     * deep. <b>Root is {@code parent_span_id IS NULL}</b> — the producer's statement — and never "the
+     * deep. <b>Root is {@code parent_span_id IS NULL}</b>, the producer's statement, and never "the
      * parent has not arrived", which is what a null {@code path} means instead.
      *
      * @return the number of spans resolved.
@@ -228,7 +228,7 @@ public class SpanRepository {
     /**
      * One pass of the ancestry fixpoint: extend a resolved parent's path with the child's own id.
      *
-     * <p>Each pass resolves exactly one level, and a batch exporter flushes a span when it ENDS — so
+     * <p>Each pass resolves exactly one level, and a batch exporter flushes a span when it ends, so
      * chains arrive deepest-first and a chain of depth <i>n</i> converges in at most <i>n</i> passes. The
      * partial index {@code ix_span_unresolved_path} is what keeps each pass a small indexed scan instead of
      * a table scan over everything already resolved.
@@ -236,9 +236,9 @@ public class SpanRepository {
      * <p><b>Selection is join-driven: a claimed row is always resolvable.</b> The parent-is-resolved
      * {@code EXISTS} lives in the {@code due} CTE, not only in the outer join, so the {@code LIMIT} spends
      * its budget on rows that will actually be updated. With the condition in the outer join alone, an
-     * unordered {@code LIMIT} kept re-claiming the same first entries of the partial index — all of them
-     * children whose parent sat further down it — the {@code UPDATE} matched none of them, and rows deeper
-     * in the index were never reached. That is permanent head-of-line blocking, not a slow pass: the
+     * unordered {@code LIMIT} kept re-claiming the same first entries of the partial index, all of them
+     * children whose parent sat further down it. The {@code UPDATE} matched none of them, and rows
+     * deeper in the index were never reached. That is permanent head-of-line blocking, not a slow pass: the
      * pending count freezes while the resolver keeps ticking.
      *
      * @return the number of spans resolved this pass; zero means the fixpoint has converged.
@@ -262,7 +262,7 @@ public class SpanRepository {
 
     /**
      * Retire spans whose ancestry can never resolve: the trace has settled and there is no non-orphan
-     * parent row for them to hang off — either the producer never shipped the parent, or the parent is
+     * parent row for them to hang off, either the producer never shipped the parent, or the parent is
      * itself an orphan.
      *
      * <p><b>This is what keeps the fixpoint drainable</b> (implementation plan §2.6). Without a terminal
@@ -353,14 +353,14 @@ public class SpanRepository {
                         """).param("limit", limit).update();
     }
 
-    /** Spans still awaiting ancestry — the depth of {@code ix_span_unresolved_path}, for the heartbeat. */
+    /** Spans still awaiting ancestry, the depth of {@code ix_span_unresolved_path}, for the heartbeat. */
     public int pendingPathCount() {
         return jdbc.sql("SELECT count(*) FROM span WHERE path IS NULL AND path_state = 'pending'")
                 .query(Integer.class)
                 .single();
     }
 
-    /** Spans still awaiting correlation — the depth of {@code ix_span_uncorrelated}, for the heartbeat. */
+    /** Spans still awaiting correlation, the depth of {@code ix_span_uncorrelated}, for the heartbeat. */
     public int pendingCorrelationCount() {
         return jdbc.sql("SELECT count(*) FROM span WHERE session_id IS NULL AND correlation_state = 'pending'")
                 .query(Integer.class)
@@ -385,7 +385,7 @@ public class SpanRepository {
     }
 
     /**
-     * The same read, bounded — for a caller that renders at most N spans and must not pay for a trace that
+     * The same read, bounded, for a caller that renders at most N spans and must not pay for a trace that
      * has far more.
      *
      * <p>The unbounded overload above is right for the rollup recompute, which genuinely needs every span.
@@ -405,10 +405,10 @@ public class SpanRepository {
     }
 
     /**
-     * The spans of every trace in {@code traceIds}, in one ancestry-then-time-ordered read — the batched
+     * The spans of every trace in {@code traceIds}, in one ancestry-then-time-ordered read, the batched
      * sibling of {@link #listByTrace(String, String, int)} for a session's traces rather than one trace's.
      * Filters {@code trace_id = ANY(:ids)}, which reads the same {@code (project_id, trace_id, id)}
-     * primary-key clustering the single-trace read does, just for a set instead of one id — no new index.
+     * primary-key clustering the single-trace read does, just for a set instead of one id, no new index.
      *
      * <p>Bounded the same way: ask for {@code cap + 1} and the extra row answers "was there more?" without a
      * second query.
@@ -427,13 +427,13 @@ public class SpanRepository {
     }
 
     /**
-     * The spans named by {@code keys}, in ONE query — the hydration read behind a page of spans that some
+     * The spans named by {@code keys}, in one query, the hydration read behind a page of spans that some
      * other index chose (a keyword search page, a kNN ranking). A row per key would be fifty round trips for
      * a fifty-row page.
      *
      * <p><b>The result is unordered and may be shorter than {@code keys}.</b> SQL has no inherent order over
-     * an id set, and the ordering that matters here — recency for a keyset page, cosine distance for a
-     * ranking — is the caller's, so the caller re-applies it. Short is a race, not an error: a span can be
+     * an id set, and the ordering that matters here, recency for a keyset page, cosine distance for a
+     * ranking, is the caller's, so the caller re-applies it. Short is a race, not an error: a span can be
      * removed by the retention sweep between the index read and this one, and dropping it is right. Both
      * facts are the same ones {@code QueryRepository.searchByIds} lives with.
      */
@@ -458,7 +458,7 @@ public class SpanRepository {
     }
 
     /**
-     * Everything a sub-agent did, at any depth, in one indexed query — {@code path <@ :prefix}, served by
+     * Everything a sub-agent did, at any depth, in one indexed query, {@code path <@ :prefix}, served by
      * the gist index (§9).
      *
      * <p>Complete only once the trace's ancestry has resolved; on a settled trace it always is.
@@ -477,7 +477,7 @@ public class SpanRepository {
 
     /**
      * One span in the shape the grading lane's source adapter wants: identity and correlation columns off
-     * {@code span}, plus the three payload fields off {@code span_payload}. A projection, not a row type —
+     * {@code span}, plus the three payload fields off {@code span_payload}. A projection, not a row type:
      * {@link SpanRow} deliberately carries no payload, because every list surface reads spans without ever
      * touching the payload table, and this is the one read that needs both.
      *
@@ -500,7 +500,7 @@ public class SpanRepository {
             @Nullable String output,
             @Nullable String attributes) {
 
-        /** The producer handle {@code "<trace_id>:<span_id>"} — the id a caller hands back to a point read. */
+        /** The producer handle {@code "<trace_id>:<span_id>"}, the id a caller hands back to a point read. */
         public String handle() {
             return traceId + ':' + id;
         }
@@ -537,7 +537,7 @@ public class SpanRepository {
         return spec.query((rs, n) -> mapEntry(rs)).list();
     }
 
-    /** A trace's entries in event-time order — the primary-key-prefix read, with payloads joined on. */
+    /** A trace's entries in event-time order, the primary-key-prefix read, with payloads joined on. */
     public List<SpanEntry> listEntriesByTrace(String projectId, String traceId) {
         return jdbc.sql("SELECT " + ENTRY_COLS + ENTRY_FROM
                         + " WHERE s.project_id = :pid AND s.trace_id = :tid"
@@ -565,7 +565,7 @@ public class SpanRepository {
      * (tag-as-the-model) instead of re-deriving the call site via source mappings. Newest first by
      * {@code started_at}; the caller groups the rows into distinct traces.
      *
-     * @param notBefore when non-null, only rows with {@code started_at >= notBefore} are eligible — bounds
+     * @param notBefore when non-null, only rows with {@code started_at >= notBefore} are eligible, bounds
      *     grounding to recent activity. {@code null} = no age bound.
      */
     public List<SpanEntry> recentEntriesByCallSite(

@@ -47,14 +47,9 @@ import org.springframework.test.context.DynamicPropertySource;
  *   <li>the day grain is a raw re-aggregation of the window, not a sum of the hours beside it.
  * </ol>
  *
- * <p><b>Two whole assertion families left with Track A, and the coverage loss is real.</b> This test
- * used to seed grader {@code verdict} rows and assert on {@code l2_evals}, {@code llm_tokens} and the
- * per-environment rollup split — a unit-by-unit proof that L1 detections and L2 grader rulings were
- * counted from their own stores and never from each other, and that the per-env values summed back to
- * the project total. Grading and the Environment concept are both gone, and neither has a substitute
- * here: {@code metric_rollup} now carries one row per (project, unit, bucket), and the only two units
- * with a live producer are {@code ingested_spans} and {@code l1_evals}. Live LLM spend is unaffected —
- * it is read from the {@code llm_call} ledger, which this test never covered.
+ * <p>{@code metric_rollup} carries one row per (project, unit, bucket), and the only two units with
+ * a live producer are {@code ingested_spans} and {@code l1_evals}, which is what this test covers.
+ * Live LLM spend is read from the {@code llm_call} ledger, never covered here.
  */
 @SpringBootTest
 @Import(TurnGrainTestDetectionConfig.class)
@@ -114,12 +109,12 @@ class MeteringIntegrationTest {
         String inBucket = bucketStart.plus(10, ChronoUnit.MINUTES).toString();
         String bucketStartIso = bucketStart.toString();
 
-        // 2 ingested spans — reused as the real subjects of two of the three detections below.
+        // 2 ingested spans, reused as the real subjects of two of the three detections below.
         Obs obs1 = observationAt(pid, newSession(pid, inBucket), inBucket);
         Obs obs2 = observationAt(pid, newSession(pid, inBucket), inBucket);
 
-        // 3 classifier detections. A detection carries NO tokens — the row has no token columns — so it
-        // moves the L1 count and nothing else.
+        // 3 classifier detections. A detection carries no tokens (the row has no token columns), so
+        // it moves the L1 count and nothing else.
         String sessionId = newSession(pid, inBucket);
         seedSessionDetection(pid, "frustration", sessionId, inBucket);
         seedDetection(pid, "secret_leak", obs1, inBucket);
@@ -162,7 +157,7 @@ class MeteringIntegrationTest {
         assertEquals(bucketStartIso, series.get(0).bucketStart());
         assertEquals(3, series.get(0).value(), "l1_evals value is stable across the re-upsert");
 
-        // One row per (project, unit, bucket) — the per-environment fan-out is gone, so a second row
+        // One row per (project, unit, bucket): the per-environment fan-out is gone, so a second row
         // under the same key would mean the upsert's conflict target no longer matches its unique index.
         assertEquals(1, rollupRowCount(pid, UsageUnit.L1_EVALS.wire(), bucketStartIso));
 
@@ -218,8 +213,8 @@ class MeteringIntegrationTest {
     }
 
     /**
-     * The {@code storage} unit is a LEVEL — a {@code COUNT(*)} snapshot of span rows at rest as of the
-     * bucket end — produced when {@code tessary.metering.storage-enabled} is on and queryable like every
+     * The {@code storage} unit is a level: a {@code COUNT(*)} snapshot of span rows at rest as of
+     * the bucket end, produced when {@code tessary.metering.storage-enabled} is on and queryable like every
      * other unit. Idempotent: re-snapshotting the same closed bucket overwrites with the same level
      * (last-writer-wins), never accumulates.
      */
@@ -337,8 +332,8 @@ class MeteringIntegrationTest {
 
     /**
      * A classifier detection over a REAL span subject, in the classifier's own table. Both halves of the
-     * span key are stored because that pair IS a span's identity. It carries no tokens — a detection row
-     * has no token columns at all — so it counts as an L1 eval and nothing else.
+     * span key are stored because that pair IS a span's identity. It carries no tokens (a detection
+     * row has no token columns at all), so it counts as an L1 eval and nothing else.
      */
     private void seedDetection(String pid, String classifierKey, Obs subject, String at) {
         insertDetection(pid, classifierKey, subject.sessionId(), subject.traceId(), subject.spanId(), at);
@@ -358,10 +353,10 @@ class MeteringIntegrationTest {
     private void insertDetection(
             String pid, String classifierKey, String sessionId, String traceId, @Nullable String spanId, String at) {
         // Route by DetectionTableRegistry's actual registration, not a hard-coded guess: "frustration"
-        // is only registered in this test JVM by TurnGrainTestDetectionConfig (no paid module is on
-        // backend/app's test classpath), so a trace-grain (spanId == null) row belongs in ITS table —
-        // writing straight to the real open baseline frustration table would insert rows
-        // MetricRollupRepository's registry-built union never reads, silently undercounting.
+        // is only registered in this test JVM by TurnGrainTestDetectionConfig, so a trace-grain
+        // (spanId == null) row belongs in its table. Writing straight to the baseline frustration
+        // table would insert rows MetricRollupRepository's registry-built union never reads, silently
+        // undercounting.
         String table = spanId == null ? TurnGrainTestDetectionConfig.TABLE : "secret_leak_detection";
         jdbc.sql("INSERT INTO " + table + " (id, project_id, classifier_id, classifier_key, subject_session_id,"
                         + " subject_trace_id, subject_span_id, severity, confidence, created_at)"

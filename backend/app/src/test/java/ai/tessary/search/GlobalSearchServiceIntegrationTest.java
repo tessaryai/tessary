@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Acceptance for the global search palette read surface: a typed query returns ranked content
- * matches, scoped to the caller's project. Track A left ONE hit type — trace — where there were
+ * matches, scoped to the caller's project. There is ONE hit type — trace — where there were
  * three; the grader and dataset legs went with their tables.
  * Exercises {@link GlobalSearchService} over a real Postgres (Testcontainers, with the pg_trgm
  * extension + name trigram indexes for typo/prefix tolerance).
@@ -57,7 +57,7 @@ class GlobalSearchServiceIntegrationTest {
      * There is exactly ONE hit type now, and that is the claim worth pinning.
      *
      * <p>This test used to seed a grader, a dataset and a span and assert all three types came back.
-     * Track A deleted the first two entity types and their search legs with them, so what is left to
+     * The first two entity types and their search legs were deleted with their tables, so what is left to
      * assert is the narrower fact: a match surfaces as a {@code trace}, and the id it carries is the
      * TRACE id rather than the span's — which is what the palette's {@code traces/<id>} route takes.
      * Under v1 this returned the observation id into that same route, a key the route could not resolve.
@@ -226,7 +226,7 @@ class GlobalSearchServiceIntegrationTest {
     }
 
     // trigramLegIsIndexBacked lived here, EXPLAINing `SELECT id FROM grader WHERE name %> :q` against
-    // ix_grader_name_trgm. Both the table and the index went with Track A. It is deleted rather than
+    // ix_grader_name_trgm. Both the table and the index are gone. It is deleted rather than
     // re-pointed because spanNameTrigramLegIsIndexBacked above already makes the identical claim
     // (`name %> :q` must reach a gin_trgm_ops index via a Bitmap Index Scan, never a Seq Scan) on the
     // one table the surface still reads.

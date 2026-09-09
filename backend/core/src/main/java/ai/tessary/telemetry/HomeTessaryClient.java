@@ -45,7 +45,7 @@ public class HomeTessaryClient {
      * <p>Public, unlike the package-private {@code MixpanelSender.send} this class replaces: the caller
      * ({@code TelemetryHeartbeat}, §1) lives in a different module ({@code surfaces}) than this class
      * ({@code core}), and {@code path} being a parameter rather than a per-call constant is what lets
-     * epic 9's future license-check client (§2) reuse this same class untouched.
+     * a future license-check client reuse this same class untouched.
      */
     public int postJson(String path, String json) throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE_URL + path))

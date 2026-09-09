@@ -28,8 +28,7 @@ import org.junit.jupiter.api.Test;
  * Spring context. Exercises the two facts that would otherwise silently rot if a future edit collapsed
  * the sandbox seam: a normal ruling round-trips through {@code TriageSandbox.SandboxRequest}/
  * {@code SandboxRun}, and an empty run (the sandbox's documented "ran, produced nothing" contract)
- * surfaces as {@code TRIAGE_RUN_INCOMPLETE} rather than a fabricated ruling. Before #854 nothing in this
- * package exercised the sandbox dependency at all.
+ * surfaces as {@code TRIAGE_RUN_INCOMPLETE} rather than a fabricated ruling.
  */
 class BehaviorTriageEngineTest {
 

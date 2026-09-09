@@ -45,8 +45,8 @@ def arl(p, r, down, hh):
 
     Dense, on purpose. This was a scipy.sparse build plus `spsolve`, which is the natural shape for
     a matrix with two entries per row — but scipy is not in this package's base dependencies (it
-    arrives only through the `quality`/`train` extras), and #1293 publishes this file, so a scipy
-    import here would have put the whole scientific stack into the open edition's declared
+    arrives only through the `quality`/`train` extras), and this file is published as part of the
+    open edition, so a scipy import here would have put the whole scientific stack into its declared
     dependency set for a script nothing imports. The problem is small enough that it does not
     matter: `solve_hh` binary-searches to a 250,000-call budget, which tops out at n=2048 over 155
     solves for the whole report. Measured against the sparse version it produced byte-identical

@@ -37,24 +37,20 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The open build's org-creation boundary from #862: no dedicated controller test covered
- * {@code OrganizationController}'s HTTP surface before this (only {@code TenantServiceTest} at the
- * service layer, plus one incidental hit in {@code ImportControllerTest}). Drives the real
- * signup -> bootstrap-org -> me flow through {@code MockMvc}, container-backed, on the same
- * {@code @DynamicPropertySource} shape {@link AuthControllerTest} and {@code OpenApiSpecDriftTest}
- * use.
+ * This build's org-creation boundary: a dedicated controller test for
+ * {@code OrganizationController}'s HTTP surface, driving the real signup -> bootstrap-org -> me flow
+ * through {@code MockMvc}, container-backed, on the same {@code @DynamicPropertySource} shape
+ * {@link AuthControllerTest} and {@code OpenApiSpecDriftTest} use.
  *
- * <p>Pins three things the open/paid split in #862 depends on:
+ * <p>Pins three things:
  * <ul>
  *   <li>a fresh signup ends with exactly one org, visible on {@code GET /auth/me} with no call to
- *       any moved endpoint (acceptance criterion 1)</li>
+ *       any other endpoint</li>
  *   <li>{@code POST /api/orgs} succeeds once (the bootstrap org) then 429s on a second attempt,
- *       under the open default {@link OrgCreationLimitConfig} cap of 1</li>
+ *       under the default {@link OrgCreationLimitConfig} cap of 1</li>
  *   <li>{@code GET /api/me/orgs}, {@code POST /api/orgs/{slug}/archive}, and
- *       {@code POST /api/orgs/{slug}/transfer-ownership} 404 (route absent, not just
- *       forbidden) under the open ({@code !paid}) profile these tests run in — the companion
- *       {@code MultiOrgControllerTest} in {@code tessary-paid/plan} covers the same methods
- *       existing and working there</li>
+ *       {@code POST /api/orgs/{slug}/transfer-ownership} 404 (route absent, not just forbidden)
+ *       in this build</li>
  * </ul>
  */
 @SpringBootTest
@@ -120,8 +116,8 @@ class OrgCreationBoundaryTest {
         Cookie session = signUp("fresh-org-862@example.com");
 
         // Signup itself bootstraps the default org (AuthController's signup/callback tail calls
-        // TenantService.ensureDefaultOrg) -- /auth/me is the ONLY read the frontend needs, per
-        // #862's rewire of Onboarding/App/Link/Sidebar off GET /api/me/orgs.
+        // TenantService.ensureDefaultOrg) -- /auth/me is the only read the frontend needs;
+        // Onboarding/App/Link/Sidebar do not call GET /api/me/orgs.
         mvc.perform(get("/auth/me").cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.orgs.length()").value(1));
@@ -132,7 +128,7 @@ class OrgCreationBoundaryTest {
         Cookie session = signUp("cap-862@example.com");
 
         // Signup already bootstrapped one org (see above), so a further createOrg call is already
-        // over the open default cap of 1 -- assert the 429 shape API consumers rely on.
+        // over the default cap of 1 -- assert the 429 shape API consumers rely on.
         mvc.perform(post("/api/orgs")
                         .cookie(session)
                         .header("X-Requested-With", "XMLHttpRequest")
@@ -164,11 +160,11 @@ class OrgCreationBoundaryTest {
     }
 
     /**
-     * #1019: the owned-org cap is a check-then-insert. Before the fix, two concurrent creates by
-     * one user both read the count before either inserted, so the cap could be exceeded. This
-     * drives two racers at the service layer (each call is its own transaction) against one free
-     * slot and requires exactly one winner — the per-owner advisory lock inside
-     * {@code TenantService.bootstrapOrg} is what makes that deterministic rather than merely likely.
+     * The owned-org cap is a check-then-insert, so two concurrent creates by one user could both
+     * read the count before either inserted and exceed the cap. This drives two racers at the
+     * service layer (each call is its own transaction) against one free slot and requires exactly
+     * one winner: the per-owner advisory lock inside {@code TenantService.bootstrapOrg} is what
+     * makes that deterministic rather than merely likely.
      */
     @Test
     void concurrentCreatesCannotExceedTheOwnedOrgCap() throws Exception {
@@ -237,11 +233,11 @@ class OrgCreationBoundaryTest {
     }
 
     /**
-     * #1028: the sibling of the create race above. Two orgs owned by one user, one recipient who is
-     * a member of both and has exactly one free slot under the cap; two concurrent transfers race at
-     * the service layer and exactly one may win. Lives here rather than in the paid module because
-     * the transactional logic is open ({@code TenantService.transferOwnership}) and this module has
-     * the real-Postgres harness; the paid controller's own test covers delegation.
+     * The sibling of the create race above. Two orgs owned by one user, one recipient who is a
+     * member of both and has exactly one free slot under the cap; two concurrent transfers race at
+     * the service layer and exactly one may win. Lives here because
+     * {@code TenantService.transferOwnership} owns the transactional logic and this module has the
+     * real-Postgres harness.
      */
     @Test
     void concurrentOwnershipTransfersCannotExceedTheRecipientsCap() throws Exception {

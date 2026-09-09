@@ -7,11 +7,11 @@ never has to read the rest of the product.
 This is **local-first**: evaluation runs on your own machine, so you can iterate cheaply before
 anything touches classify-service.
 
-> **What is here and what is not.** #1293 split this tree along the open/paid boundary. The open
+> **What is here and what is not.** This tree is split along the open/paid boundary. The open
 > edition ships `framework/`, `tool_error/`, `metric_drift/` and `data_gen/` — the modules whose
 > classifiers are pure Java in the open backend, plus the harness and the corpus emitters. The
-> paid classifier modules (the encoder-head classifiers and the SOP-conformance work) live in the
-> `tessary-paid` overlay and are not part of this export. `pyproject.toml`'s `pythonpath` carries
+> paid classifier modules (the encoder-head classifiers and the SOP-conformance work) are not
+> part of this export. `pyproject.toml`'s `pythonpath` carries
 > an overlay entry for that reason; with the overlay absent it is a directory that does not exist,
 > which pytest ignores.
 

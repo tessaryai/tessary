@@ -21,7 +21,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * D (#994)'s four assembler shapes, one test per shape (D.5), plus the token budget and the payload
+ * Four assembler shapes, one test per shape, plus the token budget and the payload
  * fallback. Real payload fixtures rather than hand-abbreviated ones — copied verbatim from {@code
  * ToolErrorEvidence.toJson}/{@code MetricFindingEvidence.toJson}'s field lists, so a field these tests
  * do not exercise is a field the real detectors also never write, not an assembler bug.

@@ -23,7 +23,7 @@
         comment guarantee the direction. Anything that needs to reach upward belongs behind an interface
         declared here and implemented above - see llmspi.ProjectLaneSeeder for the pattern
         (llmspi.TextEmbedder used to be the worked example here; it left with the rest of the vector
-        substrate, #1116).
+        substrate).
     </description>
 
     <dependencies>
@@ -208,7 +208,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as every other plugin above. No coverage gate. -->
             <plugin>

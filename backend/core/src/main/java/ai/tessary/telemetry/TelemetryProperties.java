@@ -8,11 +8,11 @@ import org.springframework.stereotype.Component;
  * The single opt-out switch for the {@code home.tessary.ai} telemetry ping, bound from
  * {@code tessary.telemetry.enabled} / {@code TESSARY_TELEMETRY_ENABLED} (Spring relaxed binding).
  *
- * <p>Replaces {@code tessary.analytics.*} (deleted with the Mixpanel stack, #858). There is no token
+ * <p>Replaces {@code tessary.analytics.*} (deleted with the Mixpanel stack). There is no token
  * field here — unlike Mixpanel, {@code devdocs/reference/telemetry-contract.md} carries no third-party
  * credential, so there is nothing else for this class to hold.
  *
- * <p><b>On by default (opt-out), per D6.</b> {@link #enabled} is the ONE gate the contract's §3
+ * <p><b>On by default (opt-out).</b> {@link #enabled} is the ONE gate the contract's §3
  * anonymity guarantee depends on: a caller must check it before touching {@link InstallIdRepository} or
  * {@link HomeTessaryClient} at all, not merely before sending — reading or minting an install id when
  * telemetry is off is itself an observable side effect the contract's "zero outbound calls, including

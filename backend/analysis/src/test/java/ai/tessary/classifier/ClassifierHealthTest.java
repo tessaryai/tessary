@@ -20,9 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * gh#545: {@link ClassifierService#health} must surface a failing sweep (status/attempts/last error)
- * without touching the DB, and must still report a healthy row for a signal that has never been
- * enqueued. All collaborators are mocked — this is the read-model logic, not the sweep itself
+ * {@link ClassifierService#health} must surface a failing sweep (status, attempts, last error)
+ * without touching the DB, and must report a healthy row for a signal that has never been
+ * enqueued. All collaborators are mocked: this is the read-model logic, not the sweep itself
  * (covered by {@link ClassifierJobRepositoryTest} / {@code ClassifierWorkerIntegrationTest}).
  */
 class ClassifierHealthTest {
@@ -113,7 +113,7 @@ class ClassifierHealthTest {
         assertEquals(3, v.attempts());
         assertEquals("classify: connection refused", v.lastError());
         assertEquals("2026-01-05T12:00:00Z", v.lastSweptAt());
-        assertNull(v.nextAttemptAt(), "no backoff stamp on main yet (gh#531) — null reads as 'next heartbeat'");
+        assertNull(v.nextAttemptAt(), "no backoff stamp on main yet — null reads as 'next heartbeat'");
     }
 
     @Test

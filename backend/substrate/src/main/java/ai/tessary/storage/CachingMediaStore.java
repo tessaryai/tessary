@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>Why.</b> It was built for grading: the judge re-hydrated an {@code image_ref} block to inline
  * bytes inside the per-grader request build, so an image-bearing unit graded by N graders issued N
- * identical reads of the same immutable row. <b>Track A removed grading, and that caller with it.</b>
+ * identical reads of the same immutable row. <b>Grading was removed, and that caller with it.</b>
  * The one remaining reader is {@link MediaController}, which serves bytes by id to the trace viewer —
  * so the amplification is now a person or a browser re-opening the same trace, not a fan-out inside one
  * request. That is a weaker case for a cache than the original one. Read this before tuning the budget,

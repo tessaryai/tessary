@@ -10,7 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * #939 TASK 2 changed what this class tests. {@link ModelCatalog#entries()} used to BE the roster —
+ * {@link ModelCatalog#entries()} used to BE the roster —
  * so pinning "gpt-4o is gone" or "Bedrock hosts no Moonshot models yet" here was a fact about the
  * whole product. It no longer is: {@link ModelCatalog#mergeLive} means the roster a project actually
  * sees is the static table overlaid with a live-fetched listing, per org and per provider — "which
@@ -35,7 +35,7 @@ class ModelCatalogTest {
 
     @Test
     void platformAuthKinds() {
-        // #939 D6 removed Ollama (the platform's one AUTH_NONE, credential-free provider) — every
+        // Ollama has been removed (the platform's one AUTH_NONE, credential-free provider) — every
         // platform is now AUTH_API_KEY or AUTH_AWS; see PlatformCatalog's own removal note.
         assertEquals(PlatformCatalog.AUTH_AWS, PlatformCatalog.authOf(ModelProvider.BEDROCK));
         assertEquals(PlatformCatalog.AUTH_API_KEY, PlatformCatalog.authOf(ModelProvider.ANTHROPIC));
@@ -45,8 +45,7 @@ class ModelCatalogTest {
     @Test
     void mergeLiveWithNoLiveListing_passesTheStaticTableThroughUnchanged() {
         // A cold cache (no credential, or a fetch that failed with nothing to fall back to) must
-        // degrade to today's static list, not to nothing — the corrective brief's own mandatory
-        // property (iii) applied at this seam.
+        // degrade to today's static list, not to nothing, at this seam.
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(ModelProvider.OPENAI, List.of());
         List<ModelCatalog.CatalogEntry> staticEntries = ModelCatalog.entries().stream()
                 .filter(e -> e.provider() == ModelProvider.OPENAI)

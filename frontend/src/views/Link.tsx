@@ -19,10 +19,9 @@ export function Link() {
     retry: false,
   });
 
-  // #862: GET /api/me/orgs moved to the paid overlay -- the org picker below reads the list off
-  // GET /auth/me (already fetched by AuthProvider) instead of a second query. The open build's
-  // account has exactly one org, so this Select renders one option; a paid account's full list
-  // still comes through the same field once it carries more than one.
+  // The org picker below reads the list off GET /auth/me (already fetched by AuthProvider)
+  // instead of a second query. This account has exactly one org, so this Select renders one
+  // option.
   const { user } = useAuth();
   const orgs = user?.orgs ?? [];
   const [orgSlug, setOrgSlug] = useState("");

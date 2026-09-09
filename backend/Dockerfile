@@ -74,10 +74,10 @@ RUN curl -fsSL -o /pyroscope.jar \
 # ---- runtime ----
 FROM eclipse-temurin:25-jre AS runtime
 
-# The image's version identity (epic 5 clause 3, #1135): the repo's short-SHA convention, supplied by
+# The image's version identity: the repo's short-SHA convention, supplied by
 # the build orchestrator (Taskfile IMAGE_VERSION / IMAGE_REVISION via docker-compose.yml's build args,
 # or --build-arg). "dev" when nobody supplied one, so a bare `docker build` still labels the image and
-# a paid build layered on it can compare. Written to a file as well as a LABEL because a derived image
+# a derived build layered on it can compare. Written to a file as well as a LABEL because a derived image
 # can COPY a file from its base and cannot read its base's labels.
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
@@ -107,7 +107,7 @@ EXPOSE 8080
 
 # OTLP receive ports (image metadata only — EXPOSE does not itself publish; the
 # orchestrator decides external exposure via compose/Caddy). The gRPC OTLP transport
-# (#235) binds 4317 and the HTTP transport 4318, both default-off behind
+# binds 4317 and the HTTP transport 4318, both default-off behind
 # `tessary.ingest.otlp.enabled` + `transport=grpc|http|both`.
 EXPOSE 4317 4318
 

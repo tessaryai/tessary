@@ -22,9 +22,9 @@ import org.springframework.stereotype.Service;
 
 /**
  * Enforces the {@link SignupPolicy} at the one moment it applies: after a provider has
- * authenticated someone and before a principal exists for them (#1226). The policy gates account
- * creation only. An existing principal is never refused, the first account is always admitted so a
- * fresh install cannot lock itself out, and a pending invitation admits in every mode.
+ * authenticated someone and before a principal exists for them. The policy gates account creation
+ * only. An existing principal is never refused, the first account is always admitted so a fresh
+ * install cannot lock itself out, and a pending invitation admits in every mode.
  */
 @Service
 public class SignupPolicyService {
@@ -54,8 +54,8 @@ public class SignupPolicyService {
 
     /**
      * The organization whose settings govern sign-ups that belong to no organization yet: the
-     * install's first. In the open edition that is the only one; a later personal org on the same
-     * install carries no policy of its own, and the settings routes say so rather than accept one.
+     * install's first, and the only one; a later personal org on the same install carries no policy
+     * of its own, and the settings routes say so rather than accept one.
      */
     public Optional<Organization> governingOrg() {
         return orgs.findOldest();

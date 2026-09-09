@@ -1,13 +1,8 @@
 # =============================================================================
-# Release: publish all four Tessary images (epic 7 clause 1, #941 / #1114)
+# Release: publish all four Tessary images
 # =============================================================================
-# Generalizes what used to be "Publish Agent Image" (D3 of the internal execution plan, which is
-# overlay-owned since #1293 and not part of this repo's public export): that workflow built and
-# pushed ONE image (the E2B/Docker agent sandbox). This one builds and pushes all four — backend,
-# frontend, sandbox-runner, agent-sandbox — from one version input, and is the only publisher that
-# survives the open export (deploy-aws-production.yml, deploy-classify-service.yml and
-# reusable-ecs-deploy.yml, which used to be the hosted product's own image builds, moved to
-# tessary-paid/ in the same PR that generalized this file — see that plan's divergence log).
+# Builds and pushes all four images (backend, frontend, sandbox-runner, agent-sandbox) from one
+# version input. It is the only publisher in this repo.
 #
 # Registry: DOCKER HUB, and only Docker Hub (`tessaryai/tessary`) — every comparable self-hosted
 # OSS project checked ships its primary image there, and `docker pull org/image` with no registry
@@ -22,7 +17,7 @@
 # The namespace is still ours and still in scripts/lib/namespace-inventory.txt; nothing publishes
 # to it.
 #
-# Versioning: SEMVER, not the repo's local short-SHA convention (D2). THE GIT TAG `v<semver>` THIS
+# Versioning: semver, not the repo's local short-SHA convention. THE GIT TAG `v<semver>` THIS
 # WORKFLOW PUSHES IS THE SINGLE SOURCE OF TRUTH for a published version — there is no VERSION file,
 # deliberately. A file could not be read by the two things that consume the version (compose's
 # `${VAR:-X}` syntax and a plain JS string literal), so it was never a build input; it was a value
@@ -37,7 +32,7 @@
 # it unless it is well-formed semver and `v<version>` does not already exist — so a release cannot
 # silently re-publish a version that was already tagged.
 #
-# Multi-arch (D4): linux/amd64 + linux/arm64, on NATIVE runners for both (ubuntu-24.04-arm is a
+# Multi-arch: linux/amd64 + linux/arm64, on NATIVE runners for both (ubuntu-24.04-arm is a
 # free GitHub-hosted runner for public repos — no QEMU emulation, which would silently mask a
 # non-native-arch RUN step failure, e.g. the groupadd/useradd/apk lines in every runtime stage
 # here). EVERY image builds its WHOLE Dockerfile on its own arch, exactly as `docker build` does on
@@ -58,8 +53,8 @@
 # cleanup job deletes when the run ends. merge-manifests then runs `docker buildx imagetools
 # create` once per service to publish the real multi-arch manifest under `<service>-<version>`.
 # verify-manifests is a separate, skippable job that then asserts each of those four resolves and
-# carries BOTH platforms: D3's own gate requires a distinct step that CAN go red, not an assertion
-# true by construction, and a merge that half-succeeded is exactly what it is looking for.
+# carries BOTH platforms. It must be a distinct step that CAN go red, not an assertion true by
+# construction, and a merge that half-succeeded is exactly what it is looking for.
 #
 # FINALIZE IS THE COMMIT POINT, and the whole job order is built around it. Everything BEFORE it is
 # additive — new tags nobody was using — so a failure there leaves no alias pointing somewhere new,
@@ -81,7 +76,7 @@
 # images cleanup had just deleted — every one-command install broken until the next release, from
 # a run that never claimed to have succeeded.
 #
-# THE COMPOSE ARTIFACT (epic 7's one-command install). After the images are merged and tagged, this
+# THE COMPOSE ARTIFACT (the one-command install). After the images are merged and tagged, this
 # workflow publishes docker-compose.yml itself to Docker Hub as an OCI artifact under
 # `compose` and `compose-<version>` — the one-command install the marketing site publishes:
 #
@@ -109,9 +104,8 @@
 # publish-compose was still to fail, leaving a published release whose one-liner resolves to
 # nothing. Notes are generated server-side by `gh release create --generate-notes`.
 #
-# NO SIGNING. Cosign / SLSA provenance / SBOM attachment are #1155's (epic 6 clause 4), which is
-# CLOSED as NOT_PLANNED (verified 2026-09-05) — this workflow adds none of it and carries no
-# `id-token: write`.
+# NO SIGNING. Cosign, SLSA provenance and SBOM attachment are not planned; this workflow adds
+# none of it and carries no `id-token: write`.
 #
 # Required secrets:
 #   DOCKER_USERNAME  - Docker Hub username (for image push from runner)
@@ -132,7 +126,7 @@ name: Release
 
 # ALL AUTOMATIC TRIGGERS ARE DISABLED. Nothing in this repository starts a workflow run on its
 # own; every workflow here is `workflow_dispatch` only, so runs happen when a human presses Run.
-# Re-arming them is tracked as #1184 (epic 11, public repo cutover). The original trigger block
+# Re-arming them is tracked separately. The original trigger block
 # for this file (generalized from publish-agent-image.yml's single-image `paths:` list) is
 # preserved commented-out immediately below — re-enabling is uncommenting it, nothing else.
 # on:
@@ -228,7 +222,7 @@ jobs:
 
       # Both stages of the same Dockerfile a local `docker build ./backend` runs. THE CONTEXT IS
       # WHAT KEEPS THE OVERLAY OUT, structurally rather than by flag: backend/pom.xml's `paid`
-      # profile activates on ../tessary-paid/pom.xml merely EXISTING, and that path is not inside
+      # profile activates on a sibling pom merely existing, and that path is not inside
       # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
       # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
       - uses: docker/build-push-action@v7
@@ -267,7 +261,7 @@ jobs:
 
       # Both stages, natively, same as build-backend. Context is the repo ROOT because this
       # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
-      # tessary-paid/ out of it. PNPM_VERSION is deliberately NOT passed — that Dockerfile's ARG
+      # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
       # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
       - uses: docker/build-push-action@v7
         with:
@@ -303,7 +297,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # No build-once optimization here (D4): re2@1.26.1 is a native addon compiled by node-gyp in
+      # No build-once optimization here: re2@1.26.1 is a native addon compiled by node-gyp in
       # the image, so this pnpm install genuinely happens twice, once per native arch runner.
       - uses: docker/build-push-action@v7
         with:
@@ -357,7 +351,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=tessary-agent-sandbox-${{ matrix.arch }}
 
   # ---------------------------------------------------------------------------------------------
-  # Epic 6 clause 3 (#1148): no open artifact reaches a real tag with paid content in it. The four
+  # No published artifact reaches a real tag with excluded content in it. The four
   # arch-suffixed images above are the artifacts; this job pulls the amd64 build of each and diffs
   # its exported contents against scripts/lib/open-artifact-denylist.txt. It sits BETWEEN the
   # builds and the merge, so a red here leaves only unmerged arch tags behind — nothing a
@@ -442,7 +436,7 @@ jobs:
           done
 
   # ---------------------------------------------------------------------------------------------
-  # D3 item 7 / D10: a DISTINCT, skippable step that CAN actually fail. This used to compare Docker
+  # A distinct, skippable step that CAN actually fail. This used to compare Docker
   # Hub against the GHCR mirror; with one registry there is no parity left to check, but the reason
   # the job exists survives intact — "merge-manifests exited 0, so the tags must be fine" is an
   # assertion that can never go red, and a merge that half-succeeded is precisely what run

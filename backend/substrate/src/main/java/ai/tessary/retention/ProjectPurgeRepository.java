@@ -17,19 +17,18 @@ import org.springframework.stereotype.Repository;
  *
  * <p>{@link #TABLES} is not sorted by size, it is sorted by what each pass saves the next one.
  * {@code media_object}'s only referrer today is {@code media_ref} ({@code fk_media_ref_media},
- * {@code ON DELETE CASCADE}, indexed by {@code idx_media_ref_media_id} — see
- * {@code 0001-media-ref-and-error-message.sql}, #761/#762), and {@code media_ref} is itself reached from
- * {@code span_payload} ({@code fk_media_ref_payload}, also {@code ON DELETE CASCADE}). Emptying
- * {@code span_payload} first therefore cascades away every {@code media_ref} row before {@code
- * media_object} is purged directly, so that pass finds nothing left pointing at it.
+ * {@code ON DELETE CASCADE}, indexed by {@code idx_media_ref_media_id}), and {@code media_ref} is
+ * itself reached from {@code span_payload} ({@code fk_media_ref_payload}, also {@code ON DELETE
+ * CASCADE}). Emptying {@code span_payload} first therefore cascades away every {@code media_ref}
+ * row before {@code media_object} is purged directly, so that pass finds nothing left pointing at
+ * it.
  *
  * <p>This table used to also carry four dangling FKs from {@code tool_call}/{@code retrieved_doc}
  * declared {@code ON DELETE SET NULL} with no index on the referencing side — the ~42-minute delete this
- * whole change exists to fix. {@code 0001-drop-dead-media-ref-columns} (#761/#762, landed ahead of this
- * migration) removed those four columns entirely in favor of the indexed {@code media_ref} join table
- * above, so that specific cost is already gone by the time a purge runs; the ordering here is what is
- * left of the original fix, kept because it costs nothing and still holds if a future FK into
- * {@code media_object} shows up unindexed.
+ * whole change exists to fix. Those four columns were removed entirely in favor of the indexed
+ * {@code media_ref} join table above, so that specific cost is already gone by the time a purge runs;
+ * the ordering here is what is left of the original fix, kept because it costs nothing and still holds
+ * if a future FK into {@code media_object} shows up unindexed.
  */
 @Repository
 public class ProjectPurgeRepository {

@@ -40,30 +40,25 @@ import org.springframework.stereotype.Service;
  * the finding's dossier, runs the agent against it and against this platform's own MCP surface, and
  * tears down.
  *
- * <h2>No clone, and the MCP key in its place</h2>
+ * <h2>No repository clone</h2>
  *
- * <p>This request used to carry a nullable {@code clone_url}, and half its runs paid for a repository
- * clone. Triage audits a CLAIM — is it true, was it measured over enough, does the evidence carry it
- * — and no source file answers any of those. What the run actually needs is the substrate the claim
- * is about, which is why the dossier shrank to the finding's own two files and the sandbox now
- * carries a short-lived project-scoped key ({@code mcp: {url, token}}, the same field
- * {@code E2bRcaSandbox} sends): the agent pages the evidence refs and reads the traces it decides to
- * read, then cites the ids it fetched. Locating a cause is RCA's job, and the repository went with
- * it.
+ * <p>Triage audits a claim: is it true, was it measured over enough, does the evidence carry it.
+ * No source file answers that. The dossier is the finding's own two files plus a short-lived
+ * project-scoped MCP key ({@code mcp: {url, token}}, the same field {@code E2bRcaSandbox} sends):
+ * the agent pages the evidence refs and reads the traces it decides to read, then cites the ids it
+ * fetched.
  *
- * <h2>A failed RUN fails open; a failed LAUNCHER does not</h2>
+ * <h2>A failed run fails open; a failed launcher does not</h2>
  *
  * <p>A run that happened and produced nothing usable returns {@link Optional#empty()}.
  * {@link BehaviorTriageEngine} turns that into a thrown {@code TRIAGE_RUN_INCOMPLETE}, the job
- * retries and eventually dead-letters, and {@code triage_verdict} stays NULL. That is what makes
- * {@code unclear} safe to close on — a launcher outage cannot manufacture one.
+ * retries and eventually dead-letters, and {@code triage_verdict} stays NULL, which is what makes
+ * {@code unclear} safe to close on: a launcher outage cannot manufacture one.
  *
  * <p>A launcher that could not be reached, rejected the credentials, has no {@code /triage} route,
- * or failed internally is a different fact and throws {@code TRIAGE_LAUNCHER_UNAVAILABLE}. It is not
- * about this finding and will be just as true for the next one, so the worker refunds the attempt
- * and stops draining instead of spending every queued job's attempts against a shut door. The
- * distinction is the whole point: before it, a launcher answering 401 looked exactly like
- * twenty-five separate findings that each happened to produce no ruling.
+ * or failed internally is a different fact and throws {@code TRIAGE_LAUNCHER_UNAVAILABLE}: it is
+ * not about this finding and will be just as true for the next one, so the worker refunds the
+ * attempt and stops draining instead of spending every queued job's attempts against a shut door.
  */
 @Service
 public class E2bTriageSandbox implements TriageSandbox {
@@ -84,7 +79,7 @@ public class E2bTriageSandbox implements TriageSandbox {
 
     private final ObserverProperties props;
     private final ProjectModelSettings modelSettings;
-    /** #939 D4: resolves + decrypts the org's own credential for the sandbox request body. */
+    /** Resolves and decrypts the org's own credential for the sandbox request body. */
     private final AgenticCredentialResolver credentials;
 
     private final LlmUsageAccountant usage;
@@ -107,12 +102,10 @@ public class E2bTriageSandbox implements TriageSandbox {
         this.credentials = credentials;
         this.usage = usage;
         this.pricer = pricer;
-        // The instrumentation scope is this class's own package, which is the convention every other
+        // The instrumentation scope is this class's own package, matching the convention every other
         // sandbox here follows (E2bRcaSandbox names ai.tessary.rca, E2bAnalysisSandbox
-        // ai.tessary.observer, and so on). It moved with the class in #839 and it is an OBSERVABLE
-        // rename: a trace query filtering on the old `...classifier.behavior` scope goes empty rather
-        // than wrong. Freezing the old string was the alternative and it would have made this the one
-        // scope name in the repo that lies about where its code lives.
+        // ai.tessary.observer). A trace query filtering on a stale scope goes empty rather than
+        // wrong, which beats freezing a string that lies about where the code lives.
         this.tracer = openTelemetry.getTracer("ai.tessary.classifier.finding");
         this.mapper = mapper;
     }
@@ -176,13 +169,11 @@ public class E2bTriageSandbox implements TriageSandbox {
             body.put("prompt", req.prompt());
             body.put("json_schema", req.jsonSchema());
             body.put("model", model);
-            // #939 D4: full removal of the launcher's deployment-env-var credential path — the org's
-            // own credential now travels ON the request, decrypted here and never logged (see
-            // AgenticCredentialResolver's class javadoc). Throws MISSING_CREDENTIALS /
-            // AGENTIC_IAM_ROLE_UNSUPPORTED BEFORE the launcher is ever called when there is no usable
-            // credential. An unresolved lane (no stored row) defaults to BEDROCK — see
-            // E2bRcaSandbox#providerFor's javadoc for why that is the honest default now that there
-            // is no deployment-wide fallback left to defer to.
+            // The org's own credential travels on the request, decrypted here and never logged (see
+            // AgenticCredentialResolver's class javadoc). Throws MISSING_CREDENTIALS or
+            // AGENTIC_IAM_ROLE_UNSUPPORTED before the launcher is ever called when there is no usable
+            // credential. An unresolved lane (no stored row) defaults to BEDROCK; see
+            // E2bRcaSandbox#providerFor's javadoc.
             ModelProvider provider = resolved.map(ProjectModelSettings.ResolvedAgenticModel::provider)
                     .orElse(ModelProvider.BEDROCK);
             body.put("provider", provider.name());
@@ -194,8 +185,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             mcp.put("url", req.mcpUrl());
             mcp.put("token", req.mcpToken());
             body.put("timeout_ms", cfg.getTimeoutMs());
-            // B (#994): a soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
-            // (not yet live-verified) caveat.
+            // A soft turn cap; see Agentic#maxTurns's javadoc for the mechanism and caveat.
             body.put("max_turns", cfg.getMaxTurns());
 
             // Host anchor for the per-turn child spans (in-VM timestamps are offsets from startMs).
@@ -209,7 +199,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             JsonNode node = mapper.readTree(respBody);
             String raw = node.path("raw").asText("");
             if (raw.isBlank()) {
-                // F1: a run-level failure body (server.js's buildErrorBody has no `raw`) — postLauncher
+                // A run-level failure body (server.js's buildErrorBody has no `raw`); postLauncher
                 // already booked any usage it carried before returning it here, so there is nothing
                 // left to do but stop treating this as a completed run.
                 markError(span, "agent returned no result");
@@ -269,11 +259,11 @@ public class E2bTriageSandbox implements TriageSandbox {
      *       fact about this request.
      * </ul>
      *
-     * <p>F1: {@code projectId}/{@code findingId}/{@code model} are here only so a failing run's body
-     * can be booked against the ledger before this method returns or throws — server.js's {@code
-     * buildErrorBody} carries a {@code usage} object (triage.js's failure envelope, extracted by the
-     * launcher) whenever the agent burned tokens before the run failed. {@link #bookUsage} already
-     * no-ops on a body with nothing usable, so this is safe to call on every non-2xx response.
+     * <p>{@code projectId}/{@code findingId}/{@code model} are here only so a failing run's body
+     * can be booked against the ledger before this method returns or throws: server.js's
+     * {@code buildErrorBody} carries a {@code usage} object whenever the agent burned tokens
+     * before the run failed. {@link #bookUsage} already no-ops on a body with nothing usable, so
+     * this is safe to call on every non-2xx response.
      */
     private @Nullable String postLauncher(
             String bodyJson, Agentic cfg, String projectId, String findingId, String model)
@@ -320,8 +310,8 @@ public class E2bTriageSandbox implements TriageSandbox {
                     resp.statusCode() == 404
                             ? " (no /triage route — is the launcher older than the backend?)"
                             : diag.isBlank() ? "" : " " + diag);
-            // F1: book what the run spent before it failed, REGARDLESS of which bucket the status
-            // falls into below — a launcher outage carries no usage (bookUsage no-ops on one), and a
+            // Book what the run spent before it failed, regardless of which bucket the status
+            // falls into below: a launcher outage carries no usage (bookUsage no-ops on one), and a
             // run failure (today always a 502, see server.js) is exactly the case this exists for.
             bookUsage(projectId, findingId, model, resp.body());
             if (isLauncherLevel(resp.statusCode())) {
@@ -350,33 +340,30 @@ public class E2bTriageSandbox implements TriageSandbox {
                 projectId,
                 ModelLane.TRIAGE.wire(),
                 model,
-                // #939 D4: never platform-funded any more — see E2bRcaSandbox's identical note.
+                // Never platform-funded; see E2bRcaSandbox's identical note.
                 false,
                 u.inputTokens(),
                 u.outputTokens(),
                 u.cacheReadTokens(),
                 u.cacheWriteTokens(),
                 u.costUsd(),
-                // The finding this ruling was about. This is the whole of launch H2's "per triage":
-                // without it the ledger can say the triage agent cost a project $40 last week and cannot
-                // say across how many rulings, which is the number that decides whether an agent session
-                // per distinct cause is the right price for a filter (H3).
+                // The finding this ruling was about: without it the ledger can say the triage agent
+                // cost a project $40 last week but not across how many rulings, which is the number
+                // that decides whether an agent session per distinct cause is the right price for a
+                // filter.
                 new LlmUsageAccountant.Subject(SUBJECT_KIND, findingId));
     }
 
     /**
-     * F4 (#994): the per-run spend cap on TRIAGE — {@code launch decision D6}, landing on the honest
-     * meter F1-F3 built. Runs AFTER {@link #bookUsage}, on the run's actual priced cost, and only ever
-     * FLAGS — logs a structured OPS line and marks the span — never rejects the ruling: see {@code
-     * ObserverProperties.Agentic#maxCostUsd}'s javadoc for why (the spend already happened; discarding
-     * a paid-for ruling protects nothing) and for the explicit statement that this is POST-HOC, not
-     * preventive — there is no live per-turn cost signal in this codebase to intervene on mid-run.
+     * The per-run spend cap on triage. Runs after {@link #bookUsage}, on the run's actual priced
+     * cost, and only ever flags: logs a structured OPS line and marks the span, never rejects the
+     * ruling. See {@code ObserverProperties.Agentic#maxCostUsd}'s javadoc for why: the spend
+     * already happened, so discarding the ruling protects nothing, and this is post-hoc rather
+     * than preventive since there is no live per-turn cost signal to intervene on mid-run.
      *
      * <p>Prices independently of {@link #bookUsage} rather than threading the number through it,
-     * because {@link LlmUsageAccountant#recordSandboxRun} computes its own priced total internally and
-     * does not hand it back — duplicating the (cheap, side-effect-free) price-book lookup here is
-     * smaller surgery than changing that shared method's signature for every other caller's benefit
-     * this issue does not need.
+     * since {@link LlmUsageAccountant#recordSandboxRun} computes its own priced total internally
+     * and does not hand it back.
      */
     private void flagIfOverSpendCap(
             Span span, SandboxRequest req, String model, String envelopeJson, @Nullable BigDecimal cap) {

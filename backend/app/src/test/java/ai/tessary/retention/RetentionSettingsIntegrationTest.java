@@ -32,7 +32,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * Settings → Data retention (#1205): the page reads the install default, a project override is
+ * Settings → Data retention: the page reads the install default, a project override is
  * what the sweeper's own {@link RetentionResolver} then reports, clearing it restores the default,
  * {@code 0} keeps forever, and a negative number is refused.
  */

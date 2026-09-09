@@ -7,9 +7,8 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Component;
 
 /**
- * One INFO line at startup naming the resolved edition. It is the positive, log-readable assertion a boot
- * check needs: an image that claims to be paid but boots the open classpath prints {@code edition=open},
- * and a health endpoint reporting 200 cannot tell those two apart.
+ * One INFO line at startup naming the resolved edition, so what actually booted is checkable
+ * alongside a health endpoint that only reports 200.
  */
 @Component
 public class EditionBanner implements SmartInitializingSingleton {

@@ -10,8 +10,8 @@ import java.util.Optional;
  * so the "Add a model" form can render generically. The {@code auth} kind drives
  * which credential fields the UI shows, which keeps the form consistent across
  * platforms (every {@code api_key} platform looks identical) and means adding a
- * platform is one descriptor here plus a build branch in {@code ChatModelFactory}
- * — no per-provider conditionals to edit in the frontend.
+ * platform is one descriptor here plus a build branch in {@code ChatModelFactory},
+ * no per-provider conditionals to edit in the frontend.
  */
 public final class PlatformCatalog {
 
@@ -27,27 +27,21 @@ public final class PlatformCatalog {
             @JsonProperty("supports_base_url") boolean supportsBaseUrl,
             @JsonProperty("default_base_url") String defaultBaseUrl) {}
 
-    // Every platform is paid and requires an org-provided credential (#939 D1/D6): OLLAMA — the one
-    // AUTH_NONE, platform-funded exception — was removed by D6's maker filter (Meta is not a
-    // supported maker), so there is no credential-free platform left at all. ChatModelFactory never
-    // falls back to an ambient key for a run selection any more.
+    // Every platform requires an org-provided credential; there is no credential-free platform.
+    // ChatModelFactory never falls back to an ambient key for a run selection.
     private static final List<PlatformDescriptor> PLATFORMS = List.of(
             new PlatformDescriptor(ModelProvider.OPENAI, "OpenAI", AUTH_API_KEY, true, "https://api.openai.com/v1"),
-            // WITH the /v1. langchain4j-anthropic's own default is "https://api.anthropic.com/v1/"
-            // and DefaultAnthropicClient appends the bare path "messages" to whatever baseUrl it is
-            // given — it does NOT add the version segment. So does OpenCode's @ai-sdk/anthropic in
-            // the agentic sandbox. A bare host here would post to /messages and 404 on BOTH paths.
-            // It reaches neither today only because buildAnthropic ignores this default and falls
-            // through to langchain4j's, and AnthropicModelLister uses its own constant — but this
-            // string is the Providers form's placeholder, so a user who types it in saves it as
-            // base_url_override, which both clients then use verbatim.
+            // WITH the /v1: langchain4j-anthropic's DefaultAnthropicClient appends the bare path
+            // "messages" to whatever baseUrl it's given rather than adding the version segment itself,
+            // and OpenCode's @ai-sdk/anthropic in the agentic sandbox does the same. A bare host here
+            // would post to /messages and 404 on both paths if a user typed it into the form.
             new PlatformDescriptor(
                     ModelProvider.ANTHROPIC, "Anthropic", AUTH_API_KEY, true, "https://api.anthropic.com/v1"),
             new PlatformDescriptor(
                     ModelProvider.OPENROUTER, "OpenRouter", AUTH_API_KEY, true, "https://openrouter.ai/api/v1"),
             new PlatformDescriptor(
                     ModelProvider.MOONSHOT, "Moonshot", AUTH_API_KEY, true, "https://api.moonshot.ai/v1"),
-            // Gemini over its own OpenAI-compatible endpoint — the same Chat Completions build path
+            // Gemini over its own OpenAI-compatible endpoint, the same Chat Completions build path
             // as OpenRouter/Moonshot, so no new auth kind or build method.
             new PlatformDescriptor(
                     ModelProvider.GEMINI,
@@ -59,15 +53,13 @@ public final class PlatformCatalog {
                     ModelProvider.GLM, "Zhipu GLM", AUTH_API_KEY, true, "https://open.bigmodel.cn/api/paas/v4"),
             new PlatformDescriptor(ModelProvider.GROK, "xAI Grok", AUTH_API_KEY, true, "https://api.x.ai/v1"),
             // No default base URL: CUSTOM is "any other OpenAI-compatible endpoint", so the user must
-            // supply one. supportsBaseUrl is true and required in practice — the form has nothing else
-            // to send the request to. Also the one deliberate exemption from D6's maker filter: an
-            // arbitrary user-supplied endpoint's model list is not enumerable against a maker at all.
+            // supply one. supportsBaseUrl is true and required in practice, since the form has nothing
+            // else to send the request to.
             new PlatformDescriptor(ModelProvider.CUSTOM, "Custom (OpenAI-compatible)", AUTH_API_KEY, true, null),
             new PlatformDescriptor(ModelProvider.BEDROCK, "AWS Bedrock", AUTH_AWS, false, null),
-            // Mantle authenticates with the same AWS credentials as Bedrock — SigV4, just against the
-            // bedrock-mantle service name — so it reuses AUTH_AWS and the Providers form renders it
-            // unchanged. No base-URL override: the host is derived from the region (a Bedrock API key
-            // would be the other way to reach it, and is deliberately not an option we offer).
+            // Mantle authenticates with the same AWS credentials as Bedrock (SigV4), just against the
+            // bedrock-mantle service name, so it reuses AUTH_AWS and the Providers form renders it
+            // unchanged. No base-URL override: the host is derived from the region.
             new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null));
 
     private PlatformCatalog() {}

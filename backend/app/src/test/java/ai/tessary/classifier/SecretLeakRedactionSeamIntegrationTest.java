@@ -33,7 +33,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * The seam #1044 found untested: an OTLP batch carrying a credential goes in through the ingest
+ * The seam left untested: an OTLP batch carrying a credential goes in through the ingest
  * service, the project's default redaction rules strip it on the write path, and the {@code
  * secret_leak} classifier still produces a detection from what was persisted. Both halves had their
  * own tests; this is the one that crosses the edge, with redaction ON and nothing seeded directly

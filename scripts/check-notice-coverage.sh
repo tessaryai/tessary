@@ -1,56 +1,53 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Built-artifact NOTICE coverage check (#1149, epic 6 — legal and security sign-off).
+# Built-artifact NOTICE coverage check: legal and security sign-off on what a real build actually
+# ships.
 #
 # The gate this script is one leg of: "the NOTICE file's attribution list is verified against the
 # actual filesystem contents of each built artifact, not the git tree." A dependency manifest
-# (backend/pom.xml, frontend/package.json) says what SHOULD resolve; it does not prove what a real
-# build actually bakes into the image — a transitive jar Maven's own resolver adds, a font binary
+# (backend/pom.xml, frontend/package.json) says what should resolve; it does not prove what a real
+# build actually bakes into the image, a transitive jar Maven's own resolver adds, a font binary
 # Vite copies into dist, a base-image package's own bundled license file. Only the artifact itself
 # can answer that, so this script builds it and looks.
 #
-# SCOPE: the open backend image and the open frontend image only — the two artifacts named in this
-# workstream. The self-host Compose bundle "as it materializes on a clean pull" and the paid image
-# are the other two artifacts the full gate text names; they belong to the other two workstreams
-# closing out #1149 in parallel and are not built or inspected here. This script also never reads
-# or names the paid overlay directory — it has nothing to say about paid content, and doing so
-# would trip check-open-boundary.sh rule 5 (an open script naming the overlay is a red `task check`
-# in the public export, where that directory does not exist).
+# SCOPE: this script's own backend and frontend images only. It never reads or names any other
+# artifact's build directory, since doing so would trip check-open-boundary.sh rule 5 (a script
+# under scripts/ naming that path is a red `task check` in the public export).
 #
 # WHAT THIS DOES.
-#   1. Builds the open backend and frontend images from docker-compose.yml — the same build
+#   1. Builds the open backend and frontend images from docker-compose.yml, the same build
 #      definitions `docker compose up` uses in production and check-open-boot-selfhost.sh proves
 #      boot with. Not reinvented here. The tags they land under are pinned below.
-#   2. `docker create` + `docker cp` — never `docker run` — pulls out exactly the layer each
+#   2. `docker create` + `docker cp`, never `docker run`, pulls out exactly the layer each
 #      Dockerfile actually assembles (backend: /app, the extracted Spring Boot layers plus the
 #      Pyroscope agent jar; frontend: /srv, the built static bundle) without starting either
 #      container or needing a database, a JDBC URL, or any of the other env `up` would demand.
 #   3. Backend: every *.jar found under the extracted layers is opened as a zip and checked for a
 #      top-level or META-INF NOTICE-shaped entry. A jar that ships one is a real, unarguable
-#      attribution-forwarding obligation (Apache License 2.0 §4(d)) — its presence is compared
+#      attribution-forwarding obligation (Apache License 2.0 §4(d)); its presence is compared
 #      against the root NOTICE file by a keyword derived from the jar's own filename. A hit with no
 #      corresponding NOTICE mention is a FAILURE: the exact "present in the artifact, absent from
 #      NOTICE" case the gate text names.
 #   4. Frontend: the built dist is scanned for font binaries (the bundled Geist / Geist Mono /
 #      Space Grotesk variable fonts, plus Lucide's icons) and for the license text that has to
-#      travel with them. BOTH halves are FAILURES now, not notes: the fonts must be named in
+#      travel with them. Both halves are failures, not notes: the fonts must be named in
 #      NOTICE, and their license text must physically be in the image (SIL OFL 1.1 §2 / ISC).
-#      #1293 made the second half enforceable by making it producible — frontend/scripts/
-#      copy-dep-licenses.mjs writes the texts into dist/licenses/ during `pnpm run build`.
+#      frontend/scripts/copy-dep-licenses.mjs writes the texts into dist/licenses/ during
+#      `pnpm run build`, which is what makes the second half enforceable.
 #
-# WHAT THIS DOES NOT PROVE — READ BEFORE TRUSTING A GREEN RUN.
+# WHAT THIS DOES NOT PROVE: READ BEFORE TRUSTING A GREEN RUN.
 #   - It does not resolve a full dependency graph. A jar's presence is discovered by walking the
 #     files the Dockerfile's own COPY actually produced, not by cross-referencing Maven's resolved
-#     classpath — a jar with no NOTICE entry of its own is silently fine here even if its license
+#     classpath; a jar with no NOTICE entry of its own is silently fine here even if its license
 #     has some OTHER forwarding obligation this script does not know how to detect (that gap is
 #     exactly what NOTICE's own "NOT INDEPENDENTLY VERIFIED" section names).
 #   - The keyword match is a case-insensitive substring test against the jar's own base filename
-#     (stripped of version and extension) — a real but blunt instrument. A NOTICE entry filed under
+#     (stripped of version and extension), a real but blunt instrument. A NOTICE entry filed under
 #     a different name than the jar (e.g. the aggregate "AWS SDK for Java" NOTICE covering a
 #     `software.amazon.awssdk:*` jar whose filename doesn't literally contain "aws") can produce a
 #     false FAILURE; this script's own hard-coded ALIAS map exists for exactly that reason and is
 #     not exhaustive.
-#   - It does not verify that a jar's NOTICE-file CONTENT matches what NOTICE actually reproduces —
+#   - It does not verify that a jar's NOTICE-file CONTENT matches what NOTICE actually reproduces:
 #     only that some attribution obligation was found and some mention of it exists. A stale quote
 #     (upstream rewords its NOTICE, ours doesn't) passes here.
 #   - It does not check the base OS images (eclipse-temurin JRE, caddy:2-alpine) for their own
@@ -59,13 +56,13 @@
 #   - It checks that SOME license text travels with the fonts, not that EACH bundled package's own
 #     text is among it: the assertion is "the licenses/ directory is non-empty", so dropping one of
 #     the four rows from copy-dep-licenses.mjs's PACKAGES table while leaving the others would pass
-#     here. That per-package correctness is enforced on the producing side instead — the script
-#     fails the build if any row cannot be resolved and copied — which is the only side that knows
+#     here. That per-package correctness is enforced on the producing side instead: the script
+#     fails the build if any row cannot be resolved and copied, which is the only side that knows
 #     which packages the build actually pulled in.
 #   - It builds and inspects one architecture (whatever `docker build` resolves to on the host
 #     running this script), not a multi-arch manifest.
 #
-# NEEDS DOCKER AND MINUTES — same cost class as check-open-boot.sh and check-dependency-audit.sh.
+# NEEDS DOCKER AND MINUTES, same cost class as check-open-boot.sh and check-dependency-audit.sh.
 # NOT wired into `task check` / scripts/check.sh's per-PR pipeline (see its EXCLUDED manifest row,
 # same disposition and same reasoning as dependency-audit: this is not a per-commit gate, it is a
 # tool a human runs before a release). Invoke it directly:
@@ -98,13 +95,12 @@ trap _cleanup EXIT
 echo "$P: building the open backend + frontend images from docker-compose.yml…"
 # POSTGRES_USER/POSTGRES_PASSWORD are only read by the backend service's `environment:` block, but
 # Compose interpolates the WHOLE file before deciding what to build, so their `:?must be set` guard
-# fires on a bare `build` too — dummy, run-scoped values, never used for anything but parsing.
+# fires on a bare `build` too; dummy, run-scoped values, never used for anything but parsing.
 # BACKEND_IMAGE/FRONTEND_IMAGE are docker-compose.yml's own override seams for the two `image:`
 # tags. Pinning them to run-scoped names is what lets `docker create` below address exactly the
 # images this build just produced, without parsing the compose file for the tag it defaulted to and
 # without colliding with (or clobbering) a real `tessaryai/tessary:*-<version>` a developer already
-# has locally. The two names used to be hard-coded on both sides; #1212 renamed the published
-# images and the `docker create` half was left pointing at tags nothing tags any more.
+# has locally.
 BACKEND_IMAGE=tessary-backend:notice-coverage-check
 FRONTEND_IMAGE=tessary-frontend:notice-coverage-check
 
@@ -150,7 +146,7 @@ while IFS= read -r _jar; do
     # surfaces under in the root NOTICE file, for the cases where the two names genuinely differ
     # (the AWS SDK's NOTICE covers many `software.amazon.awssdk:*` jars whose filenames don't
     # contain "aws"; grpc-netty-shaded's forwarding obligation is filed under "netty", not its own
-    # artifact name). NOT exhaustive — see the header's "WHAT THIS DOES NOT PROVE".
+    # artifact name). NOT exhaustive; see the header's "WHAT THIS DOES NOT PROVE".
     case "$keyword" in
         lambda|http-auth-aws|http-auth|sdk-core|auth|regions|profiles|aws-*|*-endpoints-spi|*-json-protocol)
             check_kw="aws sdk" ;;
@@ -190,14 +186,12 @@ else
     fi
     # SIL OFL 1.1 §2 (and ISC, for Lucide) require the copyright notice AND the license text to
     # accompany every redistributed copy of the font. The artifact being redistributed is this
-    # image, so the obligation is on /srv — naming the packages in NOTICE, which the branch above
-    # checks, does not discharge it. This used to be a `note` that set no `fail`, on the reasoning
-    # that Vite does not copy npm license files and the script could not close the gap itself.
-    # #1293 closed it: frontend/scripts/copy-dep-licenses.mjs writes them to dist/licenses/ as the
-    # last step of `pnpm run build`, and dist becomes /srv. So an empty result here no longer means
-    # "known gap" — it means that build step did not run (or was dropped from package.json's
-    # `build`, or frontend/Dockerfile stopped COPYing frontend/scripts), and the image ships font
-    # binaries with no license. That is a real compliance failure, and it fails.
+    # image, so the obligation is on /srv: naming the packages in NOTICE, which the branch above
+    # checks, does not discharge it. frontend/scripts/copy-dep-licenses.mjs writes the texts to
+    # dist/licenses/ as the last step of `pnpm run build`, and dist becomes /srv, so an empty
+    # result here means that build step did not run (or was dropped from package.json's `build`,
+    # or frontend/Dockerfile stopped COPYing frontend/scripts), and the image ships font binaries
+    # with no license. That is a real compliance failure, and it fails.
     _font_license="$(find "$TMP/frontend/srv" -type f \( -iname 'OFL*' -o -iname 'LICENSE*' -o -iname '*NOTICE*' \) | sort)"
     if [ -z "$_font_license" ]; then
         echo "  FINDING      font binaries are bundled but NO license text travels with them in the image — frontend/scripts/copy-dep-licenses.mjs did not run (check frontend/package.json's \`build\` and frontend/Dockerfile's \`COPY frontend/scripts\`)" >&2

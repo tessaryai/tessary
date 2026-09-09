@@ -26,7 +26,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * Acceptance for the commit-SHA lineage spine: a substrate grain — session, turn, trace or span —
  * resolves to the exact {@code project_version} (commit SHA) that caused it.
  *
- * <p><b>Three node kinds left with Track A, and with them the raw-SHA shape.</b> {@code verdict},
+ * <p><b>Three node kinds are gone, and with them the raw-SHA shape.</b> {@code verdict},
  * {@code observer_alert} and {@code diff_classification} were all resolvable here; grading and the
  * observer are gone, and {@code observer_alert.project_version_sha} was the only raw-SHA provenance
  * the spine ever had. What is asserted below is the whole of what remains: the direct-FK shape on

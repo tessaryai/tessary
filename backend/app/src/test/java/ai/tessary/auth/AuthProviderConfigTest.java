@@ -11,7 +11,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * {@link AuthProviderConfig}'s bean selection (#852) is exactly the failure class that passes
+ * {@link AuthProviderConfig}'s bean selection is exactly the failure class that passes
  * every other test while being wrong: the wrong {@link AuthProvider} silently wins, everything
  * else keeps compiling, and nothing else notices. Two separate {@code @SpringBootTest} classes,
  * one per posture, since {@code @DynamicPropertySource} is fixed per test class and Spring caches

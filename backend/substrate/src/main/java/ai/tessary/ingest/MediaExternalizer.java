@@ -30,7 +30,7 @@ import org.springframework.stereotype.Component;
  * ({@code {type:"image_ref", data:"<mediaId>", mediaType:"<mime>"}}); each externalized document
  * becomes a {@code document_ref} node whose {@code text} field ALSO carries the extracted PDF text (or
  * a labeled failure marker) so the judge boundary never needs a MediaStore round trip for the common
- * case (#985, Epic 8 Track B). Bytes live once (content-addressed, per-project deduped) in
+ * case. Bytes live once (content-addressed, per-project deduped) in
  * {@code media_object}. Readers re-hydrate by id: the judge boundary via {@link MediaStore#get}
  * just-in-time, the frontend via the media serve endpoint.
  *
@@ -49,7 +49,7 @@ import org.springframework.stereotype.Component;
  * {@code media_object} row back to the span that carries it: the reference itself is a string inside the
  * payload JSON, invisible to FKs and cascades, so the caller writes a {@code media_ref} row per id in the
  * same transaction as the payload. Dropping them on the floor is what made every one of those rows
- * unreachable and uncollectable (#761), and a store that succeeds without the caller learning the id is
+ * unreachable and uncollectable, and a store that succeeds without the caller learning the id is
  * the bug re-appearing.
  *
  * <p>Recognises the same base64 shapes {@code ContentExtractor} does: Anthropic

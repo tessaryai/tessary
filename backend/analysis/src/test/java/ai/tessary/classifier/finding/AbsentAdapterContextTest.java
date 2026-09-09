@@ -26,23 +26,21 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 /**
- * The open edition's context STARTS with no drift adapter on the classpath.
+ * This build's context starts with no drift adapter on the classpath.
  *
- * <p>{@code TriageSourceAbsenceTest} already proves that an absent adapter DEGRADES correctly — an empty
- * list, a null block, a 404 — by handing empty collections to the real constructors. It cannot prove the
- * step before that: whether Spring hands those constructors an empty collection at all. That gap is
- * exactly where #840 and #841 would have failed. Two of the ports have a single implementation each,
- * all {@code @Component}s that #840 took to {@code ai.tessary.paid.classifier.behavior}, and they were
- * injected as plain required
- * {@code List<T>} parameters — so moving that package produced NO compile error, NO import to sever and
- * nothing for {@code check-open-boundary.sh} to grep, while Spring treats a required collection with no
- * candidates as an unsatisfied dependency and refuses to start. A boot failure with a green build, found
- * when a container starts. That move has now happened, and this test is what says it landed quietly.
+ * <p>{@code TriageSourceAbsenceTest} already proves that an absent adapter degrades correctly (an
+ * empty list, a null block, a 404) by handing empty collections to the real constructors. It
+ * cannot prove the step before that: whether Spring hands those constructors an empty collection
+ * at all. The ports with a single implementation are injected as plain required {@code List<T>}
+ * parameters, so removing that implementation produces no compile error, no import to sever and
+ * nothing for {@code check-open-boundary.sh} to grep, while Spring treats a required collection
+ * with no candidates as an unsatisfied dependency and refuses to start: a boot failure with a
+ * green build, found only when a container starts. This test is what catches that quietly.
  *
  * <p>So this file asserts the thing no other file can: a context holding the real
- * {@link FindingService}, {@link BehaviorTriageSource} and {@link ClassifierDebugService}, with every
- * collaborator mocked and NO {@link CauseResolver} or
- * {@link ClassifierDebugContributor} bean at all, comes up — and the ports resolve empty.
+ * {@link FindingService}, {@link BehaviorTriageSource} and {@link ClassifierDebugService}, with
+ * every collaborator mocked and no {@link CauseResolver} or {@link ClassifierDebugContributor}
+ * bean at all, comes up, and the ports resolve empty.
  *
  * <p>No Spring Boot application, no database, no Docker: {@link ApplicationContextRunner} is a bean
  * factory, and every collaborator below is a Mockito mock that is never called.
@@ -50,9 +48,10 @@ import org.springframework.context.annotation.Import;
 class AbsentAdapterContextTest {
 
     /**
-     * The wiring an edition with no drift classifier produces. {@code @Import} rather than
-     * {@code @Bean} methods on purpose: it is the REAL constructor Spring has to satisfy, so a parameter
-     * that goes back to {@code List<T>} fails this test rather than passing it in a different shape.
+     * The wiring a build with no drift classifier produces. {@code @Import} rather than
+     * {@code @Bean} methods on purpose: it is the real constructor Spring has to satisfy, so a
+     * parameter that goes back to {@code List<T>} fails this test rather than passing it in a
+     * different shape.
      */
     @Configuration(proxyBeanMethods = false)
     @Import({FindingService.class, BehaviorTriageSource.class, ClassifierDebugService.class})
@@ -143,13 +142,13 @@ class AbsentAdapterContextTest {
                     assertNull(
                             ctx.getStartupFailure(),
                             "an edition shipping no drift adapter must WIRE, not merely degrade once wired");
-                    // And the ports really are empty — the context could otherwise be green because something
-                    // else quietly registered an adapter.
+                    // The ports really are empty: the context could otherwise be green because
+                    // something else quietly registered an adapter.
                     assertTrue(ctx.getBeansOfType(CauseResolver.class).isEmpty());
                     assertTrue(
                             ctx.getBeansOfType(ClassifierDebugContributor.class).isEmpty());
-                    // The shared table's own adapter is open and never absent, which is why THAT port is still a
-                    // plain List<TriageSource> and is not part of this claim.
+                    // The shared table's own adapter is never absent, which is why that port is
+                    // still a plain List<TriageSource> and is not part of this claim.
                     assertEquals(1, ctx.getBeansOfType(TriageSource.class).size());
                 });
     }

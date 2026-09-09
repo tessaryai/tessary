@@ -13,7 +13,7 @@ allowBuilds:
   protobufjs: true
   sharp: true
 
-# Transitive advisory fixes (#928). Both are pulled in by dependencies whose own latest release
+# Transitive advisory fixes. Both are pulled in by dependencies whose own latest release
 # still carries the vulnerable version, so there is no upstream bump to take:
 #
 #   sharp    @huggingface/transformers@4.2.0 -- the LATEST release, not a stale pin -- depends on

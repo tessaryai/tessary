@@ -16,11 +16,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
  * {@link RateLimitFilter#shouldNotFilter}'s posture table, on the {@code AuthFilterPostureTest}
- * precedent (#935): plain JUnit, no Spring context, no Docker. This filter needs neither — it
+ * precedent: plain JUnit, no Spring context, no Docker. This filter needs neither — it
  * reads a request path and, on the throttled path, an in-memory map, so it runs everywhere and
  * runs fast.
  *
- * <p>Written new because no {@code RateLimitFilterTest} existed anywhere in the repo before #935,
+ * <p>Written new because no {@code RateLimitFilterTest} existed anywhere in the repo before this,
  * unlike {@link AuthFilter}, which had a thorough posture test. The gap mattered here specifically:
  * the fix this file backs (widening {@code shouldNotFilter} to cover guarded actuator paths) had no
  * regression harness to extend, and no established shape to model a new one after other than this
@@ -67,7 +67,7 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("a guarded actuator path is NOT exempt (#935) -- it now carries a staff-verified ctx")
+    @DisplayName("a guarded actuator path is NOT exempt -- it now carries a staff-verified ctx")
     void guardedActuatorPathsAreRateLimited() {
         for (String path : new String[] {
             "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus"
@@ -90,14 +90,14 @@ class RateLimitFilterTest {
     }
 
     // -----------------------------------------------------------------------------------------
-    // #852: POST /auth/signup and /auth/login are the two credential-checking routes the
+    // POST /auth/signup and /auth/login are the two credential-checking routes the
     // dependency-free password provider adds. They must now be rate-limited by IP, since they
     // have no TenantContext to key on -- and every OTHER /auth/** path must stay exempt exactly
     // as before.
     // -----------------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("POST /auth/signup and /auth/login are no longer exempt (#852)")
+    @DisplayName("POST /auth/signup and /auth/login are no longer exempt")
     void credentialRoutesAreNotExempt() {
         assertFalse(filter().shouldNotFilter(request("POST", "/auth/signup")), "/auth/signup must be rate-limited");
         assertFalse(filter().shouldNotFilter(request("POST", "/auth/login")), "/auth/login must be rate-limited");

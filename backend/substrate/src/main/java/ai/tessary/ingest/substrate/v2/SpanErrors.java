@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
  * How a failing span's two error columns are derived, in one place because two writers derive them: the
  * span itself ({@link SpanBatchWriter}) and the {@code tool_call} hung off it ({@link SpanSideTables}).
  *
- * <p><b>The split (#762).</b> {@code error_type} used to be written from the producer's
+ * <p><b>The split.</b> {@code error_type} used to be written from the producer's
  * {@code statusMessage} — free prose, up to 3,271 characters of agent markdown on the corpus that
  * surfaced this — in the column every facet, breakdown and {@code GROUP BY} in the product treats as a
  * type. It now holds the CLASS: the producer's own {@code error.type} attribute, which is what OTel
@@ -39,7 +39,7 @@ final class SpanErrors {
      * bound the fallback signature carries. {@code error.type} is documented everywhere as a short facet
      * key, but nothing upstream enforces that on the wire, and a producer is free to put prose there; an
      * uncapped declared value would let one poorly-behaved producer reopen the exact bloated-facet-key
-     * problem #762 exists to close.
+     * problem this exists to close.
      */
     static @Nullable String errorClass(@Nullable String declaredType, @Nullable String statusMessage) {
         if (declaredType != null && !declaredType.isBlank()) return cap(declaredType);

@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
  *       deploy any of its traces ran under.</li>
  * </ul>
  *
- * <p>A third shape, RAW SHA, existed until Track A: {@code observer_alert.project_version_sha}
+ * <p>A third shape, RAW SHA, existed while there was an observer: {@code observer_alert.project_version_sha}
  * stored the SHA string rather than the FK and resolved through
  * {@link ProjectVersionRepository#findByCommit}. It went with the observer, and a new column must
  * NOT bring it back — {@link ProjectVersionRepository#findByCommit} survives for the write-side
@@ -43,13 +43,13 @@ public class CommitLineageService {
      *
      * <p>These names are the PATH TOKEN of {@code /versions/lineage/{nodeKind}/{nodeId}}, so the enum is
      * the public spelling of a node kind and not merely an internal label. {@link #SPAN} was
-     * {@code OBSERVATION} until 0094 finished the v1 vocabulary rename: {@link #TURN} is kept beside
+     * {@code OBSERVATION} until the v1 vocabulary rename finished: {@link #TURN} is kept beside
      * {@link #TRACE} because a turn IS a trace and callers minted links under both words, whereas nothing
      * ever linked to {@code /lineage/observation/…} — the frontend has no caller and the plugin does not
      * use this endpoint at all.
      *
      * <p>{@code VERDICT}, {@code OBSERVER_ALERT}, {@code DIFF_CLASSIFICATION} and {@code RISK_STAT}
-     * were removed by Track A with the tables behind them. The path variable is a string, so those
+     * were removed with the tables behind them. The path variable is a string, so those
      * spellings now fail {@link #parse} and the endpoint answers 400 rather than 500 — which is the
      * correct answer for a node kind that no longer exists.
      */

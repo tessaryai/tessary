@@ -78,7 +78,7 @@ public class AgenticRcaEngine {
      * <p>They are the agreed specification for this layer, not prompt tuning: what an RCA is for and what
      * it is allowed to conclude (rules 1 and 2), the order that keeps it cheap and honest (3, 4), the
      * standard of proof (5), what the repository is and is not (6), the obligation that makes a
-     * report actionable rather than a story (7), and — since B (#994) — what to do if the run is forced
+     * report actionable rather than a story (7), and what to do if the run is forced
      * to stop before finishing (8), so a truncated run reports a low-confidence verdict rather than
      * silence.
      */
@@ -135,7 +135,7 @@ public class AgenticRcaEngine {
      * always the RCA path (there is no alternate, non-agentic analyzer to fall back to), so the check is
      * unconditional rather than gated on "am I the active analyzer".
      *
-     * <p><b>#857 considered and rejected adding the same unconditional treatment to a blank {@code
+     * <p><b>This engine deliberately does not apply the same unconditional treatment to a blank {@code
      * tessary.rca.agentic.mcp-base-url} here.</b> Unlike {@code tessary.rca.agentic.sandbox}'s key (whose
      * default, "e2b", is always registered — a stable invariant), the MCP base URL has no safe non-blank
      * default, and this bean is instantiated in EVERY app-context boot regardless of whether the boot

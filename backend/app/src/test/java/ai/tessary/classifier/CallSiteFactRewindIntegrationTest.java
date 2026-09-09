@@ -35,38 +35,19 @@ import org.springframework.test.context.DynamicPropertySource;
  * The chicken-and-egg this feature exists to break, end to end against the real pgvector Postgres.
  *
  * <p>The platform must ingest correctly-tagged traces before the plugin will assess the repo, and it
- * is that repo assessment (agentic synthesis) which captures {@code call_site.output_schema} and
- * {@code call_site.shape}. So a project's first traffic is ALWAYS swept by Malformed Output and
- * Groundedness before either has anything to gate on: they abstain, the cursor advances over the
- * abstention, and — before this — that history was unscoreable forever while the product rendered it
- * as "nothing found".
+ * is that repo assessment (agentic synthesis) which captures {@code call_site.output_schema}. So a
+ * project's first traffic is always swept by Malformed Output before it has anything to gate on: it
+ * abstains, and the cursor advances over the abstention.
  *
  * <p>These tests pin the fix at its real seams: a fact landing rewinds exactly the signals that
  * declare it, an unchanged re-capture rewinds nothing, and a fact change never disturbs a signal that
  * reads only the trace.
  *
- * <h2>The SHAPE half of this file left with #888, and is owed back</h2>
- *
- * <p>{@link ai.tessary.model.CallSite} facts have exactly two readers. {@code
- * MalformedOutputDetector} declares {@code OUTPUT_SCHEMA} and stays open; {@code GroundednessDetector}
- * declared {@code SHAPE} and moved to {@code tessary-paid/groundedness} with #888. {@code
- * ClassifierService.rewindForCallSiteFact} asks {@code catalog.detectorFor(row.detector())} what facts a
- * signal reads and skips it when that answer is {@code null} — so in an open build a shape change now
- * rewinds nothing, because the only signal that ever cared is not on the classpath.
- *
- * <p>Three tests asserting the shape rewind were therefore DELETED rather than relocated, following the
- * precedent set for behaviour drift and the paid plan module: {@code @SpringBootTest} lives in {@code
- * backend/app}, whose dependency closure can never contain a paid module, and the overlay has no
- * integration-test harness. Epic 5 owns building that harness. Three more assertions went with them —
- * {@code assertFalse(rewound(pid, "groundedness"), ...)} in three surviving tests — NOT because they
- * failed, but because they would have kept passing on the detector's absence instead of on the rule they
- * name. A green assertion that cannot fail is worse than a missing one.
- *
- * <p>What is gone, precisely, so it can be restored rather than reinvented: a shape import re-opens
- * groundedness's history; re-importing the same shape rewinds nothing (the diff is taken before
- * {@code replace()} wipes the call sites); a shape moving from outside {@code GROUNDED_SHAPES} to inside
- * it re-opens history; and the default {@code upsert(pipeline, true)} import path rewinds on shape the
- * same way it does on schema.
+ * <p>{@link ai.tessary.model.CallSite} facts have one live reader in this build: {@code
+ * MalformedOutputDetector} declares {@code OUTPUT_SCHEMA}. {@code
+ * ClassifierService.rewindForCallSiteFact} asks {@code catalog.detectorFor(row.detector())} what
+ * facts a signal reads and skips it when that answer is {@code null}, so a {@code SHAPE} fact
+ * change rewinds nothing here: nothing on this classpath reads it.
  */
 @SpringBootTest
 @Import(TurnGrainTestDetectionConfig.class)
@@ -102,12 +83,9 @@ class CallSiteFactRewindIntegrationTest {
      * A project whose built-ins have each already swept its pre-synthesis history — the state every
      * real project reaches before any repo assessment is possible.
      *
-     * <p>Frustration is a paid classifier and OFF by default in an open build (#887/#888), but its
-     * detector is the always-open {@code EncoderDetector}, so it is still a live control here for "a
-     * call-site fact does not disturb a signal that reads only the trace" — granted before the project
-     * exists, the moment seeding reads capabilities. Groundedness is NOT granted: a grant would seed the
-     * row but its detector left with #888, so every groundedness assertion here would pass on the
-     * detector's absence rather than on the rewind rule. See the class note above.
+     * <p>Frustration is granted before the project exists, the moment seeding reads capabilities, so
+     * its always-on {@code EncoderDetector} is a live control here for "a call-site fact does not
+     * disturb a signal that reads only the trace."
      */
     private String projectWithSweptHistory(String name) {
         String pid = TenantFixture.bootstrap(tenants, name, org -> {

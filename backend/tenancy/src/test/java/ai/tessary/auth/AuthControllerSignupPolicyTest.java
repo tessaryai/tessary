@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 /**
- * The sign-up policy gate (#1226) at each of the three call sites that create a principal:
+ * The sign-up policy gate at each of the three call sites that create a principal:
  * {@code POST /auth/signup}, {@code POST /auth/login}'s first-time path, and
  * {@code GET /auth/callback}. A refusal must reach the caller as the catalogued error, or as a
  * redirect naming it on the browser-navigation route, and must leave {@link TenantService} untouched.

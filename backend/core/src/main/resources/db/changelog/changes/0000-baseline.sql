@@ -2,9 +2,9 @@
 
 --changeset evals:0000-baseline splitStatements:false stripComments:false
 --comment: The squashed baseline schema for the OPEN lane, re-photographed 2026-09 for the public
---comment: repo cutover (#1144) so tessaryai/tessary starts life with one changeset instead of the
---comment: churn that had accumulated behind it. The 0017-0023 chain that followed the epic-3
---comment: partition is folded in: the vector/embedding substrate and the centroid classifier's
+--comment: repo cutover so tessaryai/tessary starts life with one changeset instead of the
+--comment: churn that had accumulated behind it. The 0017-0023 chain that followed the open/paid
+--comment: split is folded in: the vector/embedding substrate and the centroid classifier's
 --comment: table are gone along with the `vector` extension itself (0017), the `assistant` model
 --comment: lane is gone and ck_project_model_setting_lane is down to (rca, triage) (0018),
 --comment: provider_credential carries auth_mode, custom_model_name and an org-scoped unique index
@@ -14,19 +14,17 @@
 --comment: since a photograph of an empty database cannot carry a row nobody inserted.
 --comment: This file seeds NO rows. embedding_space held the open lane's only platform seed and it
 --comment: left with the embedding lane in 0017, so a database born from this baseline starts empty.
---comment: Paid-only tables are not here: they live in the OVERLAY lane, tessary-paid/db's own
---comment: master changelog, whose baseline is tessary-paid:P0000-paid-baseline and which applies
---comment: strictly after this one. That includes behavior_baseline_event_profile_id_fkey, an FK on
---comment: an OPEN table that references an overlay one and so cannot run until the overlay has
---comment: created it.
+--comment: Paid-only tables are not here: they live in the OVERLAY lane's own master changelog,
+--comment: which applies strictly after this one. That includes
+--comment: behavior_baseline_event_profile_id_fkey, an FK on an OPEN table that references an
+--comment: overlay one and so cannot run until the overlay has created it.
 --comment: There is no conversion path and no straggler accommodation: every database either fold
 --comment: ever touched was dropped and recreated on its reset day, so a database of this era has
---comment: run this one changeset (plus, where the paid overlay is present,
---comment: tessary-paid:P0000-paid-baseline) and nothing else. A database that predates the baseline
+--comment: run this one changeset and nothing else. A database that predates the baseline
 --comment: fails its first boot loudly on the precondition below and is recreated, never repaired.
 --comment: New open migrations go in changes/NNNN-*.sql under author `evals`, numbering from the
---comment: next free number after this fold (0024); paid ones go in the overlay lane under author
---comment: `tessary-paid`, numbering from P0001.
+--comment: next free number after this fold (0024); paid-lane migrations are numbered
+--comment: independently in the overlay's own changelog.
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'project'
 

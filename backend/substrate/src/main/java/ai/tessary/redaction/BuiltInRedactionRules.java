@@ -106,7 +106,7 @@ public final class BuiltInRedactionRules {
             // field of a JSON body rather than the remainder of it. It also refuses a value that is
             // already a redaction token: this rule runs after the credential rules above, and without
             // the lookahead `api_key=AKIA...` came out as [REDACTED_SECRET], which the secret_leak
-            // detector reads at its LOW band instead of the API-key token's HIGH (#1044).
+            // detector reads at its LOW band instead of the API-key token's HIGH.
             new Template(
                     "Secret assignment",
                     "(?i)\\b(?:api[_-]?key|secret|password|passwd|access[_-]?token|refresh[_-]?token"

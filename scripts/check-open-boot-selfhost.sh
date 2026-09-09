@@ -1,34 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Detached open-edition SELF-HOST boot check (#1052) — the second leg of the epic-2 gate.
+# Detached SELF-HOST boot check: the second leg of the boot gate.
 #
-# scripts/check-open-boot.sh boots docker-compose.dev.yml (through scripts/lib/dev-compose.sh) and
-# drives the authenticated triage flow through it. That proves the DEV stack boots keyless. The
-# artifact a self-hoster actually runs is docker-compose.yml — a different file with a different
-# shape, and until #1052 no check had ever booted it: it defaults SPRING_PROFILES_ACTIVE to
-# `production` (activating application-production.yaml and AuthRequiredInProdGuard, which refuses
-# to start on a blank session key), it builds the real backend/Dockerfile and
-# frontend/Dockerfile (the Caddy-bundled image #926 hardened, which had no automated coverage
-# either), it starts sandbox-runner unconditionally (docker.sock mount, group_add, published image),
-# and it carried a hardcoded Tessary-region default the dev file never had. The gate's green run
-# said nothing about any of that. This leg does — boot + production auth guard + credential
-# deny-list. It deliberately does NOT repeat the authenticated triage flow: that is the dev leg's
-# job, and the two files share the same backend image contents, so proving the flow twice buys
-# nothing the production-profile boot itself does not already prove.
+# scripts/check-open-boot.sh boots docker-compose.dev.yml and drives the authenticated triage flow
+# through it, proving the DEV stack boots keyless. The artifact a self-hoster actually runs is
+# docker-compose.yml — a different file with a different shape: it defaults SPRING_PROFILES_ACTIVE
+# to `production` (activating application-production.yaml and AuthRequiredInProdGuard, which
+# refuses to start on a blank session key), it builds the real backend/Dockerfile and
+# frontend/Dockerfile, and it starts sandbox-runner unconditionally (docker.sock mount, group_add,
+# published image). This leg proves boot + production auth guard + credential deny-list, without
+# repeating the authenticated triage flow — that is the dev leg's job, and the two files share the
+# same backend image contents.
 #
 # NEVER RUN AGENT-SIDE, EVER — same rule as check-open-boot.sh, same reason (needs Docker to build
 # and boot a real stack). Run by a human (`task check:open:boot:selfhost`) or the dispatch-only
 # `.github/workflows/open-edition-boot.yml` (its second job). Never part of `task check` or
 # scripts/check.sh — see its EXCLUDED manifest row.
 #
-# WHAT IS PASSED IN, AND HOW — AND WHAT NO LONGER IS. Until #1230 this leg wrote a `.env` into the
-# export holding four generated credential values, because docker-compose.yml could not render or
-# boot without them: two of its own keys used `:?must be set`, so Compose refused before pulling an
-# image, and the production profile's auth guard refused to start on a blank session key. That is
-# exactly the prerequisite #1230 removed, so the write is gone, and ITS ABSENCE IS THIS LEG'S
-# ASSERTION: the self-host artifact must now boot with no credential supplied to it at all. If a
-# future change reintroduces one, this leg fails, which is the point — the .env below carries only
-# this run's port/dir knobs and nothing that seals or authenticates anything.
+# CREDENTIALS: this leg writes no generated credential into the export's `.env` — the self-host
+# artifact must boot with none supplied at all. If a future change reintroduces one, this leg
+# fails, which is the point; the .env below carries only this run's port/dir knobs.
 #
 # Kept from the original recipe: no cloud var, no SITE_DOMAIN (unset, so Caddy's :8000 plain-HTTP
 # site is what a fresh self-host reaches first, and so PlaceholderSecretGuard stays in its warn
@@ -41,18 +32,18 @@
 #   bash scripts/check-open-boot-selfhost.sh --negative-health  prove the health signal can fail:
 #       the backend's probe is overridden to a failing command, and the frontend must stay
 #       `created` (waiting) rather than `running`, with the wait reporting the failure instead of
-#       hanging until a timeout (epic 7 clause 4, #1189)
-#   bash scripts/check-open-boot-selfhost.sh --domain  boot with SITE_DOMAIN set (#1225): the
-#       sign-in origin and the WorkOS callback derive from it, the frontend serves the hostname on
+#       hanging until a timeout
+#   bash scripts/check-open-boot-selfhost.sh --domain  boot with SITE_DOMAIN set: the sign-in
+#       origin and the WorkOS callback derive from it, the frontend serves the hostname on
 #       :HTTPS_PORT with an operator-mounted certificate and no ACME attempt, a scheme-prefixed
 #       SITE_DOMAIN and a disagreeing TESSARY_AUTH_FRONTEND_URL each refuse the boot naming the key,
 #       and in upstream mode a forwarded client address is honoured from TRUSTED_PROXIES only.
 #       This leg DOES write two generated sealing keys, because PlaceholderSecretGuard refuses a
 #       domain on the shipped placeholders; the keyless assertion belongs to the default leg.
 #   bash scripts/check-open-boot-selfhost.sh --kafka  boot with the `kafka` profile and
-#       TESSARY_INGEST_SPOOL_MODE=kafka (#984): the bundled Redpanda is in the healthy set, its
-#       binary runs with --unsafe-bypass-fsync=false (the durability the docs promise), the
-#       backend creates both ingest topics on its own, and the consumer group holds one member per
+#       TESSARY_INGEST_SPOOL_MODE=kafka: the bundled Redpanda is in the healthy set, its binary
+#       runs with --unsafe-bypass-fsync=false (the durability the docs promise), the backend
+#       creates both ingest topics on its own, and the consumer group holds one member per
 #       configured drainer, each with partitions assigned — the parallel drain is real, not a knob.
 set -euo pipefail
 
@@ -86,8 +77,8 @@ done
 TMP="$(mktemp -d)"
 # A clean-room boot must not share state with the developer's own stack: both compose files carry
 # `name: tessary`, so without this the export reuses the developer's project, its persistent
-# Postgres volume (a pre-partition database fails the regenerated baseline's checksum, D-A) and
-# tears that stack down on exit. COMPOSE_PROJECT_NAME outranks the file's `name:`.
+# Postgres volume (a pre-partition database fails the regenerated baseline's checksum) and tears
+# that stack down on exit. COMPOSE_PROJECT_NAME outranks the file's `name:`.
 export COMPOSE_PROJECT_NAME="open-boot-selfhost-$$"
 COMPOSE=""
 
@@ -109,7 +100,7 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
-echo "$P: exporting the working tree (faithful export, #889) -> $TMP"
+echo "$P: exporting the working tree (faithful export) -> $TMP"
 bash "$ROOT/scripts/lib/export-simulate.sh" "$TMP"
 
 # The self-host artifact, named directly and on purpose. This is NOT a dev-stack invocation, so
@@ -166,7 +157,7 @@ fi
 # sandbox-runner comment). Read it off the socket itself, from inside a container, so this is
 # right on any host — a GitHub runner's docker group is not GID 999, and Docker Desktop's is 0.
 # Read as a CONTAINER sees the socket, which is the only view that matters: Docker Desktop mounts
-# it root:root, so the host-side stat (501:20 on a Mac) was never the right number (#1191 found it).
+# it root:root, so the host-side stat (501:20 on a Mac) was never the right number.
 DOCKER_SOCK_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock busybox:1.36 stat -c %g /var/run/docker.sock 2>/dev/null || echo 999)"
 # This run's port/dir knobs, and deliberately NOTHING ELSE (see the header). Compose reads this file
 # both for `${VAR}` interpolation and through backend's `env_file:`, and `config`/`ps` below see the
@@ -228,7 +219,7 @@ echo "$P: booting docker-compose.yml (self-host artifact) — production profile
 
 fail=0
 
-# The stack's own readiness signal first (epic 7 clause 4, #1189): `docker compose ps` must
+# The stack's own readiness signal first: `docker compose ps` must
 # report healthy for exactly the four services docs/self-hosting/setup.mdx names, and for no
 # other, before any HTTP probe below is allowed to stand in for it. 320 s clears the backend
 # probe's own give-up point (15 s start_period plus 60 retries x 5 s = 315 s), so this budget is
@@ -245,7 +236,7 @@ open_boot_assert_healthy_set "$P" "$TMP" "$COMPOSE" "${SERVICES[@]}" || fail=1
 open_boot_wait_for "$P" "GET /            (frontend, via caddy :$HTTP_PORT)" "$BASE/"          200 90 || fail=1
 open_boot_wait_for "$P" "GET /api/v1/me   (backend,  via caddy)"            "$BASE/api/v1/me" 401 90 || fail=1
 open_boot_wait_for "$P" "GET /auth/me     (backend,  via caddy)"            "$BASE/auth/me"   401    || fail=1
-# #1255: the status IS the assertion. This route is bearer-scoped, so the backend answers 401 —
+# The status IS the assertion. This route is bearer-scoped, so the backend answers 401 —
 # while an unproxied path does not 404, it falls through to the SPA and answers index.html with a
 # 200. So 401 proves the @backend matcher carries it and 200 proves it does not, which is the exact
 # failure this leg missed for as long as the matcher omitted the prefix. `unit` is supplied only to
@@ -305,7 +296,7 @@ done
 open_boot_check_denied_credentials "$P" "$TMP" "$COMPOSE" "${SERVICES[@]}" || fail=1
 
 if [ "$KAFKA_LEG" = 1 ]; then
-    echo "$P: KAFKA: profile kafka, TESSARY_INGEST_SPOOL_MODE=kafka, $KAFKA_CONSUMERS consumers (#984)…"
+    echo "$P: KAFKA: profile kafka, TESSARY_INGEST_SPOOL_MODE=kafka, $KAFKA_CONSUMERS consumers…"
     # 1. Durability is the whole reason to opt in, so the broker's own process line must carry the
     # explicit fsync flag docker-compose.yml passes (the image's developer_mode would otherwise
     # bypass fsync). Read from /proc rather than the log: the flag is the binary's argument.
@@ -347,7 +338,7 @@ if [ "$KAFKA_LEG" = 1 ]; then
 fi
 
 if [ "$DOMAIN_LEG" = 1 ]; then
-    echo "$P: DOMAIN: SITE_DOMAIN=$DOMAIN, TLS_MODE=owncert (#1225)…"
+    echo "$P: DOMAIN: SITE_DOMAIN=$DOMAIN, TLS_MODE=owncert…"
     HTTPS_BASE="https://$DOMAIN:$HTTPS_PORT"
     _resolve=(--resolve "$DOMAIN:$HTTPS_PORT:127.0.0.1")
 

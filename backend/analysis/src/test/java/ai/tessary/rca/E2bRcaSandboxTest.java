@@ -51,7 +51,7 @@ class E2bRcaSandboxTest {
         return s;
     }
 
-    /** #939 D4: every run resolves + injects an org credential now — a lenient stub covering
+    /** Every run resolves + injects an org credential now — a lenient stub covering
      *  whichever provider each test's lane resolution (or the BEDROCK default, for an unresolved
      *  lane — see E2bRcaSandbox#providerFor) actually asks for. No test here asserts the
      *  credential's own contents (only `provider`, a plain non-secret field, and the rest of the
@@ -175,7 +175,7 @@ class E2bRcaSandboxTest {
         assertEquals("https://api.example/mcp", body.path("mcp").path("url").asText());
         assertEquals("tsy_a_secret", body.path("mcp").path("token").asText());
         assertTrue(body.path("clone_url").asText().contains("x-access-token"));
-        // #939 D4: `provider` is ALWAYS sent now (never omitted) — there is no deployment-wide
+        // `provider` is ALWAYS sent now (never omitted) — there is no deployment-wide
         // default left for the launcher to fall through to. No explicit lane selection defaults to
         // BEDROCK (see E2bRcaSandbox#providerFor's javadoc for why that specific default), and the
         // credential resolved for it rides on the request too (never logged — see `credentials()`).
@@ -216,13 +216,13 @@ class E2bRcaSandboxTest {
         // The lane wins; an unset lane (every other test here) still gets ObserverProperties' default.
         var body = MAPPER.readTree(posted.toString());
         assertEquals("global.anthropic.claude-sonnet-4-6", body.path("model").asText());
-        // #939: an explicit lane selection also names its provider, so the launcher's providerConfig()
+        // An explicit lane selection also names its provider, so the launcher's providerConfig()
         // knows which block to build without having to parse the model id's shape.
         assertEquals("BEDROCK", body.path("provider").asText());
     }
 
     /**
-     * #939: a project pointed at one of the four new non-Bedrock providers sends a bare model id
+     * A project pointed at one of the four new non-Bedrock providers sends a bare model id
      * (not a Bedrock inference-profile string) plus an explicit {@code provider} field — the launcher
      * has no Bedrock-syntax hint to parse for these, so the field is how it knows what to build.
      */

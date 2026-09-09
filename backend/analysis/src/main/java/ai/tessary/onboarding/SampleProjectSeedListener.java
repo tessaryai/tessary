@@ -41,7 +41,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Seeds the sample project's demo data (#1227, showcase #1230) — enough for {@link
+ * Seeds the sample project's demo data — enough for {@link
  * OnboardingController#progress} to compute {@link OnboardingStage#CASE} without the real detection
  * pipeline ever running, so a project a user reaches by clicking "Start with a sample project" looks
  * like a project that has been live for weeks, not an empty shell with a banner on it.
@@ -79,7 +79,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * own NOT NULL/CHECK constraints says plainly "this row is fabricated," which a call through the
  * business-logic layer would not.
  *
- * <h2>The showcase dataset (#1230)</h2>
+ * <h2>The showcase dataset</h2>
  *
  * <p>{@link SampleShowcase} generates ~500+ "AI customer-support agent" traces spread over a 14-day
  * window and threaded through seven call sites; six of them carry a real cost/duration/error-rate
@@ -153,7 +153,7 @@ public class SampleProjectSeedListener {
         }
     }
 
-    // ---- showcase (#1230) ------------------------------------------------------------------
+    // ---- showcase -----------------------------------------------------------------------------
 
     private void seedShowcase(String projectId) {
         for (String callSite : SampleShowcase.CALL_SITES) {

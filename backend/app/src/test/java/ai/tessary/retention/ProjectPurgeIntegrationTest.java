@@ -320,9 +320,9 @@ class ProjectPurgeIntegrationTest {
     /**
      * {@code n} traces, each with a span, that span's payload, a tool call and a media object — the
      * volume tables the purge walks. The media object is referenced from its span_payload via a
-     * {@code media_ref} row, the join table {@code 0001-media-ref-and-error-message.sql} (#761/#762)
-     * introduced in place of the old unindexed {@code tool_call.arguments_ref}/{@code result_ref}
-     * columns — this is what makes {@code media_object} reachable at all today.
+     * {@code media_ref} row, the join table introduced in place of the old unindexed
+     * {@code tool_call.arguments_ref}/{@code result_ref} columns — this is what makes
+     * {@code media_object} reachable at all today.
      */
     private void traffic(Project p, int n) {
         String at = Instant.now().toString();

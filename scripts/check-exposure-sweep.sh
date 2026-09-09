@@ -1,47 +1,20 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The fresh-deployment exposure sweep (epic 6 clause 8, #1153; re-run unmodified by epic 7's #1198).
+# The fresh-deployment exposure sweep.
 #
-# Boots the self-host artifact, docker-compose.yml, exactly as check-open-boot-selfhost.sh does — a
-# faithful export, the production profile, no credential supplied — then attacks it from outside
+# Boots the self-host artifact, docker-compose.yml, exactly as check-open-boot-selfhost.sh does (a
+# faithful export, the production profile, no credential supplied), then attacks it from outside
 # with nothing but what the quickstart ships, and from a neighbouring tenant with an ordinary
-# account. Five arms, each recording every probe it makes as `METHOD PATH -> CODE  note` so a
-# green run is a listed result set rather than a silent pass:
-#
-#   1. unauthenticated probe   every operation in the open OpenAPI spec, plus the actuator, MCP,
-#                              OTLP and springdoc paths the spec does not list, called with no
-#                              cookie and no bearer. A 2xx is a finding unless the path is
-#                              unauthenticated BY DESIGN (the allowlist below, each entry with why).
-#   2. default credential      the rendered compose and every container env carry no denied
-#                              credential; the database holds no session and no membership before
-#                              the first signup; a guessed default login fails; the Postgres port
-#                              is not published; and (2b, last, since it takes the backend down)
-#                              the shipped placeholder sealing keys make the backend REFUSE to boot
-#                              under a real SITE_DOMAIN, which is what keeps a forgeable session
-#                              cookie off any host that is not localhost.
-#   3. served bundle           the frontend's /srv, byte for byte: no source map, no
-#                              sourceMappingURL, no credential-shaped string, no absolute build
-#                              path, nothing from the export's forbidden-string list (EXPOSURE_
-#                              FORBIDDEN — see the variable below; the list moved into the overlay
-#                              at #1293 and this script may not name the overlay itself).
-#   4. SSRF and traversal      a listener on the stack network; every customer-supplied URL field
-#                              (provider base_url_override, source baseUrl) is pointed at it and
-#                              at the loopback backend, and every id-shaped path segment is given
-#                              a traversal payload. A connection to the listener, or a 2xx on a
-#                              traversal, is a finding.
-#   5. cross-tenant            two fresh accounts; every read/list operation under an org is
-#                              called by tenant B with tenant A's slugs (ids are a well-formed
-#                              placeholder ULID, so the answer is the tenant gate's, 403 or 404),
-#                              and B's project-bound bearer is aimed at A's org routes. A 2xx is
-#                              a finding.
+# account. Five arms: unauthenticated probe, default credential, served bundle, SSRF and traversal,
+# and cross-tenant. Each records every probe as `METHOD PATH -> CODE  note`, so a green run is a
+# listed result set rather than a silent pass.
 #
 # The result set is written to scripts/lib/exposure-sweep-baseline.txt with --record, and every
-# later run diffs itself against that file: a probe that changed status is reported by name, which
-# is what lets #1198 re-run this instrument unmodified and state what moved. The exit code is
-# the FINDINGS, never the diff — a baseline is a record, not an allowlist.
+# later run diffs itself against that file, naming any probe whose status changed. The exit code
+# is the findings, never the diff; a baseline is a record, not an allowlist.
 #
-# NEVER RUN AGENT-SIDE, EVER — needs Docker, the network and minutes. Run by a human
-# (`task check:exposure:sweep`) or the dispatch-only open-edition-boot.yml. EXCLUDED from
+# Never run agent-side: needs Docker, the network and minutes. Run by a human
+# (`task check:exposure:sweep`) or the dispatch-only open-edition-boot.yml. Excluded from
 # `task check` (see scripts/check.sh's manifest).
 set -euo pipefail
 P=check-exposure-sweep
@@ -56,20 +29,14 @@ for arg in "$@"; do
 done
 for tool in docker curl jq python3 shasum; do command -v "$tool" >/dev/null || { echo "$P: $tool is required" >&2; exit 2; }; done
 
-# ARM 3's FORBIDDEN-STRING LIST, AND WHY IT IS A VARIABLE (#1293 review). #1293 relocated
-# export-forbidden-strings.txt into the paid overlay, and this script may not name the overlay --
-# check-open-boundary.sh rule 5 fails any scripts/*.sh outside its four-name allowlist that does --
-# so the caller passes the path in. The default is the pre-#1293 open location, which no longer
-# exists in either repo; `task check:exposure:sweep` sets it to the overlay copy. Same shape and
-# same reason as check-classifier-quality-doc.sh's CQ_DOC.
+# ARM 3's FORBIDDEN-STRING LIST IS A VARIABLE because export-forbidden-strings.txt does not exist
+# in this checkout; the caller passes the path in. Same shape and reason as
+# check-classifier-quality-doc.sh's CQ_DOC.
 #
-# When the list is not there the sweep does NOT quietly drop the loop and leave the row out of the
-# result set, which is what it used to do: the run then printed no `BUNDLE forbidden-strings hits`
-# row at all while still exiting on FINDINGS, so the only signal was a baseline diff the exit code
-# ignores. It records `not-scanned` instead, so the absence is a visible row rather than a silence.
-# It is NOT a finding: the public repo has no overlay, so open-edition-boot.yml legitimately runs
-# this arm without the list, and a permanently red public gate is the failure mode that gets a gate
-# switched off.
+# When the list is not there the sweep records `not-scanned` rather than silently dropping the
+# row, so the absence is visible. It is NOT a finding: this repo has no such list, so
+# open-edition-boot.yml legitimately runs this arm without it, and a permanently red public gate
+# is the failure mode that gets a gate switched off.
 EXPOSURE_FORBIDDEN="${EXPOSURE_FORBIDDEN:-scripts/lib/export-forbidden-strings.txt}"
 docker info >/dev/null 2>&1 || { echo "$P: the docker daemon is not reachable" >&2; exit 2; }
 
@@ -236,7 +203,7 @@ _by_design() {
     case "$1 $2" in
         "GET /auth/mode") return 0 ;;          # tells the login page which flow to render
         "POST /auth/login") return 0 ;;        # the login itself; a wrong password is a 401 elsewhere
-        "POST /auth/signup") return 0 ;;       # open registration, by design: docs/self-hosting/setup.mdx's "Secure the instance" states the posture (#1198)
+        "POST /auth/signup") return 0 ;;       # open registration, by design: docs/self-hosting/setup.mdx's "Secure the instance" states the posture
         "GET /auth/callback"|"GET /auth/login") return 0 ;;   # the WorkOS redirect dance
         "POST /auth/logout"|"GET /auth/logout") return 0 ;;
         "POST /auth/link/start"|"POST /auth/link/poll"|"GET /auth/link/poll") return 0 ;;  # device link, plugin-facing
@@ -404,11 +371,11 @@ done
 echo "$P: arm 5 done, $n5 probes"
 
 # ---- arm 2, second half: the shipped keys refuse a real host --------------------------------
-# docker-compose.yml ships its two sealing keys as public placeholders on purpose (#1230), so the
+# docker-compose.yml ships its two sealing keys as public placeholders on purpose, so the
 # credential that "still authenticates after first boot" is the session cookie anyone could forge
-# against them. What makes that defensible is PlaceholderSecretGuard: with SITE_DOMAIN set to a real
-# hostname and either key still at its default, the backend must REFUSE to start, naming the key.
-# Proven here by re-creating the backend under a domain and watching it refuse.
+# against them. PlaceholderSecretGuard is what makes that defensible: with SITE_DOMAIN set to a
+# real hostname and either key still at its default, the backend must refuse to start, naming the
+# key. Proven here by re-creating the backend under a domain and watching it refuse.
 echo "$P: arm 2b, the shipped placeholder keys must refuse to boot under a real domain"
 (cd "$TMP" && env "${_empty_cred_assignments[@]}" SITE_DOMAIN=sweep.example.invalid $COMPOSE up -d --no-build backend) >/dev/null 2>&1 || true
 refused=0
@@ -441,8 +408,8 @@ _placeholders() {
 }
 sort -o "$RESULTS" "$RESULTS"
 if [ "$RECORD" = 1 ]; then
-    { echo "# Exposure-sweep result set (epic 6 clause 8, #1153). Regenerated by check-exposure-sweep.sh --record;"
-      echo "# a later run diffs itself against this file and names every probe whose status changed (#1198)."
+    { echo "# Exposure-sweep result set. Regenerated by check-exposure-sweep.sh --record;"
+      echo "# a later run diffs itself against this file and names every probe whose status changed."
       echo "# Row shape: METHOD PATH -> CODE  note. Slugs and ids are the sweep's own placeholders."
       _placeholders "$RESULTS"; } > "$BASELINE"
     echo "$P: baseline recorded to scripts/lib/exposure-sweep-baseline.txt ($(grep -c -v '^#' "$BASELINE") rows)"

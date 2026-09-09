@@ -23,63 +23,55 @@ import org.springframework.stereotype.Service;
 /**
  * Reads a project's per-lane model choices, with a small write-through cache.
  *
- * <p><b>Why cache.</b> {@code ChatModelFactory.resolve(projectId, lane)} runs on the path of every
- * platform-funded LLM call, and grading a single trace fans out to one call per grader. Hitting
- * Postgres for a row that changes roughly never would put a query in front of every judge call for
- * no benefit. The cache is invalidated explicitly on write ({@link #invalidate}) rather than
- * time-bounded, so a settings change takes effect on the next call instead of "within a minute".
+ * <p>{@code ChatModelFactory.resolve(projectId, lane)} runs on the path of every platform-funded LLM
+ * call, so the cache avoids hitting Postgres for a row that changes roughly never. It is invalidated
+ * explicitly on write ({@link #invalidate}) rather than time-bounded, so a settings change takes
+ * effect on the next call.
  *
- * <p><b>Validation lives here</b>, not only in the controller, because there are two ways a bad pair
- * can arrive: a fresh PUT, and a row written before a capability changed (AWS retiring a tier for a
- * model, or us removing a model from {@link BedrockModelProfile}). {@link #validate} is the single
- * gate for the first; {@link #resolve} degrades safely for the second.
+ * <p>Validation lives here, not only in the controller, because a bad pair can arrive two ways: a
+ * fresh PUT, or a row written before a capability changed (a provider retiring a tier for a model, or
+ * a model being removed from {@link BedrockModelProfile}). {@link #validate} is the gate for the
+ * first; {@link #resolve} degrades safely for the second.
  *
- * <p><b>A row is an override, never a starting point.</b> Nothing writes one but an explicit choice
- * on the settings page, because at the moment a project is created its org has no provider key and
- * therefore no model it could run. A lane with no row (or with one the org can no longer serve)
- * resolves through {@link LanePriority} against the providers the org HAS — see {@link #resolve} —
- * so configuring the first provider is what gives every lane a model, and configuring a better one
- * later moves the lanes that were never pinned by hand.
+ * <p>A row is an override, never a starting point: nothing writes one but an explicit choice on the
+ * settings page. A lane with no row (or with one the org can no longer serve) resolves through
+ * {@link LanePriority} against the providers the org has (see {@link #resolve}), so configuring the
+ * first provider gives every lane a model, and configuring a better one later moves the lanes that
+ * were never pinned by hand.
  *
- * <h2>#939: the {@code model_key} union</h2>
+ * <h2>The {@code model_key} union</h2>
  *
  * <p>{@code project_model_setting.model_key} started as a plain-text {@link BedrockModelProfile}
- * key ({@code amazon.nova-2-lite}) — those never carry a colon. #939 widens an
- * {@link LaneGroup#AGENT_VM} lane's reach to a non-Bedrock {@link ModelCatalog} entry (GEMINI, GLM,
- * GROK, CUSTOM) without a schema change, by encoding that case as {@code "<PROVIDER>:<model_name>"}
- * ({@link #CATALOG_KEY}) — a shape no Bedrock key has ever taken, so both old and new rows are
- * unambiguous from the string alone. {@link #parseCatalogKey} and {@link #catalogEntryFor} are the
- * only two places that decode it; every other reader still calls {@link BedrockModelProfile#find}
- * first and only falls through to the catalog on a miss, so the zero-migration-risk path for every
- * existing Bedrock row is completely unchanged.
+ * key ({@code amazon.nova-2-lite}); those never carry a colon. An {@link LaneGroup#AGENT_VM} lane can
+ * also reach a non-Bedrock {@link ModelCatalog} entry (GEMINI, GLM, GROK, CUSTOM), encoded as
+ * {@code "<PROVIDER>:<model_name>"} ({@link #CATALOG_KEY}), a shape no Bedrock key has ever taken so
+ * both forms are unambiguous from the string alone. {@link #parseCatalogKey} and
+ * {@link #catalogEntryFor} are the only two places that decode it; every other reader calls
+ * {@link BedrockModelProfile#find} first and only falls through to the catalog on a miss.
  */
 @Service
 public class ProjectModelSettings {
 
     /**
-     * A non-Bedrock catalog key's wire shape — see the class javadoc's "{@code model_key} union"
+     * A non-Bedrock catalog key's wire shape, see the class javadoc's "{@code model_key} union"
      * section. Bedrock/mantle keys are dotted ({@code openai.gpt-5.6-luna}) and never match this.
      */
     private static final Pattern CATALOG_KEY = Pattern.compile("^([A-Z_]+):(.+)$");
 
     private final ProjectModelSettingRepository repo;
 
-    /**
-     * #939 D3: read to gate an explicit save against the org's configured providers — see
-     * {@link #set(String, String, ModelLane, String, ServiceTier, String)}.
-     */
+    /** Read to gate an explicit save against the org's configured providers, see {@link #set}. */
     private final ProviderCredentialRepository credentials;
 
     /**
-     * {@code projectId → orgId} (#939 TASK 2), so {@link #resolve(String, ModelLane)} can consult the
-     * live catalog for a non-Bedrock row without every caller having to pass an orgId it may not have
-     * on hand — the shared cache {@link ChatModelFactory} and {@code AgenticCredentialResolver} also
-     * use.
+     * {@code projectId -> orgId}, so {@link #resolve(String, ModelLane)} can consult the live
+     * catalog for a non-Bedrock row without every caller having to pass an orgId it may not have
+     * on hand.
      */
     private final ProjectOrgResolver orgResolver;
 
     /**
-     * The live, per-(org, provider) model catalog (#939 TASK 2) — consulted, cache-only (see
+     * The live, per-(org, provider) model catalog, consulted cache-only (see
      * {@link #catalogEntryFor}'s own javadoc for why never {@code refreshingRead} here), so a
      * non-Bedrock model that exists only in a provider's live listing still resolves/validates
      * instead of being treated as unknown.
@@ -109,7 +101,7 @@ public class ProjectModelSettings {
      * What {@code lane} runs on for this project, or empty when nothing can run it.
      *
      * <p>Two sources, in order. An explicit row the org can still serve wins. Otherwise the lane is
-     * resolved automatically from {@link LanePriority} — the best model in that lane's order whose
+     * resolved automatically from {@link LanePriority}: the best model in that lane's order whose
      * provider the org holds a credential for. Empty means the org has configured no provider that
      * serves any model this lane offers, which is the state a brand-new org is in and the reason the
      * settings page asks for a provider before it asks for a model.
@@ -122,7 +114,7 @@ public class ProjectModelSettings {
      * in the table, so re-adding the credential brings the choice back.
      *
      * <p>An effort the model no longer accepts degrades to "no effort" instead, keeping the chosen
-     * model: unlike a tier — which changes what the call costs — effort is a quality dial, and running
+     * model: unlike a tier, which changes what the call costs, effort is a quality dial, and running
      * the chosen model at its own default is much closer to the intent than moving to another model.
      */
     public Optional<LaneSelection> resolve(String projectId, ModelLane lane) {
@@ -159,7 +151,7 @@ public class ProjectModelSettings {
         if (bedrock.isPresent() && !bedrock.get().supportedTiers().contains(row.serviceTier())) {
             return Optional.empty();
         }
-        // A catalog (non-Bedrock) row carries no tier concept at all — set() always clamps a
+        // A catalog (non-Bedrock) row carries no tier concept at all: set() always clamps a
         // non-tiered lane's tier to STANDARD, and every AGENT_VM lane (the only place a catalog key
         // can land, see #validate) is non-tiered, so there is nothing further to check here.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
@@ -194,7 +186,7 @@ public class ProjectModelSettings {
     }
 
     /**
-     * Whether {@code lane} offers {@code modelKey} at all — the LANE's own list, not its group's. The
+     * Whether {@code lane} offers {@code modelKey} at all: the lane's own list, not its group's. The
      * two differ on purpose: TRIAGE carries only the models under its price ceiling, so a group-level
      * check would let a raw PUT put a frontier model on the lane the ceiling exists to protect.
      *
@@ -223,15 +215,15 @@ public class ProjectModelSettings {
 
     /**
      * The full Bedrock inference-profile id this project has chosen for {@code lane}, or empty to
-     * inherit whatever default that lane's caller holds. <b>Bedrock rows only</b> — a project pointed
-     * at a non-Bedrock catalog entry (#939) resolves to empty here, exactly like an unset lane; use
+     * inherit whatever default that lane's caller holds. Bedrock rows only: a project pointed at a
+     * non-Bedrock catalog entry resolves to empty here, exactly like an unset lane; use
      * {@link #resolveAgenticModel} for the provider-aware form the sandbox launcher needs.
      *
      * <p>For the lanes that build their own Bedrock request, {@link ChatModelFactory} already does
      * this internally. This exists for the sandbox lanes, whose model is handed to the agent inside a
-     * microVM rather than to a client we construct — it needs the id as a string, and it must be the
-     * <i>full</i> profile id, since the launcher qualifies it with a provider and passes it straight
-     * through and Bedrock rejects a short alias with a 400.
+     * microVM rather than to a client we construct, so it needs the id as a string, and it must be the
+     * full profile id, since the launcher qualifies it with a provider and passes it straight
+     * through, and Bedrock rejects a short alias with a 400.
      */
     public Optional<String> inferenceProfileId(String projectId, ModelLane lane) {
         return resolve(projectId, lane)
@@ -240,11 +232,10 @@ public class ProjectModelSettings {
     }
 
     /**
-     * The {@code (provider, modelId)} pair the sandbox launcher (#939) needs to run this project's
-     * chosen model for {@code lane} — a Bedrock/{@code BEDROCK_MANTLE} inference-profile id, or a
-     * bare {@link ModelCatalog} model name for one of the four new providers. Empty means the org has
-     * no credential for any provider this lane can run on — the launcher has nothing to fall back to
-     * and the run fails on credentials, which is the same answer it reached before, one step earlier.
+     * The {@code (provider, modelId)} pair the sandbox launcher needs to run this project's chosen
+     * model for {@code lane}: a Bedrock/{@code BEDROCK_MANTLE} inference-profile id, or a bare
+     * {@link ModelCatalog} model name for one of the other providers. Empty means the org has no
+     * credential for any provider this lane can run on, and the run fails on credentials.
      */
     public Optional<ResolvedAgenticModel> resolveAgenticModel(String projectId, ModelLane lane) {
         return resolve(projectId, lane).map(selection -> {
@@ -267,7 +258,7 @@ public class ProjectModelSettings {
             @JsonProperty("model_id") String modelId) {}
 
     /**
-     * Parsed form of a non-Bedrock {@code "<PROVIDER>:<model_name>"} {@code model_key} — see the
+     * Parsed form of a non-Bedrock {@code "<PROVIDER>:<model_name>"} {@code model_key}, see the
      * class javadoc's "the {@code model_key} union" section.
      */
     private record CatalogKey(ModelProvider provider, String modelName) {}
@@ -285,23 +276,21 @@ public class ProjectModelSettings {
 
     /**
      * The {@link ModelCatalog.CatalogEntry} a non-Bedrock {@code model_key} names, or empty when the
-     * key isn't one of ours. {@link ModelProvider#CUSTOM} has no real per-model catalog — one
+     * key isn't one of ours. {@link ModelProvider#CUSTOM} has no real per-model catalog: one
      * representative entry stands for "any model this endpoint serves" (see {@link ModelCatalog}'s
-     * own CUSTOM comment) — so any non-blank suffix under {@code CUSTOM:} resolves to that one entry
+     * own CUSTOM comment), so any non-blank suffix under {@code CUSTOM:} resolves to that one entry
      * rather than requiring an exact name match.
      *
-     * <p><b>#939 TASK 2:</b> a miss against the static table falls through to the live catalog before
-     * giving up, so a model that exists only in a provider's live listing still resolves/validates —
+     * <p>A miss against the static table falls through to the live catalog before giving up, so a
+     * model that exists only in a provider's live listing still resolves/validates, via
      * {@link ModelCatalogFetchService#cachedRead}, deliberately never {@code refreshingRead}: this
      * method is shared by {@link #resolve}, which runs on paths several judge/agentic call sites hit
-     * per lane, so it must add no fetch latency of its own. A cold live cache degrades to "not found
-     * here yet", exactly this method's pre-TASK-2 behavior for any non-static model — the settings
-     * page's own catalog read ({@code ProviderCredentialController#catalog}) is what warms the cache
-     * with {@code refreshingRead}, and in the normal list-then-save UI flow that happens first.
+     * per lane, so it must add no fetch latency of its own. The settings page's own catalog read
+     * ({@code ProviderCredentialController#catalog}) is what warms the cache with
+     * {@code refreshingRead}, and in the normal list-then-save UI flow that happens first.
      *
      * @param orgId null when the caller has no org context (a project whose row was deleted out from
-     *     under it, via {@link #resolve}) — degrades to static-only lookup, this method's entire
-     *     pre-TASK-2 behavior.
+     *     under it, via {@link #resolve}); degrades to static-only lookup.
      */
     private Optional<ModelCatalog.CatalogEntry> catalogEntryFor(@Nullable String orgId, @Nullable String modelKey) {
         Optional<CatalogKey> parsed = parseCatalogKey(modelKey);
@@ -330,7 +319,7 @@ public class ProjectModelSettings {
      * <p>The provider gate comes first: a {@code (lane, modelKey)} whose provider the org holds no
      * credential for is refused with {@link ModelConfigError#PROVIDER_NOT_CONFIGURED}. The picker
      * only offers models the org has a key for, so reaching this is a bug in the picker's filter
-     * rather than a normal user path — but it is also the boundary a raw PUT crosses, and a row
+     * rather than a normal user path, but it is also the boundary a raw PUT crosses, and a row
      * written past it would be a stored choice the lane could never serve.
      *
      * <p>A non-{@link ModelLane#tiered} lane is stored at Standard whatever the caller asked for: it
@@ -361,7 +350,7 @@ public class ProjectModelSettings {
     }
 
     /**
-     * The {@link ModelProvider} a {@code model_key} resolves to, Bedrock/mantle keys included — the
+     * The {@link ModelProvider} a {@code model_key} resolves to, Bedrock/mantle keys included: the
      * union {@link #validate} already decodes, reused here so the credential gate asks the same
      * question the picker's option list was built from. Returns empty for a key that is neither a
      * known Bedrock descriptor nor a known catalog entry; {@link #requireConfiguredProvider} treats
@@ -404,10 +393,10 @@ public class ProjectModelSettings {
      * the message names the real problem:
      *
      * <ol>
-     *   <li>the model isn't one of ours — nothing else is worth checking;
-     *   <li>the tier has no online wire form ({@link ServiceTier#BATCH}) — invalid for every model,
+     *   <li>the model isn't one of ours: nothing else is worth checking;
+     *   <li>the tier has no online wire form ({@link ServiceTier#BATCH}): invalid for every model,
      *       so blaming the model would misdirect;
-     *   <li>the pair is unsupported — e.g. Flex on Haiku 4.5, where both halves are individually
+     *   <li>the pair is unsupported, e.g. Flex on Haiku 4.5, where both halves are individually
      *       fine. This is the check that stops a Bedrock 400 from surfacing mid-grade, hours after
      *       the setting was saved.
      *   <li>the lane needs an agentic model and this one isn't. An {@link LaneGroup#AGENT_VM} lane
@@ -416,10 +405,9 @@ public class ProjectModelSettings {
      *       that never starts.
      *   <li>the model is not offered for this lane's {@link LaneGroup}. Checked after the capability
      *       above, because "this model cannot do that work" is a more useful thing to be told than
-     *       "this model is not on the list" whenever both are true — and the two are not the same
-     *       check: Claude Haiku 4.5 is agentic, so only the offer list keeps it off a microVM lane,
-     *       which is the gap that made this check necessary.
-     *   <li>the model does not accept this reasoning effort — either because it takes no effort at all
+     *       "this model is not on the list" whenever both are true, and the two are not the same
+     *       check: Claude Haiku 4.5 is agentic, so only the offer list keeps it off a microVM lane.
+     *   <li>the model does not accept this reasoning effort, either because it takes no effort at all
      *       (every Converse model here) or because the level is not in its set. Checked last because it
      *       is the narrowest condition, and because naming the model is only useful once the model
      *       itself is known to be valid.
@@ -430,12 +418,11 @@ public class ProjectModelSettings {
     }
 
     /**
-     * {@link #validate(ModelLane, String, ServiceTier, String)}, with an orgId (#939 TASK 2) so a
-     * non-Bedrock {@code modelKey} that exists only in that org's live-fetched catalog still passes
-     * rather than throwing {@link ModelConfigError#UNKNOWN_PLATFORM_MODEL}. The org-gated {@link
-     * #set(String, String, ModelLane, String, ServiceTier, String)} — the only save path a real
-     * picker selection reaches, per its own javadoc — is the one caller that has an orgId to give;
-     * the 4-arg overload above passes null and validates against the static table only.
+     * {@link #validate(ModelLane, String, ServiceTier, String)}, with an orgId so a non-Bedrock
+     * {@code modelKey} that exists only in that org's live-fetched catalog still passes rather than
+     * throwing {@link ModelConfigError#UNKNOWN_PLATFORM_MODEL}. The org-gated {@link #set} is the one
+     * caller that has an orgId to give; the 4-arg overload above passes null and validates against the
+     * static table only.
      */
     public void validate(
             @Nullable String orgId,
@@ -448,8 +435,8 @@ public class ProjectModelSettings {
             validateBedrock(lane, modelKey, tier, reasoningEffort);
             return;
         }
-        // #939: the non-Bedrock half of the union (see the class javadoc). A miss on BOTH halves is
-        // the original UNKNOWN_PLATFORM_MODEL — the model simply isn't ours.
+        // The non-Bedrock half of the union (see the class javadoc). A miss on both halves is
+        // the original UNKNOWN_PLATFORM_MODEL: the model simply isn't ours.
         Optional<ModelCatalog.CatalogEntry> catalog = catalogEntryFor(orgId, modelKey);
         if (catalog.isEmpty()) {
             throw new TessaryException(ModelConfigError.UNKNOWN_PLATFORM_MODEL, modelKey);
@@ -468,7 +455,7 @@ public class ProjectModelSettings {
         if (lane != null && lane.agentic() && !BedrockModelProfile.isAgentic(modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
-        // The lane's own list, not its group's — this is what enforces TRIAGE's price ceiling against a
+        // The lane's own list, not its group's: this is what enforces TRIAGE's price ceiling against a
         // raw PUT. Claude Sonnet 5 is agentic, offered for AGENT_VM, and valid at Standard, so nothing
         // above this line stops it landing on the lane that runs unattended once per cause.
         if (lane != null && !isOfferedOn(lane, modelKey)) {
@@ -480,13 +467,9 @@ public class ProjectModelSettings {
     }
 
     /**
-     * The catalog (non-Bedrock, #939) half of {@link #validate}. Only reachable for an
-     * {@link LaneGroup#AGENT_VM} lane today: the launcher rewire (#939) is the only caller
-     * {@link ProjectModelSettings} needs to serve a non-Bedrock provider to, and the current sole
-     * {@link LaneGroup#LLM_CALLS}-shaped caller ({@code ChatModelFactory}'s own pinned-run selection)
-     * never goes through this class at all — see {@link #resolve}'s javadoc on that same gap. A
-     * catalog key on any other lane shape is rejected with {@code MODEL_NOT_OFFERED_FOR_LANE} rather
-     * than accepted and silently unreachable.
+     * The catalog (non-Bedrock) half of {@link #validate}. Only reachable for an
+     * {@link LaneGroup#AGENT_VM} lane today; a catalog key on any other lane shape is rejected with
+     * {@code MODEL_NOT_OFFERED_FOR_LANE} rather than accepted and silently unreachable.
      */
     private static void validateCatalog(
             ModelLane lane,
@@ -504,7 +487,7 @@ public class ProjectModelSettings {
         if (!entry.agentic()) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
-        // Same lane-scoped gate as the Bedrock half above — TRIAGE's ceiling leaves each provider's
+        // Same lane-scoped gate as the Bedrock half above: TRIAGE's ceiling leaves each provider's
         // flagship agentic and permitted by the group, but not offered on this lane.
         if (!isOfferedOn(lane, modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());

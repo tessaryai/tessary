@@ -36,13 +36,11 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * End-to-end acceptance for gh#531: a sweep job that keeps throwing (the {@code /classify}
- * launcher transport-failure case) is dead-lettered after {@code maxAttempts} consecutive
- * failures — crossing the cap logs ERROR exactly once, below-cap failures stay WARN and dedup to
- * one stacktrace per streak — and, once
- * the backend recovers, the next heartbeat past the cooldown floor gives the signal a fresh job
- * instead of leaving it permanently wedged. Runs against the real pgvector Postgres
- * (Testcontainers) so the job-queue SQL runs for real; only the encoder scorer is faked.
+ * A sweep that keeps throwing is dead-lettered after {@code maxAttempts} consecutive failures:
+ * crossing the cap logs ERROR once, and below-cap failures stay WARN and dedup to one stacktrace
+ * per streak. Once the backend recovers, the next heartbeat past the cooldown floor gives the
+ * signal a fresh job instead of leaving it wedged. Runs against real pgvector Postgres
+ * (Testcontainers); only the encoder scorer is faked.
  */
 @SpringBootTest
 @Import({ThrowingEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
@@ -95,11 +93,8 @@ class ClassifierWorkerDeadLetterTest {
     void fastFailingSweep_deadLettersAtTheCap_logsErrorOnce_thenRecoversOnceHealthy() {
         String pid =
                 TenantFixture.bootstrap(tenants, "signal-deadletter").project().id();
-        // A project is seeded with the built-in catalog on creation, and tick() sweeps every ENABLED
-        // classifier it finds. This test counts ERROR logs across the whole tick, so only the
-        // deliberately-failing classifier below may be enabled. Disable rather than delete: the catalog
-        // reconcile re-inserts anything missing, and it preserves enabled state where it would undo a
-        // delete.
+        // tick() sweeps every ENABLED classifier, and a project seeds the whole built-in catalog on
+        // creation. Disable the rest instead of deleting: catalog reconcile would re-insert them enabled.
         jdbc.sql("UPDATE classifier SET enabled = FALSE WHERE project_id = :pid")
                 .param("pid", pid)
                 .update();
@@ -161,7 +156,7 @@ class ClassifierWorkerDeadLetterTest {
             assertEquals(
                     1,
                     warns,
-                    "the below-cap failures stay WARN and dedup to one stacktrace per streak (gh#532), "
+                    "the below-cap failures stay WARN and dedup to one stacktrace per streak, "
                             + "not one per heartbeat");
 
             // /classify recovers: the next heartbeat (cooldown=0) revives the dead job and this sweep succeeds.

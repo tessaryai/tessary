@@ -18,13 +18,12 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link AgenticRcaEngine#validateSandboxConfig()} — nothing in this package exercised it before #857
- * (no {@code AgenticRcaEngineTest} existed at all). Only the pre-existing sandbox-key check is covered
- * here: #857 considered and rejected adding an equivalent unconditional blank-{@code mcp-base-url}
- * check to this method — see its javadoc for why (it would fail context refresh on every
- * {@code @SpringBootTest} in {@code app} that does not fake the property, proven concretely with
- * {@code OpenApiSpecDriftTest}). The per-job throw in {@link AgenticRcaEngine#run} remains the
- * enforcement point for a blank URL, unchanged by this issue.
+ * {@link AgenticRcaEngine#validateSandboxConfig()} — this class is the only coverage of it. Only the
+ * pre-existing sandbox-key check is covered here: an equivalent unconditional blank-{@code mcp-base-url}
+ * check was considered and rejected for this method — see its javadoc for why (it would fail context
+ * refresh on every {@code @SpringBootTest} in {@code app} that does not fake the property, proven
+ * concretely with {@code OpenApiSpecDriftTest}). The per-job throw in {@link AgenticRcaEngine#run}
+ * remains the enforcement point for a blank URL.
  */
 class AgenticRcaEngineTest {
 

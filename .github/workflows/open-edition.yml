@@ -1,73 +1,25 @@
 name: Open edition
 
-# THE OPEN-EDITION GATE (#849 AC1), BUILT BUT NOT ARMED. `ci.yml` is a deliberate weekly cron
-# (see its own header) — this is the new file beside it, not an edit to it, because a job landing
-# inside `ci.yml` inherits that file's `on:` block, and this gate is meant to answer per PR rather
-# than once a week. It does not do that YET: see the `on:` block below, which is dispatch-only
-# until there are CI minutes for it.
+# Runs `bash scripts/check.sh --edition open`, the CI-callable entrypoint documented in that
+# script's own header. An overlay directory stays checked out during this run; the flag only
+# changes what the script builds and tests, so a green run doesn't prove the tree survives
+# with that directory actually removed. That boot check lives separately in
+# open-edition-boot.yml.
 #
-# ONE JOB, ONE LINE OF SUBSTANCE: `bash scripts/check.sh --edition open` (#875) is the CI-callable
-# interface — see that script's own header ("THE CI-CALLABLE INTERFACE IS THIS SCRIPT, NOT THE
-# TASK TARGET"). Everything above the final step exists only to assemble the FIVE toolchains that
-# line needs in one job, which scripts/check.sh:36-49 names explicitly and warns against
-# shortcutting: naming only `setup-java` here (mirroring `ci.yml`'s `backend` job) sends this
-# workflow to a job that dies on the second gate (frontend). The five, and which gate needs each:
-#   actions/setup-java (25)   -- backend (-P '!paid'), and check-backend.sh hard-fails on any
-#                                other JDK before Maven even starts
-#   pnpm + actions/setup-node -- frontend, and classify-service's own install step
-#   astral-sh/setup-uv        -- classifier-parity (--edition open). #1293 moved all six of its
-#                                pins into the overlay, so under --edition open it now runs ZERO
-#                                pins and prints a named skip; uv is still needed here because the
-#                                script reaches uv before it decides that. slack-service is no
-#                                longer in this list at all — its gate is overlay-owned now.
-#   actions/setup-python      -- vendored-plugin (pip install pyyaml + pytest)
-#   caddy on PATH             -- the caddy gate (validate)
-# Order matters once, the same way it does in `ci.yml`'s `frontend` job: pnpm/action-setup MUST
-# run before actions/setup-node, because setup-node's `cache: pnpm` resolves the store path by
-# shelling out to `pnpm`, which does not exist on PATH yet otherwise.
+# Everything before the final step assembles the toolchains that script needs in one job:
+# Java (backend, and check-backend.sh hard-fails on the wrong JDK before Maven starts), pnpm
+# + node (frontend and classify-service), uv (classifier-parity), python (vendored-plugin),
+# and caddy on PATH (the caddy gate). Order matters once: pnpm/action-setup must run before
+# actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
+# path.
 #
-# WHAT THIS RUN DOES NOT PROVE. `--edition open` runs with `tessary-paid/` still on disk (this
-# workflow checks out the whole repo, overlay included) and only changes what scripts/check.sh
-# ASKS for — see that script's "MODE IS A PROXY" note. The gates whose disposition differs by
-# edition (paid-frontend, compile-service) are SKIPPED here unconditionally, by manifest row, not
-# because the overlay happens to be absent. Proving the export itself — that the tree survives
-# `tessary-paid/` actually being GONE — is the separate, dispatch-only boot check in
-# open-edition-boot.yml (#849 AC4), not this workflow.
-#
-# ---------------------------------------------------------------------------------------------
-# "REQUIRED" HERE IS A DOCUMENTED CONVENTION, NOT A GITHUB-ENFORCED GATE. READ THIS BEFORE
-# ASSUMING A RED RUN BLOCKS A MERGE.
-# ---------------------------------------------------------------------------------------------
-# This workflow is INTENDED to become a required check on `main` once it is armed per PR. Two
-# separate things stand between here and there. The first is the `on:` block below, which is
-# dispatch-only by decision. The second is that GitHub's native required-status-check mechanism
-# is unavailable on this repo TODAY, independent of anything in this file:
-#
-#   $ gh api repos/tessaryai/tessary/branches/main/protection
-#   $ gh api repos/tessaryai/tessary/rulesets
-#
-# both return, verbatim, as of 2026-08-31:
-#
-#   403 {"message":"Upgrade to GitHub Pro or make this repository public to enable this feature."}
-#
-# This repo is private on a plan tier that does not offer branch protection or repository
-# rulesets. Until the org's GitHub plan changes or the repo goes public, NOTHING enforces
-# "required" here except discipline: a RED run of this workflow CAN currently be merged past, and
-# GitHub will not stop it. Treat a red check the same way you would treat a required one being
-# red — do not merge past it — but know that the only thing making you do that is this comment,
-# not the platform. Re-check both API calls above once the plan or visibility changes; the moment
-# either stops 403ing, wire this workflow into branch protection / a ruleset for real and delete
-# this section. The matching ledger entry is the divergence log dated 2026-08-31 in the internal
-# execution plan (overlay-owned since #1293; it is not part of this repo's public export).
+# This repo's GitHub plan doesn't support branch protection or rulesets, so nothing enforces
+# this workflow as a required check yet beyond convention: treat a red run as blocking even
+# though GitHub won't stop a merge past it. Wire it into branch protection for real once the
+# plan or visibility changes.
 on:
-  # DISPATCH-ONLY, deliberately. Same trade, and the same decision, as open-edition-boot.yml
-  # beside it: "Add the CI check but don't enable it per PR, note it down somewhere, we will
-  # enable it later once we get more CI minutes." A `pull_request:` line here spends a full
-  # five-toolchain job on every push to every open PR, which is the entire free-tier budget on
-  # a 24-PR stack.
-  #
-  # THE ONE-LINE CHANGE THAT TURNS IT ON: add `pull_request:` back under `on:`. Nothing else in
-  # this file needs to change — the job below is already the per-PR gate, it just is not armed.
+  # Dispatch-only until there's CI budget for a five-toolchain job on every PR push. Adding
+  # `pull_request:` here is the whole change needed to arm it per PR.
   workflow_dispatch:
 
 jobs:
@@ -83,8 +35,7 @@ jobs:
           java-version: '25'
           cache: maven
 
-      # Before setup-node: setup-node's `cache: pnpm` shells out to pnpm to resolve the store
-      # path, so pnpm has to be on PATH first — see ci.yml's `frontend` job for the same ordering.
+      # Must precede setup-node: its `cache: pnpm` shells out to pnpm to resolve the store path.
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
@@ -95,22 +46,18 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      # classify-service pins the same pnpm version (packageManager: pnpm@11.15.1) and installs
-      # its own deps inside check-classify-service.sh — no separate install step needed here,
-      # matching ci.yml's classify-service job.
+      # classify-service pins the same pnpm version and installs its own deps inside
+      # check-classify-service.sh; no separate install step needed here.
 
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          # One lockfile, not two: #1293 moved slack-service/ (and its uv.lock) into the overlay,
-          # which this OPEN-edition workflow never checks out. classifiers/uv.lock stays — the
-          # public half of the classifier tree keeps it.
           cache-dependency-glob: classifiers/uv.lock
 
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      # Major-pinned, not exact-pinned — see ci.yml's vendored-plugin job for why.
+      # Major-pinned, not exact-pinned: see ci.yml's vendored-plugin job for why.
       - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
 
       - name: Install Caddy
@@ -122,6 +69,5 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y caddy
 
-      # The exact gate `task check:open` runs — single source of truth. See scripts/check.sh's own
-      # header: CI never loads the Taskfile, so this calls the script directly.
+      # CI never loads the Taskfile, so this calls the script directly.
       - run: bash scripts/check.sh --edition open

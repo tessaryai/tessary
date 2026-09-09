@@ -61,7 +61,7 @@ for the one narrow exception, an anonymous heartbeat that never carries content)
 |---|---|---|
 | **OTLP spans** (HTTP + gRPC) | `ingest/otlp/OtlpIngestService.java:161` → `SubstrateWriter.enqueue` → `SubstrateWriter.java:184` `redactBatch` | **Yes** — the drainer applies the project's enabled rules before the write |
 | **Bundle / manual import** (the `.tessary/` bundle from the evals plugin) | `pipeline/ImportController.java` → `PipelineService` | **No.** The controller does not reference redaction, and it does not go through `SubstrateWriter`. Whatever free text the bundle carries — grader and SOP prose, examples, call-site descriptions — is stored as authored. It also carries no capability gate |
-| **Slack mention relay** | `tessary-paid/slack-service/src/slack_service/platform_api.py:55-58` posts the raw message `text` to the platform's mention endpoint | **No** |
+| **Slack mention relay** | *(not in this tree — see [`devdocs/reference/architecture.md`](../reference/architecture.md)'s `slack/` row)*. The paid platform code posts the raw message `text` to the platform's mention endpoint | **No** |
 | **Sandbox-authored triage / RCA output** | `rca/E2bRcaSandbox.java`, `classifier/finding/E2bTriageSandbox.java` | **No.** Neither file references `redact`. The report text an agent writes back can quote the evidence it was given, and it is stored as written |
 
 Only the first row passes through the guard. `SubstrateWriter.enqueue` has exactly one production
@@ -86,17 +86,17 @@ recall, and this is the recall it costs.
 | **Any value that arrived as a JSON number or boolean** | `RedactionEngine.java:322-324`: "Numbers, booleans and nulls are returned untouched… it is not that a rule is unlikely to match them, it is that no rule is ever offered them." An SSN or a card number serialized unquoted is invisible to every rule |
 | **The interior of a long inline payload run** (base64 media, embedded blobs) | `RedactionEngine.java:170-180` skips the interior of a contiguous payload-character run once it exceeds `EDGE_MARGIN`×2 + `MIN_RUN` (512 + 512 + 512 ≈ 1.5 KB). The first and last 512 characters are still scanned; everything between them is preserved verbatim and never offered to a rule |
 
-### A control redaction used to break: `secret_leak` — fixed by #1044
+### A control redaction used to break: `secret_leak`
 
 Through 2026-09-06 this was true: `SecretLeakDetector` (`classifier/detector/SecretLeakDetector.java:42-68`)
 read `obs.output()` (`:117`) after the write-path guard had already replaced ten of its eleven strong
 credential patterns with `[REDACTED_…]` markers, so a green `secret_leak` result on the OTLP path meant
 nothing.
 
-#1274 (2026-09-07) fixed it: the detector now also matches the five redaction-marker tokens
+This was fixed on 2026-09-07: the detector now also matches the five redaction-marker tokens
 (`REDACTION_MARKERS`, `:63-68`) and fires at the confidence band the underlying raw shape carries, so the
 marker redaction left behind is itself the evidence. `stripe-key` still has no marker to fall back on,
-because redaction still doesn't cover Stripe's key format — that part is unchanged. #1044 is closed.
+because redaction still doesn't cover Stripe's key format — that part is unchanged.
 
 ## Rules
 

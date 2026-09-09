@@ -108,7 +108,7 @@ class SecretLeakDetectorTest {
     @Test
     void redactionMarkersFireAtTheirRuleBand() {
         // The write-path redaction rules run before the sweep, so on a default project the raw literal
-        // is already `[REDACTED_API_KEY]` by the time this detector reads the persisted output (#1044).
+        // is already `[REDACTED_API_KEY]` by the time this detector reads the persisted output.
         Detection apiKey = detect("Sure — your key is [REDACTED_API_KEY] and the region is us-east-1.");
         assertTrue(apiKey.fired(), "an API-key redaction token fires");
         assertEquals(Detection.Confidence.HIGH, apiKey.confidence());

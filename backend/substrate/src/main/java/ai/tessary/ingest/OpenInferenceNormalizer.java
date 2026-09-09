@@ -21,7 +21,7 @@ import org.jspecify.annotations.Nullable;
  * call the same normalizer. It is <b>dormant</b> unless OpenInference keys are present — {@link #isOpenInference}
  * gates it — so non-OI inputs are untouched.
  *
- * <p>Authority: the key map is {@code docs/reference/trace-schema.md} (§OpenInference → gen_ai), realized via
+ * <p>Authority: the key map is {@code devdocs/reference/trace-schema.md} (§OpenInference → gen_ai), realized via
  * {@link GenAiAttributes}. Never invent an attribute where a standard {@code gen_ai.*} one exists. Per the
  * project's never-truncate invariant, message content is carried whole — bounded by count upstream, never clipped.
  */
@@ -252,7 +252,7 @@ public final class OpenInferenceNormalizer {
      * <p><b>Deferred:</b> the indexed/flattened OTLP attribute form — where a message array is delivered as scalar
      * keys like {@code llm.input_messages.0.message.role} / {@code …0.message.content} rather than a nested array
      * or JSON-encoded string — is intentionally NOT handled here. That re-assembly belongs with the OTLP receiver
-     * work (deferred, see {@code docs/reference/trace-schema.md} "Out of scope"); a flattened span normalizes with
+     * work (deferred, see {@code devdocs/reference/trace-schema.md} "Out of scope"); a flattened span normalizes with
      * {@code null} messages until then.
      */
     private static @Nullable JsonNode asArray(@Nullable JsonNode node) {

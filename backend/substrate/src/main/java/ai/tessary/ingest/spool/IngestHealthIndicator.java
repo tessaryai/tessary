@@ -9,7 +9,7 @@ import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 /**
- * The {@code ingestSpool} health contributor, served through the {@code /actuator/health/ingest} group (#984, criterion 4): the spool's depth, bytes,
+ * The {@code ingestSpool} health contributor, served through the {@code /actuator/health/ingest} group: the spool's depth, bytes,
  * oldest unprocessed age and dead-lettered count, and how many of the drainers are alive, so a self-hoster
  * can ask one HTTP endpoint whether accepted data is reaching the substrate instead of scraping the
  * once-a-minute throughput log line. DOWN when any drainer is dead (health used to say UP while the

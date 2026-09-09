@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The one-command install, end to end, against a real registry (epic 7's one-command install).
+# The one-command install, end to end, against a real registry (the one-command install).
 #
 # scripts/check-compose-artifact.sh is the cheap gate: it reads docker-compose.yml and asserts the
 # properties a publishable file must have. This is the expensive one, and it is the only thing that

@@ -30,7 +30,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * The invariants the shared {@code finding} table introduces, against the real schema — every one of
+ * The invariants the shared {@code finding} table introduces, against the real schema: every one of
  * them is a database constraint or a predicate rather than Java, so a unit test would assert the mock.
  *
  * <p>What is pinned here is the set of rules that make ONE table safe for four classifiers: the live
@@ -87,7 +87,7 @@ class SharedFindingTableIntegrationTest {
         assertEquals(population, written, "the writer records every ref the classifier handed it");
 
         // Re-offering the same window must write nothing, which is what makes a sweep that re-reads its
-        // own page idempotent — and it must not double the recorded count either.
+        // own page idempotent, and it must not double the recorded count either.
         assertEquals(
                 0,
                 evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now),
@@ -106,7 +106,7 @@ class SharedFindingTableIntegrationTest {
 
     /**
      * The read side of the population: {@code get_finding_evidence} pages this repository, and its keyset
-     * is SQL — a row comparison over {@code (role, rank, id)} with a cast on each slot — so a unit test
+     * is SQL, a row comparison over {@code (role, rank, id)} with a cast on each slot, so a unit test
      * against a mock would prove nothing about the one thing that can be wrong here.
      *
      * <p>The property that matters is completeness. A population is only auditable if walking it returns
@@ -192,7 +192,7 @@ class SharedFindingTableIntegrationTest {
      * <p>The MCP-side test can only prove that a thrown not-found maps to a clean tool error, because it
      * mocks the service that would have decided. The decision is here: {@code findingEvidence} resolves
      * the finding under the CALLER's project first, so a finding id lifted from another tenant is
-     * indistinguishable from one that never existed — not-found, never forbidden, since a distinguishable
+     * indistinguishable from one that never existed, not-found, never forbidden, since a distinguishable
      * 403 is itself a disclosure that the id is real.
      *
      * <p>The repository is asserted directly beside it, so the scope does not rest on the service guard
@@ -242,10 +242,9 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * {@code ux_finding_live} keeps {@code blocked} inside its predicate, and dropping it would
-     * re-introduce 0033's bug class: the blocked row would stop matching the index, the next firing
-     * would conflict with nothing, a second finding would be INSERTed beside it, and the human's verdict
-     * would be silently discarded.
+     * {@code ux_finding_live} keeps {@code blocked} inside its predicate. Dropping it would let the
+     * blocked row stop matching the index, so the next firing would conflict with nothing, a second
+     * finding would be INSERTed beside it, and the human's verdict would be silently discarded.
      */
     @Test
     @DisplayName("a blocked finding still owns its cause, so a later firing lands on it")
@@ -267,17 +266,11 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * The forward CHECK, as {@code 0095} rewrote it: {@code finding_id IS NOT NULL OR state = 'resolved'}.
-     * A LIVE case names the finding it is about, because a case that cannot say what it is about is a
-     * triage row nobody can act on.
-     *
-     * <p><b>The state arm is what let both of 0086's escape arms go</b> — a detector list and an
-     * {@code opened_at < '2026-08-13'} cutoff. 0090 explained why they could not simply be dropped:
-     * force-resolving a retired detector's cases sets {@code state} and does NOT backfill
-     * {@code finding_id}, and the CHECK had no state arm, so every post-cutoff findingless row would fail
-     * {@code ADD CONSTRAINT} and take the migration down. Giving it one says the invariant directly
-     * instead of naming the detectors and the date it happened to be true on, and history stays legal.
-     * The second half of this test is that row: findingless, post-cutoff, and resolved.
+     * The forward CHECK: {@code finding_id IS NOT NULL OR state = 'resolved'}. A live case names the
+     * finding it is about, because a case that cannot say what it is about is a triage row nobody can
+     * act on. The state arm exists because force-resolving a retired detector's cases sets
+     * {@code state} without backfilling {@code finding_id}, so a resolved case has to stay legal
+     * without one. The second half of this test is that row: findingless, resolved.
      */
     @Test
     @DisplayName("a live case must name a finding; a resolved case may be findingless")
@@ -289,25 +282,18 @@ class SharedFindingTableIntegrationTest {
                 () -> insertCase(p, "behavior_drift", null, "open"),
                 "behaviour drift has a finding by construction, so a live case without one is a bug");
 
-        // What 0086/0090/0095 leave behind: cases opened by a source that no longer exists, closed by the
-        // migration that retired it, still carrying no finding. They have to remain legal or no migration
-        // after the one that closed them could re-add this constraint.
+        // A case opened by a source that no longer exists, closed by the migration that retired it,
+        // still carrying no finding. Such rows have to remain legal, since no later migration could
+        // re-add this constraint otherwise.
         insertCase(p, "classifier", null, "resolved");
-        // `grader_degradation` was the second half of that pair and is no longer insertable: 0016 DELETED
-        // its rows and narrowed eval_case_detector_check off it, rather than leaving them resolved-and-
-        // findingless like the `classifier` ones above. The asymmetry is deliberate and is the migration's
-        // own comment: a retired-source row stays legal when some detector could still re-assert or close
-        // it, and grader_degradation's could not — it was the grader CUSUM watcher, and grading is gone.
 
         insertCase(p, "behavior_drift", firing(p, "gram-case"), "open");
     }
 
     /**
-     * Mark-wrong re-anchored. {@code of_verdict_id} pointed at a detection verdict, and those aged out on
-     * the 90-day verdict TTL — so a human's correction outlived the row it was attached to and the
-     * training signal was lost by a clock rather than by a decision. Track A finished the argument by
-     * deleting the verdict table outright; {@code of_finding_id} is now the only anchor there is, and
-     * the {@code annotation} table itself survives precisely because the classifier still trains on it.
+     * A correction anchors on {@code of_finding_id}, the only anchor there is. A verdict pointer would
+     * age out on the 90-day verdict TTL, so a human's correction would outlive the row it was attached
+     * to and the training signal would be lost by a clock rather than by a decision.
      */
     @Test
     @DisplayName("a correction anchors on the finding, the only anchor left")
@@ -391,15 +377,12 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has behaviour drift switched ON <b>before its project is created</b>.
-     *
-     * <p>Two things make this necessary. The open-edition default has behavior_drift OFF
-     * (the paid classifiers {@code CapabilityService} reports as unavailable), so without a grant these cases
-     * would assert the capability default rather than the behaviour they name. And the grant has to precede the
-     * project, because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project does not
-     * have. The suite used to get all of this ambiently from {@code tessary.plan.default-key=enterprise} in
-     * surefire, which went away with plan tiers (open-core epic 1 issue 1).
+     * Bootstrap a tenant whose org has behaviour drift switched on before its project is created. This
+     * build's default has {@code behavior_drift} off, so without a grant these cases would assert the
+     * capability default rather than the behaviour they name. The grant has to precede the project,
+     * because project creation is what seeds the built-in classifiers: grant afterwards and the
+     * classifier row is never inserted, leaving the test hunting findings from a classifier the project
+     * does not have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

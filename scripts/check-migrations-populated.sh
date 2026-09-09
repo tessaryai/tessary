@@ -1,117 +1,89 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-# Populated-database migration gate — run the new migrations against ROWS
+# Populated-database migration gate: run the new migrations against rows
 # =============================================================================
-# docs/reference/PLAN-1-cleanup-release.md §2 rule 2. `task check` applies Liquibase to an
-# EMPTY Testcontainers database (TestPostgres.createIsolatedDatabase), and an empty database
+# `task check` applies Liquibase to an empty Testcontainers database, and an empty database
 # structurally cannot fail the two ways a rename fails:
 #
 #   1. `ALTER TABLE … ADD CONSTRAINT … CHECK (col = ANY (ARRAY['new', …]))` validates
 #      every existing row. With no rows it always passes. With one row still holding
-#      'old' it aborts the deploy — and that is the constraint swap the whole release
-#      is made of.
-#   2. `UPDATE … SET col='new' WHERE col='old'` that matches ZERO rows is
+#      'old' it aborts the deploy, and that is the constraint swap a rename is made of.
+#   2. `UPDATE … SET col='new' WHERE col='old'` that matches zero rows is
 #      indistinguishable from one that matches all of them. Where no CHECK backs the
-#      column (metric_rollup.metric, the alert_event payload keys) nothing fails at all:
-#      the reader just starts seeing zero, not an error.
+#      column nothing fails at all: the reader just starts seeing zero, not an error.
 #
-# So this script builds a database that HAS those rows, and asserts.
+# So this script builds a database that has those rows, and asserts.
 #
-# TWO LANES (2026-09, #1074). The DB baseline is partitioned: the open tables (64 at the
-# partition, a count the partition derived from its own dump rather than typed) live in
-# backend/core's 0000-baseline.sql, 15 paid tables live in the paid overlay module's own
-# P0000-paid-baseline.sql, applied by a second Liquibase bean strictly after the open one. This
-# script mirrors that with two lanes of its own:
+# TWO LANES. The DB baseline is partitioned: the open tables live in backend/core's
+# 0000-baseline.sql, and an optional overlay module's own tables live in its own
+# P0000-paid-baseline.sql, applied by a second Liquibase bean strictly after the open one.
+# This script mirrors that with two lanes of its own:
 #
-#   OPEN LANE (always runs)     — open-old chain, open fixture, open-new chain, the always-run
+#   OPEN LANE (always runs)     → open-old chain, open fixture, open-new chain, the always-run
 #                                  half of fixture-coverage.
-#   OVERLAY LANE (opt-in)       — overlay-old chain, paid fixture, overlay-new chain, the
+#   OVERLAY LANE (opt-in)       → overlay-old chain, overlay fixture, overlay-new chain, the
 #                                  overlay-gated half of fixture-coverage. Runs only when
 #                                  MIGPOP_OVERLAY_DIR is set (mirroring Taskfile.yml's own
-#                                  file-exists guard on whether the overlay is present at
-#                                  all) — an open-alone checkout has no paid tables to seed or
-#                                  assert on, and skipping the lane is not the same as skipping
-#                                  the proof: the open half still asserts everything an open
+#                                  file-exists guard on whether the overlay module is present):
+#                                  a checkout without it has no overlay tables to seed or assert
+#                                  on, and skipping the lane is not the same as skipping the
+#                                  proof, since the open half still asserts everything an open
 #                                  checkout owns.
 #
-# Six steps against ONE throwaway container, in this order — open-old before overlay-old
-# because the paid overlay's own floor-pin precondition (real db.changelog-paid.yaml, used for
-# the OVERLAY-NEW apply below) requires evals:0000-baseline to already be in databasechangelog;
-# paid-fixture after overlay-old because its rows FK against tables overlay-old just created;
-# open-fixture before overlay-old (not after) because the paid fixture's rows ALSO FK against
-# the open fixture's anchor rows (prj_fix, cls_fix, org_fix):
+# Six steps against one throwaway container, in this order: open-old before overlay-old because
+# the overlay changelog's own floor-pin precondition (used for the overlay-new apply below)
+# requires the open baseline to already be in databasechangelog; overlay-fixture after overlay-old
+# because its rows FK against tables overlay-old just created; open-fixture before overlay-old
+# (not after) because the overlay fixture's rows also FK against the open fixture's anchor rows:
 #
-#   open-old chain    → the open changelog up to and including MIGPOP_BASELINE, regenerated by
-#                        cutting the current open master's include list at that file.
-#   open fixture      → scripts/lib/populated-fixture.sql.
-#   overlay-old chain → [overlay lane only] the paid changelog up to and including
-#                        MIGPOP_OVERLAY_BASELINE, regenerated the same way, its floor-pin
-#                        preConditions block stripped (unneeded for this throwaway apply — the
-#                        floor, evals:0000-baseline, is already satisfied by open-old above; the
-#                        real pin is what OVERLAY-NEW below exercises).
-#   paid fixture      → [overlay lane only] MIGPOP_OVERLAY_FIXTURE
-#                        (derived from MIGPOP_OVERLAY_DIR by default — see below); its coverage
-#                        claims are MIGPOP_OVERLAY_EXPECTS, a sourced fragment beside it.
-#   fixture-coverage   → a query per claim that a fixture row loaded. Runs BEFORE the new chains,
+#   open-old chain     → the open changelog up to and including MIGPOP_BASELINE, regenerated by
+#                         cutting the current open master's include list at that file.
+#   open fixture       → scripts/lib/populated-fixture.sql.
+#   overlay-old chain  → [overlay lane only] the overlay changelog up to and including
+#                         MIGPOP_OVERLAY_BASELINE, regenerated the same way, its floor-pin
+#                         preConditions block stripped (unneeded for this throwaway apply, since
+#                         the floor is already satisfied by open-old above; the real pin is what
+#                         overlay-new below exercises).
+#   overlay fixture    → [overlay lane only] MIGPOP_OVERLAY_FIXTURE (derived from
+#                         MIGPOP_OVERLAY_DIR by default, see below); its coverage claims are
+#                         MIGPOP_OVERLAY_EXPECTS, a sourced fragment beside it.
+#   fixture-coverage   → a query per claim that a fixture row loaded. Runs before the new chains,
 #                        so a table a migration drops is still queryable here.
 #   open-new chain     → the current open master, i.e. every migration after MIGPOP_BASELINE,
 #                        applied on top of populated tables.
-#   overlay-new chain  → [overlay lane only] the REAL db.changelog-paid.yaml (floor-pin intact),
-#                        i.e. every paid migration after MIGPOP_OVERLAY_BASELINE.
+#   overlay-new chain  → [overlay lane only] the real overlay changelog (floor-pin intact), i.e.
+#                        every overlay migration after MIGPOP_OVERLAY_BASELINE.
 #   assertions         → one block per release with a migration in flight (none in either lane
-#                        today — see "WHERE THIS STANDS TODAY" below).
-#
-# WHERE THIS STANDS TODAY. The 2026-09 cutover re-baseline (#1144) folded the 0017-0023 chain
-# into 0000-baseline.sql, as the partition before it (#1074) folded 0001-0016 and moved 15 tables
-# out to a brand-new P0000-paid-baseline.sql. So both lanes' "new chain" is empty today — every
-# assertion that used to live in a release block below tested migrations that are now INSIDE the
-# baseline on both sides of the old/new cut, which is exactly the failure the "MOVING THE
-# BASELINE" rule below warns about: an assertion that reads as PASS against migrations nothing
-# here still applies separately. Each fold deleted its own: the partition deleted six (the five
-# "Model lane cutover"/"Triage cutover" blocks that tested 0004-0007 and 0009, and the "Track A
-# removal" block that tested 0016, which landed on main as PR #1095 BEFORE the partition and so
-# was folded with the rest), and #1144 deleted the seventh, "Phase 0017", which tested the
-# vector/embedding substrate's removal. Those blocks, and the fixture rows that existed only to
-# feed them, were deleted in the same commit that folded their chain (their rows: saved_view, two behaviour-review job rows,
-# finding's now-nonexistent review columns, the retired lanes of project_model_setting/llm_call,
-# and Track A's: the environment rows, the dropped tables' rows, the colliding metric_rollup and
-# metric_baseline rows, the four retired job kinds, the verdict retention class — the folded
-# baseline's own CHECK constraints no longer admit several of those values at all, and several of
-# the tables no longer exist, so keeping the rows would have broken the fixture LOAD, not just
-# left an assertion stale). The fixture still holds the rows a rename or a drop has to move for
-# whatever lands next; a new migration that touches a persisted value only needs its assertions
-# written below.
+#                        today, since both lanes' "new chain" is currently empty).
 #
 # WHY THE BASELINES ARE PINNED FILENAMES AND NOT `git merge-base HEAD origin/main`. Each fixture
-# is written against ONE schema — its lane's baseline — and a merge-base cut produces that schema
+# is written against one schema, its lane's baseline, and a merge-base cut produces that schema
 # only while a release is unmerged. The moment it lands on main, every file in it exists at
-# merge-base too, the "old" chain silently becomes the FULL chain, and the fixture fails to
+# merge-base too, the "old" chain silently becomes the full chain, and the fixture fails to
 # load against a schema its own release already renamed. The gate would then read as fixture
 # rot rather than as a tool that had expired, and it would be runnable exactly once, by hand,
-# before merge. Pinned, it stays runnable forever — which is what makes it a gate the next
+# before merge. Pinned, it stays runnable forever, which is what makes it a gate the next
 # release can also point at its own renames.
 #
 # MOVING A BASELINE. Bump one (or pass MIGPOP_BASELINE= / MIGPOP_OVERLAY_BASELINE=) only
 # together with a fixture that loads against the new baseline's schema and assertions that
-# match — i.e. when a release's renames are done and the NEXT release wants this vehicle.
+# match, i.e. when a release's renames are done and the next release wants this vehicle.
 # Bumping it alone turns the whole file into assertions about migrations that are already
 # inside the "old" chain, which pass without proving anything.
 #
-# WHY THE LIQUIBASE CLI IMAGE. The app's only in-process Liquibase path is
-# SpringLiquibase at boot (backend/core/.../db/LiquibaseConfig.java for the open lane,
-# PaidDbAutoConfiguration for the paid one), which needs the full application context —
-# datasource, WorkOS config, the lot — to apply a changelog. The CLI image needs a JDBC URL.
-# Every apply here goes through the SAME tool, which is what makes the before/after comparison
-# meaningful, and this database is throwaway, so nothing about the app's own runtime is being
-# simulated or asserted. The image ships no Postgres driver, so the driver is taken from the
-# local Maven repository — the one the backend already builds against.
+# WHY THE LIQUIBASE CLI IMAGE. The app's only in-process Liquibase path is SpringLiquibase at
+# boot, which needs the full application context (datasource, WorkOS config, the lot) to apply a
+# changelog. The CLI image needs only a JDBC URL. Every apply here goes through the same tool,
+# which is what makes the before/after comparison meaningful, and this database is throwaway, so
+# nothing about the app's own runtime is being simulated or asserted. The image ships no Postgres
+# driver, so the driver is taken from the local Maven repository the backend already builds against.
 #
-# NOT-YET-APPLICABLE ASSERTIONS. Each release's assertions go in a block gated on a schema
-# fact its own migration establishes, so a migration that has not landed reports SKIP and
-# never PASS: a gate that passes vacuously is worse than no gate.
+# NOT-YET-APPLICABLE ASSERTIONS. Each release's assertions go in a block gated on a schema fact
+# its own migration establishes, so a migration that has not landed reports SKIP and never PASS:
+# a gate that passes vacuously is worse than no gate.
 #
-# The fixture-coverage block runs ALWAYS (its open half) or when the overlay lane is on (its
+# The fixture-coverage block runs always (its open half) or when the overlay lane is on (its
 # overlay half), and is the guard on the guard: it fails if a value this script asserts on never
 # made it into the fixture, so a SKIP in the release-block section always means "the migration is
 # not here yet", never "the row was not here either".
@@ -119,12 +91,12 @@
 # Usage:  ./scripts/check-migrations-populated.sh [--keep]
 #           --keep   leave the container running for poking at; prints the psql line
 #
-#         MIGPOP_OVERLAY_DIR=<absolute path to the paid overlay's resources root> ./scripts/check-migrations-populated.sh
-#           turns the overlay lane on — a paid module's resources root, holding
-#           db/changelog/paid/db.changelog-paid.yaml. Unset (the default): open lane only.
+#         MIGPOP_OVERLAY_DIR=<absolute path to the overlay module's resources root> ./scripts/check-migrations-populated.sh
+#           turns the overlay lane on, holding db/changelog/paid/db.changelog-paid.yaml.
+#           Unset (the default): open lane only.
 #         MIGPOP_OVERLAY_FIXTURE=<path>     default: scripts/lib/paid-populated-fixture.sql, sibling to
 #                                            the overlay module MIGPOP_OVERLAY_DIR names
-#         MIGPOP_OVERLAY_EXPECTS=<path>     default: paid-populated-expects.sh beside the paid fixture;
+#         MIGPOP_OVERLAY_EXPECTS=<path>     default: paid-populated-expects.sh beside the overlay fixture;
 #                                            the overlay's own expect() calls, sourced in the overlay lane
 #         MIGPOP_OVERLAY_BASELINE=<file>    default P0000-paid-baseline.sql
 #
@@ -133,10 +105,10 @@
 #
 # Not wired into `task check` or CI, deliberately: it is worth running exactly when a migration
 # renames or narrows a persisted value, and it is dead weight on every other change. Run it per
-# phase — `task migrations:populated` — before merging one that does. Taskfile.yml's
-# `migrations:populated` task runs the overlay lane automatically when the paid overlay is present
-# (mirroring `overlay:apply-changelog`'s own file-exists guard), so a paid
-# checkout gets both lanes without passing the env vars by hand.
+# phase, `task migrations:populated`, before merging one that does. Taskfile.yml's
+# `migrations:populated` task runs the overlay lane automatically when the overlay module is
+# present (mirroring `overlay:apply-changelog`'s own file-exists guard), so such a checkout gets
+# both lanes without passing the env vars by hand.
 # =============================================================================
 
 set -euo pipefail
@@ -156,20 +128,20 @@ DB="tessary"
 PASSWORD="migpop"
 KEEP=0
 
-# The last changeset the open fixture is written against — everything after it is what this
+# The last changeset the open fixture is written against: everything after it is what this
 # gate runs against rows. See "WHY THE BASELINES ARE PINNED FILENAMES" above before moving it.
 BASELINE="${MIGPOP_BASELINE:-0000-baseline.sql}"
 
-# The overlay lane. Unset MIGPOP_OVERLAY_DIR is "no paid overlay in this checkout" — every
+# The overlay lane. Unset MIGPOP_OVERLAY_DIR means no overlay module in this checkout: every
 # overlay-lane step below is skipped, not failed, the same file-exists guard shape
 # Taskfile.yml's own overlay:apply-changelog task already uses.
 OVERLAY_DIR="${MIGPOP_OVERLAY_DIR:-}"
 # The overlay's own directory name is never spelled out literally in this file on purpose
-# (check-open-boundary.sh rule 5: an open script may not name the overlay module by path — only
-# the four scripts whose whole job IS managing it may, and this is not one of them). The fixture
+# (check-open-boundary.sh rule 5: an open script may not name the overlay module by path, only
+# the scripts whose whole job is managing it may, and this is not one of them). The fixture
 # default below is derived from MIGPOP_OVERLAY_DIR itself
 # (<overlay module>/db/src/main/resources -> <overlay module>/scripts/lib/...), which the caller
-# supplies — Taskfile.yml's migrations:populated task, itself an orchestration file allowed to
+# supplies, Taskfile.yml's migrations:populated task, itself an orchestration file allowed to
 # name the overlay under its own guard.
 OVERLAY_FIXTURE="${MIGPOP_OVERLAY_FIXTURE:-}"
 if [ -n "$OVERLAY_DIR" ] && [ -z "$OVERLAY_FIXTURE" ]; then
@@ -256,12 +228,12 @@ done < <(sed -n 's|^ *file: *\(db/changelog/changes/.*\)$|\1|p' "$MASTER")
 echo "check-migrations-populated: open lane — old chain ${OLD_COUNT} file(s) through ${BASELINE}, new ${NEW_COUNT} file(s):${NEW_FILES:- none}"
 
 # ---------------------------------------------------------------- the overlay changelogs
-# Same cut-at-baseline derivation as the open lane, sourced from the overlay's OWN master
+# Same cut-at-baseline derivation as the open lane, sourced from the overlay's own master
 # rather than the open one, and with the floor-pin preConditions block left out entirely (not
-# carried over and stripped — regenerated from scratch, so there is nothing to strip): the
-# throwaway "old" apply below runs strictly after open-old in the SAME database, so the floor
+# carried over and stripped, regenerated from scratch, so there is nothing to strip): the
+# throwaway "old" apply below runs strictly after open-old in the same database, so the floor
 # (evals:0000-baseline in databasechangelog) is already satisfied by the time it would be
-# checked. The REAL floor-pin is what OVERLAY-NEW exercises, using $OVERLAY_MASTER unmodified.
+# checked. The real floor-pin is what OVERLAY-NEW exercises, using $OVERLAY_MASTER unmodified.
 
 OVERLAY_NEW_COUNT=0
 OVERLAY_NEW_FILES=""
@@ -313,7 +285,7 @@ done
 docker exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1 || die "postgres never became ready on :${PORT}"
 
 # One function, both lanes: $2 is the resources root to mount (open or overlay), so the same
-# tool applies both — see "WHY THE LIQUIBASE CLI IMAGE" above.
+# tool applies both, see "WHY THE LIQUIBASE CLI IMAGE" above.
 liquibase_update() {
   local label="$1" resources="$2" changelog="$3" log="$WORK/liquibase-${1// /-}.log"
   if ! docker run --rm --network "$NETWORK" \
@@ -364,7 +336,7 @@ docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DB" -q \
   <scripts/lib/populated-fixture.sql \
   || die "the open fixture did not load against the open-old chain — it has drifted from the schema through ${BASELINE}"
 
-# ---------------------------------------------------------------- 2. overlay-old, paid-fixture
+# ---------------------------------------------------------------- 2. overlay-old, overlay-fixture
 
 if [ -n "$OVERLAY_DIR" ]; then
   echo "check-migrations-populated: applying the overlay-old chain"
@@ -393,7 +365,7 @@ expect "retention_policy both classes"        2 "SELECT count(DISTINCT data_clas
                                                    WHERE data_class IN ('traces','detections')"
 expect "alert_event payload classifier keys"  1 "SELECT count(*) FROM alert_event WHERE payload_json LIKE '%\"classifiers\"%' AND payload_json LIKE '%\"classifier_key\"%'"
 expect "pre_deploy_check rows"                1 "SELECT count(*) FROM pre_deploy_check"
-# The old six-table detection UNION view is gone (#1074); these are its three OPEN arms, asked
+# The old six-table detection UNION view is gone; these are its three open arms, asked
 # directly. All three fixture rows are span-grain (see scripts/lib/populated-fixture.sql), which
 # is the fact this checks rather than assuming.
 expect "open detection rows across the three open tables" 3 "SELECT (SELECT count(*) FROM secret_leak_detection)
@@ -406,8 +378,7 @@ expect "open detections are all span-grain"   3 "SELECT (SELECT count(*) FROM se
 if [ -n "$OVERLAY_DIR" ]; then
   echo "-- overlay lane --"
   # The overlay's fixture claims live beside its fixture, in the overlay, because an open script
-  # never names an overlay relation (the ordering contract, epic 3 of the open-core execution
-  # plan — overlay-owned since #1293). The file is a shell fragment that calls expect(); it is
+  # never names an overlay relation. The file is a shell fragment that calls expect(); it is
   # sourced here with expect() and q() already defined.
   [ -f "$OVERLAY_EXPECTS" ] || die "MIGPOP_OVERLAY_EXPECTS ${OVERLAY_EXPECTS} does not exist"
   # shellcheck disable=SC1090
@@ -438,12 +409,12 @@ fi
 # on rows nothing has migrated yet. Example shape, for whoever writes the next one:
 #
 #   echo
-#   echo "Phase A — <what the release renames>"
+#   echo "Phase A: <what the release renames>"
 #   if [ "$(q "SELECT to_regclass('public.<table the migration adds>') IS NOT NULL")" = "t" ]; then
 #     expect "old value gone"  0 "SELECT count(*) FROM <t> WHERE <col>='<old>'"
 #     expect "new value there" 1 "SELECT count(*) FROM <t> WHERE <col>='<new>'"
 #   else
-#     skip "Phase A" "<the schema fact> is absent — the migration has not landed"
+#     skip "Phase A" "<the schema fact> is absent, the migration has not landed"
 #   fi
 #
 

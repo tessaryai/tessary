@@ -21,13 +21,12 @@
 # No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per invocation
 # (see runScriptInDocker), never a long-lived process.
 #
-# BASE IMAGE: node:22-alpine3.24, the SAME as template.ts (E2B), kept in lockstep
-# (#1017 closed the last holdout, template.ts).
+# BASE IMAGE: node:22-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
 # Why not 20: `re2@1.26.1` — pinned by every recipe, unchanged — declares
 # `engines.node: "^22.22.2 || ^24.15.0 || >=26.0.0"`, and npm's own resolved node-gyp fails to even
 # configure under Node 20 with an unrelated undici crash (`TypeError:
-# webidl.util.markAsUncloneable is not a function`), verified on both linux/amd64 and linux/arm64
-# in #855. The launcher's own Dockerfile is on the same base for the same reasons.
+# webidl.util.markAsUncloneable is not a function`), verified on both linux/amd64 and linux/arm64.
+# The launcher's own Dockerfile is on the same base for the same reasons.
 #
 # Why ALPINE and not Debian: every remaining CRITICAL on the Debian recipe was an unfixable Debian
 # package. bookworm carried 16; moving to trixie cleared libsqlite3-0 and zlib1g and left 13, all
@@ -120,7 +119,7 @@ RUN chmod +x /usr/local/bin/tessary-evals-validate
 ENV HOME=/home/user
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Non-root from here down (finding #855-r3, crew review PR #1005). This USED to be a trailing
+# Non-root from here down. This USED to be a trailing
 # `RUN chown -R node:node /home/user`, which cost a 73 MB layer all by itself: chown rewrites the
 # metadata of every file under /home/user, so Docker re-stores the whole node_modules tree a second
 # time. Creating the directory owned by `node` up front and doing the writes AS `node` produces the
@@ -132,7 +131,7 @@ WORKDIR /home/user
 
 # Modules the in-VM scripts require from /home/user — @opencode-ai/sdk drives the opencode server,
 # undici lifts fetch's 300s headers timeout. acorn/acorn-walk/re2 backed the codegen
-# self-correction harness Track A deleted and are left here to stay byte-identical to template.ts's
+# self-correction harness that was deleted and are left here to stay byte-identical to template.ts's
 # line — see that file for why trimming them waits for the next E2B rebuild.
 # DELIBERATELY npm though the repo is otherwise on pnpm — see template.ts's own comment;
 # the same reasoning applies unchanged here (no lockfile to honor, the container is disposable, npm
@@ -157,8 +156,8 @@ COPY --chown=node:node sandbox-runner/agent-sandbox/agent-stream.js /home/user/a
 COPY --chown=node:node sandbox-runner/agent-sandbox/rca.js /home/user/rca.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/triage.js /home/user/triage.js
 
-# The image's version identity (epic 5 clause 3, #1135; extended here per epic 7 clause 1, #941):
-# same convention and same "dev" fallback as backend/Dockerfile, so the release workflow's OCI
+# The image's version identity: same convention and same "dev" fallback as backend/Dockerfile,
+# so the release workflow's OCI
 # label assertion has something to check on every published image, not just backend/frontend.
 # Written to a file as well as a LABEL for the same reason backend/Dockerfile gives: a derived
 # image can COPY a file from its base and cannot read its base's labels. WORKDIR here is

@@ -61,7 +61,7 @@ class MediaExternalizerTest {
                 List.of("media-1"),
                 result.mediaIds(),
                 "the caller must learn the id, or the media_ref row that makes the bytes reachable"
-                        + " and collectable is never written (#761)");
+                        + " and collectable is never written");
 
         ArgumentCaptor<byte[]> stored = ArgumentCaptor.forClass(byte[].class);
         verify(media).put(eq("p1"), stored.capture(), eq("image/jpeg"));
@@ -136,10 +136,8 @@ class MediaExternalizerTest {
 
     @Test
     void anthropicBase64Document_becomesDocumentRef_textCarriesFailureMarker() throws Exception {
-        // Not a real PDF (PdfTextExtractorTest owns real-PDF extraction correctness) — this proves the
-        // externalization/ref-minting/failure-labeling wiring, not extraction quality: garbage bytes
-        // extract to Optional.empty(), and the ref must STILL be minted (bytes preserved) with a labeled
-        // failure marker in `text`, never a fatal batch.
+        // Garbage bytes, not a real PDF (PdfTextExtractorTest owns real extraction) — proves that when
+        // extraction fails, the ref is still minted with a labeled failure marker, never a fatal batch.
         byte[] notAPdf = {1, 2, 3, 4};
         String b64 = Base64.getEncoder().encodeToString(notAPdf);
         String json = "[{\"type\":\"text\",\"text\":\"see attached\"},"

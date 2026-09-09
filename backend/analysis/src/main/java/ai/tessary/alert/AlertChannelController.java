@@ -48,11 +48,9 @@ public class AlertChannelController {
     }
 
     /**
-     * Some transports are a capability of their own. Slack is not part of the launch, so an org without
-     * {@link Capability#SLACK} cannot point a channel at it — checked here, at the write, rather than only
-     * at delivery, so the refusal lands where the person is rather than in a log nobody reads.
-     *
-     * <p>An unrecognized kind falls through to {@link AlertChannelService}, which owns that error.
+     * Slack is gated behind {@link Capability#SLACK}, checked here at the write rather than only at
+     * delivery so the refusal lands where the person is rather than in a log nobody reads. An
+     * unrecognized kind falls through to {@link AlertChannelService}, which owns that error.
      */
     private void requireChannelKind(Resolved r, String kind) {
         if (AlertChannelKind.SLACK.wire().equalsIgnoreCase(kind == null ? "" : kind.trim())) {
@@ -114,7 +112,7 @@ public class AlertChannelController {
                 .toList());
     }
 
-    /** Alerts are a paid capability ({@link Feature#ALERTS}): resolve the project AND require the entitlement. */
+    /** Resolve the project and require the {@link Capability#ALERTS} entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.ALERTS);

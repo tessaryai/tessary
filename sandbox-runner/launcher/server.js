@@ -18,7 +18,7 @@
  *                                                    The one agentic route with NO clone — see runTriage.
  *   GET  /healthz                                    -> 200
  *
- * FIVE ROUTES LEFT WITH TRACK A, and the list is worth keeping because the shape of what remains is
+ * FIVE ROUTES WERE REMOVED, and the list is worth keeping because the shape of what remains is
  * the argument for the rename: /grade and /lint ran user-authored grader code, /synthesize and
  * /codegen authored it, and /analyze served the git observer. All five went with grading and the
  * observer. What is left — /rca and /triage — is OUR agent ruling on the surviving classifier
@@ -41,12 +41,12 @@
  * Env:
  *   PORT                  (default 8080)
  *   SANDBOX_API_KEY       shared secret the backend must present
- *   SANDBOX_BACKEND       'docker' (default, D7) | 'e2b' | 'local'. Three DISTINCT isolation
+ *   SANDBOX_BACKEND       'docker' (default) | 'e2b' | 'local'. Three DISTINCT isolation
  *                         guarantees, not interchangeable:
  *                           'docker' — the agentic paths (/rca, /triage) each run in a
  *                             FRESH, hardened sibling container spawned
  *                             from AGENT_IMAGE over the mounted Docker socket, one per request,
- *                             removed on completion. This is D7's open default: no E2B key, no
+ *                             removed on completion. This is the open default: no E2B key, no
  *                             Tessary cloud credential, isolation equivalent to the E2B path.
  *                           'e2b'    — the original path: a fresh E2B microVM per request.
  *                           'local'  — agentic paths run DIRECTLY ON THIS HOST process against a
@@ -68,10 +68,10 @@
  *   AGENT_IMAGE            the published agent image the docker backend runs one sibling
  *                         container from per request (default
  *                         tessaryai/tessary:agent-sandbox-latest — the agent-sandbox tag name
- *                         matches the E2B template alias tessary-agent-sandbox, D6/D9 in
- *                         tessary-paid/OPEN-CORE.md — see sandbox-runner/agent-sandbox/Dockerfile and
+ *                         matches the E2B template alias tessary-agent-sandbox — see
+ *                         sandbox-runner/agent-sandbox/Dockerfile and
  *                         .github/workflows/release.yml). Docker backend only.
- *   SANDBOX_DOCKER_CONCURRENCY  max sibling containers running at once (default 1, per D7).
+ *   SANDBOX_DOCKER_CONCURRENCY  max sibling containers running at once (default 1).
  *                         One in-process semaphore guards the single container-spawn call site, so
  *                         every route shares one limiter rather than each keeping its own in sync.
  *   SANDBOX_DOCKER_MEMORY_MB, SANDBOX_DOCKER_CPUS, SANDBOX_DOCKER_PIDS_LIMIT
@@ -102,7 +102,7 @@
  *                         first confusing empty-/work run if it's missing. See LAUNCHER_WORK_DIR's
  *                         own comment in the code below for the full mechanism.
  *
- * Analysis-sandbox agent auth (#939 D4 — FULL REMOVAL of the deployment-env-var credential path).
+ * Analysis-sandbox agent auth (FULL REMOVAL of the deployment-env-var credential path).
  * Every /rca and /triage request now carries its own `credential` object — the org's own
  * ProviderCredential row, decrypted by the backend and injected here — and this launcher reads NO
  * provider secret from its own process env any more. There is no AGENT_PROVIDER deployment knob, no
@@ -149,13 +149,13 @@ function Sandbox() {
 }
 
 const PORT = Number(process.env.PORT || 8080);
-// D7: Docker is the open default so the triage/RCA flow needs zero Tessary cloud credentials
+// Docker is the open default so the triage/RCA flow needs zero Tessary cloud credentials
 // (no E2B key) out of the box. 'e2b' and 'local' are both still explicit opt-ins.
 const BACKEND = (process.env.SANDBOX_BACKEND || 'docker').toLowerCase();
 const SANDBOX_API_KEY = process.env.SANDBOX_API_KEY || '';
 const E2B_API_KEY = process.env.E2B_API_KEY;
 // E2B_TEMPLATE / 'evals-grader-runner' was the second alias here — the grader sandbox /grade and
-// /lint ran in. Both routes went with Track A, so the constant, the env var and its compose entries
+// /lint ran in. Both routes were removed, so the constant, the env var and its compose entries
 // are gone. The published cloud template is orphaned in E2B; nothing in this tree can delete it.
 const ANALYZER_TEMPLATE = process.env.E2B_ANALYZER_TEMPLATE || 'tessary-agent-sandbox';
 const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 60000);
@@ -168,7 +168,7 @@ const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
 // --- Docker backend (SANDBOX_BACKEND=docker) config — see the Env block above for what each
 // of these does. ---
 const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock';
-// D9 (#1114): server.js has no interpolation of its own the way docker-compose.yml's
+// server.js has no interpolation of its own the way docker-compose.yml's
 // ${VAR:-...${OTHER:-x}} does, so this default cannot compose a version out of TESSARY_VERSION.
 // It does not need to: the tag floats, and the release repoints `-latest` — which is why there is
 // no version literal here to keep in step with anything. Set AGENT_IMAGE to pin.
@@ -180,7 +180,7 @@ const SANDBOX_DOCKER_PIDS_LIMIT = Number(process.env.SANDBOX_DOCKER_PIDS_LIMIT |
 const DOCKER_SANDBOX_NETWORK = process.env.DOCKER_SANDBOX_NETWORK || 'tessary-sandbox';
 // Whether a sibling agent container is CUT OFF from the tessary service network. Opt-in, default off.
 //
-// #855 made the cut-off unconditional: every sibling ran on DOCKER_SANDBOX_NETWORK, "never the
+// The cut-off used to be unconditional: every sibling ran on DOCKER_SANDBOX_NETWORK, "never the
 // tessary service network this launcher itself runs on". That is the right posture for an install
 // whose operator treats agent runs as untrusted — but it is not reachability-neutral, and the cost
 // landed on the default install. The agent reads every trace and span it reasons about through the
@@ -191,7 +191,7 @@ const DOCKER_SANDBOX_NETWORK = process.env.DOCKER_SANDBOX_NETWORK || 'tessary-sa
 //
 // So the default inverts: the sibling joins the network this launcher is already on and resolves
 // `backend` by service name, and an operator who deems their installation untrusted sets
-// SANDBOX_NETWORK_ISOLATION=1 to restore #855's dedicated bridge — at which point reaching the
+// SANDBOX_NETWORK_ISOLATION=1 to restore that dedicated bridge — at which point reaching the
 // backend is the SITE_DOMAIN public-origin path, exactly as it was.
 //
 // What isolation still buys when it is on is unchanged. What turning it off costs is the honest
@@ -225,7 +225,7 @@ const SANDBOX_LABEL_VALUE = '1';
 // larger timeout_ms in the request body — up to 1,200,000ms for /triage, 900,000ms
 // for /rca — none of which resemble SANDBOX_TIMEOUT_MS's 60000ms default. A reap threshold sized
 // off that constant alone would kill still-legitimately-running containers on every redeploy or
-// crash-restart (finding #855-r1, crew review PR #1005). So every container is labeled with its
+// crash-restart. So every container is labeled with its
 // own actual timeoutMs (below) and reaped against THAT, with a generous safety multiplier for
 // Docker/network overhead the in-container clock doesn't see; this constant survives only as the
 // fallback for a container with no parseable timeout label (e.g. one created before this fix, or
@@ -244,22 +244,22 @@ const SANDBOX_LABEL_TIMEOUT_MS = 'tessary.sandbox.timeout-ms';
 // unavailable in the region.
 const MANTLE_GPT = 'bedrock-mantle-gpt';
 const BEDROCK_RUNTIME = 'amazon-bedrock';
-// MANTLE_PROJECT_ID stays a deployment-wide env var (#939 D4 did not move it): it is an
+// MANTLE_PROJECT_ID stays a deployment-wide env var: it is an
 // attribution SCOPE, not a secret, and there is nowhere on ProviderCredential for a per-org value
-// to live even if there were reason to want one. MANTLE_REGION does not: as of D4 the region for a
+// to live even if there were reason to want one. MANTLE_REGION does not: the region for a
 // BEDROCK_MANTLE run comes from `credential.aws_region` (the org's own credential row), same as
 // every other Bedrock/mantle field.
 const MANTLE_PROJECT_ID = (process.env.MANTLE_PROJECT_ID || '').trim();
 
-// #939 D4: FULL REMOVAL of the AGENT_PROVIDER deployment-wide dev-override knob and every env var
+// FULL REMOVAL of the AGENT_PROVIDER deployment-wide dev-override knob and every env var
 // it read (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY, GEMINI_API_KEY,
 // GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY, CUSTOM_OPENAI_BASE_URL/CUSTOM_OPENAI_API_KEY). What is
 // left is the per-REQUEST form only: every /rca and /triage body now carries a `credential` object
 // (the org's ProviderCredential row, decrypted by the backend — see the file-header doc), and the
 // database is the only source. There is no deployment-wide fallback any more — a self-hoster with
 // no org credential simply cannot run RCA/TRIAGE, the same way they cannot without an API key
-// anywhere else in this product now (#939 D6 also removed the one credential-free provider,
-// Ollama).
+// anywhere else in this product now (removing the deployment-wide knob also removed the one
+// credential-free provider, Ollama).
 //
 // OPENCODE_PROVIDER_NAME/REQUEST_PROVIDER_TO_MODE survive from that removal because they answer a
 // different question than AGENT_PROVIDER did: not "what does this deployment default to" but
@@ -338,7 +338,7 @@ function defaultBaseUrlFor(mode) {
 
 /**
  * Base URL + API key for one OpenAI-compat mode, sourced from the request's own `credential`
- * object (#939 D4) rather than the launcher's process env. `mode` is the lowercase mode string
+ * object rather than the launcher's process env. `mode` is the lowercase mode string
  * (OPENCODE_PROVIDER_NAME's keys) — the caller resolves `credential.provider` through
  * REQUEST_PROVIDER_TO_MODE first, so this function itself never sees the uppercase wire form.
  */
@@ -387,9 +387,9 @@ function openAiCompatProviderBlock(mode, credential, model) {
  * The provider config OpenCode runs with, injected per run rather than baked into the image so
  * the region and the served model list stay with the launcher that already resolves credentials.
  *
- * #939 D4: dispatches purely on `credential.provider` — there is no deployment-wide default any
+ * Dispatches purely on `credential.provider` — there is no deployment-wide default any
  * more (see the file-header doc and the constants block above this function), so exactly ONE
- * provider block is declared per run: the one the request's own credential names. Before D4 this
+ * provider block is declared per run: the one the request's own credential names. Previously this
  * unconditionally declared BOTH Bedrock endpoints (the platform's ambient identity served either)
  * and merged in an optional per-request OpenAI-compat block on top; now the credential IS the
  * selection, so there is nothing to merge — a Bedrock credential gets the Bedrock block, a GEMINI
@@ -438,7 +438,7 @@ function providerConfig(credential, qualifiedModel) {
   return config;
 }
 
-// CREDENTIAL / NETWORK POSTURE for a spawned sandbox process or sibling container (#1020). Every
+// CREDENTIAL / NETWORK POSTURE for a spawned sandbox process or sibling container. Every
 // runner takes one and there is NO default: omitting it is a TypeError at the call site, not a
 // silent fall-through to the full credential set. The two postures:
 //   AGENT_POSTURE      -- our own agent (/rca, /triage): the host env plus the provider credentials
@@ -446,15 +446,16 @@ function providerConfig(credential, qualifiedModel) {
 //                         on docker) for the repo clone and the model-provider call.
 //   UNTRUSTED_POSTURE  -- an EMPTY env and, on docker, NetworkMode 'none'. It has NO ROUTE TODAY:
 //                         its only callers were /grade and /lint, which ran user-authored grader
-//                         code, and Track A removed both. It is kept deliberately. #1020 landed this
-//                         pair precisely so a future untrusted-content route cannot default into the
-//                         full credential set, and deleting the safe half of that pair would leave
+//                         code, and removing both routes removed its only route. It is kept
+//                         deliberately: the pair exists precisely so a future untrusted-content
+//                         route cannot default into the full credential set, and deleting the
+//                         safe half of that pair would leave
 //                         requirePosture with exactly one legal value — which is a default wearing a
 //                         parameter's clothes.
 // The old shape -- an optional envOverride / opts.{envs,network} that defaulted to AGENT_POSTURE's
 // values when omitted -- was correct at every existing call site and wrong as a default: a future
 // untrusted-content route that forgot the override would have inherited AWS/Bedrock/Anthropic
-// credentials and egress with no error anywhere (crew review, PR #1006).
+// credentials and egress with no error anywhere.
 const AGENT_POSTURE = Object.freeze({ kind: 'trusted-agent' });
 const UNTRUSTED_POSTURE = Object.freeze({ kind: 'untrusted-content' });
 function requirePosture(posture, where) {
@@ -479,8 +480,8 @@ function childEnvFor(posture, workDir, credential, qualifiedModel) {
 // SigV4 only, deliberately. A Bedrock API key would be the smaller thing to hand a sandbox, but
 // a Bedrock IAM policy that grants `bedrock-mantle:CreateInference` does not thereby grant
 // `bedrock-mantle:CallWithBearerToken` — so a bearer token here would authenticate on bedrock-runtime and
-// 403 on every mantle model, which is the confusing half-failure worth not building. #939 D4 removed
-// the one path that ever offered a bearer token here (AGENT_PROVIDER=bedrock-api-key) entirely, so
+// 403 on every mantle model, which is the confusing half-failure worth not building. Removing
+// the one path that ever offered a bearer token here (AGENT_PROVIDER=bedrock-api-key) entirely means
 // this reasoning is now unconditional rather than "in every mode except one".
 //
 // The env var an OpenAI-compat mode's credential rides in, forwarded alongside
@@ -523,8 +524,8 @@ function agentEnvs(credential, qualifiedModel) {
   const envs = {};
   if (credential.provider === 'BEDROCK' || credential.provider === 'BEDROCK_MANTLE') {
     envs.AWS_REGION = credential.aws_region || '';
-    // #939 D4 (the sandbox-side half of the IAM-role auth carried over from #939's earlier landing):
-    // omit the AWS key pair ENTIRELY when the credential has none (an iam_role-mode row never
+    // The sandbox-side half of the IAM-role auth: omit the AWS key pair ENTIRELY when the
+    // credential has none (an iam_role-mode row never
     // reaches here at all — see AGENTIC_IAM_ROLE_UNSUPPORTED on the backend — but an api_key-mode
     // row's keys are always present, so this stays a defensive omit-if-blank, not a live branch).
     // AWS_ACCESS_KEY_ID='' in the child env is not "absent" to the SDK's DefaultCredentialsProvider
@@ -563,13 +564,13 @@ function toProviderModel(model, credential) {
   if (model.includes('/')) return model;
   if (mode) return OPENCODE_PROVIDER_NAME[mode] + '/' + model;
   // BEDROCK / BEDROCK_MANTLE (REQUEST_PROVIDER_TO_MODE has no entry for either) — the only two
-  // providers left once an OpenAI-compat credential doesn't match, now that #939 D4 removed every
-  // deployment-wide dev override this used to fall through to first.
+  // providers left once an OpenAI-compat credential doesn't match, now that every
+  // deployment-wide dev override this used to fall through to first is removed.
   return (model.startsWith('openai.') ? MANTLE_GPT : BEDROCK_RUNTIME) + '/' + model;
 }
 
 // toAnthropicModel (Bedrock inference-profile id -> first-party Anthropic model id) lived here
-// until #939 D4 removed AGENT_PROVIDER=anthropic, its one caller. It is not coming back: ANTHROPIC
+// until the removal of AGENT_PROVIDER=anthropic, its one caller. It is not coming back: ANTHROPIC
 // is a per-request-selectable provider again, but it now carries its OWN model names
 // ("claude-sonnet-5", from ModelCatalog) rather than a Bedrock inference-profile id needing
 // translation, so toProviderModel qualifies it like every other non-Bedrock provider.
@@ -602,7 +603,7 @@ function scrubToken(s) {
 // breadcrumb pointing at the launcher logs, not a log shipper.
 const DETAIL_MAX = 200;
 
-// #857: an E2B microVM is a separate machine on E2B's network, not a process on this host — a
+// An E2B microVM is a separate machine on E2B's network, not a process on this host — a
 // callback URL of `http://localhost:8000` (docker-compose.dev.yml's own default, and the value the
 // RCA/triage MCP base URL resolves to whenever nothing else is configured) means "call yourself
 // back" from inside the microVM, which is unreachable and guaranteed to fail the run after burning
@@ -614,8 +615,8 @@ const DETAIL_MAX = 200;
 // `0.0.0.0` (a real deployment-config typo, not just a curiosity — Linux happily lets a client
 // bind/connect to it as loopback) and IPv4-mapped IPv6 literals (`::ffff:127.0.0.1`, which Node's
 // URL parser normalizes to `[::ffff:7f00:1]` rather than `[::1]`) both need their own checks: they
-// are equally "call yourself back" addresses but do not textually match `127.0.0.1`/`[::1]` (crew
-// review, PR #1008). `u.hostname` already lower-cases and numerically normalizes IPv4 shorthand/
+// are equally "call yourself back" addresses but do not textually match `127.0.0.1`/`[::1]`.
+// `u.hostname` already lower-cases and numerically normalizes IPv4 shorthand/
 // octal/decimal forms (e.g. `0177.0.0.1` -> `127.0.0.1`) per the WHATWG URL spec, so those need no
 // extra handling here.
 const IPV4_MAPPED_LOCALHOST = '[::ffff:7f00:1]';
@@ -884,7 +885,7 @@ function runScriptLocally(scriptName, payload, timeoutMs, posture, credential) {
 }
 
 // ---------------------------------------------------------------------------
-// Docker backend (SANDBOX_BACKEND=docker) — D7's open default.
+// Docker backend (SANDBOX_BACKEND=docker) — the open default.
 //
 // Talks to the Docker Engine API over the socket docker-compose.yml mounts read-write into this
 // container (DOCKER_SOCKET_PATH). Deliberately raw HTTP over `node:http`'s `socketPath` option,
@@ -962,7 +963,7 @@ async function ensureAgentImage() {
   // Newline-delimited JSON pull-progress frames. The pull can fail MID-STREAM (bad tag, network
   // drop, registry auth failure) while the HTTP status stays 200 — Docker reports that failure
   // only as an `{"error": "..."}` frame somewhere in the stream, per the Engine API's own
-  // documented behaviour. Checking statusCode alone (finding #855-r2, crew review PR #1005)
+  // documented behaviour. Checking statusCode alone
   // would cache agentImageReady=true forever on a failed pull, since nothing would ever retry.
   let pullError = null;
   let buffered = '';
@@ -1012,8 +1013,8 @@ function createDockerLogDemuxer(onStdout, onStderr) {
 }
 
 // A simple in-process counting semaphore. This is SANDBOX_DOCKER_CONCURRENCY's whole
-// implementation: it wraps the ONE container-spawn call site below (not per-script), so #856 can
-// reuse the same instance for /grade and /lint without a second limiter to keep in sync.
+// implementation: it wraps the ONE container-spawn call site below (not per-script), so every
+// route can reuse the same instance without a second limiter to keep in sync.
 class Semaphore {
   constructor(max) {
     this.max = max;
@@ -1121,13 +1122,13 @@ async function reapOrphanSandboxContainers() {
 }
 
 // Docker backend (SANDBOX_BACKEND=docker): run an analyzer script in a FRESH, hardened sibling
-// container spawned from AGENT_IMAGE, one per request, removed on completion — D7's open default.
+// container spawned from AGENT_IMAGE, one per request, removed on completion — the open default.
 // Cloned from runScriptLocally's shape (mkdtemp work dir -> write input.json -> run with an
 // MAX_STDOUT_BYTES cap and a timeout -> cleanup in `finally`), swapping "spawn node on the host"
 // for "create+start a sibling container that runs node inside it". agentEnvs() passes through
 // unchanged for the agentic callers below (AGENT_POSTURE), which is what keeps E2B/local/docker
-// credential resolution identical (see the Env-block comment at the top of this file). #856's
-// Every surviving route passes AGENT_POSTURE. UNTRUSTED_POSTURE has no caller since Track A removed
+// credential resolution identical (see the Env-block comment at the top of this file).
+// Every surviving route passes AGENT_POSTURE. UNTRUSTED_POSTURE has no caller since removing
 // /grade and /lint — see the posture block above for why the constant stays anyway.
 function runScriptInDocker(scriptName, payload, timeoutMs, posture, credential) {
   requirePosture(posture, 'runScriptInDocker');
@@ -1295,7 +1296,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
 // stay observable in the latter case we accumulate stdout/stderr ourselves via onStdout/
 // onStderr (the error object's copies are empty there), log elapsed time, and run a sandbox
 // post-mortem (logSandboxDiagnostics) before re-throwing.
-// #939 D4: the backend throws MISSING_CREDENTIALS before ever calling this launcher when a
+// The backend throws MISSING_CREDENTIALS before ever calling this launcher when a
 // project's org has no usable credential, so every well-formed request carries one — but this
 // launcher does not trust that promise blindly. A missing or malformed `credential` is rejected
 // as `bad_request` (the CALLER sent something unusable) rather than allowed to reach
@@ -1330,7 +1331,7 @@ function requireCredential(credential, scriptName) {
 
 async function runAgenticScript(scriptName, rawPayload) {
   const timeoutMs = Number(rawPayload.timeout_ms || SANDBOX_TIMEOUT_MS);
-  // #939 D4: `credential` is the org's own ProviderCredential row, decrypted by the backend and
+  // `credential` is the org's own ProviderCredential row, decrypted by the backend and
   // sent ONLY on this field — see the file-header doc for its shape. It is destructured OUT of
   // `rawPayload` here and never rejoins `payload` below: `payload` is what gets written to
   // input.json (on every backend, including inside the E2B microVM's own filesystem at
@@ -1349,7 +1350,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   console.log(`${scriptName}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
   if (BACKEND === 'local') return runScriptLocally(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
   if (BACKEND === 'docker') return runScriptInDocker(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
-  // #857: both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
+  // Both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
   // file). Reject a missing or localhost-pointed callback URL BEFORE spending an E2B sandbox create
   // call: on this backend the microVM cannot reach the host's localhost at all, so letting the run
   // proceed only guarantees a slower, more expensive version of the same failure. The guard is kept
@@ -1521,7 +1522,7 @@ const server = http.createServer(async (req, res) => {
 // Fail at boot, not on the first /analyze an hour later.
 //
 // The AGENT_PROVIDER boot checks that used to live here (a misspelled mode, a mode with no
-// credential set) are GONE with the knob itself (#939 D4) — there is no deployment-wide provider
+// credential set) are GONE with the knob itself — there is no deployment-wide provider
 // mode left to validate at boot; every /rca and /triage's credential is validated per-request by
 // requireCredential() instead, since it is now per-request data, not a deployment property.
 //
@@ -1547,7 +1548,7 @@ if (require.main === module && BACKEND === 'docker') {
 if (require.main === module) server.listen(PORT, () => {
   const detail = BACKEND === 'docker' ? `backend=docker, image=${AGENT_IMAGE}, concurrency=${SANDBOX_DOCKER_CONCURRENCY}`
     : BACKEND === 'local' ? 'backend=local' : `backend=e2b, template=${ANALYZER_TEMPLATE}`;
-  // #939 D4: no more deployment-wide provider note — every request's provider now rides on its
+  // No more deployment-wide provider note — every request's provider now rides on its
   // own `credential.provider`, not a boot-time env var.
   console.log(`sandbox-runner launcher listening on :${PORT} (${detail})`);
 });
@@ -1557,7 +1558,7 @@ module.exports = {
   childEnvFor,
   AGENT_POSTURE,
   UNTRUSTED_POSTURE,
-  // #939: the provider-dispatch seam, exported for test/provider-dispatch.test.js — see that file's
+  // The provider-dispatch seam, exported for test/provider-dispatch.test.js — see that file's
   // header for why each of these needs direct coverage rather than only the end-to-end request tests.
   toProviderModel,
   providerConfig,

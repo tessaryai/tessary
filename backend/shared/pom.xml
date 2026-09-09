@@ -23,7 +23,7 @@
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
         </dependency>
-        <!-- open/media/PdfTextExtractor (document/PDF modality, #985): sits beside the MediaStore SPI
+        <!-- open/media/PdfTextExtractor (document/PDF modality): sits beside the MediaStore SPI
              so it flows transitively to substrate (ingest-time extraction) and llm-runtime/evaluation
              (judge-time extraction) through the reactor chain. See pdfbox.version's comment in the
              aggregator pom for the license/CI note. -->
@@ -129,7 +129,7 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, open module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as the enforcer plugin above. No coverage gate. -->
             <plugin>

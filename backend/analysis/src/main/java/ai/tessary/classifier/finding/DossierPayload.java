@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
  * that has no dedicated dossier assembler — see {@link
  * ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler} for the classifiers that do.
  *
- * <h2>The evidence-bias contract (revised by D, #994)</h2>
+ * <h2>The evidence-bias contract</h2>
  *
  * <p>The dossier's job is to state the CLAIM — what was measured, over what, against what — and to be
  * honest about how the agent got from that claim to the instances it cites. The contract used to be

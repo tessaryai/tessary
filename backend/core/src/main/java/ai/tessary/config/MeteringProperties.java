@@ -20,10 +20,10 @@ import org.springframework.stereotype.Component;
 public class MeteringProperties {
 
     /**
-     * Whether to produce the {@code storage} usage unit. Default off: storage is a LEVEL
-     * snapshot whose billable basis (rows vs bytes vs retention-days) is a product decision tied to billing,
-     * so the slot stays reserved until a deployment ratifies the basis and opts in. The other four units
-     * always meter.
+     * Whether to produce the {@code storage} usage unit. Default off: storage is a point-in-time
+     * snapshot whose billable basis (rows vs bytes vs retention-days) is a product decision tied to
+     * billing, so the slot stays reserved until a deployment ratifies the basis and opts in. The other
+     * four units always meter.
      */
     private boolean storageEnabled = false;
 
@@ -37,10 +37,8 @@ public class MeteringProperties {
      * Platform-funded spend, in USD, that one org may burn in a day before the daily operator report
      * escalates its line from INFO to WARN.
      *
-     * <p><b>This is a threshold, not a cap.</b> Launch decision D6 leaves platform-paid LLM deliberately
-     * uncapped — telemetry, no ceiling — and H4 asks only that a cap stay a decision we can take on
-     * evidence rather than one we are forced into. Crossing this changes a log level and nothing else: no
-     * request is refused and no lane is stopped. Zero or negative disables the escalation entirely.
+     * <p>This is a threshold, not a cap: crossing it changes a log level and nothing else, no request
+     * is refused and no lane is stopped. Zero or negative disables the escalation entirely.
      */
     private double spendWarnUsdPerOrgPerDay = 25.0;
 

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
- * D (#994): the {@code tool_error} shape — {@code ToolErrorEvidence.toJson}'s blob already groups
+ * The {@code tool_error} shape — {@code ToolErrorEvidence.toJson}'s blob already groups
  * failure instances by error SIGNATURE with a per-signature count (the {@code patterns[]} array), so
  * this is a faithful re-rendering of that structure into prose, not a fresh aggregation. What it adds
  * over shipping the raw JSON: population totals stated in words, and an explicit, honest statement of

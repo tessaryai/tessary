@@ -42,7 +42,7 @@ public final class GitIntegrationDtos {
     public record InstallUrlView(String url) {}
 
     /**
-     * The GitHub App manifest-flow starting point (#860's BYO-App wizard): {@code manifest} is the
+     * The GitHub App manifest-flow starting point: {@code manifest} is the
      * JSON blob the frontend auto-submits as a POSTed {@code manifest} form field to {@code url}
      * (github.com's manifest-flow needs POST, not a redirect — the manifest is too large for a
      * query string, unlike the install/authorize URLs above).

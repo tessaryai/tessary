@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Renders the open frontend image's Caddyfile to stdout from the environment (#1225).
+# Renders the open frontend image's Caddyfile to stdout from the environment.
 #
 #   SITE_DOMAIN      bare hostname; blank means the :8000 plain-HTTP listener only
 #   TLS_MODE         acme (default) | owncert | upstream, read only when SITE_DOMAIN is set

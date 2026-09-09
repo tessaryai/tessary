@@ -296,7 +296,7 @@ class McpQueryToolsTest {
 
     /**
      * {@code keyword} is the only mode the schema advertises. The prior {@code semantic} (cosine-kNN) mode
-     * was removed with the rest of the embedding substrate (#1116); a schema that still listed it would be
+     * was removed with the rest of the embedding substrate; a schema that still listed it would be
      * advertising a mode {@code query_search} now rejects.
      */
     @Test
@@ -484,8 +484,8 @@ class McpQueryToolsTest {
 
     @Test
     void searchSemanticModeYieldsCleanToolError() throws Exception {
-        // The service rejects any mode other than 'keyword' with UNKNOWN_SEARCH_MODE (production behavior
-        // post-#1116, since QueryService no longer has a semantic branch to fall into) — the mock here
+        // The service rejects any mode other than 'keyword' with UNKNOWN_SEARCH_MODE (production behavior,
+        // since QueryService no longer has a semantic branch to fall into) — the mock here
         // stands in for that, and the tool surface still turns it into a clean error mentioning the mode.
         when(queryService.search(eq(PROJECT_ID), any(SearchRequest.class)))
                 .thenThrow(new TessaryException(QueryError.UNKNOWN_SEARCH_MODE, "semantic"));

@@ -23,9 +23,9 @@
  *      binds a repository, so the callbacks land here.
  *   2. Bind an owner/name directly, for a repo the app already reaches — or,
  *      with a pasted personal access token, a repo no App installation
- *      reaches at all (#860's PAT fallback).
+ *      reaches at all (the PAT fallback).
  *   3. No App configured anywhere yet: "Set up your own GitHub App" runs
- *      GitHub's manifest flow (#860) to register one interactively and store
+ *      GitHub's manifest flow to register one interactively and store
  *      its credentials, landing back here with ?github_app_connected=1 —
  *      then path 1 installs it on the repos to observe.
  * The picker's choice is re-validated against the sealed token server-side, so
@@ -65,7 +65,7 @@ export function GitIntegration() {
   }, [justConnected]);
 
   // The manifest wizard's callback lands back here once GitHub hands over the newly-registered
-  // App's credentials and GithubAppConfigService has persisted + live-applied them (#860). The App
+  // App's credentials and GithubAppConfigService has persisted + live-applied them. The App
   // is now configured deployment-wide, but THIS project still has no repo bound — nudge straight
   // into the install redirect the App-configured install-url now serves instead of dead-ending.
   const justSetUpApp = params.get("github_app_connected") === "1";
@@ -153,7 +153,7 @@ export function GitIntegration() {
         repoName: name.trim(),
         // A blank token binds a repo the hosted/BYO App already reaches, same as before. A non-blank
         // one is a personal-access-token fallback for a repo no App installation covers — the backend
-        // seals it and GithubTokenService tries it before ever touching App credentials (#860).
+        // seals it and GithubTokenService tries it before ever touching App credentials.
         token: token.trim() === "" ? undefined : token.trim(),
       }),
     onSuccess: () => {

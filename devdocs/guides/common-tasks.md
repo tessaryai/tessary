@@ -23,20 +23,16 @@ with `scripts/sync-evals-contract.sh` if `contract/` predates it). Then absorb i
    optional fields can ride in an existing `*_json` column instead of a new
    column. Note what is NOT here: the bundle's grader and quality-dimension shards
    are routed to `Shard.IGNORE` by `BundleAssembler` and persist nowhere, because
-   Track A removed everything that could run one. A field on those shards needs no
+   everything that could run one was removed. A field on those shards needs no
    work at all.
    **If the changeset renames a persisted value, narrows a CHECK, or drops a
    table, also run `./scripts/check-migrations-populated.sh`** — `task check`
    applies Liquibase to empty databases, so it cannot fail a constraint swap that
    existing rows violate or an `UPDATE` that matches nothing; that script applies
    the chain over a fixture that holds one row per renamed value. Its header
-   explains the mechanics. Pass `MIGPOP_OVERLAY_DIR=tessary-paid/db/src/main/resources`
-   (an absolute path, since it becomes a Docker bind mount) to also run the paid
-   overlay's own lane.
-   **If the change instead regenerates `0000-baseline.sql` or the paid overlay's
-   own `P0000-*-baseline.sql` in place** (a squash, or the epic-3
-   partition, see decision D-A in the open-core program doc's divergence log for
-   when this is allowed at all), run `docker compose -f docker-compose.dev.yml down -v`
+   explains the mechanics.
+   **If the change instead regenerates `0000-baseline.sql` in place** (a squash,
+   when that is allowed at all), run `docker compose -f docker-compose.dev.yml down -v`
    (and the paid overlay's compose file, if running one) before the next
    `task dev`: a Postgres volume born under the OLD baseline carries its OWN
    `databasechangelog` ledger, which the new baseline changeset was never
@@ -72,7 +68,7 @@ port and its read-side siblings, and that seam has its own document:
 [`../reference/classifier-extension-interface.md`](../reference/classifier-extension-interface.md).
 
 (This heading replaced *New curation kind*. Curation — the accept/edit/reject overlay over an
-imported pipeline — was removed on the backend with graders in Track A, along with
+imported pipeline — was removed on the backend along with graders,
 `CurationController` and the `curation_entry` table. Frontend still carries dead `Curation`/
 `CurationEntry` types (`frontend/src/api/types.ts`) and an orphaned `client.ts` stub hitting a
 `/curation/*` route that no longer exists — do not resurrect it as a model for new work.)

@@ -5,8 +5,8 @@ import java.math.BigDecimal;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One platform LLM call as it lands in the {@code llm_call} ledger — the token buckets kept SPLIT
- * (input / output / cache-read / cache-write) rather than collapsed to a total, because the four are
+ * One platform LLM call as it lands in the {@code llm_call} ledger. The token buckets stay split
+ * (input / output / cache-read / cache-write) rather than collapsed to a total, since the four are
  * priced at different rates and a cache-heavy lane looks nothing like an output-heavy one on the bill.
  *
  * <p>{@code costUsd} is null when no price book in force holds a rate for the model: the honest
@@ -15,11 +15,11 @@ import org.jspecify.annotations.Nullable;
  *
  * @param subjectKind the subject's table name ({@code behavior_finding}, {@code rca_report}, …), or null
  *     for the per-call lanes that have no single unit of work behind them. With {@code subjectId} this is
- *     what makes spend attributable to one triage rather than only to a lane (launch H2).
- * @param subjectId the subject row's id. An opaque pointer, not an FK — see migration {@code 0051}.
- * @param priceBookVersion which {@code price_book} priced this row — non-null exactly when {@code costUsd}
- *     is. Null ALSO means "priced by the retired hand-maintained catalog" on rows written before migration
- *     {@code 0084}; those are never rewritten, because this ledger is append-only accounting and stamping
+ *     what makes spend attributable to one triage rather than only to a lane.
+ * @param subjectId the subject row's id. An opaque pointer, not an FK: see migration {@code 0051}.
+ * @param priceBookVersion which {@code price_book} priced this row, non-null exactly when {@code costUsd}
+ *     is. Null also means "priced by the retired hand-maintained catalog" on rows written before migration
+ *     {@code 0084}; those are never rewritten, since this ledger is append-only accounting and stamping
  *     a book onto a row it did not price would fabricate the audit trail.
  */
 public record LlmCallRow(
@@ -41,16 +41,10 @@ public record LlmCallRow(
         String createdAt) {
 
     /**
-     * {@code llm_call.funding} values — whose credential paid for the call. The platform's own ambient
+     * {@code llm_call.funding} values: whose credential paid for the call. The platform's own ambient
      * Bedrock identity funds the platform lanes; a pinned provider runs on the customer's credential. A
      * deployment-wide spend ceiling counts only {@link #PLATFORM}, so one customer's BYO-key usage can
      * never stop work for every other tenant.
-     *
-     * <p>These constants lived on {@code VerdictRow} until Track A removed grading — {@code verdict} and
-     * {@code llm_call} both carried a {@code cost_funding}/{@code funding} column and shared one
-     * vocabulary. They are re-homed here rather than deleted because {@code llm_call} is the ledger that
-     * survives, and the two persisted strings are unchanged: a stored {@code 'platform'} row still reads
-     * back as one.
      */
     public static final class CostFunding {
         private CostFunding() {}

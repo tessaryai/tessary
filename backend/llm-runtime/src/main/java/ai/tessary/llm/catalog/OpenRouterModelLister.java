@@ -14,15 +14,15 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Lists {@code GET https://openrouter.ai/api/v1/models} — confirmed live and unauthenticated during
- * #939 TASK 2's implementation (2026-09-04): the endpoint needs no key to enumerate models (only to
+ * Lists {@code GET https://openrouter.ai/api/v1/models} — confirmed live and unauthenticated as of
+ * 2026-09-04: the endpoint needs no key to enumerate models (only to
  * run one), and every id observed was namespaced {@code <maker>/<slug>} (e.g. {@code openai/gpt-5.5},
  * {@code anthropic/claude-...}, {@code moonshotai/kimi-...}, {@code z-ai/glm-...}, {@code
  * x-ai/grok-...}), plus a small set of {@code ~<maker>/<slug>-latest} pointer aliases. {@code
  * name} carries a human-readable label (e.g. {@code "Meta: Muse Spark 1.3"}).
  *
  * <p>Unlike the single-maker listers, OpenRouter hosts dozens of makers — Meta, Mistral, DeepSeek,
- * Cohere and more, none of them one of D6's six — so every entry is run through
+ * Cohere and more, none of them one of the six supported makers — so every entry is run through
  * {@link SupportedMaker#fromOpenRouterPrefix} and dropped on a miss. This is the intersection step
  * the corrective brief specifies for OpenRouter: "its reported catalog INTERSECT the six makers."
  */

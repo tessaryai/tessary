@@ -1,47 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * #890 — route render smoke test.
+ * Route render smoke test.
  *
- * Mounts the REAL <App/> (wrapped exactly as src/main.tsx wraps it — see that file — with
- * BrowserRouter swapped for a MemoryRouter pointed at one URL) at every 'view' entry in the
- * regenerated route manifest, and asserts each one renders SOMETHING without throwing, under the
- * open edition's default capabilities. This is a render-smoke test, not a content test: the only
- * assertion per route is "the container is not blank and nothing threw" — see the scope guard in
- * the issue and in the open-core execution plan's epic-1 gate. A view's actual behaviour is that view's own test's
- * job, if it ever gets one.
+ * Mounts the real <App/> (wrapped as src/main.tsx wraps it, with BrowserRouter swapped for a
+ * MemoryRouter pointed at one URL) at every 'view' entry in the regenerated route manifest, and
+ * asserts each one renders something without throwing. This is a render-smoke test, not a content
+ * test: the only assertion per route is that the container is non-blank and nothing threw. A
+ * view's actual behavior is that view's own test's job.
  *
- * WHY MOUNT THE REAL APP rather than hand-selecting a provider stack per route. App.tsx itself
- * decides which of TenantProvider/CapabilityGate/ProtectedRoute apply to a given URL — three of the
- * open view entries (/link, /, /orgs/:orgSlug) are NOT under
- * /orgs/:orgSlug/projects/:projectSlug and must NOT be wrapped in TenantProvider (it throws
- * synchronously outside that prefix — see TenantContext.tsx). /new-org left the open tree with
- * #862 (multi-org is a paid-only concern now), and /onboarding left with #1227 (the org-creation
- * wizard is gone — TenantService#ensureDefaultOrg mints the default org/project on signup itself),
- * so neither is one of these any more. Mounting the real App and letting its own <Routes> tree pick
- * the wrapper is what avoids ever getting that call wrong here.
+ * WHY MOUNT THE REAL APP rather than hand-select a provider stack per route: App.tsx itself
+ * decides which of TenantProvider/CapabilityGate/ProtectedRoute apply to a given URL (some view
+ * entries must NOT be wrapped in TenantProvider, which throws synchronously outside the tenant
+ * prefix — see TenantContext.tsx). Mounting the real App and letting its own <Routes> tree pick
+ * the wrapper avoids getting that call wrong here.
  *
  * MOCKING STRATEGY. auth.me()/getCapabilities()/getGradingStatus()/listProjects() are called
  * unconditionally on mount (AuthProvider, useCapabilities, the shell chrome's grading banner and
- * sidebar) — these are given fixed, realistic answers below so every route gets past the loading
- * screen. FAKE_ME.orgs stands in for the removed listMyOrgs() mock: RootRedirect, Sidebar, and Link
- * all read the org list off GET /auth/me now (#862), not a second query.
- * Every OTHER `auth` method is a mutation, never invoked at mount, so it is stubbed
+ * sidebar) — these get fixed, realistic answers below so every route gets past the loading screen.
+ * FAKE_ME.orgs stands in for the org list: RootRedirect, Sidebar, and Link all read it off
+ * GET /auth/me. Every other `auth` method is a mutation, never invoked at mount, so it is stubbed
  * to a rejected-never-called shape only for type completeness.
  *
  * WHAT "MOUNTS" MEANS HERE. Every view is React.lazy'd behind ProjectShell's own <Suspense>, whose
- * fallback sits INSIDE the shell chrome — so a container that merely has text proves the chrome
- * rendered, not the view. Each route's settle loop below therefore waits for that fallback to go
- * away as well as for react-query to go quiet, and fails the route if it never does. Until that was
- * added, most project-scoped entries in this suite were asserting against a spinner: the routed
- * view never mounted before the assertion ran, and the runs where one happened to win the race
- * were the ones that "flaked" on an unmocked query. See the comment on the settle loop itself.
+ * fallback sits inside the shell chrome — so a container that merely has text proves the chrome
+ * rendered, not the view. Each route's settle loop below waits for that fallback to go away as
+ * well as for react-query to go quiet, and fails the route if it never does.
  *
- * `projectApi(...)` is different, deliberately (locked decision, see the issue): each method a
- * test case does not explicitly override defaults to `Promise.resolve(undefined)` via a Proxy,
- * NOT a safe-empty default. #890's whole purpose is catching a capability key or API shape that
- * silently stopped resolving — a safe-empty default (`[]`/`{}`) would let exactly that regression
- * pass silently. The cost this accepts is bounded to view-level PRs that add a new, unmocked data
- * call — they see one rejected/thrown promise in that one test, not a blanket per-route burden.
+ * `projectApi(...)` is different, deliberately: each method a test case does not explicitly
+ * override defaults to `Promise.resolve(undefined)` via a Proxy, not a safe-empty default. This
+ * suite's whole purpose is catching a capability key or API shape that silently stopped resolving
+ * — a safe-empty default (`[]`/`{}`) would let exactly that regression pass silently.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -56,11 +44,9 @@ import manifest from "./routeManifest.generated.json";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
-// Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT. Since #1133 the
-// backend applies UNAVAILABLE_IN_OPEN_EDITION only when its Edition bean reads open; this table is the OPEN
-// edition's answer, which is the edition this smoke test renders.
-// (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java:68,76) literally:
-// every wire key true EXCEPT these five, which the open edition reports unavailable/off.
+// Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT
+// (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java): every wire key is true
+// except these five, which this deployment reports unavailable/off.
 const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
   "triage_automatic_enabled",
   "behavior_drift_enabled",
@@ -94,11 +80,10 @@ const OPEN_EDITION_CAPABILITIES: Record<CapabilityWire, boolean> = Object.fromEn
 const FAKE_ME = {
   id: "user-fake",
   email: "smoke@example.com",
-  // #862: GET /api/me/orgs moved to the paid overlay -- RootRedirect/Sidebar/Link now all read the
-  // org list off GET /auth/me instead, so this fixture (not a mocked listMyOrgs()) is what stands
-  // between every one of those routes and an unwanted redirect (RootRedirect now bounces to
-  // /login rather than /onboarding when it sees an empty list -- #1227 deleted that wizard, since
-  // TenantService#ensureDefaultOrg guarantees this list is never actually empty post-auth).
+  // GET /api/me/orgs is gone; RootRedirect/Sidebar/Link all read the org list off GET /auth/me
+  // instead, so this fixture (not a mocked listMyOrgs()) is what stands between every one of
+  // those routes and an unwanted redirect to /login on an empty list. TenantService#ensureDefaultOrg
+  // guarantees the list is never actually empty post-auth.
   orgs: [{ id: "org-fake", slug: "fake-orgSlug", name: "Fake Org", role: "owner" }],
   platform_staff: false,
 };
@@ -139,8 +124,8 @@ vi.mock("./api/client", () => {
     listMembers: vi.fn(() => Promise.resolve([])),
     listInvitations: vi.fn(() => Promise.resolve([])),
     loginUrl: vi.fn((returnTo?: string) => `/auth/login${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`),
-    // Called unconditionally on mount by the new Login/Signup views (#853) -- must resolve, same
-    // as me()/getCapabilities()/etc above, or those two routes hang on the loading screen forever.
+    // Called unconditionally on mount by Login/Signup -- must resolve, same as
+    // me()/getCapabilities() above, or those two routes hang on the loading screen forever.
     mode: vi.fn(() => Promise.resolve({ redirectFlow: false, firstRun: false })),
     login: unusedMutation("login"),
     signup: unusedMutation("signup"),
@@ -155,8 +140,8 @@ vi.mock("./api/client", () => {
     getLlmUsage: unusedMutation("getLlmUsage"),
     getLlmUsageSeries: unusedMutation("getLlmUsageSeries"),
     updateOrg: unusedMutation("updateOrg"),
-    // archiveOrg/unarchiveOrg/deleteOrg/transferOwnership moved to the paid overlay's own
-    // multiOrgApi.ts with #862 -- the open `auth` export no longer has them to mock.
+    // archiveOrg/unarchiveOrg/deleteOrg/transferOwnership live elsewhere now -- the `auth` export
+    // here no longer has them to mock.
     updateProject: unusedMutation("updateProject"),
     makeProjectDefault: unusedMutation("makeProjectDefault"),
     archiveProject: unusedMutation("archiveProject"),
@@ -169,7 +154,7 @@ vi.mock("./api/client", () => {
     deny: unusedMutation("link.deny"),
   };
   // See the header note: unlisted methods default to Promise.resolve(undefined), never a
-  // safe-empty shape — a deliberate, locked decision (#890).
+  // safe-empty shape.
   function projectApi(orgSlug: string, projectSlug: string) {
     const overrides = currentProjectApiOverrides;
     return new Proxy(
@@ -184,9 +169,9 @@ vi.mock("./api/client", () => {
       },
     );
   }
-  // #939 D1: provider credentials moved to an org-scoped API (TenantContext.useOrgApi) — the
-  // Settings → Providers route calls it on mount, same "unlisted methods default to
-  // Promise.resolve(undefined)" shape projectApi already uses above (#890's locked decision).
+  // Provider credentials live on an org-scoped API (TenantContext.useOrgApi) -- the Settings ->
+  // Providers route calls it on mount, same "unlisted methods default to Promise.resolve(undefined)"
+  // shape projectApi uses above.
   function orgApi(orgSlug: string) {
     const overrides = currentOrgApiOverrides;
     return new Proxy(
@@ -268,27 +253,22 @@ function resolveUrl(fullPath: string): string {
 const NOT_FOUND = (resource: string) => () =>
   Promise.reject(new ApiError(404, { code: `${resource}.not_found`, message: `no ${resource} with that id` }));
 
-/** Shared, reused across many entries below — a genuinely empty list IS a valid real API response
- * for these endpoints, not a stand-in for "we didn't bother"; each name here is still an explicit,
- * named override on the specific views that call it, never the Proxy's own anonymous fallback. */
+/** Shared across many entries below. A genuinely empty list is a valid real API response for
+ * these endpoints, not a stand-in for "didn't bother" -- each is still an explicit named override. */
 const EMPTY_TRIAGE = {
   cases: [],
   muted: [],
   recently_resolved: [],
-  // Read directly (no `?.`) by Triage.tsx's all-clear state, which an empty `cases: []` triggers —
-  // discovered running this suite: an incomplete-but-plausible fixture is exactly the silent-shape
-  // regression #890 exists to catch, this time in the TEST's own fixture rather than the mock.
-  // `traces_total`/`open_findings` are nullable on the wire — the server skips both when a project
-  // has an open queue, since only the empty screen prints them. Zero here, not null: this fixture
-  // has `cases: []`, which is exactly the case where the server WOULD have counted.
+  // Read directly (no `?.`) by Triage.tsx's all-clear state, which an empty `cases: []` triggers.
+  // `traces_total`/`open_findings` are nullable on the wire and null only when the project has an
+  // open queue; zero here is correct since this fixture has `cases: []`.
   watching: { classifiers: 0, call_sites: 0, traces_last_day: 0, traces_total: 0, open_findings: 0 },
 };
 const EMPTY = () => Promise.resolve([]);
 
-/** Matches the `Vitals` schema shape (dimension/groups/priced_models/total/window), not just the
- * two fields the pulse strip's happy path reads first — discovered running this suite once the
- * render-smoke race (this file's own fix, #890) was closed: the previous, incomplete fixture only
- * ever looked correct because the suite finished asserting before PulseStrip read `total.cost`. */
+/** Matches the full `Vitals` schema shape (dimension/groups/priced_models/total/window), not just
+ * the two fields the pulse strip's happy path reads first -- an incomplete fixture here passed
+ * only because the suite used to finish asserting before PulseStrip read `total.cost`. */
 const EMPTY_GROUP = { cost: { usd: 0, delta_pct_per_turn: null, baseline_usd: null, calls: 0, unpriced_calls: 0, tokens: 0, flagged: false }, duration: { p50_ms: 0, p95_ms: 0, delta_pct: null, baseline_p95_ms: null, turns: 0, flagged: false }, flagged: false, key: null, label: null };
 const EMPTY_VITALS = {
   dimension: "call_site",
@@ -298,9 +278,9 @@ const EMPTY_VITALS = {
   window: { from: "2026-01-01T00:00:00Z", to: "2026-01-08T00:00:00Z", days: 7, baseline_from: "2025-12-25T00:00:00Z", baseline_to: "2026-01-01T00:00:00Z" },
 };
 
-/** Matches the `OnboardingView` schema — `useOnboarding` (Triage) reads `.stage` directly,
- * no `?.`, so an unmocked default (`undefined`) trips the same "data cannot be undefined" class
- * this suite exists to catch, on any route that mounts it. */
+/** Matches the `OnboardingView` schema -- `useOnboarding` (Triage) reads `.stage` directly, no
+ * `?.`, so an unmocked default trips the same "data cannot be undefined" failure on any route
+ * that mounts it. */
 const EMPTY_ONBOARDING = {
   stage: "watching" as const,
   listening: true,
@@ -319,14 +299,10 @@ const EMPTY_ONBOARDING = {
 };
 
 /**
- * Matches `SubstrateStatusView` (#1227) with `has_tagged_span: true` — deliberately NOT the
- * not-connected shape a brand-new project would actually report. `ProjectShell` (App.tsx) now reads
- * this on EVERY project-scoped route to decide whether to render `<ConnectGate/>` in place of
- * `<ShellChrome>` and the real view entirely; without a fixture here every one of this suite's
- * ~40 `kind:view` project-scoped entries would mount the gate instead of the view it is meant to
- * smoke-test (the unmocked-Proxy default resolves `undefined`, which the gate's own fail-open
- * check treats as "not gated" — so routes would still render, just never the actual view under
- * test). Same "data cannot be undefined" reasoning as `EMPTY_ONBOARDING` above.
+ * Matches `SubstrateStatusView` with `has_tagged_span: true` -- deliberately not the not-connected
+ * shape a brand-new project would report. `ProjectShell` reads this on every project-scoped route
+ * to decide whether to render `<ConnectGate/>` in place of the real view; without a connected
+ * fixture here, every project-scoped route would mount the gate instead of the view under test.
  */
 const CONNECTED_SUBSTRATE_STATUS = {
   has_live: true,
@@ -347,40 +323,27 @@ const EMPTY_REDACTION_RULES = { rules: [] as unknown[] };
 const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
 
 /**
- * Applied to EVERY tenant-scoped route, view-specific overrides layered on top — not just the
- * "triage" entry's own. `useCaseCounts` (shell/useCases.ts) calls `api.getTriage` for the nav
- * badge from inside `ShellChrome`, which every `/orgs/:orgSlug/projects/:projectSlug/*` route
- * mounts regardless of which view it lands on. Discovered running this suite: TanStack Query logs
- * its own "Query data cannot be undefined" `console.error` the moment ANY unmocked query resolves
- * undefined — even one a defensive `?.` consumer never lets crash — so the shell badge's call needs
- * a real answer on every tenant route, not only the one view that treats the count as its main
- * content.
+ * Applied to every tenant-scoped route, view-specific overrides layered on top. `useCaseCounts`
+ * calls `api.getTriage` for the nav badge from inside `ShellChrome`, which every tenant route
+ * mounts regardless of which view it lands on -- an unmocked query resolving `undefined` logs a
+ * "data cannot be undefined" console.error even when a `?.` consumer never lets it crash.
  *
- * `getVitals`/`onboarding` belong here for the same reason, one layer further in: `CapabilityGate`
- * (see capabilities/CapabilityGate.tsx) fail-closes while its own capability read is loading and
- * redirects to Triage — which is never gated, so it can't itself redirect-loop — so on EVERY
- * capability-gated route (several Settings pages, …) Triage actually
- * mounts for the one tick before capabilities resolve, starts its own `getVitals`/`onboarding`
- * queries, and then unmounts as the real view takes over — without those queries ever being
- * cancelled. React Query keeps running them to completion regardless, so they still log the same
- * "data cannot be undefined" warning on a route whose own VIEW_OVERRIDES entry has nothing to do
- * with vitals or onboarding at all. Only closing the earlier console.error race (this file's fix
- * for #890) made this transient mount's queries reliably observed instead of racing past the old
- * assertion — it was always happening, just never caught.
+ * `getVitals`/`onboarding` belong here too: `CapabilityGate` fail-closes while its capability read
+ * is loading and redirects to Triage, so on every capability-gated route Triage briefly mounts,
+ * starts these queries, and unmounts before they resolve -- React Query still runs them to
+ * completion and logs the same warning.
  *
- * `substrateStatus` joins this set for #1227: `ProjectShell` reads it before ShellChrome (and
- * therefore every route inside it, including the transient Triage mount above) ever mounts, so it
- * is even more unconditional than `getTriage`/`getVitals`/`onboarding` — see
- * `CONNECTED_SUBSTRATE_STATUS`'s own comment for why the fixture reports a connected project.
+ * `substrateStatus` joins the set because `ProjectShell` reads it before `ShellChrome` (and every
+ * route inside it) ever mounts -- see `CONNECTED_SUBSTRATE_STATUS`'s own comment.
  */
 const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
   getTriage: () => Promise.resolve(EMPTY_TRIAGE),
   getVitals: () => Promise.resolve(EMPTY_VITALS),
   onboarding: () => Promise.resolve(EMPTY_ONBOARDING),
   substrateStatus: () => Promise.resolve(CONNECTED_SUBSTRATE_STATUS),
-  // Joins the set for the same transient-Triage-mount reason as `getVitals`/`onboarding` above:
-  // Triage reads `configured_providers` to tell "triage found nothing" apart from "triage never
-  // ran", so the read now fires on every tenant route, gated ones included.
+  // Same transient-Triage-mount reason as getVitals/onboarding above: Triage reads
+  // `configured_providers` to tell "found nothing" apart from "never ran", so this fires on
+  // every tenant route, gated ones included.
   getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
 };
 
@@ -395,10 +358,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   },
   traces: {
     // Matches the real `TracesPage` schema (`traces`/`next_cursor`), not a generic
-    // `items`/`next_cursor` page shape — discovered running this suite once the console.error
-    // race (this file's fix, #890) was closed: `useObservedFacets` reads `pages.flatMap((p) =>
-    // p.traces)` with no `?.`, so the previous, wrong-shaped fixture only ever looked correct
-    // because the suite finished asserting before that path actually ran.
+    // `items`/`next_cursor` shape -- `useObservedFacets` reads `pages.flatMap((p) => p.traces)`
+    // with no `?.`.
     listTraces: () => Promise.resolve({ traces: [], next_cursor: null }),
   },
   "traces/:traceId": {
@@ -427,12 +388,10 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getVitals: () => Promise.resolve(EMPTY_VITALS),
   },
   // Legacy `/pipeline/*` URLs are the one entry here that still resolves to a VIEW rather than a
-  // redirect: `ToProjectSegment segment="triage"` in App.tsx. Track A deleted the grader overview
-  // it used to land on, along with `getGraderStats` / `listObserverAlerts` /
-  // `listObserverProposals`, so what is left is the triage surface's own queries. The `graders`,
-  // `graders/:graderId`, `review`, `review/:queueId` and `observer` entries that sat here are gone
-  // with their views — every one of those paths is a redirect in the manifest now, and a redirect
-  // mounts no queries to override.
+  // redirect: `ToProjectSegment segment="triage"` in App.tsx. The grader overview it used to land
+  // on is gone, along with `getGraderStats`/`listObserverAlerts`/`listObserverProposals`, so what
+  // remains is the triage surface's own queries. The `graders`, `review` and `observer` entries
+  // that sat here are gone with their views -- those paths are redirects in the manifest now.
   "pipeline/*": {
     getPipeline: () => Promise.resolve(null),
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
@@ -441,10 +400,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getRcaReport: NOT_FOUND("rca report"),
   },
   // ---- Settings sections -----------------------------------------------------------------------
-  // Every one of these mounts a view that reads at least one project endpoint on mount. They had no
-  // entry at all until now because, before the settle loop above, the Settings views never actually
-  // mounted inside this suite — the assertion ran while ProjectShell's Suspense fallback was still
-  // up. Now that they do mount, each needs the real shape its endpoint returns for an empty project.
+  // Every one of these mounts a view that reads at least one project endpoint on mount, and each
+  // needs the real shape its endpoint returns for an empty project.
 
   // `/settings` itself has no view: its index route redirects to `settings/sources`, so it lands on
   // Sources and issues Sources' read.
@@ -455,7 +412,7 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     listSources: EMPTY,
     getGitIntegration: () => Promise.resolve(null),
   },
-  // #939 D1: listProviderCatalog/listProviderCredentials moved to the org-scoped API — see
+  // listProviderCatalog/listProviderCredentials live on the org-scoped API -- see
   // VIEW_ORG_OVERRIDES below, not this (project-scoped) map.
   // The client coalesces the endpoint's empty body to `null` — a real "no repo connected" answer.
   git: {
@@ -488,18 +445,17 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
         can_manage: true,
       }),
   },
-  // Keyed on the manifest's literal raw path, "*" collides two distinct routes: the
-  // project-level catch-all (falls through to Triage, already covered by SHELL_CHROME_OVERRIDES)
-  // and Settings' own catch-all (folds to Sources — see App.tsx). `listSources` only matters to
-  // the second, but is harmless to hand the first too, and VIEW_OVERRIDES has no way to tell them
-  // apart by path alone.
+  // Keyed on the manifest's literal raw path, "*" collides two distinct routes: the project-level
+  // catch-all (falls to Triage) and Settings' own catch-all (falls to Sources). `listSources` only
+  // matters to the second but is harmless on the first, and there's no way to tell them apart by
+  // path alone.
   "*": {
     listSources: EMPTY,
   },
 };
 
-// #939 D1: provider credentials are org-scoped now (TenantContext.useOrgApi), not project-scoped —
-// a second, much smaller override map for the one route that reads them.
+// Provider credentials are org-scoped (TenantContext.useOrgApi), not project-scoped -- a second,
+// smaller override map for the one route that reads them.
 const VIEW_ORG_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   providers: {
     listProviderCatalog: () => Promise.resolve(EMPTY_PROVIDER_CATALOG),
@@ -527,27 +483,18 @@ function renderApp(url: string) {
   return { ...view, queryClient };
 }
 
-// Every view is React.lazy-loaded (`named()` in App.tsx wraps a dynamic `import(...)` per view).
-// In production that import gets a head start from AuthContext's `preloadRouteChunk`, keyed off
-// `window.location.pathname` — but this suite renders behind a MemoryRouter, whose route never
-// touches `window.location`, so that warm-up never fires here and every test would otherwise hit
-// a cold `import()` the first time its view's chunk loads in this process. That import can still
-// be in flight at the moment the DOM first looks non-blank (the shell chrome around the routed
-// view already satisfies that) and, critically, at the moment react-query first reports
-// `isFetching() === 0` too (nothing has started fetching yet because the view that would fetch
-// hasn't mounted) — so the race isn't a react-query timing question at all, it's this. Globbing
-// every view module and importing them all up front, once, before any test runs, removes the
-// cold-import race for every route at its source rather than papering over it per-test with a
-// guessed flush.
-// Exclude *.test.tsx: the bare "*.tsx" pattern also matches sibling test files under views/
-// (e.g. Providers.test.tsx, added by #861) -- eagerly importing one as a side effect of THIS
-// pre-warm executes its top-level vi.mock() calls in this file's own module context, silently
-// overriding a real dependency (TenantContext) for every test that runs after it. Found the hard
-// way: every route mount started failing with a fixture-mismatched query key the moment the first
-// sibling *.test.tsx file existed under views/.
+// Every view is React.lazy-loaded (`named()` in App.tsx). In production that import gets a head
+// start from AuthContext's `preloadRouteChunk`, keyed off `window.location.pathname` -- but this
+// suite renders behind a MemoryRouter, which never touches `window.location`, so every test would
+// otherwise hit a cold `import()` on first mount. That import can still be in flight at the
+// moment the DOM looks non-blank and at the moment react-query first reports `isFetching() === 0`,
+// so glob-importing every view module up front, once, removes the race at its source.
+// Exclude *.test.tsx: it also matches sibling test files under views/, and eagerly importing one
+// runs its top-level vi.mock() calls in this file's module context, silently overriding a real
+// dependency for every test that runs after it.
 const VIEW_MODULES = import.meta.glob(["./views/**/*.tsx", "!./views/**/*.test.tsx"]);
 
-describe("route manifest render smoke test (#890)", () => {
+describe("route manifest render smoke test", () => {
   beforeAll(async () => {
     await Promise.all(Object.values(VIEW_MODULES).map((load) => load()));
   });
@@ -650,20 +597,19 @@ describe("route manifest render smoke test (#890)", () => {
     });
   }
 
-  // #862: the Sidebar project switcher's "Organizations" section (header, org rows, and
-  // "+ New organization") is a paid surface -- `paid.orgSwitcherRows` renders `null` under the
-  // open stub. This is the R1 risk the issue's own grounding flagged: the switcher, not NewOrg.tsx
-  // alone, is the actual multi-org UI, and it renders on every authenticated page, so a wrong
-  // answer here would be far more visible than on the one screen NewOrg used to live on.
-  it("open edition's sidebar switcher has no Organizations section or New-organization action (#862)", async () => {
+  // The Sidebar project switcher's "Organizations" section (header, org rows, "+ New
+  // organization") is not rendered in this test's mock -- it's the actual multi-org UI, not
+  // NewOrg.tsx, and it renders on every authenticated page, so a wrong answer here would be far
+  // more visible than on the one screen NewOrg used to live on.
+  it("sidebar switcher has no Organizations section or New-organization action", async () => {
     currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES };
     const url = resolveUrl("/orgs/:orgSlug/projects/:projectSlug/triage");
     const { container } = renderApp(url);
 
-    // #1227: ProjectShell now reads listProjects + substrateStatus before ever mounting
-    // ShellChrome (the connect-gate decision), so a bare "some text exists" check would
-    // pass on the transient "Loading…" screen (App.tsx's `FullScreen`) rather than on the
-    // Sidebar this test actually asserts against. Wait for the switcher button itself.
+    // ProjectShell reads listProjects + substrateStatus before ever mounting ShellChrome, so a
+    // bare "some text exists" check would pass on the transient "Loading…" screen (App.tsx's
+    // `FullScreen`) rather than on the Sidebar this test actually asserts against. Wait for the
+    // switcher button itself.
     await waitFor(() => {
       expect(container.querySelector('button[aria-haspopup="menu"]'), "project switcher button not found").toBeTruthy();
     });

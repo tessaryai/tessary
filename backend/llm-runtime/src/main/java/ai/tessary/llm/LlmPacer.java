@@ -36,7 +36,7 @@ import org.springframework.stereotype.Component;
  * dominated by real network latency.
  *
  * <p>Limits are static constants — a conservative ceiling shared by every paced provider
- * (OpenRouter, Moonshot — Ollama was dropped by #939 D6's maker filter; see
+ * (OpenRouter, Moonshot — Ollama was dropped by the maker filter; see
  * {@code ChatModelFactory.paced}), all reached only via a
  * user-supplied credential, plus 429 back-off. They are intentionally not configurable per
  * provider: the ceiling is deliberately cautious rather than tuned to any one tier's advertised

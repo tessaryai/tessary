@@ -81,7 +81,7 @@ class GithubManifestControllerTest {
         assertTrue(view.url().startsWith("https://github.com/settings/apps/new?state="), view.url());
 
         JsonNode manifest = readManifest(view.manifest());
-        // No push-webhook endpoint survives Track A, so the App is minted with its hook off and no url.
+        // There is no push-webhook endpoint, so the App is minted with its hook off and no url.
         assertEquals(false, manifest.path("hook_attributes").path("active").asBoolean(true));
         assertTrue(manifest.path("hook_attributes").path("url").isMissingNode());
         assertEquals(

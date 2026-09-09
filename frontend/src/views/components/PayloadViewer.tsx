@@ -427,7 +427,7 @@ function truncate(s: string, n = 32): string {
 // (`document_url`, `document_b64`, `document_ref`) are also recognised. Keep this in sync with that
 // extractor when shapes change — this is a fourth, independently-kept-in-sync vocabulary alongside the
 // Java ContentBlock enum, the judge-boundary switch, and the Python/Java classifier-context switch (see
-// docs/reference/media-contract.md).
+// devdocs/reference/media-contract.md).
 
 /** Base64 image MIME types we will render. image/svg+xml is DELIBERATELY excluded:
  *  SVG is an active document (can carry <script>) and a data: URL of it would
@@ -452,7 +452,7 @@ function safeImageUrl(url: unknown): string | null {
   return null;
 }
 
-/** The one document type this run ships (#985, Decision 2: PDF only — no audio/video). */
+/** The one document type this run ships (PDF only — no audio/video). */
 const ALLOWED_DOCUMENT_MIME = new Set(["application/pdf"]);
 
 /** {@link safeImageUrl}'s document counterpart: `https://` or a `data:application/pdf;base64,…` URI. */
@@ -509,7 +509,7 @@ const IMAGE_BLOCK_TYPES = new Set([
   "image",
 ]);
 
-/** Every block type {@link extractMedia} recognises as a document (#985: PDF only — no audio/video).
+/** Every block type {@link extractMedia} recognises as a document (PDF only — no audio/video).
  *  Includes the raw wire aliases (`document`, `input_file`, `file`) alongside the platform's own
  *  first-class `document_*` kinds, mirroring {@link IMAGE_BLOCK_TYPES}'s pattern. */
 const DOCUMENT_BLOCK_TYPES = new Set(["document_ref", "document_b64", "document_url", "document", "input_file", "file"]);

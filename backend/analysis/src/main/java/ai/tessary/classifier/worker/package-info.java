@@ -23,6 +23,6 @@
  * </ol>
  *
  * <p>The contract an out-of-tree author writes against is
- * {@code docs/reference/classifier-extension-interface.md}.
+ * {@code devdocs/reference/classifier-extension-interface.md}.
  */
 package ai.tessary.classifier.worker;

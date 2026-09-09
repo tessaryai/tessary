@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>The book in force for a source is its most recently published version.</b> {@link #currentBooks()}
  * returns one row per source — today just {@code litellm} — and {@link #rateFor} walks them in that order,
  * returning the first hit together with the version that produced it, because a writer has to stamp what
- * priced the row. Until #1032 a hand-maintained {@code manual} source was layered ahead of the vendored
+ * priced the row. A hand-maintained {@code manual} source used to be layered ahead of the vendored
  * one; every row it carried is now either reconciled upstream or a genuine gap priced as unpriced rather
  * than guessed, so this is single-source in practice, not by a hardcoded assumption.
  *

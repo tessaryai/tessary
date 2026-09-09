@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>Why the table exists.</b> An externalized image is referenced by an {@code image_ref} node inside
  * the payload JSON and by nothing else: a string, invisible to foreign keys, joins and cascades. Media
  * therefore grew without bound and no cleanup could reclaim it, while "delete this project's data" left
- * every one of their images behind (#761). A row here is the reference made visible to the database, and
+ * every one of their images behind. A row here is the reference made visible to the database, and
  * it is what {@code RetentionRepository.deleteOrphanedMedia} reads to decide that bytes are collectable.
  *
  * <p><b>Written in the payload's transaction, and keyed on the payload.</b> The FK is to
@@ -59,7 +59,7 @@ public class MediaRefRepository {
     /** One span's references, for {@link #insertAllForSpans}. */
     public record SpanMedia(String traceId, String spanId, List<String> mediaIds) {}
 
-    /** Every reference of a whole batch in one JDBC batch (#984 M2); same key and idempotence as {@link #insertAll}. */
+    /** Every reference of a whole batch in one JDBC batch; same key and idempotence as {@link #insertAll}. */
     public void insertAllForSpans(String projectId, List<SpanMedia> spans) {
         List<SqlParameterSource> rows = new ArrayList<>();
         for (SpanMedia span : spans) {

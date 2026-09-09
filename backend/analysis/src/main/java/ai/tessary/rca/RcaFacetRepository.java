@@ -21,7 +21,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>This was {@code RcaVerdictRepository}, and half of it went with grading.</b> Three reads —
  * {@code graderVersionCounts}, {@code gradingHealth} and {@code executionErrors} — aggregated
  * {@code FROM verdict}, so a checklist could ask whether a grader had been redefined or had started
- * erroring. Track A removed grading and the {@code verdict} table with it. What survives reads
+ * erroring. Grading and the {@code verdict} table are gone. What survives reads
  * {@code span} only, which is why the class is named for the facets rather than for a store.
  *
  * <p><b>The checklist is thinner for it, and that is a known gap rather than a finished shape.</b> The

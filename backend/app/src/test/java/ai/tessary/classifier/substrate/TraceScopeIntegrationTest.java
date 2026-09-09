@@ -24,32 +24,25 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Which call site a trace is SCOPED to — the choice that decides which baseline it is fitted into.
+ * Which call site a trace is scoped to: the choice that decides which baseline it is fitted into.
  *
- * <p>A trace legitimately spans several call sites: {@code tessary.call_site.id} binds a SPAN, and the
+ * <p>A trace legitimately spans several call sites: {@code tessary.call_site.id} binds a span, and the
  * vitals slice groups spend and tool-error rate by the span's own. Drift is trace-grain and must
- * collapse that to one, and the right one is the ENTRY POINT — what the product invoked — not whichever
+ * collapse that to one, and the right one is the entry point, what the product invoked, not whichever
  * child the agent happened to reach.
  *
- * <p>In v2 the collapse happens ONCE, in the rollup recompute, which copies the root span's call site
- * onto the trace; a sweep then reads a column. So these tests seed spans, run the real rollup, and
- * assert on what the trace ended up scoped to — rather than on a per-sweep LATERAL that no longer
- * exists.
+ * <p>The collapse happens once, in the rollup recompute, which copies the root span's call site onto the
+ * trace; a sweep then reads a column. So these tests seed spans, run the real rollup, and assert on what
+ * the trace ended up scoped to.
  *
  * <p>Alongside the scoping cases sit three reads that the same substrate query answers and that nothing
  * else covers end to end: the parent column bounding the fan-out, a tool's symbol coming from its
  * {@code tool_call} name rather than the gen_ai span name, and an MCP call resolving through the raw
  * attribute it carries instead of a {@code tool_call} row it never gets.
  *
- * <p><b>Why this is a substrate test and not a drift test.</b> It was
- * {@code BehaviorTraceScopeIntegrationTest} until #840, on the reasonable grounds that scoping decides
- * which drift baseline a trace is fitted into. But every assertion here is on
- * {@link BehaviorSubstrateRepository} and {@link TrajectoryAssembler}, both open and both shared by
- * every trace-grain classifier; drift was the consumer, not the subject. Two of the original seven cases
- * really were drift — {@code reSweepIsIdempotent} and {@code implausibleEventTimeIsDropped}, which drove
- * {@code BehaviorDriftSweep} and asserted on the profile and its grams — and they went with the
- * classifier to {@code tessary-paid/}; they run as {@code BehaviorTraceScopeIntegrationTest} in
- * {@code tessary-paid/assembly}, the overlay's harness (#882).
+ * <p>Every assertion here is on {@link BehaviorSubstrateRepository} and {@link TrajectoryAssembler},
+ * both shared by every trace-grain classifier, which is why this lives as a substrate test rather than a
+ * drift test.
  */
 @SpringBootTest
 class TraceScopeIntegrationTest {
@@ -97,7 +90,7 @@ class TraceScopeIntegrationTest {
         Instant t0 = Instant.now().minusSeconds(3_600);
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // Ids are chosen, not generated, so the ROOT sorts LAST by id — a child would win any ordering
+        // Ids are chosen, not generated, so the root sorts last by id: a child would win any ordering
         // that did not first restrict to parentless spans. The root's own call site is the only one the
         // recompute may take.
         String rootId = "zzzz-root";
@@ -123,10 +116,9 @@ class TraceScopeIntegrationTest {
         Instant t0 = Instant.now().minusSeconds(3_600);
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // Root carries no call site — a producer that tags only the spans it owns. v1 walked down to the
-        // earliest child, which is how a baseline for "traffic that entered at policy.early" ended up
-        // holding traces that merely PASSED THROUGH it. v2 does not walk: the entry point either declared
-        // a scope or it did not, and "did not" is its own bucket that nothing else is pooled into.
+        // Root carries no call site: a producer that tags only the spans it owns. The entry point either
+        // declared a scope or it did not, and "did not" is its own bucket that nothing else is pooled into
+        // rather than borrowing a child's scope.
         seedSpan(pid, traceId, "root", null, "agent", "loop", null, t0);
         seedSpan(pid, traceId, "aaaa-late", "root", "tool", "late", "policy.late", t0.plusSeconds(9));
         seedSpan(pid, traceId, "bbbb-early", "root", "llm", "early", "policy.early", t0.plusSeconds(1));
@@ -160,10 +152,9 @@ class TraceScopeIntegrationTest {
         List<BehaviorSubstrateRepository.TraceHead> heads = List.of(headOf(pid, traceId));
         List<String> symbols = assembler.assemble(pid, heads, Set.of()).get(0).symbols();
 
-        // Asserted through assemble() rather than reduce(): a dropped column or a wrong alias
-        // degrades to all-null parents, which still yields a plausible-looking sequence with no
-        // fan-out at all — the silent-no-op class this slice keeps hitting. Only an end-to-end
-        // assertion can tell "grouped correctly" from "never grouped".
+        // Asserted through assemble() rather than reduce(): a dropped column or a wrong alias degrades to
+        // all-null parents, which still yields a plausible-looking sequence with no fan-out at all. Only
+        // an end-to-end assertion can tell "grouped correctly" from "never grouped".
         assertEquals(
                 List.of(
                         "^",
@@ -187,10 +178,8 @@ class TraceScopeIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
 
         // The gen_ai convention names a tool span "{operation} {target}", and ingest puts the bare
-        // tool name on tool_call. Reading the span name gave `tool:execute_tool_verify_member` in
-        // production against `tool:verify_member` offline — a whole-alphabet divergence on the COMMON
-        // producer shape, invisible to the reduction fixture because that feeds TraceAction directly
-        // and never runs this query.
+        // tool name on tool_call. Reading the span name instead would give `tool:execute_tool_verify_member`
+        // rather than `tool:verify_member`, a whole-alphabet divergence on a common producer shape.
         SpanRef root = seedSpan(pid, traceId, null, "agent", "loop", "cs-a", t0);
         SpanRef tool =
                 seedSpan(pid, traceId, root.spanId(), "tool", "execute_tool verify_member", "cs-a", t0.plusSeconds(1));
@@ -216,10 +205,10 @@ class TraceScopeIntegrationTest {
         Instant t0 = Instant.now().minusSeconds(3_600);
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // Ingest mints a tool_call row only for kind `tool`, so an MCP call — equally dispatchable,
-        // and a fan-out member like any other — has none to read. The raw attribute is what keeps
-        // `mcp:execute_tool_search_docs` out of the alphabet. It lives on span_payload in v2, which is
-        // why the read pays a bounded 1:1 join for it rather than a column.
+        // Ingest mints a tool_call row only for kind `tool`, so an MCP call has none to read even though
+        // it dispatches and fans out like any other. The raw attribute is what keeps
+        // `mcp:execute_tool_search_docs` out of the alphabet; it lives on span_payload, which is why the
+        // read pays a bounded 1:1 join for it rather than a column.
         SpanRef root = seedSpan(pid, traceId, null, "agent", "loop", "cs-a", t0);
         fx.spanSeed(pid)
                 .traceId(traceId)
@@ -286,11 +275,8 @@ class TraceScopeIntegrationTest {
     }
 
     /**
-     * A plain tenant. The old version of this helper granted {@code Capability.BEHAVIOR_DRIFT} before
-     * creating the project, because project creation is what seeds the built-in classifier rows and the
-     * two sweep-driven cases needed the drift row to exist. Nothing carried here reads a classifier at
-     * all — these assertions are on spans, the rollup and the assembler — so the grant would be seeding
-     * a row no case looks at.
+     * A plain tenant. Nothing here reads a classifier row; the assertions are on spans, the rollup, and
+     * the assembler.
      */
     private TenantFixture.Setup tenant(String name) {
         return TenantFixture.bootstrap(tenants, name);
