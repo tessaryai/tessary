@@ -11,6 +11,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -336,6 +338,23 @@ public class TenantService {
     }
 
     /**
+     * Run {@code action} once this transaction commits, or immediately when there is no transaction to
+     * wait for. A rollback drops it, which is right: nothing was revoked, so nothing needs evicting.
+     */
+    private static void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
+    }
+
+    /**
      * Lazily create the org's quiet "sample project" (#1227) — a real, deletable project row marked
      * via {@code settings: {"sample": true}} ({@link Project#isSample()}), never wired through {@link
      * #ensureDefaultOrg} or the signup tail. It exists only once a user follows the connect gate's
@@ -411,10 +430,16 @@ public class TenantService {
             return ProjectDeleteAcceptance.ALREADY_ACCEPTED;
         }
         int revoked = apiKeys.revokeAllForProject(projectId, now);
-        // The UPDATE above is deliberately synchronous so nothing new lands in a project on its way out;
-        // without this the verified-token cache would keep answering for those keys for a full TTL and
-        // hand that window straight back, on the ingest path, which authenticates on the key alone.
-        tokenCache.invalidateProject(projectId);
+        // AFTER the commit, not here. The UPDATE above is deliberately synchronous so nothing new lands
+        // in a project on its way out, and the verified-token cache has to be told or it keeps answering
+        // for those keys — but evicting inside this transaction reopens the same window from the other
+        // side: a verification on another connection reads the bumped generation, then reads the row this
+        // transaction has not committed yet, sees it still live, and caches it with a generation nothing
+        // will invalidate again. READ COMMITTED is what makes that reachable, and the ingest front doors
+        // authenticate on the key alone, so the stale entry is a writable deleted project for a full TTL.
+        // ApiKeyService.revoke is safe from this only because it is NOT transactional — its UPDATE
+        // autocommits before it evicts.
+        afterCommit(() -> tokenCache.invalidateProject(projectId));
         deleteJobs.enqueue(projectId, now);
         return new ProjectDeleteAcceptance(true, revoked);
     }

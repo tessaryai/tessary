@@ -141,7 +141,8 @@ these fields through `FindingController` (renamed from `BehaviorController` in #
 | `auth/SignupPolicyService` | The sign-up policy gate (#1226): `admit` after authentication, before any principal; `update` writes the governing org's `settings.signupPolicy` + an audit row |
 | `tenant/SignupPolicy` | The policy record: `open` / `domain` / `invite`, parsed from and written into `organization.settings` |
 | `tenant/OrganizationController` `GET`/`PUT …/signup-policy` | Owner/admin read and write of the instance policy; `PATCH …/orgs/{slug}` refuses a differing policy in the raw blob |
-| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup) |
+| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup); verification is served from `VerifiedTokenCache` |
+| `tenant/VerifiedTokenCache` | Short-lived memory of verified tokens, so bcrypt is off the per-request path. Every revocation path must evict it |
 | `tenant/ApiKeyController` | Managed API keys (scoped) |
 | `tenant/McpTokenController` | MCP personal tokens (admin mint shape) |
 | `mcp/*` | JSON-RPC MCP endpoint + tools |

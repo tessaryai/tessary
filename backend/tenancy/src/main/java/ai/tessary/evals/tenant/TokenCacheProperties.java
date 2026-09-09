@@ -32,12 +32,11 @@ public class TokenCacheProperties {
     /**
      * How long a verified token stays verified, in seconds.
      *
-     * <p>This is <em>not</em> the revocation window: {@link ApiKeyService#revoke} and
-     * {@link ApiKeyService#rotate} evict the key's entry as part of the same call, so a key revoked
-     * through the product stops working immediately. The TTL bounds the cases that do not go through
-     * those methods — a row deleted by hand in psql, a restore from backup, a second replica revoking a
-     * key this process has cached. Sixty seconds keeps that window shorter than the time it takes to
-     * notice a leaked key, while still removing bcrypt from all but one request a minute per token.
+     * <p><b>This is not the revocation window.</b> Every revocation path evicts as it revokes — see
+     * {@link VerifiedTokenCache} for which paths those are and why each one has to. The TTL bounds only
+     * what reaches the database without going through them: a row edited by hand, a restore from backup,
+     * another replica. Sixty seconds keeps that shorter than the time it takes to notice a leaked key,
+     * while still removing bcrypt from all but one request a minute per token.
      */
     private long ttlSeconds = 60;
 
@@ -56,9 +55,8 @@ public class TokenCacheProperties {
     private long negativeTtlSeconds = 10;
 
     /**
-     * Most rejected tokens held at once, capped separately from {@link #maxEntries} on purpose — the
-     * reason is in {@link VerifiedTokenCache}'s class documentation. Anyone can drive this map; only a
-     * holder of a real token can drive the other one.
+     * Most rejected tokens held at once, capped separately from {@link #maxEntries} on purpose; the
+     * reason is in {@link VerifiedTokenCache}'s class documentation.
      */
     private int maxRejections = 1024;
 
