@@ -94,7 +94,10 @@ bash "$ROOT/scripts/check-compose-artifact.sh"
 # relative paths against the file's own directory, so a copy elsewhere renders differently.
 STRIPPED="$ROOT/.compose-artifact-publish.yml"
 PINNED="$ROOT/.compose-artifact-publish.pinned.yml"
-trap 'rm -f "$STRIPPED" "$PINNED"' EXIT
+# The prompt answers are a FILE, never a pipe — see the publish loop below for why that matters.
+ANSWERS="$ROOT/.compose-artifact-publish.answers"
+printf 'y\ny\ny\n' > "$ANSWERS"
+trap 'rm -f "$STRIPPED" "$PINNED" "$ANSWERS"' EXIT
 python3 "$ROOT/scripts/lib/strip-compose-build.py" docker-compose.yml "$STRIPPED"
 python3 "$ROOT/scripts/lib/pin-compose-version.py" "$STRIPPED" "$PINNED" "$VERSION"
 mv "$PINNED" "$STRIPPED"
@@ -138,13 +141,22 @@ for ref in "${REFS[@]}"; do
         continue
     fi
     echo "$P: publishing $ref"
-    # `yes |` IS LOAD-BEARING, and `-y` alone is not enough. `-y` answers the variables prompt;
+    # STDIN IS A FILE, and both halves of that are load-bearing.
+    #
+    # There has to BE stdin because `-y` alone is not enough: it answers the variables prompt, but
     # the file also declares a bind mount (the docker socket, which check-compose-artifact.sh
-    # allows by name) and THAT prompt is separate. On a runner it reads EOF, defaults to No, and
-    # `docker compose publish` then EXITS 0 HAVING WRITTEN NOTHING — which is how run
-    # 34336599569 printed "published" for two tags that were never created. Same TTY-gated trap
-    # as the `-y` on the `up` command in check-compose-artifact.sh's own note.
-    yes | docker compose -f "$STRIPPED" publish -y "$ref"
+    # allows by name) and that confirmation is a SEPARATE prompt. On a runner it reads EOF,
+    # defaults to No, and `docker compose publish` EXITS 0 HAVING WRITTEN NOTHING — which is how
+    # run 34336599569 reported publishing two tags that were never created. Same TTY-gated trap
+    # check-compose-artifact.sh already documents for the `-y` on `up`.
+    #
+    # And it has to be a FILE rather than `yes |`, which was the first attempt at this: compose
+    # closes stdin as soon as it has its answers, `yes` takes SIGPIPE, and `set -o pipefail` turns
+    # that into a failed pipeline AFTER a completely successful publish. Run 34337898320 printed
+    # "compose-0.4.0 published", then "yes: standard output: Broken pipe", then exited 1, and the
+    # cleanup job dutifully deleted the artifact that had just been published correctly. A regular
+    # file cannot SIGPIPE, so the exit status is the publish's own.
+    docker compose -f "$STRIPPED" publish -y "$ref" < "$ANSWERS"
 done
 
 [ "$DRY_RUN" = 1 ] && exit 0
