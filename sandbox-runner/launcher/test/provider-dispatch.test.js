@@ -100,7 +100,7 @@ test('providerConfig: GLM/GROK/CUSTOM/OPENAI each declare their own block with t
     options: { baseURL: 'https://my-endpoint.example/v1', apiKey: 'canary-custom' },
   });
   assert.deepEqual(providerConfig(OPENAI_CRED).provider['openai-direct'], {
-    npm: '@ai-sdk/openai-compatible',
+    npm: '@ai-sdk/openai',
     options: { baseURL: 'https://api.openai.com/v1', apiKey: 'canary-openai' },
   });
 });
@@ -179,7 +179,7 @@ test('providerConfig: an explicit ANTHROPIC base_url override still wins over th
 test('providerConfig: an OpenAI-compat block declares the run\'s own model', () => {
   const cfg = providerConfig({ provider: 'OPENAI', api_key: 'k' }, 'openai-direct/gpt-5.5');
   assert.deepEqual(cfg.provider['openai-direct'].models, { 'gpt-5.5': {} });
-  assert.equal(cfg.provider['openai-direct'].npm, '@ai-sdk/openai-compatible');
+  assert.equal(cfg.provider['openai-direct'].npm, '@ai-sdk/openai');
 });
 
 test('providerConfig: an OPENROUTER model keeps the slash in its own id', () => {
