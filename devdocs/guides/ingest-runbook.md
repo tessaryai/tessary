@@ -21,6 +21,10 @@ which is why "is ingest healthy?" had no answer that was not a shrug.
 | O5 | **Write failures** — batches that exhausted their retries | 0 | `ingest.throughput` field `failed_batches` |
 | O6 | **Ingest availability** — the front door answers | ≥ 99.5% non-5xx on `/v1/traces` | `http_server_requests_seconds_count{uri="/v1/traces"}` |
 
+**Measuring these yourself.** `scripts/bench/` is an open-loop OTLP load harness and the compose
+overlay that pins a reference box; it is how the drain and redaction figures below were taken, and it
+is the way to get the same numbers for a box you actually run. It is not part of `task check`.
+
 **O2 is a single-instance number and the deployment is single-replica** (Tessary's
 hosted deployment runs one backend replica). 200 spans/s is roughly 17 million spans a day, which
 is about two orders of magnitude above current production traffic — the objective exists so that a
