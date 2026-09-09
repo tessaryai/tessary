@@ -33,14 +33,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /** Case lifecycle as a human drives it: resolve, mute, unmute, and how a case is looked up. */
 @SpringBootTest
+// Own context on purpose: CaseWorker's sweep is parked here, and the lifecycle assertions depend on no other writer
+// touching the case rows.
+@TestPropertySource(properties = "test.context-group=case-service")
 class CaseServiceTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.cases.heartbeat-ms", () -> "3600000");
     }
 

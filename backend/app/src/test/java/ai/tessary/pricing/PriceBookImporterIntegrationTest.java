@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * Acceptance for the boot-time rate import against the real Postgres. The importer has already run once
@@ -20,6 +21,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * so every test here is really asking what a SECOND boot does.
  */
 @SpringBootTest
+// Own context on purpose: it asserts what a SECOND boot of the importer does, so it must own the price-book tables
+// the first boot seeded.
+@TestPropertySource(properties = "test.context-group=price-book-importer")
 class PriceBookImporterIntegrationTest {
 
     @Autowired

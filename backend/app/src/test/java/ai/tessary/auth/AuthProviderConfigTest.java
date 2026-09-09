@@ -29,7 +29,6 @@ class AuthProviderConfigTest {
 
         @DynamicPropertySource
         static void props(DynamicPropertyRegistry r) {
-            r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
             r.add("workos.api-key", () -> "");
             r.add("workos.client-id", () -> "");
         }
@@ -53,7 +52,6 @@ class AuthProviderConfigTest {
 
         @DynamicPropertySource
         static void props(DynamicPropertyRegistry r) {
-            r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
             r.add("workos.api-key", () -> "sk_test_fake");
             r.add("workos.client-id", () -> "client_fake");
         }

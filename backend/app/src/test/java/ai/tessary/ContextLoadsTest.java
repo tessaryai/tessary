@@ -15,25 +15,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Smoke test that the Spring context loads end-to-end and tenancy works.
- * Auth is disabled (WORKOS_* unset) so the filter passes everything through
- * — we exercise the data layer directly.
+ * Auth is off because {@code TestAuthDisabledInitializer} sets {@code tessary.auth.disabled=true}
+ * for every test context, so the filter passes everything through and this exercises the data layer
+ * directly.
  */
 @SpringBootTest
 class ContextLoadsTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        // workos.* deliberately blank. That alone no longer makes AuthFilter no-op --
-        // TestAuthDisabledInitializer supplies tessary.auth.disabled=true for every test context, and
-        // the filter needs both. See that initializer for why the suite states it once rather than
-        // in 115 files.
-    }
 
     @Autowired
     SourceService sourceService;

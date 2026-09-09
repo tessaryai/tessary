@@ -39,8 +39,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Layer-2 is a hand-pressed button, and this is the surface behind it.
@@ -62,11 +60,6 @@ class ManualEscalationIntegrationTest {
      * tests are about. A test that wants the other arm passes its own.
      */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     FindingService behavior;

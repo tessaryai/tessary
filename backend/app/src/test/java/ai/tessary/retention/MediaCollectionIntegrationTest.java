@@ -15,8 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Media garbage collection: bytes nothing references are reclaimed, and bytes something references are
@@ -36,11 +34,6 @@ class MediaCollectionIntegrationTest {
 
     /** {@link RetentionPinIntegrationTest}'s fingerprint: one context and one database for both, and
      *  sweeps confined to the database whose other tests already expect them. */
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
-
     private static final String OLD = Instant.now().minus(30, ChronoUnit.DAYS).toString();
 
     @Autowired

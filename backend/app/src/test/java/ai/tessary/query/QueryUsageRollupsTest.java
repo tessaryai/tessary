@@ -26,8 +26,6 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Acceptance: the pre-aggregated {@code metric_rollup} table is reachable through the generic
@@ -40,11 +38,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class QueryUsageRollupsTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     QueryController controller;

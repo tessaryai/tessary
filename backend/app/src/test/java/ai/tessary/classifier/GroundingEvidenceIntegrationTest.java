@@ -28,8 +28,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Executes {@link SubstrateReadRepository#groundingEvidence} against the real Postgres.
@@ -43,11 +41,6 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest
 @Import(StubEncoderScorerConfig.class)
 class GroundingEvidenceIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     SessionRepository sessions;

@@ -20,8 +20,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * DB-backed proof that {@link ConversationThreadAssembler} walks a whole conversation (not just the
@@ -38,11 +36,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class ConversationThreadAssemblerIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     SessionRepository sessions;

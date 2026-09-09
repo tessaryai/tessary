@@ -25,8 +25,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The triage gate, against the query that enforces it.
@@ -50,11 +48,6 @@ class MetricDriftCaseGateIntegrationTest {
      * are about. A test that wants the other arm passes its own.
      */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     MetricDriftSource source;

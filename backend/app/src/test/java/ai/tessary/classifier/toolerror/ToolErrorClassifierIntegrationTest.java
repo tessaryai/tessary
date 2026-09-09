@@ -32,8 +32,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The tool-error classifier (launch segment C) against a real database, end to end: ingested rows in,
@@ -67,11 +65,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class ToolErrorClassifierIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     private static final String TOOL = "search_docs";
 

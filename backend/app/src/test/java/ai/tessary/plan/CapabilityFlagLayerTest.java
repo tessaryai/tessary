@@ -16,8 +16,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * This build's resolution contract, against real {@code org_feature_flag} rows:
@@ -32,11 +30,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class CapabilityFlagLayerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's two private sets. */
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(

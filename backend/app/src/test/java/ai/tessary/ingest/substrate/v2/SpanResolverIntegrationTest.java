@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * The two micro-batch resolvers: the ancestry fixpoint (§6.4) and the correlation backfill (§6.3), and the
@@ -48,6 +49,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
             "tessary.ingest.substrate.rollup-enabled=false",
             "tessary.ingest.substrate.resolver-batch-size=500"
         })
+// Own context on purpose: both resolvers select from a GLOBAL partial index, so another class's spans would consume
+// the batch limit the starvation test exists to measure.
+@TestPropertySource(properties = "test.context-group=span-resolver")
 class SpanResolverIntegrationTest {
 
     @Autowired

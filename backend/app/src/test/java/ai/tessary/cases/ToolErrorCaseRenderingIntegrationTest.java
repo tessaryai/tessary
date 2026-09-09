@@ -47,7 +47,6 @@ class ToolErrorCaseRenderingIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.cases.heartbeat-ms", () -> "3600000");
     }
 

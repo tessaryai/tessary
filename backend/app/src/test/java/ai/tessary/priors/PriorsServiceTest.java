@@ -15,8 +15,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * End-to-end governed-priors pipeline against the real Testcontainers Postgres (the schema
@@ -44,14 +43,12 @@ import org.springframework.test.context.DynamicPropertySource;
             "tessary.priors.epsilon=1.0",
             "tessary.priors.sensitivity=1.0"
         })
+// Own context on purpose: it runs with single-tenant off and the cohort thresholds lowered, a posture no other class
+// should see.
+@TestPropertySource(properties = "test.context-group=priors-service")
 class PriorsServiceTest {
 
     private static final String FEATURE = "grader.pass_rate";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     PriorsService priors;

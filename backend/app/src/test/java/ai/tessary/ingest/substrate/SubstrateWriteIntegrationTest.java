@@ -35,8 +35,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * Acceptance test for the async substrate write path end to end — {@code enqueue} → sample → redact →
@@ -50,19 +49,18 @@ import org.springframework.test.context.DynamicPropertySource;
  *
  * <p>No grading {@code run} row exists at any point and no LLM call happens — the path is structural
  * only.
+ *
+ * <p>There is deliberately no queue override: the burst below runs at the SHIPPED defaults. It stays far
+ * inside the byte budget (~1%), so it proves the defaults hold a real burst rather than showing where the
+ * budget sheds; {@code SubstrateWriterResilienceTest} covers the byte accounting at the edge.
  */
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
+// Own context on purpose: it counts JDBC round trips across a full burst, so another class writing spans into the
+// same context would corrupt the measurement.
+@TestPropertySource(properties = "test.context-group=substrate-write")
 class SubstrateWriteIntegrationTest {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SubstrateWriteIntegrationTest.class);
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        // No queue override: the burst below runs at the SHIPPED defaults. It is far
-        // inside the byte budget (~1%), so it proves the defaults hold a real burst, not where the budget
-        // sheds; SubstrateWriterResilienceTest covers the byte accounting at the edge.
-    }
 
     @Autowired
     SubstrateWriter writer;

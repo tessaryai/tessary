@@ -31,8 +31,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The correction loop for a {@code distribution_shift} finding — PROGRAM.md §9, the half of the
@@ -59,11 +57,6 @@ class MetricFindingResolveIntegrationTest {
      * are about. A test that wants the other arm passes its own.
      */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     FindingService drift;

@@ -44,7 +44,6 @@ class PreDeploySignalLoopIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.predeploy.enabled", () -> "true"); // activate the loop (write + read)
     }
 

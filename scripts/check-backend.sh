@@ -7,6 +7,19 @@
 # Single source of truth for the backend gate: invoked by both the Taskfile (`task backend:check`,
 # and thus `task check`) and CI (.github/workflows/check.yml, via scripts/check.sh). Keep both callers
 # thin wrappers around this script so the local gate and CI can never drift.
+#
+# `-T 2` builds the reactor two modules at a time. The eleven modules fan out into several
+# independent branches, and the per-module work that fills the wall clock (compile, SpotBugs, PMD,
+# Spotless, forbidden-apis) parallelizes cleanly across them. What does NOT parallelize is `app`'s
+# own surefire run: it is one module, so its tests stay serial within it and `app` is the critical
+# path at roughly 3 of the 5 minutes. The win is that the other ten modules' analysis finishes
+# alongside `app` instead of after it, and it is bounded by that: measured 331s serial vs 303s here.
+#
+# The count is 2 rather than `1C` on purpose. 1C (8 threads), 4 and 2 all landed within 17s of each
+# other, which is inside run-to-run noise, so there is nothing to buy by asking for more threads —
+# and the tests drive a Postgres in a CPU-capped container, so leaving cores for the database is
+# worth more than a wider reactor. A fixed count also behaves the same on a 4-vCPU CI runner as it
+# does on an 8-core laptop.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -24,4 +37,4 @@ if [ "${jmajor:-0}" != 25 ]; then
 fi
 
 cd "$ROOT/backend"
-exec mvn -B verify "$@"
+exec mvn -B -T 2 verify "$@"

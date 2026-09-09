@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * Resolution precedence, against the imported books rather than an in-memory map. These are the cases the
@@ -17,6 +18,9 @@ import org.springframework.boot.test.context.SpringBootTest;
  * point of asserting them here is that moving the lookup into the database changed none of them.
  */
 @SpringBootTest
+// Own context on purpose: it resolves against the boot-imported books, which a model row written by any other class
+// would change.
+@TestPropertySource(properties = "test.context-group=model-resolver")
 class ModelResolverIntegrationTest {
 
     @Autowired

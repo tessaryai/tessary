@@ -22,8 +22,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
 /**
@@ -42,17 +40,12 @@ import org.springframework.test.context.TestPropertySource;
 // it (claimBatch's LIMIT 0 returns nothing); the long heartbeat cannot park it alone, because
 // @Scheduled(fixedDelay) has no initial delay and the first tick fires at context startup.
 //
-// Static @TestPropertySource, not the @DynamicPropertySource below: dynamic properties are NOT part
-// of the context cache key, so a parking value registered there would silently not apply whenever
-// another test class built the shared context first.
+// Static @TestPropertySource, not @DynamicPropertySource: a dynamic registration keys the context
+// cache on the declaring Method rather than on the value, which forks a context per class instead of
+// letting this one and RcaWorkerTest share the one parked context they both want.
 @SpringBootTest
 @TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
 class RcaControllerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     RcaController controller;
