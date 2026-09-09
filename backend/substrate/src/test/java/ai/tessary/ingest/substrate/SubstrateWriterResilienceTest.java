@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -117,10 +118,11 @@ class SubstrateWriterResilienceTest {
     // ---- the byte budget ----
 
     /** A blocking writer, so batches stay queued and the byte accounting can be observed at rest. */
-    private static SpanBatchWriter blockingWriter(CountDownLatch release) {
+    private static SpanBatchWriter blockingWriter(CountDownLatch entered, CountDownLatch release) {
         SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
         try {
             Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
+                entered.countDown();
                 release.await();
                 return 1;
             });
@@ -167,10 +169,11 @@ class SubstrateWriterResilienceTest {
      */
     @Test
     void enqueue_shedsOnTheByteBudget_notTheBatchCount() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         SubstrateProperties props = new SubstrateProperties();
         props.setQueueMaxBytes(300_000);
-        SubstrateWriter writer = writerWith(props, blockingWriter(release));
+        SubstrateWriter writer = writerWith(props, blockingWriter(entered, release));
         try {
             // ~100 KB each (payload + the fixed per-entry allowance), so two fit under 300 KB and the
             // third does not — with no count bound at all, which is the point.
@@ -178,6 +181,10 @@ class SubstrateWriterResilienceTest {
             assertTrue(writer.enqueue("p1", List.of(sized("b", 100_000))), "second batch fits");
             assertFalse(writer.enqueue("p1", List.of(sized("c", 100_000))), "third exceeds the byte budget");
             assertEquals(1L, writer.shedBatches(), "the refusal must be counted as a shed");
+            // Depth only drops once the drainer has CLAIMED a batch, so wait for it to be inside the
+            // write rather than racing it: the reserved bytes are held until ack, so nothing above
+            // this line depends on the timing.
+            assertTrue(entered.await(10, TimeUnit.SECONDS), "the drainer must have claimed the first batch");
             assertTrue(writer.queueDepth() <= 1, "one batch in flight, one queued: the count was never the bound");
         } finally {
             release.countDown();
