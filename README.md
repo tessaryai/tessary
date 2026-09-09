@@ -3,7 +3,7 @@
   Tessary
 </h1>
 
-<p align="center">Stop AI agents from failing silently in production.</p>
+<p align="center">Stop your agents from failing silently in production.</p>
 
 <p align="center">
   <a href="https://tessary.ai/docs">Docs</a> ·
