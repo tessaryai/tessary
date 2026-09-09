@@ -45,7 +45,29 @@
 #   bash scripts/publish-compose-artifact.sh --version=<v>         override the version suffix
 #   bash scripts/publish-compose-artifact.sh --dry-run             print what it would publish
 #
-# Requires a registry login for each repository it writes. NEVER RUN AGENT-SIDE.
+# PUSHED WITH ORAS, NOT `docker compose publish`. What ships is a plain OCI artifact — one YAML
+# blob, media type application/vnd.docker.compose.file+yaml, under artifact type
+# application/vnd.docker.compose.project, with an empty config descriptor. oras writes exactly that
+# shape (verified against a real published artifact, manifest field for manifest field) and is
+# built for scripts: it takes no input, asks nothing, and its exit code is its own.
+#
+# `docker compose publish` is a convenience wrapper aimed at a human at a terminal, and every one
+# of its human affordances cost this repository a release. It prompts to confirm the file's bind
+# mount declaration (the docker socket) SEPARATELY from `-y`; on a runner that prompt reads EOF,
+# answers No, and the command EXITS 0 HAVING WRITTEN NOTHING — run 34336599569 reported publishing
+# two tags that did not exist. Feeding it `yes` fixed that and broke the next release a different
+# way: compose closes stdin once it has its answers, `yes` takes SIGPIPE, and `set -o pipefail`
+# turned a successful publish into a failed job, so run 34337898320 rolled back an artifact it had
+# just written correctly. Neither failure is reachable from a tool with no prompts.
+#
+# THE REGISTRY STILL HAS THE LAST WORD. oras exiting 0 is not taken as evidence either; the check
+# after the push loop asks the registry whether each ref is really there and really is a compose
+# artifact. That check is why switching publishers is safe to do: release.yml writes the pinned tag
+# and renders it back BEFORE the commit point, so a publisher that produced something Compose
+# cannot read fails the run while everything is still reversible.
+#
+# Requires a registry login for each repository it writes — oras reads the same
+# ~/.docker/config.json that `docker login` and docker/login-action write. NEVER RUN AGENT-SIDE.
 set -euo pipefail
 P=publish-compose-artifact
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -86,6 +108,14 @@ fi
     exit 1
 }
 
+ORAS="${ORAS:-$(command -v oras || true)}"
+[ -n "$ORAS" ] || {
+    echo "$P: oras is not on PATH. It is what pushes the artifact (see the header)." >&2
+    echo "$P: Install a checksum-verified copy with:" >&2
+    echo "$P:   ORAS=\"\$(bash scripts/lib/install-oras.sh \"\$HOME/.local/bin\")\"" >&2
+    exit 1
+}
+
 # The file has to be publishable before anything is pushed anywhere; a red here is a repository
 # problem, not a registry one, and it should read as one.
 bash "$ROOT/scripts/check-compose-artifact.sh"
@@ -94,10 +124,8 @@ bash "$ROOT/scripts/check-compose-artifact.sh"
 # relative paths against the file's own directory, so a copy elsewhere renders differently.
 STRIPPED="$ROOT/.compose-artifact-publish.yml"
 PINNED="$ROOT/.compose-artifact-publish.pinned.yml"
-# The prompt answers are a FILE, never a pipe — see the publish loop below for why that matters.
-ANSWERS="$ROOT/.compose-artifact-publish.answers"
-printf 'y\ny\ny\n' > "$ANSWERS"
-trap 'rm -f "$STRIPPED" "$PINNED" "$ANSWERS"' EXIT
+PUSHDIR="$(mktemp -d)"
+trap 'rm -f "$STRIPPED" "$PINNED"; rm -rf "$PUSHDIR"' EXIT
 python3 "$ROOT/scripts/lib/strip-compose-build.py" docker-compose.yml "$STRIPPED"
 python3 "$ROOT/scripts/lib/pin-compose-version.py" "$STRIPPED" "$PINNED" "$VERSION"
 mv "$PINNED" "$STRIPPED"
@@ -135,28 +163,31 @@ for ref in "${REFS[@]}"; do
     fi
 done
 
+# THE FILE IS COPIED IN UNDER ITS PUBLISHED NAME. oras derives the layer's
+# `org.opencontainers.image.title` from the path it is given, so pushing `.compose-artifact-*.yml`
+# would stamp this publisher's scratch filename into a public artifact. Pushing `docker-compose.yml`
+# from a directory of its own is what makes the annotation read like the file a consumer gets.
+cp "$STRIPPED" "$PUSHDIR/docker-compose.yml"
+COMPOSE_VERSION="$(docker compose version --short 2>/dev/null || echo unknown)"
+cat > "$PUSHDIR/annotations.json" <<JSON
+{
+  "docker-compose.yml": {
+    "com.docker.compose.file": "docker-compose.yml",
+    "com.docker.compose.version": "${COMPOSE_VERSION}"
+  }
+}
+JSON
+
 for ref in "${REFS[@]}"; do
     if [ "$DRY_RUN" = 1 ]; then
         echo "$P: would publish $ref"
         continue
     fi
     echo "$P: publishing $ref"
-    # STDIN IS A FILE, and both halves of that are load-bearing.
-    #
-    # There has to BE stdin because `-y` alone is not enough: it answers the variables prompt, but
-    # the file also declares a bind mount (the docker socket, which check-compose-artifact.sh
-    # allows by name) and that confirmation is a SEPARATE prompt. On a runner it reads EOF,
-    # defaults to No, and `docker compose publish` EXITS 0 HAVING WRITTEN NOTHING — which is how
-    # run 34336599569 reported publishing two tags that were never created. Same TTY-gated trap
-    # check-compose-artifact.sh already documents for the `-y` on `up`.
-    #
-    # And it has to be a FILE rather than `yes |`, which was the first attempt at this: compose
-    # closes stdin as soon as it has its answers, `yes` takes SIGPIPE, and `set -o pipefail` turns
-    # that into a failed pipeline AFTER a completely successful publish. Run 34337898320 printed
-    # "compose-0.4.0 published", then "yes: standard output: Broken pipe", then exited 1, and the
-    # cleanup job dutifully deleted the artifact that had just been published correctly. A regular
-    # file cannot SIGPIPE, so the exit status is the publish's own.
-    docker compose -f "$STRIPPED" publish -y "$ref" < "$ANSWERS"
+    ( cd "$PUSHDIR" && "$ORAS" push "$ref" \
+        --artifact-type application/vnd.docker.compose.project \
+        --annotation-file annotations.json \
+        docker-compose.yml:application/vnd.docker.compose.file+yaml )
 done
 
 [ "$DRY_RUN" = 1 ] && exit 0
