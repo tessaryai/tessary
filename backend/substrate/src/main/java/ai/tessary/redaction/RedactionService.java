@@ -10,12 +10,19 @@ import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.redaction.RedactionEngine.CompiledRule;
 import ai.tessary.tenant.Ids;
+import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.ForkJoinWorkerThread;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +63,46 @@ public class RedactionService {
 
     private final Map<String, List<CompiledRule>> compiledCache = new ConcurrentHashMap<>();
 
+    /**
+     * Below this many payload bytes the fork and join cost more than the regex they save.
+     *
+     * <p>Bytes rather than entries, because {@link #redactBatch} states the cost model in its own log
+     * line: redaction scales with body size, not row count. Sixteen kilobytes is roughly four of the
+     * ~4 KB chat spans the ingest path actually carries.
+     */
+    private static final long PARALLEL_THRESHOLD_BYTES = 16 * 1024;
+
+    /**
+     * The pool redaction runs in, or null when {@code parallelism} is 1 and the calling thread does the
+     * work — which is the pre-2026-09 behaviour exactly.
+     *
+     * <p>Owned here rather than borrowed from the common pool: this is the only CPU-bound fan-out in the
+     * write path, and the whole reason redaction sits on the drain side is that its cost must stay
+     * bounded and off the request thread. A pool of a stated size keeps both properties; the common pool
+     * would share threads with anything else that parallel-streams and make the bound a fiction.
+     */
+    private final @Nullable ForkJoinPool pool;
+
     public RedactionService(RedactionRuleRepository repo, RedactionProperties props) {
+        // Null-tolerant: the resilience tests build this with no properties to exercise the writer, and
+        // no configuration means no fan-out, which is the serial behaviour they are asserting anyway.
+        int parallelism = props == null ? 1 : props.getParallelism();
+        // Named threads: this codebase diagnoses production by thread dump, and "ForkJoinPool-1-worker-3"
+        // says nothing about which subsystem is burning the core. A counter rather than getPoolIndex():
+        // the pool assigns that index in registerWorker, AFTER this factory returns, so naming from it
+        // labels every worker "redaction-0" and buys nothing.
+        AtomicInteger seq = new AtomicInteger();
+        this.pool = parallelism > 1
+                ? new ForkJoinPool(
+                        parallelism,
+                        p -> {
+                            ForkJoinWorkerThread t = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(p);
+                            t.setName("redaction-" + seq.getAndIncrement());
+                            return t;
+                        },
+                        null,
+                        false)
+                : null;
         this.repo = repo;
         this.props = props;
     }
@@ -66,7 +112,9 @@ public class RedactionService {
     /**
      * Redact a project's ingest batch before substrate persistence. Returns the same list reference when
      * the guard is disabled or the project has no enabled rules (the common no-op); otherwise a new list of
-     * redacted {@link RawEntry}s. Never throws — a malformed rule is already dropped at compile time.
+     * redacted {@link RawEntry}s. A malformed rule is already dropped at compile time, so no rule can fail
+     * here; the one thing this does propagate is an {@link Error} raised inside the fan-out, which is
+     * deliberately not caught (see {@link #redactAll}).
      */
     public List<RawEntry> redactBatch(String projectId, List<RawEntry> entries) {
         if (!props.isEnabled() || entries.isEmpty()) return entries;
@@ -79,18 +127,160 @@ public class RedactionService {
         // it took a CPU profile to find. durationMs/bytes are emitted as numeric fields so Loki can
         // graph them and alert on the trend instead of anyone needing to notice.
         Instant started = Instant.now();
-        List<RawEntry> out = new ArrayList<>(entries.size());
         long bytes = 0;
         for (RawEntry e : entries) {
-            bytes += length(e.inputMessagesJson()) + length(e.outputMessagesJson());
-            out.add(redactEntry(e, rules));
+            bytes += redactableBytes(e);
         }
+        boolean[] forked = {false};
+        List<RawEntry> out = redactAll(entries, rules, bytes, forked);
         StructuredLog.info(log, Markers.OPS, "redaction.batch")
                 .field("entries", entries.size())
                 .field("rules", rules.size())
                 .field("bytes", bytes)
+                .field("parallel", forked[0])
                 .durationMs(started)
                 .log();
+        return out;
+    }
+
+    /**
+     * Apply the rules to every entry, across {@link RedactionProperties#getParallelism()} threads.
+     *
+     * <p>Each entry is an independent pure transform over immutable compiled rules, so this is a plain
+     * parallel map; {@code toList()} on an ordered stream keeps the batch's order. The writer does not
+     * require that — it re-sorts by {@code (traceId, id)} itself and its §6.1 says every FK is
+     * satisfiable regardless of arrival order — but a transform that returns rows in the order it was
+     * given is one less thing to reason about, and costs nothing here. The work is submitted into a pool this class owns rather than the
+     * common pool, so redaction can never borrow threads from — or lend contention to — anything else,
+     * and the parallelism stays the stated bound.
+     *
+     * <p>Small batches stay on the calling thread: below {@link #PARALLEL_THRESHOLD_BYTES} the fork and
+     * join cost more than the regex saves.
+     */
+    private List<RawEntry> redactAll(List<RawEntry> entries, List<CompiledRule> rules, long bytes, boolean[] forked) {
+        // isShutdown, because @PreDestroy can close the pool while a drainer still holds a claimed batch
+        // (SubstrateWriter.shutdown does not join them) and submit would then throw
+        // RejectedExecutionException out of a method documented as never throwing.
+        if (pool == null || pool.isShutdown() || bytes < PARALLEL_THRESHOLD_BYTES) {
+            return serially(entries, rules);
+        }
+        forked[0] = true;
+        ForkJoinTask<List<RawEntry>> task;
+        try {
+            task = pool.submit(() ->
+                    entries.parallelStream().map(e -> redactEntry(e, rules)).toList());
+        } catch (RejectedExecutionException e) {
+            // The isShutdown check above is advisory: @PreDestroy can land between it and this submit.
+            forked[0] = false;
+            return serially(entries, rules);
+        }
+        try {
+            return task.get();
+        } catch (InterruptedException e) {
+            // Wait it out rather than cancel-and-redo. cancel(mayInterruptIfRunning) has no effect on a
+            // running ForkJoinTask, so the pool completes this batch either way; redoing it serially
+            // would run a second full pass over the same cores on the shutdown path, which is the worst
+            // moment to double the work. The interrupt is carried to the caller instead of swallowed.
+            try {
+                return awaitUninterruptibly(task, entries, rules);
+            } finally {
+                Thread.currentThread().interrupt();
+            }
+        } catch (ExecutionException e) {
+            // An Error is NOT ours to swallow. ForkJoinTask.get wraps one in ExecutionException, so a
+            // bare catch here would quietly turn a StackOverflowError -- the live case, from regex
+            // backtracking over payloads the body cap allows up to 2 MB -- into a serial retry that
+            // overflows again. SubstrateWriter's own catch is "deliberately NOT widened to Throwable"
+            // for the same reason; this keeps that decision rather than inverting it one layer down.
+            if (e.getCause() instanceof Error err) {
+                // Rethrown as-is, not wrapped: the point is that an Error keeps its type and reaches the
+                // JVM's own handling. The wrapper carries the fork/join frames, so it rides along as
+                // suppressed rather than being discarded.
+                err.addSuppressed(e);
+                throw err;
+            }
+            // Categorical, with no throwable attached and no cause message interpolated: WARN egresses
+            // to Loki, and an exception raised while redacting can carry the very content redaction
+            // exists to keep out of logs (backend/AGENTS.md, "WARN+ egress is a data-egress surface").
+            forked[0] = false;
+            StructuredLog.warn(log, Markers.OPS, "redaction.parallel.failed")
+                    .field("entries", entries.size())
+                    .field(
+                            "cause",
+                            e.getCause() == null
+                                    ? "unknown"
+                                    : e.getCause().getClass().getSimpleName())
+                    .log();
+            log.debug("parallel redaction failure detail", e.getCause());
+            return serially(entries, rules);
+        }
+    }
+
+    @PreDestroy
+    void shutdownPool() {
+        if (pool != null) pool.shutdown();
+    }
+
+    /**
+     * The content {@link #redactEntry} actually rewrites, which is what its cost scales with.
+     *
+     * <p>All five, and the fifth is the one that keeps catching this out. {@code metadata} is not a few
+     * tags: the OTLP mapper hands over the resource attributes plus every flattened span attribute, and
+     * {@code redactMetadata} runs the rules over every non-usage string in it. Omitting it under-read a
+     * normal LLM span roughly twofold — the messages sit in {@code metadata} as well until
+     * {@code SpanBatchWriter} strips the duplicate — and read a span carrying its payload only in custom
+     * attributes as zero, so that shape could never fork at any configured parallelism.
+     *
+     * <p>Two earlier versions of this method were wrong in the same direction: entry count (ignores size
+     * entirely) and then the {@code *MessagesJson} pair alone (null on every non-OTLP source). The gate
+     * fails safe to serial when this under-reads, which is why neither was caught by a test.
+     */
+    private static long redactableBytes(RawEntry e) {
+        long total = (long) length(e.input())
+                + length(e.output())
+                + length(e.inputMessagesJson())
+                + length(e.outputMessagesJson());
+        Map<String, Object> metadata = e.metadata();
+        if (metadata != null) {
+            for (Map.Entry<String, Object> kv : metadata.entrySet()) {
+                if (kv.getValue() instanceof String v && !GenAiAttributes.isUsageOrCostKey(kv.getKey())) {
+                    total += v.length();
+                }
+            }
+        }
+        return total;
+    }
+
+    /** Finish what the pool is already doing, ignoring further interrupts; the caller restores the flag. */
+    private List<RawEntry> awaitUninterruptibly(
+            ForkJoinTask<List<RawEntry>> task, List<RawEntry> entries, List<CompiledRule> rules) {
+        while (true) {
+            try {
+                return task.get();
+            } catch (InterruptedException ignored) {
+                // Deliberately swallowed here and re-raised by the caller's finally: the point of this
+                // loop is to finish work the pool is already doing rather than abandon and repeat it.
+            } catch (ExecutionException ee) {
+                if (ee.getCause() instanceof Error err) {
+                    err.addSuppressed(ee);
+                    throw err;
+                }
+                StructuredLog.warn(log, Markers.OPS, "redaction.parallel.failed")
+                        .field("entries", entries.size())
+                        .field(
+                                "cause",
+                                ee.getCause() == null
+                                        ? "unknown"
+                                        : ee.getCause().getClass().getSimpleName())
+                        .log();
+                return serially(entries, rules);
+            }
+        }
+    }
+
+    private List<RawEntry> serially(List<RawEntry> entries, List<CompiledRule> rules) {
+        List<RawEntry> out = new ArrayList<>(entries.size());
+        for (RawEntry e : entries) out.add(redactEntry(e, rules));
         return out;
     }
 
