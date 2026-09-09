@@ -1558,9 +1558,11 @@ if (require.main === module && BACKEND === 'docker') {
 if (require.main === module) server.listen(PORT, () => {
   const detail = BACKEND === 'docker' ? `backend=docker, image=${AGENT_IMAGE}, concurrency=${SANDBOX_DOCKER_CONCURRENCY}`
     : BACKEND === 'local' ? 'backend=local' : `backend=e2b, template=${ANALYZER_TEMPLATE}`;
+  // The BOUND port, not the configured one: PORT=0 asks the OS for a free port, and the tests
+  // read the assignment back off this line rather than guessing a port that may be taken.
   // No more deployment-wide provider note — every request's provider now rides on its
   // own `credential.provider`, not a boot-time env var.
-  console.log(`sandbox-runner launcher listening on :${PORT} (${detail})`);
+  console.log(`sandbox-runner launcher listening on :${server.address().port} (${detail})`);
 });
 
 // Test seam only (test/sandbox-posture.test.js): requiring this module never listens or touches Docker.
