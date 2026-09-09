@@ -34,11 +34,10 @@ import org.springframework.context.annotation.Configuration;
  * raising {@code maximum-pool-size} to relieve pool pressure got no effect at all. The values set below
  * are defaults and the yaml overrides them.
  *
- * <p>The key that had actually drifted is {@code connection-timeout}. The yaml asks for 10s; the code
- * was using Hikari's 30s default, and a measured overload showed exactly that — a 34s p99 and a 55s
- * worst case where the documented behaviour was a 10s failure. Under Loom the pool, not the thread
- * count, is the write path's ceiling, so how long a caller waits for a connection is the difference
- * between backpressure and a stall.
+ * <p>Under Loom the pool, not the thread count, is the write path's ceiling, so {@code
+ * connection-timeout} decides whether a saturated pool answers as backpressure or as a stall. It is the
+ * key this binding actually changes: the yaml asks for 10s and the pool had been using Hikari's 30s
+ * default.
  */
 @Configuration
 public class DataSourceConfig {
@@ -62,10 +61,14 @@ public class DataSourceConfig {
         ds.setMaximumPoolSize(10);
         ds.setMinimumIdle(1);
         ds.setLeakDetectionThreshold(30_000);
-        ds.setPoolName("tessary-hikari");
+        // evals-hikari, not tessary-hikari: it is a Micrometer pool= tag, so renaming it splits the series.
+        // telemetry-naming.md records it as deliberately frozen through the namespace rename.
+        ds.setPoolName("evals-hikari");
         ds.setJdbcUrl(jdbcUrl);
         ds.setUsername(props.getDbUsername());
         ds.setPassword(props.getDbPassword());
+        // The configured URL. spring.datasource.hikari.jdbc-url binds after this returns and would win,
+        // which no deployment sets — but this line is not the authority on what the pool connects to.
         log.info("postgres datasource at {}", jdbcUrl);
         return ds;
     }
