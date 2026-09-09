@@ -156,9 +156,12 @@ name: Release
 #       bump:
 #         description: "Which part of the newest release tag to bump"
 #         required: true
-#         default: patch
+#         default: "Patch (x.y.z+1)"
 #         type: choice
-#         options: [patch, minor, major]
+#         options:
+#           - "Patch (x.y.z+1)"
+#           - "Minor (x.y+1.0)"
+#           - "Major (x+1.0.0)"
 
 on:
   workflow_dispatch:
@@ -166,9 +169,16 @@ on:
       bump:
         description: "Which part of the newest release tag to bump"
         required: true
-        default: patch
+        default: "Patch (x.y.z+1)"
         type: choice
-        options: [patch, minor, major]
+        # Each option carries the worked example of what it does to x.y.z, because the dropdown is
+        # the last thing a human sees before a release and GitHub cannot interpolate the real base
+        # tag into it. Placeholders rather than today's numbers: a literal here would be a copy of
+        # the version, and the copy is what goes stale.
+        options:
+          - "Patch (x.y.z+1)"
+          - "Minor (x.y+1.0)"
+          - "Major (x+1.0.0)"
 
 # ONE RELEASE AT A TIME. Two dispatches in flight would interleave their `imagetools create` calls
 # and could leave `<service>-latest` pointing at the older of the two. `cancel-in-progress: false`
@@ -225,6 +235,11 @@ jobs:
             exit 1
           fi
           IFS=. read -r MAJOR MINOR PATCH <<<"${BASE#v}"
+          # The dropdown labels carry their own worked example, so the value arrives as
+          # `Patch (x.y.z+1)`. The first word is the bump, lowercased; the rest was for the human.
+          # `tr` rather than bash 4's `${BUMP,,}`, which is a syntax error on the bash 3.2 a macOS
+          # contributor would test this logic with.
+          BUMP="$(printf '%s' "${BUMP%% *}" | tr '[:upper:]' '[:lower:]')"
           case "$BUMP" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
