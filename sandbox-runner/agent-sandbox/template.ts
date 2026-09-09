@@ -79,7 +79,7 @@ export const template = Template()
   // SAME version as @opencode-ai/sdk below: they ship in lockstep, and agent-stream.js reads
   // message parts whose field names have moved between releases (see partsOf/toolCallsOf). Bump
   // both together.
-  .npmInstall('opencode-ai@1.18.13', { g: true })
+  .npmInstall('opencode-ai@1.18.30', { g: true })
   // Size only, not correctness. opencode ships its runtime as a ~180 MB platform binary in
   // optionalDependencies and on musl npm installs every variant matching the arch — 2 on arm64,
   // 4 on amd64 (both -baseline flavours too) — while executing exactly one.
@@ -110,7 +110,7 @@ export const template = Template()
   // together: here, the sibling Dockerfile, AND agent-sandbox/package.json (the host-local
   // backend, also ^6.28.0). agent-stream.js needs it to lift fetch's 300s headers timeout.
   .runCmd(
-    'mkdir -p /home/user && cd /home/user && npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.13 undici@^6.28.0 && npm cache clean --force',
+    'mkdir -p /home/user && cd /home/user && npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.30 undici@^6.28.0 && npm cache clean --force',
   )
   // HOME must match the runtime user (e2b runs sandboxes as `user`) so the runtime `opencode`
   // finds its config; PIP_BREAK_SYSTEM_PACKAGES lets the agent `pip install` further deps at

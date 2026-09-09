@@ -8,8 +8,8 @@
 allowBuilds:
   esbuild: true
   re2: true
-# 1.18.13 is younger than pnpm's release-age gate. Excluded rather than pinned lower: it is the
+# 1.18.30 is younger than pnpm's release-age gate. Excluded rather than pinned lower: it is the
 # version this was exercised against, and it must match the `opencode` CLI in template.ts. Names
 # one exact version, so it lapses on the next bump.
 minimumReleaseAgeExclude:
-  - '@opencode-ai/sdk@1.18.13'
+  - '@opencode-ai/sdk@1.18.30'
