@@ -49,7 +49,7 @@
 #      has NO apkInstall, so template.ts's mirror of this line has to be a raw `.runCmd`.
 #
 # The musl swap itself is verified, not assumed: re2@1.26.1 compiles under Alpine's g++ and matches
-# correctly, opencode-ai 1.18.13 installs and runs, PyYAML imports, and @opencode-ai/sdk loads.
+# correctly, opencode-ai 1.18.30 installs and runs, PyYAML imports, and @opencode-ai/sdk loads.
 FROM node:22-alpine3.24
 
 # The `tar` module npm vendors (usr/local/lib/node_modules/npm/node_modules/tar) ships at 7.5.11 on
@@ -99,7 +99,7 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages pyyaml
 # `set -e` plus the empty-inode guard matter: if stat ever fails, this must abort the build rather
 # than fall through to a loop that deletes every variant including the live one.
 RUN set -e; \
-    npm install -g opencode-ai@1.18.13; \
+    npm install -g opencode-ai@1.18.30; \
     D=/usr/local/lib/node_modules/opencode-ai; \
     INO="$(stat -c %i "$D/bin/opencode.exe")"; \
     [ -n "$INO" ] || { echo "could not stat opencode.exe" >&2; exit 1; }; \
@@ -138,7 +138,7 @@ WORKDIR /home/user
 # is already in the base image). undici pins to ^6 so this line stays byte-identical to
 # template.ts's (bump every recipe together; undici 8 needs node >=22.19, fine on node:22-alpine3.24).
 # The cache clean is size only: npm leaves ~38 MB in $HOME/.npm that nothing at runtime reads.
-RUN npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.13 undici@^6.28.0 \
+RUN npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force
 
 # The bundle contract, copied straight from its repo-root source of truth (contract/) rather than

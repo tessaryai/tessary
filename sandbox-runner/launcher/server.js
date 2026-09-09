@@ -378,7 +378,17 @@ function openAiCompatProviderBlock(mode, credential, model) {
   // the alternative and it is WRONG for GEMINI specifically: under the id `google`, OpenCode's
   // built-in provider plugin wins over the `npm` override and issues the NATIVE Gemini wire shape
   // with no Authorization header at all.
-  const block = { npm: '@ai-sdk/openai-compatible', options: creds };
+  // OPENAI is the one mode pointed at OpenAI's own endpoint, and it gets OpenAI's own package.
+  // `@ai-sdk/openai-compatible` always sends `max_tokens`, which the GPT-5.x reasoning line
+  // rejects outright ("Unsupported parameter ... use max_completion_tokens instead"), and OpenCode
+  // folds that 400 into an empty assistant turn, so the run surfaces as "opencode produced no
+  // usable reply" with a valid key and zero tokens. `@ai-sdk/openai` rewrites the field per model
+  // and is the only one of the two that can: knowing which models need it requires knowing the
+  // models, which is exactly what "any OpenAI-compatible endpoint" cannot assume. Upstream tracks
+  // the gap as opencode #45223, still open. Every other mode here IS such an endpoint, so the
+  // compat adapter stays right for them.
+  const npm = mode === OPENAI_COMPAT_MODE ? '@ai-sdk/openai' : '@ai-sdk/openai-compatible';
+  const block = { npm, options: creds };
   if (model) block.models = { [model]: {} };
   return { [OPENCODE_PROVIDER_NAME[mode]]: block };
 }
