@@ -12,7 +12,7 @@ name: CodeQL
 # repository, and GHAS is not included in a free org plan. THIS WORKFLOW CANNOT SUCCEED TODAY —
 # not because it is misconfigured, but because the feature it drives is not purchased. It is
 # authored and fully wired anyway, the same "authored but not armed" precedent
-# open-edition-boot.yml set for a CI-minutes reason: the weekly cron below will fail loudly until
+# boot-checks.yml set for a CI-minutes reason: the weekly cron below will fail loudly until
 # either GHAS is purchased or this repo goes public, which is the honest signal — a silently
 # absent workflow would look like nobody thought about CodeQL at all, and a comment saying so
 # without a workflow to point at is a claim nobody can verify.
@@ -24,7 +24,7 @@ name: CodeQL
 #
 # THE MOMENT EITHER BLOCKER LIFTS: no change needed here beyond removing this comment block —
 # the job is already correct. Re-check both `gh api` calls above periodically; the moment neither
-# 403s/plan-gates, this can go on `pull_request:` for real (mirroring open-edition.yml's own
+# 403s/plan-gates, this can go on `pull_request:` for real (mirroring check.yml's own
 # documented one-line path from dispatch-only to armed).
 #
 # LANGUAGES: java-kotlin covers backend/ (Java 25, no Kotlin sources), javascript-typescript
@@ -43,7 +43,7 @@ name: CodeQL
 # re-enabling is uncommenting it, nothing else.
 # on:
 #   schedule:
-#     - cron: '0 4 * * 1' # Mondays 04:00 UTC — offset from ci.yml (03:00)
+#     - cron: '0 4 * * 1' # Mondays 04:00 UTC — offset from drift-checks.yml (03:00)
 #                          # (03:30) so the three weekly jobs don't contend for the same minute.
 #   workflow_dispatch:
 

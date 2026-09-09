@@ -29,7 +29,7 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate: 27 named checks (docs links, module/open-boundary/license/export-denylist hygiene, pipeline vocabulary, contract + vendored-plugin, Caddyfile, version/required-inputs/compose-artifact/selfhost-health/connect-route/readme self-host doc gates, classify, slack, sandbox-runner, compile-service, overlay-schema, classifier parity, no-bedrock, frontend, paid-image, paid-frontend, backend verify) — see the manifest in `scripts/check.sh` for the authoritative, edition-aware list; it is NOT the identical set CI runs (see that script's header) | yes |
+| `task check` | The full gate (14 checks in the open edition): backend `mvn verify`, frontend, classify-service, sandbox-runner, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `readme-front-door`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
@@ -51,8 +51,7 @@ see [`contract/tests/README.md`](../../contract/tests/README.md).
 package's tests. Static analysis bound to the `verify` phase (SpotBugs, PMD, forbidden-apis),
 module-hygiene
 (`scripts/check-module-hygiene.sh`), the classifier-pipeline vocabulary gate
-(`scripts/check-pipeline-vocabulary.sh`), the docs link gate
-(`scripts/check-docs-links.sh`), the classifier-quality doc gate
+(`scripts/check-pipeline-vocabulary.sh`), the classifier-quality doc gate
 (`scripts/check-classifier-quality-doc.sh`, which pins
 the classifier-quality reference page to the served model revisions and catalog
 thresholds, and skips with a named reason where that page is absent), and root-package tests such as `ContextLoadsTest` run
@@ -61,17 +60,20 @@ bound to the `compile` phase instead, so they run on every narrowed slice too �
 `mvn test-compile`/`test` triggers `compile` first. Prefer the slices you touched for the inner
 loop; use the full gate before merging.
 
-**Your local run is the only per-change gate.** There is no pre-commit hook, and CI
-(`.github/workflows/ci.yml`) runs the same checks, but currently only on manual
-`workflow_dispatch` — all automatic triggers (including the weekly Monday 03:00 UTC cron) are
-disabled pending the public repo cutover; the commented-out schedule block is
-preserved in the file for re-enabling later. That is a deliberate free-tier cost trade: CI calls
-the same `scripts/check-*.sh` these tasks do, so local green ⇒ CI green by construction, and the
-one thing CI adds is the vendored-plugin freshness diff, which hard-fails there (`$CI` set)
-instead of warning-and-passing offline. The consequence to internalise: a PR merged on a red
-local check stays red on `main` indefinitely — nothing notices on its own while CI's automatic
-triggers are disabled. Run `gh workflow run ci.yml` before a risky merge, and periodically to
-catch drift.
+**CI runs the same gate on every pull request.** There is still no pre-commit hook, but
+`.github/workflows/check.yml` calls `scripts/check.sh` — the same manifest `task check` runs — on
+`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) is armed
+alongside it. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
+so a red check has to be respected rather than enforced.
+
+Two gates are deliberately not on that per-PR path and live in the dispatch-only
+`.github/workflows/drift-checks.yml`:
+
+- `conformance-parity` — regenerates the fixture pinning the Java port to the Python engine.
+- `vendored-plugin` — its freshness half fetches `tessaryai/plugins` over the network and hard-fails
+  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff.
+
+Run `gh workflow run drift-checks.yml` before a risky merge, and periodically to catch drift.
 
 For a single test class, go straight to Maven — there is no task for it. `-pl` is the module
 that owns the test (`app` for anything `@SpringBootTest`):
@@ -169,10 +171,9 @@ checked against what it actually exercised rather than what its tests merely cla
 Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Refresh them locally
 with `task backend:coverage` (equivalent to `task backend:check:open` — same reactor, same
 profile — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
-CI's dispatch-only cadence below). CI additionally uploads the reports as a build artifact
-(`backend-jacoco-coverage`) from the `backend` job, currently reachable only via manual
-`workflow_dispatch` (the weekly cron is disabled pending the public repo cutover) — see
-[Running it](#running-it) above for why that job isn't per-PR.
+CI's cadence). CI additionally uploads the reports as a build artifact
+(`backend-jacoco-coverage`), from `check.yml`'s single job, so it lands on every pull request rather
+than on the old weekly cron. `if: always()`, so a red run still leaves a baseline.
 
 `backend/test-support` carries no `<build><plugins>` block and no `*Test.java` files, so it isn't
 instrumented — there's nothing to measure.

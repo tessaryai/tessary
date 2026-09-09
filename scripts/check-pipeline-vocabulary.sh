@@ -171,8 +171,10 @@ TRIAGE_FORBIDDEN=(
 )
 
 _scan_triage() {
-    grep -rn --include='*.java' --include='*.ts' --include='*.tsx' --include='*.js' --include='*.md' \
-        -- "$1" backend classifiers contract docs frontend/src sandbox-runner 2>/dev/null \
+    # No --include='*.md' and no docs/ root (standing rule, see scripts/check.sh's header): a
+    # dropped relation named in prose is not a bug. Code and config only.
+    grep -rn --include='*.java' --include='*.ts' --include='*.tsx' --include='*.js' \
+        -- "$1" backend classifiers contract frontend/src sandbox-runner 2>/dev/null \
         | grep -v '/target/' \
         | grep -v '/node_modules/' \
         | grep -v '/generated-sources/' \

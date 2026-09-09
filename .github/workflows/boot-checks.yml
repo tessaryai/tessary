@@ -1,9 +1,9 @@
-name: Open edition boot check
+name: Boot checks
 
 # The detached open-edition boot check, deliberately dispatch-only. This workflow is fully wired
 # to scripts/check-open-boot.sh on a Docker-capable runner, on demand from the Actions tab, but
 # not on an automatic trigger, to conserve this repo's free-tier GitHub Actions minutes. Appending
-# it to open-edition.yml's job list or ci.yml's cron would put it on every trigger those files
+# it to check.yml's job list or drift-checks.yml's cron would put it on every trigger those files
 # already carry (`on:` is file-level), hence a separate workflow file with `on: workflow_dispatch`
 # only, which costs zero minutes until a human presses the button.
 #
@@ -16,7 +16,7 @@ name: Open edition boot check
 #     pull_request:
 #     workflow_dispatch:
 #
-# (the same two-key shape open-edition.yml already uses), once there are enough CI minutes to
+# (the same two-key shape check.yml already uses), once there are enough CI minutes to
 # afford a Docker-capable runner on every PR.
 on:
   workflow_dispatch:

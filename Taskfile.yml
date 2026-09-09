@@ -244,7 +244,7 @@ tasks:
       - bash scripts/check-backend.sh -P '!paid'
 
   backend:coverage:
-    desc: "Refresh the JaCoCo coverage baseline for the 11 open backend modules. Runs the IDENTICAL command as backend:check:open — same reactor, same `!paid` profile, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the open reactor aborts it before jacoco:report runs, same as it would for backend:check:open. It exists only as a separately-named entry point so refreshing coverage doesn't have to wait on CI's weekly cadence (.github/workflows/ci.yml runs the backend job on a schedule/dispatch only); it is NOT part of backend:check/check:open/CI's per-PR path itself. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Reports land at backend/<module>/target/site/jacoco/index.html. tessary-paid/ is deliberately excluded — see devdocs/reference/test-suite.md."
+    desc: "Refresh the JaCoCo coverage baseline for the 11 open backend modules. Runs the IDENTICAL command as backend:check:open — same reactor, same `!paid` profile, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the open reactor aborts it before jacoco:report runs, same as it would for backend:check:open. It exists only as a separately-named entry point so refreshing coverage doesn't have to wait on CI's weekly cadence (.github/workflows/drift-checks.yml runs the backend job on a schedule/dispatch only); it is NOT part of backend:check/check:open/CI's per-PR path itself. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Reports land at backend/<module>/target/site/jacoco/index.html. tessary-paid/ is deliberately excluded — see devdocs/reference/test-suite.md."
     cmds:
       # Through the script, not a bare mvn invocation, for the same reason backend:check:open
       # is: the JDK-major-25 guard has to run before Maven starts, or a mismatch surfaces as an
@@ -534,10 +534,14 @@ tasks:
 
   # ---- combined ----
   # The project gate. Nothing enforces it locally, and CI is NOT a per-PR check:
-  # .github/workflows/ci.yml runs on a WEEKLY CRON (Mondays 03:00 UTC) plus workflow_dispatch, with
-  # 15 jobs. The overlay-schema job also carries a `pull_request` trigger; every other job stays
-  # weekly-cron/workflow_dispatch only.
-  # Each target here and the matching CI job invoke the SAME scripts/check-*.sh, so the gate is
+  # CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh --edition open` on
+  # `pull_request:`, which is this same manifest, so local green => CI green on the same script.
+  # drift-checks.yml holds the two gates check.sh does NOT run (vendored-plugin,
+  # conformance-parity), dispatch-only. Merge-blocking is still not possible: branch protection is
+  # plan-gated on this repo.
+  # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. Since
+  # the trim there are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh,
+  # so every row below that names a CI job is covered by that single job instead. The gate is
   # defined once and "local green ⇒ CI green" holds by construction (no drift to keep in sync):
   #   contract:check + CI contract job -> scripts/check-contract-consistency.sh (vendored contract drift)
   #   contract:plugin + CI vendored-plugin job -> scripts/check-vendored-plugin.sh (validator rules + freshness)
@@ -607,7 +611,7 @@ tasks:
       - bash scripts/check.sh --edition open "{{.CLI_ARGS}}"
 
   check:open:boot:
-    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only open-edition-boot.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
+    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
     cmds:
       # check-open-boot.sh derives OPEN_BOOT_OVERLAY_DIR itself (tessary-paid/pom.xml present or
       # not), so this target does not duplicate that probe — the dispatch-only CI workflow's direct
@@ -650,12 +654,12 @@ tasks:
       - bash scripts/check-zero-egress.sh {{.CLI_ARGS}}
 
   check:selfhost:images:
-    desc: "Asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`/`check:open`; run before the self-host boot job in open-edition-boot.yml."
+    desc: "Asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`/`check:open`; run before the self-host boot job in boot-checks.yml."
     cmds:
       - bash scripts/check-selfhost-images.sh {{.CLI_ARGS}}
 
   check:selfhost:compose:
-    desc: "The one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`/`check:open`; run by open-edition-boot.yml's fourth job."
+    desc: "The one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`/`check:open`; run by boot-checks.yml's fourth job."
     cmds:
       - bash scripts/check-selfhost-compose-artifact.sh
 

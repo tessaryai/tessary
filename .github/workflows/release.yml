@@ -116,7 +116,7 @@
 # supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
 # of a number the tree already states twice — and the only workflow that read it, so nothing else
 # going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
-# the same source every other workflow's pnpm/action-setup reads and the rule ci.yml's `frontend`
+# the same source every other workflow's pnpm/action-setup reads and the rule drift-checks.yml's `frontend`
 # job states in as many words: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
 # ARG default covers the launcher build, and scripts/check-required-inputs.sh already holds every
 # such default equal to the Taskfile's pin, so dropping the build-arg removed a source rather than

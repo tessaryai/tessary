@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # sandbox-runner gate. Single source of truth: invoked by both the Taskfile
-# (`task sandbox-runner:check`) and CI (.github/workflows/ci.yml) — the only job that actually runs
+# (`task sandbox-runner:check`) and CI (.github/workflows/check.yml, via scripts/check.sh) — the only caller that actually runs
 # any sandbox-runner test, so a script covering just launcher/ leaves everything else in
 # sandbox-runner/ unwired into any gate. No test harness existed for
 # server.js before the docker sandbox driver was added — the first thing that needed real

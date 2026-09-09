@@ -19,7 +19,7 @@
 # EXCLUDED manifest row in scripts/check.sh, same shape as open-boot-selfhost's). Run by a human
 # (`task check:selfhost:images`), by the release rehearsal before its first timed command —
 # "before the clock starts", so a broken pull fails as a broken pull, not a slow boot — and by
-# `.github/workflows/open-edition-boot.yml`.
+# `.github/workflows/boot-checks.yml`.
 #
 # WHAT IT CHECKS, per image reference:
 #   (a) `docker buildx imagetools inspect <ref>` resolves at all (no login).

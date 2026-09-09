@@ -1,0 +1,79 @@
+name: Drift checks
+
+# The two gates that watch for drift against something outside this checkout.
+#
+# This file was drift-checks.yml, a fourteen-job weekly backstop from when nothing ran per PR. check.yml now
+# runs scripts/check.sh on every pull request, and that manifest is a superset of the twelve jobs
+# deleted here. Two definitions of one gate on two triggers is how they drift apart.
+#
+# What is left are the two gates whose subject is not the diff under review:
+#
+#   vendored-plugin     Drift against tessaryai/plugins. The validator-rules half is local and
+#                       cheap; the freshness half fetches that repo over the network and hard-fails
+#                       on $CI. It was in check.sh's manifest until check.yml went to
+#                       `pull_request:` and came out then, because per PR it reds pull requests
+#                       over upstream commits and transient network failures that have nothing to
+#                       do with the change being reviewed. Right check, wrong trigger.
+#
+#   conformance-parity  Drift between the Python engine and its Java port. EXCLUDED from check.sh's
+#                       manifest by its own row since #875.
+#
+# Neither is safe to run per PR, because neither is measuring the PR. Both measure whether two
+# things that are supposed to track each other still do.
+#
+# Dispatch-only, and unlike the file it replaces there is no commented-out cron to restore. Run it
+# before a risky merge and before a release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vendored-plugin:
+    name: Vendored evals plugin (validator rules + freshness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      # Major-pinned, not exact-pinned. Unpinned, a new pytest major reddens main on a day nobody
+      # changed anything; exact-pinned, CI drifts from whatever developers have locally and the
+      # repo's "local green ⇒ CI green by construction" property quietly stops holding.
+      - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
+      # The exact gate `task contract:plugin` runs: single source of truth.
+      #
+      # The plugin repo (tessaryai/plugins) is public and deliberately runs no PR CI, so the
+      # enforcement for its contract lives here instead. The freshness half reads raw file
+      # contents from that repo over unauthenticated HTTPS and writes nothing back, so it leaves
+      # no trace there. $CI is set by Actions, which makes an unreachable plugin repo a hard
+      # failure rather than a skip.
+      - run: bash scripts/check-vendored-plugin.sh
+
+
+  conformance-parity:
+    name: Conformance parity fixture (Python engine ↔ Java port)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: classifiers/uv.lock
+      # The exact gate `task conformance:parity` runs: single source of truth.
+      #
+      # conformance_parity.json is what pins the Java conformance port to the Python engine, and
+      # until this job existed nothing regenerated it: the backend suite read the fixture, so a
+      # Java change was caught and a Python change was not. The fixture would keep pinning the
+      # port to an engine that no longer existed, green all the way, the silent-divergence class
+      # that cost this project a round of measurements once already. Seconds to run: the generator
+      # needs numpy and nothing else.
+      #
+      # No overlay guard here any more: the script self-guards, and on the right predicate. Its
+      # hard dependency is `classifiers/`, where it cds and where the generator's package lives,
+      # not the overlay, so a caller guard on the overlay's presence was correct only by accident.
+      # It now skips on `--edition open` and on `classifiers/` being absent, and says so.
+      - run: bash scripts/check-conformance-parity.sh
+

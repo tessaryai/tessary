@@ -1,14 +1,14 @@
-name: Open edition
+name: Check
 
 # Runs `bash scripts/check.sh --edition open`, the CI-callable entrypoint documented in that
 # script's own header. An overlay directory stays checked out during this run; the flag only
 # changes what the script builds and tests, so a green run doesn't prove the tree survives
 # with that directory actually removed. That boot check lives separately in
-# open-edition-boot.yml.
+# boot-checks.yml.
 #
 # Everything before the final step assembles the toolchains that script needs in one job:
-# Java (backend, and check-backend.sh hard-fails on the wrong JDK before Maven starts), pnpm
-# + node (frontend and classify-service), uv (classifier-parity), python (vendored-plugin),
+# Four toolchains: Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm
+# + node (frontend and classify-service), python (the gates that shell out to python3),
 # and caddy on PATH (the caddy gate). Order matters once: pnpm/action-setup must run before
 # actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
 # path.
@@ -18,13 +18,24 @@ name: Open edition
 # though GitHub won't stop a merge past it. Wire it into branch protection for real once the
 # plan or visibility changes.
 on:
-  # Dispatch-only until there's CI budget for a five-toolchain job on every PR push. Adding
-  # `pull_request:` here is the whole change needed to arm it per PR.
+  # Armed per PR. scripts/check.sh is a superset of what the old drift-checks.yml's fourteen jobs ran, so one
+  # job here buys more coverage per PR than that weekly cron ever did, and it is the gate this file
+  # was always written to be. If the minutes bill bites, the revert is deleting the `pull_request:`
+  # line; nothing else in this file depends on it.
+  pull_request:
   workflow_dispatch:
+
+# One run per PR at a time. Without this, every push to an open PR starts a fresh run while the
+# previous one keeps going to completion; on a stacked branch that is most of the minutes bill.
+# cancel-in-progress is the opposite of release.yml's setting, deliberately: a superseded check is
+# waste, a superseded release is a half-published registry.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   open-edition:
-    name: Open edition (tree minus tessary-paid/, --edition open)
+    name: check.sh (the full gate manifest, --edition open)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -49,16 +60,14 @@ jobs:
       # classify-service pins the same pnpm version and installs its own deps inside
       # check-classify-service.sh; no separate install step needed here.
 
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          cache-dependency-glob: classifiers/uv.lock
-
+      # Six surviving gates shell out to python3 (version-consistency, open-boundary,
+      # license-headers, caddy, compose-artifact, export-denylist). Pinned rather than relying on
+      # whatever ubuntu-latest ships. No pip install: pyyaml and pytest were vendored-plugin's, and
+      # that gate moved to drift-checks.yml. Nothing left here imports either.
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      # Major-pinned, not exact-pinned: see ci.yml's vendored-plugin job for why.
-      - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
+      # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
 
       - name: Install Caddy
         run: |
@@ -71,3 +80,15 @@ jobs:
 
       # CI never loads the Taskfile, so this calls the script directly.
       - run: bash scripts/check.sh --edition open
+
+      # Coverage baseline, open modules only. The JaCoCo report is a build-time side effect of the
+      # `mvn verify` inside check-backend.sh; this step only captures it. It lived in the old
+      # drift-checks.yml `backend` job and moved here with that file's trim, so the artifact keeps being
+      # produced, on every PR now rather than weekly. `if: always()` so a red run still leaves a
+      # baseline to look at.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-jacoco-coverage
+          path: backend/*/target/site/jacoco/**
+          if-no-files-found: warn

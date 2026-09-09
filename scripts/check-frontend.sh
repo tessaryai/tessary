@@ -5,7 +5,7 @@
 # `tsc` but breaks `vite build` still fails here.
 #
 # Single source of truth for the frontend gate: invoked by both the Taskfile (`task frontend:check`)
-# and CI (.github/workflows/ci.yml). Dependency install is environment-specific and is NOT part of
+# and CI (.github/workflows/check.yml, via scripts/check.sh). Dependency install is environment-specific and is NOT part of
 # the gate: CI runs `pnpm install --frozen-lockfile`, local dev runs `task frontend:install`; this
 # script assumes node_modules is already present.
 set -euo pipefail

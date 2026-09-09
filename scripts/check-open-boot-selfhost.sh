@@ -14,7 +14,7 @@
 #
 # NEVER RUN AGENT-SIDE, EVER — same rule as check-open-boot.sh, same reason (needs Docker to build
 # and boot a real stack). Run by a human (`task check:open:boot:selfhost`) or the dispatch-only
-# `.github/workflows/open-edition-boot.yml` (its second job). Never part of `task check` or
+# `.github/workflows/boot-checks.yml` (its second job). Never part of `task check` or
 # scripts/check.sh — see its EXCLUDED manifest row.
 #
 # CREDENTIALS: this leg writes no generated credential into the export's `.env` — the self-host

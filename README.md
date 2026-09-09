@@ -15,7 +15,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache 2.0 license"></a>
   <a href="https://github.com/tessaryai/tessary/releases"><img src="https://img.shields.io/github/v/release/tessaryai/tessary" alt="Latest release"></a>
   <a href="https://hub.docker.com/r/tessaryai/tessary"><img src="https://img.shields.io/docker/pulls/tessaryai/tessary" alt="Docker pulls"></a>
-  <a href="https://github.com/tessaryai/tessary/actions/workflows/ci.yml"><img src="https://github.com/tessaryai/tessary/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/tessaryai/tessary/actions/workflows/check.yml"><img src="https://github.com/tessaryai/tessary/actions/workflows/check.yml/badge.svg" alt="CI status"></a>
 </p>
 
 Tessary is an open-source agent reliability platform for engineering teams running AI agents in production. It watches every trace an agent produces, flags the ones that look wrong with cheap classifiers, groups related findings into a case, and explains the case with an RCA (root-cause analysis) run grounded in your own repository.
