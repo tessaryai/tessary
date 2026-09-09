@@ -28,7 +28,7 @@ Two notes on the deterministic pair. `secret_leak` reads what the write path lef
 Four classifiers exist in the product and cannot run here:
 
 - `frustration` and `groundedness` depend on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
-- `behavior_drift` and `sop_conformance` ship as catalog entries with no detector behind them, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure).
+- `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
 
 The capability API refuses an override for any of the four rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) states the same boundary from the install side.
 

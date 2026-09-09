@@ -1,72 +1,81 @@
 ---
-title: "Tessary Documentation"
-description: "What Tessary does, what the open edition covers, and which section of the documentation answers your question."
+title: "Tessary"
+description: "What Tessary does, how to self-host it, and the three steps from a running instance to your first explained case."
 ---
 
-Tessary is an open-source agent reliability platform for engineering teams running AI agents in production. It reads every trace your agents produce, flags the ones that moved using classifiers cheap enough to run on all of them, validates the flags that hold into cases, and explains a case with an agentic RCA (root-cause analysis) run, grounded in your own repository when you connect one.
+Tessary watches agents running in production. It reads every trace your agents produce, runs classifiers over all of them to detect changes and likely problems, checks whether each detected change is a real issue, and then investigates what caused the ones that are.
 
-Agents develop production issues without crashing and without failing visibly. Once an agent is mature, most of its failures are low-frequency, which is why watching a sample of traffic structurally cannot find them. Tessary watches all of it, and treats identifying a problem as the beginning of the work rather than the end of it.
+The four stages have names you will see throughout these pages. A classifier creates a **finding** when it detects a change. **Triage** decides whether the finding is a real issue. A validated finding becomes a **case**. An agentic root-cause analysis (RCA) run then investigates the case and reports what it thinks caused it.
 
-These pages document the open edition, the code in this repository, which is open source under the Apache License 2.0. They do not document Tessary Cloud, the hosted service. Parts of the product do not run here at all: [what the open edition leaves out](#what-the-open-edition-leaves-out) names them.
+These pages document the open edition, the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). They do not document Tessary Cloud, the hosted service.
 
-## Start here
+## Self-host Tessary
 
-<CardGroup cols={3}>
-  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
-    Bring up the services with Docker Compose, create an account, and connect a trace source.
-  </Card>
-  <Card title="Instrument your agent" icon="code" href="/instrument/overview">
-    Send traces to Tessary and tag every model call with a call site.
-  </Card>
+A deployment is a single-node Docker Compose stack, and every credential it needs ships with a working default. Paste this into your coding agent:
+
+```text
+Self-host Tessary for me by following https://github.com/tessaryai/tessary/blob/main/setup.md
+```
+
+[`setup.md`](https://github.com/tessaryai/tessary/blob/main/setup.md) is written as instructions to an agent: install what is missing, bring every service up, verify the frontend, and hand back the URL. It needs Docker Engine 26 or newer and Docker Compose v2.34 or newer on the machine.
+
+Prefer to run it yourself? The same install is one command, with nothing cloned and no `.env` to edit:
+
+```bash
+docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+```
+
+Either way, open `http://localhost` once `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Three of the shipped credentials are placeholders published in the repository, so this install is a localhost test drive until you replace them. [Secure the instance](/self-hosting/setup#secure-the-instance) covers that, and it is not something the agent does for you.
+
+## What the open edition includes
+
+Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+
+<Card title="Open edition" icon="box-open" href="/open-edition">
+  What is included, what needs configuring, what is unavailable here, and where the product's boundaries are today.
+</Card>
+
+## Start in three steps
+
+<Steps>
+  <Step title="Start Tessary">
+    Take either path above, create your account, and replace the three placeholder secrets. [Set up Tessary](/self-hosting/setup) covers first boot end to end.
+  </Step>
+  <Step title="Instrument your agent">
+    Send traces to the OTLP (OpenTelemetry Protocol) endpoint, and tag every span that covers a model call with a `tessary.call_site.id` attribute. There is no Tessary client library to install, and the connect screen carries a prompt you can hand to a coding agent. [Instrument your agent](/instrument/overview) covers both paths.
+  </Step>
+  <Step title="Review what Tessary finds">
+    Classifiers need a stretch of your own traffic before they can tell a change from normal variation. Once they have it, findings start arriving.
+  </Step>
+</Steps>
+
+## What you see after connecting traces
+
+The project reports its progress as a milestone ladder, and **Triage** names the stage whenever the queue is empty. A new project reads `not_connected`, then `listening` once the endpoint is live, then `fitting` once traces are arriving. Classifiers stay at `fitting` while they learn what your traffic normally looks like, which takes a while on low volume and is expected rather than a fault.
+
+After that, three things appear in order:
+
+| You see | What it means |
+| --- | --- |
+| A **finding** on the Classifiers page | A classifier detected a change and recorded the production evidence for it. It is not yet a validated issue. |
+| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. |
+| An **RCA report** on the case | The agentic run reports a verdict, hypotheses with the traces it cites for each, and the checks it ruled out. Connect a repository and it can ground that work in your own code. |
+
+Tessary explains the issue and hands it to you. It does not open the fix.
+
+## Read next
+
+<CardGroup cols={2}>
   <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
-    The four stages a trace moves through, and what each one needs before it can run.
+    The four stages in detail, and what each one needs before it can run.
+  </Card>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    What a call site is, why the tag is required, and where it goes in your code.
+  </Card>
+  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
+    Every environment variable a self-hosted deployment reads, and what it controls.
+  </Card>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    The three key scopes, and the surfaces each one reaches.
   </Card>
 </CardGroup>
-
-Those three are the order of the work: stand up an instance, point an agent at it, then read what comes back. A new project stays on the connect gate until one span carrying a `tessary.call_site.id` attribute arrives.
-
-## Instrument your agent
-
-Instrumenting means two things: traces reach the OTLP (OpenTelemetry Protocol) endpoint, and every span covering a model call carries a call-site tag. There is no Tessary client library to install.
-
-- [Instrument your agent](/instrument/overview) is the task, either by handing the connect screen's prompt to a coding agent or by wiring the exporter yourself.
-- [The call-site tag](/instrument/call-site-tag) covers what a call site is, how to choose an id that survives, and where the attribute goes in code.
-- [Configure an exporter](/instrument/exporters) covers the three forms: environment variables, an in-code span processor, or a collector you already run.
-- [Span requirements](/instrument/span-requirements) lists every field Tessary reads off a span, with accepted values and constraints.
-- [Instrumentation troubleshooting](/instrument/troubleshooting) works through nothing arriving, spans arriving untagged, and a connect gate that stays closed.
-
-## Concepts
-
-Read these to understand what Tessary is doing with your traces and why the pipeline is shaped this way.
-
-- [How Tessary works](/concepts/how-it-works) walks the whole chain, from an arriving trace to an explained case.
-- [Call sites](/concepts/call-sites) explains the unit almost everything else is scoped to, and why an untagged span cannot be watched.
-- [Classifiers and findings](/concepts/classifiers-and-findings) lists which classifiers the open edition runs, what fitting a baseline means, and what a finding records.
-- [Cases](/concepts/cases) covers how triage turns a finding into a case, and the states a case moves through.
-- [Root-cause analysis](/concepts/root-cause-analysis) covers what the agentic run reads, what it returns, and what a connected repository adds.
-
-## Self-hosting
-
-A deployment is a single-node Docker Compose stack. One command boots it, because every credential the stack needs ships with a working default. Two of those defaults are placeholders published in the repository, and replacing them is part of setup.
-
-- [Set up Tessary](/self-hosting/setup) covers first boot, through to a connected trace source.
-- [Configuration reference](/self-hosting/configuration) lists every environment variable and what it controls.
-- [Custom domain](/self-hosting/custom-domain) puts the instance on your own hostname and covers how TLS (Transport Layer Security) is served.
-- [Deployment topology](/self-hosting/deployment) describes the services a deployment runs and how traffic flows through them.
-- [Upgrading](/self-hosting/upgrading) covers pulling new images, what to back up first, and how schema migrations run.
-- [Troubleshooting](/self-hosting/troubleshooting) organizes self-hosting problems by what you observe, and carries the Postgres backup and restore steps.
-
-## Reference
-
-- [API keys](/reference/api-keys) covers the three scopes, their token prefixes, and the surfaces each one reaches.
-- [MCP server](/reference/mcp-server) covers the endpoint, the credential it accepts, its read-only guarantee, and the tools it offers.
-- [Ingestion contract](/reference/ingestion-contract) is the exhaustive lookup for every wire field the ingestion pipeline consumes, and the limits it enforces.
-
-## What the open edition leaves out
-
-Four classifiers exist in the product and cannot run here. `frustration` and `groundedness` depend on a separate encoder service that this configuration does not start and whose model weights are not published. `behavior_drift` and `sop_conformance` ship as catalog entries with no detector behind them. The other five classifiers run out of the box. [Classifiers and findings](/concepts/classifiers-and-findings#what-the-open-edition-runs) covers both sides of that line.
-
-Two more boundaries are worth knowing before you evaluate:
-
-- **Automatic triage is off by default**, in every edition, because running it unattended drives model spend with no ceiling. Findings are still filed and still visible; nothing escalates them on its own until an owner turns it on. See [what triage needs before it can run](/concepts/cases#what-triage-needs-before-it-can-run).
-- **Tessary explains and hands off.** It does not open the fix. A case reaches you through an alert rule and a notification destination you add, and [where a case reaches you](/concepts/cases#where-a-case-reaches-you) covers what that notification carries.
