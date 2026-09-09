@@ -67,7 +67,6 @@ class McpControllerTest {
             chains: []
             taxonomy: []
             """);
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Enable auth so MCP bearer-token verification runs. Say so directly rather than
         // configuring a fake external-provider key as an indirect toggle -- see
         // TestAuthDisabledInitializer's javadoc for why.

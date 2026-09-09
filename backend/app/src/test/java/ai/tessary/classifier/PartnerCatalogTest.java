@@ -22,8 +22,6 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The partner-facing classifier catalog, against real {@code org_feature_flag} rows.
@@ -54,11 +52,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class PartnerCatalogTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     /**
      * The classifiers a launch partner must not see. The three launch classifiers

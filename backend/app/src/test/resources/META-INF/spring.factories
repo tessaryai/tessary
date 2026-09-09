@@ -2,4 +2,12 @@
 # entries from spring.factories). Points the suite at the JVM-singleton pgvector Testcontainers DB.
 org.springframework.context.ApplicationContextInitializer=\
   ai.tessary.db.TestcontainersPostgresInitializer,\
-  ai.tessary.auth.TestAuthDisabledInitializer
+  ai.tessary.auth.TestAuthDisabledInitializer,\
+  ai.tessary.config.TestSecretKeyInitializer
+
+# Runs alongside the framework defaults (a listener declared here is added to, not substituted for,
+# the DEFAULT_TEST_EXECUTION_LISTENER_CLASS_NAMES set). Empties the schema between test classes that
+# share a context, which is the isolation those classes used to get by accident from each having its
+# own context and therefore its own database.
+org.springframework.test.context.TestExecutionListener=\
+  ai.tessary.db.SchemaCleaningTestExecutionListener

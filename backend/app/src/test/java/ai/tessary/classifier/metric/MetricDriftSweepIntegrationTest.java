@@ -39,8 +39,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * {@link MetricDriftSweep} end to end against the real Postgres, for the two things a sweep has to get
@@ -63,11 +61,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class MetricDriftSweepIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     /**
      * The shipped shape at the smallest sizes the clamps allow, so a window closes within a fixture

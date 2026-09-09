@@ -12,8 +12,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * {@code project_model_setting} against the real Postgres — the round-trip the mocked
@@ -22,11 +20,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class ProjectModelSettingRepositoryTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     TenantService tenants;

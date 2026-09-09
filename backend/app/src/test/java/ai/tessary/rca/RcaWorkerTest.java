@@ -45,8 +45,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -73,18 +71,15 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 // unaffected. Lengthening the heartbeat CANNOT do this on its own — @Scheduled(fixedDelay) has no
 // initial delay, so the first tick always fires at context startup, inside the test window.
 //
-// Both properties are static @TestPropertySource, not @DynamicPropertySource, because dynamic
-// properties are NOT part of the context cache key: ~90 other @SpringBootTest classes register only
-// `tessary.secret-key` and share this exact MergedContextConfiguration, so whichever builds the
-// context first wins and a dynamic parking value silently never applies.
+// Both properties are static @TestPropertySource, not @DynamicPropertySource. Dynamic properties DO
+// reach the context cache key -- DynamicPropertiesContextCustomizer.equals compares the Set<Method>
+// it was built from -- but that is exactly the problem: the key would turn on which class declared
+// the method rather than on what it registered, so this class would fork a context of its own for a
+// value @TestPropertySource states in the cache key directly, where two classes wanting the same
+// parking share one context.
 @SpringBootTest
 @TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
 class RcaWorkerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     RcaWorker worker;

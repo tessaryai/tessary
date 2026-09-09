@@ -30,8 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Frustration is {@link ClassifierModelModule.Grain#TURN}: its subject is what the user said, and the
@@ -50,11 +48,6 @@ import org.springframework.test.context.DynamicPropertySource;
 class ClassifierTurnGrainIntegrationTest {
 
     private static final String FRUSTRATED = "this is frustrating, you're not listening";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     SessionRepository sessions;

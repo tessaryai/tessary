@@ -15,8 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Exercises the signal sweep queue's dead-letter budget against the real pgvector
@@ -36,11 +34,6 @@ class ClassifierJobRepositoryTest {
 
     private static final int MAX_ATTEMPTS = 5;
     private static final long LONG_COOLDOWN_SECONDS = 3600;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     ClassifierJobRepository jobs;

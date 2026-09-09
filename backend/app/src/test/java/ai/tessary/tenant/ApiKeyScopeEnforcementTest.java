@@ -14,8 +14,6 @@ import ai.tessary.query.QueryDtos.CountRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Acceptance: a key cannot act outside its scope. Drives the write ({@code /v1/traces}) and
@@ -26,12 +24,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class ApiKeyScopeEnforcementTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        // OTLP HTTP ingest is always on now, so the scope gate (not a disabled-route 404) is what we hit.
-    }
 
     @Autowired
     OtlpTraceController otlp;

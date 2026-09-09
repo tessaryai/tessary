@@ -34,6 +34,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * A sweep that keeps throwing is dead-lettered after {@code maxAttempts} consecutive failures:
@@ -44,13 +45,15 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 @Import({ThrowingEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+// Own context on purpose: the zero dead-letter cooldown it needs would make every other class's failed job revive
+// instantly.
+@TestPropertySource(properties = "test.context-group=classifier-dead-letter")
 class ClassifierWorkerDeadLetterTest {
 
     private static final int MAX_ATTEMPTS = 5;
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // A near-zero cooldown lets the test drive an automatic revival without a real-time wait.
         r.add("tessary.classifier.dead-letter-cooldown-seconds", () -> "0");
     }

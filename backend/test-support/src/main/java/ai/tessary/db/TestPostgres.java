@@ -50,12 +50,21 @@ public final class TestPostgres {
 
     /** JDBC URL for a database created via {@link #createIsolatedDatabase()}. */
     public static String jdbcUrl(String dbName) {
+        return urlPrefix() + dbName;
+    }
+
+    /**
+     * Everything in a {@link #jdbcUrl(String)} up to and including the final slash, so a caller
+     * about to do something destructive can prove the connection it holds points at this
+     * throwaway container and not at a database someone cares about. The mapped port is assigned
+     * by Docker per run, which is what makes this worth checking rather than assuming.
+     */
+    public static String urlPrefix() {
         return "jdbc:postgresql://"
                 + CONTAINER.getHost()
                 + ":"
                 + CONTAINER.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
-                + "/"
-                + dbName;
+                + "/";
     }
 
     public static String username() {

@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * The case lifecycle state machine, against real Postgres so the partial indexes and the ISO-text
@@ -35,11 +36,13 @@ import org.springframework.test.context.DynamicPropertySource;
  * case on the next worker tick, which is how "resolve" comes to look broken.
  */
 @SpringBootTest
+// Own context on purpose: CaseWorker's sweep is parked here, and a shared database would let another class's findings
+// reconcile these cases away.
+@TestPropertySource(properties = "test.context-group=case-ledger")
 class CaseLedgerTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Park CaseWorker's sweep. It reconciles every active project from the REAL sources, which
         // report nothing for a fixture project — so a tick landing mid-test would auto-resolve the
         // cases these assertions just opened.

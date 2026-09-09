@@ -51,7 +51,6 @@ class ClassifierCursorKeysetIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.classifier.batch-size", () -> String.valueOf(BATCH));
     }
 

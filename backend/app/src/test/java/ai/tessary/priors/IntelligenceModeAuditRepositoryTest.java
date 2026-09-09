@@ -12,8 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * Verifies the SOC 2 evidence trail against the real Testcontainers Postgres (the schema
@@ -22,12 +21,10 @@ import org.springframework.test.context.DynamicPropertySource;
  * repository directly and confirm the auditor's boot row is present (single-tenant is the default).
  */
 @SpringBootTest
+// Own context on purpose: it asserts the auditor's boot-time evidence row, which is written once per context and
+// nowhere else.
+@TestPropertySource(properties = "test.context-group=intelligence-mode-audit")
 class IntelligenceModeAuditRepositoryTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     IntelligenceModeAuditRepository repo;

@@ -33,6 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.redpanda.RedpandaContainer;
@@ -46,6 +47,9 @@ import org.testcontainers.redpanda.RedpandaContainer;
  */
 @Testcontainers
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
+// Own context on purpose: it swaps the ingest spool onto a Redpanda container, so its bean graph is not the shared
+// one.
+@TestPropertySource(properties = "test.context-group=kafka-spool")
 class KafkaSpoolIntegrationTest {
     private static final Logger log = LoggerFactory.getLogger(KafkaSpoolIntegrationTest.class);
 
@@ -55,7 +59,6 @@ class KafkaSpoolIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.ingest.spool.mode", () -> "kafka");
         r.add("tessary.ingest.spool.kafka.bootstrap-servers", REDPANDA::getBootstrapServers);
         r.add("tessary.ingest.spool.kafka.partitions", () -> "4");

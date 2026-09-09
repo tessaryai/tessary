@@ -40,7 +40,6 @@ class OpenApiSpecDriftTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Matches the app's normal (auth-enforced) posture rather than the suite's global
         // unauthenticated default -- say so directly rather than configuring a fake
         // external-provider key as an indirect toggle. See TestAuthDisabledInitializer's javadoc.

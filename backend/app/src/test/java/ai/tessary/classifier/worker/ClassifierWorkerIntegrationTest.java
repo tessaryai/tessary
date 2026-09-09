@@ -34,8 +34,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * End-to-end acceptance for the async signal sweep: with the worker enabled, the structurally-
@@ -48,11 +46,6 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest
 @Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
 class ClassifierWorkerIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-    }
 
     @Autowired
     SessionRepository sessions;

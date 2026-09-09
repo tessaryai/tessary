@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * The two partial indexes the baseline changeset defines on {@code eval_case}, the display-number
@@ -40,11 +41,13 @@ import org.springframework.test.context.DynamicPropertySource;
  * that the string was assembled.
  */
 @SpringBootTest
+// Own context on purpose: CaseWorker's sweep is parked here, and its assertions read the case table without a project
+// filter.
+@TestPropertySource(properties = "test.context-group=case-repository")
 class CaseRepositoryIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.cases.heartbeat-ms", () -> "3600000");
     }
 

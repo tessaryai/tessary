@@ -54,7 +54,6 @@ class ImportControllerTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Enable auth so this test exercises the real, authenticated request path -- say so
         // directly rather than configuring a fake external-provider key as an indirect toggle.
         // See TestAuthDisabledInitializer's javadoc.

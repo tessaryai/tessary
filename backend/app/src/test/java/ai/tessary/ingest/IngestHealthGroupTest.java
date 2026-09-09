@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -28,13 +29,15 @@ import org.springframework.web.context.WebApplicationContext;
  * public top-level document still renders no component detail.
  */
 @SpringBootTest
+// Own context on purpose: it boots with real auth and a platform staff list, a posture the rest of the suite must not
+// inherit.
+@TestPropertySource(properties = "test.context-group=ingest-health-group")
 class IngestHealthGroupTest {
 
     private static final String STAFF = "staff-984@example.com";
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("workos.api-key", () -> "");
         r.add("workos.client-id", () -> "");
