@@ -19,7 +19,9 @@
 #                                                 coordinate in the tree and require red on each
 #
 # Needs the network. Run by `task check:namespaces`, quarterly plus on dispatch by
-# .github/workflows/namespace-recheck.yml, and before every release by release.yml.
+# .github/workflows/namespace-recheck.yml. NOT by release.yml: a re-registered namespace is a
+# standing risk on its own clock, not a property of the release being cut, and gating a release on
+# it made every release depend on Docker Hub, GitHub AND Hugging Face all being reachable.
 set -euo pipefail
 P=check-namespaces
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
