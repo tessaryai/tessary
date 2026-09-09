@@ -52,7 +52,11 @@
 # failures, and then the real ones get skipped too.
 #
 # Gone, so nobody re-adds them thinking it was an oversight: docs-links, selfhost-health,
-# required-inputs, readme-front-door and connect-route (rows below carry the reason).
+# required-inputs and connect-route (rows below carry the reason). readme-front-door went further
+# and was deleted outright, script and row together: excluded from the pipeline it asserted nothing,
+# and kept on disk it invited someone to run it by hand and believe the answer, which two of its own
+# checks could not give (an untagged fence let the install-ordering check pass, and its nav lookup
+# matched any label, not the settings group it named).
 # check-open-boundary.sh's rule 6, check-pipeline-vocabulary.sh's `--include='*.md'`,
 # check-compose-artifact.sh's published-command clause and check-contract-consistency.sh's two
 # AUTHORING_CONTRACT.md / SKILL.md legs were cut out of otherwise-mechanical gates.
@@ -288,7 +292,6 @@ contract-consistency|scripts/check-contract-consistency.sh|RUN|RUN|open on both 
 vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 caddy|scripts/check-caddy.sh|RUN|RUN|open on both sides
 paid-caddy|tessary-paid/scripts/check-paid-caddy.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid spec and no Caddyfile.prod for the gate to compare; both live in the overlay|this gate lives in the overlay, the overlay twin of the `caddy` row above; it lives there because check-open-boundary.sh rule 5 fails any scripts/*.sh naming that directory. The checker itself is open and variadic (scripts/lib/caddy-proxies-spec.py); only the caller and the config are the overlay's.
-readme-front-door|scripts/check-readme-front-door.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It asserted README prose: a required section heading, eight exact phrases inside it, and which fenced block came first. A README rewrite reds it while the README is fine|EXCLUDED:same|declared here only so the completeness assertion can see it
 connect-route|scripts/check-connect-route.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It string-matched eleven prose fragments from docs/self-hosting/setup.mdx against JSX. Renaming a button reds it|EXCLUDED:same|declared here only so the completeness assertion can see it
 required-inputs|scripts/check-required-inputs.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. An input with no default passed if setup.mdx's required-variable table had a row for it, so documenting a variable elsewhere reds the build|EXCLUDED:same|declared here only so the completeness assertion can see it
 compose-artifact|scripts/check-compose-artifact.sh|RUN|RUN|the one-command install: docker-compose.yml is also the OCI artifact behind `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`, so it must stay publishable (long-syntax ports, literal memory limits) and mount no host path in a default-profile service; the build strip that makes the artifact must remove build sections and nothing else; pure text plus a client-side `docker compose config`, no daemon and no network

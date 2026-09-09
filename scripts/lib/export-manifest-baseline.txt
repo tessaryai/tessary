@@ -1468,7 +1468,6 @@ scripts/check-open-boot-selfhost.sh
 scripts/check-open-boot.sh
 scripts/check-open-boundary.sh
 scripts/check-pipeline-vocabulary.sh
-scripts/check-readme-front-door.sh
 scripts/check-required-inputs.sh
 scripts/check-sandbox-runner-launcher.sh
 scripts/check-selfhost-compose-artifact.sh
