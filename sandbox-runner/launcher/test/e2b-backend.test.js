@@ -27,23 +27,26 @@ const SERVER_JS = path.join(__dirname, '..', 'server.js');
 // docker-backend.test.js's identical constant for why.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 
+// PORT=0 hands the choice to the OS and the launcher logs back the port it actually bound, so
+// tests can never collide on a guessed one. Returns that port alongside the child.
 async function startLauncher(env) {
   const child = spawn('node', [SERVER_JS], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...env, PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  await new Promise((resolve, reject) => {
+  const port = await new Promise((resolve, reject) => {
     let out = '';
     const onData = (d) => {
       out += d.toString();
-      if (/listening on/.test(out)) { child.stdout.off('data', onData); resolve(); }
+      const bound = /listening on :(\d+)/.exec(out);
+      if (bound) { child.stdout.off('data', onData); resolve(Number(bound[1])); }
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', (d) => { out += d.toString(); });
     child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
     setTimeout(() => reject(new Error(`launcher did not start in time: ${out}`)), 5000);
   });
-  return child;
+  return { child, port };
 }
 
 function postJson(port, urlPath, body, apiKey) {
@@ -77,12 +80,10 @@ const LOCALHOST_URLS = [
 
 for (const route of ['/rca', '/triage']) {
   test(`e2b backend: ${route} rejects a localhost mcp.url before creating a sandbox`, async () => {
-    const port = 18500 + Math.floor(Math.random() * 500);
-    const child = await startLauncher({
+    const { child, port } = await startLauncher({
       SANDBOX_BACKEND: 'e2b',
       E2B_API_KEY: 'fake-e2b-key',
       SANDBOX_API_KEY: 'testkey',
-      PORT: String(port),
     });
 
     try {
@@ -98,12 +99,10 @@ for (const route of ['/rca', '/triage']) {
   });
 
   test(`e2b backend: ${route} rejects a missing mcp.url before creating a sandbox`, async () => {
-    const port = 18500 + Math.floor(Math.random() * 500);
-    const child = await startLauncher({
+    const { child, port } = await startLauncher({
       SANDBOX_BACKEND: 'e2b',
       E2B_API_KEY: 'fake-e2b-key',
       SANDBOX_API_KEY: 'testkey',
-      PORT: String(port),
     });
 
     try {
@@ -120,12 +119,10 @@ for (const route of ['/rca', '/triage']) {
 
 for (const rawUrl of LOCALHOST_URLS) {
   test(`e2b backend: rejects ${rawUrl} as a localhost form`, async () => {
-    const port = 18500 + Math.floor(Math.random() * 500);
-    const child = await startLauncher({
+    const { child, port } = await startLauncher({
       SANDBOX_BACKEND: 'e2b',
       E2B_API_KEY: 'fake-e2b-key',
       SANDBOX_API_KEY: 'testkey',
-      PORT: String(port),
     });
 
     try {
@@ -181,15 +178,13 @@ test('docker backend: the SAME localhost mcp.url is accepted unchanged (guard is
   });
   await new Promise((resolve) => server.listen(socketPath, resolve));
 
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
   });

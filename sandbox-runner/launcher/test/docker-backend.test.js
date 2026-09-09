@@ -124,23 +124,26 @@ function startFakeDaemon(
   });
 }
 
+// PORT=0 hands the choice to the OS and the launcher logs back the port it actually bound, so
+// tests can never collide on a guessed one. Returns that port alongside the child.
 async function startLauncher(env) {
   const child = spawn('node', [SERVER_JS], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...env, PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  await new Promise((resolve, reject) => {
+  const port = await new Promise((resolve, reject) => {
     let out = '';
     const onData = (d) => {
       out += d.toString();
-      if (/listening on/.test(out)) { child.stdout.off('data', onData); resolve(); }
+      const bound = /listening on :(\d+)/.exec(out);
+      if (bound) { child.stdout.off('data', onData); resolve(Number(bound[1])); }
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', (d) => { out += d.toString(); });
     child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
     setTimeout(() => reject(new Error(`launcher did not start in time: ${out}`)), 5000);
   });
-  return child;
+  return { child, port };
 }
 
 function postJson(port, urlPath, body, apiKey) {
@@ -171,15 +174,13 @@ test('docker backend: container-create carries the required hardening flags', as
   fs.mkdirSync(workDir, { recursive: true });
 
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: 20 });
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume', // never created — the fake daemon never mounts it
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
   });
@@ -222,15 +223,13 @@ test('docker backend: SANDBOX_DOCKER_CONCURRENCY=1 serializes two concurrent run
 
   const WAIT_MS = 200;
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: WAIT_MS });
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
   });
@@ -267,15 +266,13 @@ test('docker backend: pulls AGENT_IMAGE when the daemon does not already have it
   // comment). The raw Engine API's /containers/create does not auto-pull, so the launcher must
   // pull it itself before create; without that, this request would 404 at create time.
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: 20, imageMissing: true });
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
   });
@@ -308,15 +305,13 @@ test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset', asyn
   fs.mkdirSync(workDir, { recursive: true });
 
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: 20 });
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     // SANDBOX_BACKEND intentionally absent.
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
     // No E2B_API_KEY, no AWS credentials beyond region: the docker default must not need them.
@@ -348,15 +343,13 @@ test('docker backend: two agentic routes share the SAME semaphore under concurre
 
   const WAIT_MS = 200;
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: WAIT_MS });
-  const port = 18500 + Math.floor(Math.random() * 500);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
   });
@@ -394,15 +387,13 @@ async function runOneAgentJob(env, daemonOpts) {
   const workDir = path.join(scratch, 'work');
   fs.mkdirSync(workDir, { recursive: true });
   const daemon = await startFakeDaemon(socketPath, { waitDelayMs: 10, ...daemonOpts });
-  const port = 19100 + Math.floor(Math.random() * 400);
-  const child = await startLauncher({
+  const { child, port } = await startLauncher({
     SANDBOX_BACKEND: 'docker',
     DOCKER_SOCKET_PATH: socketPath,
     AGENT_IMAGE: 'test-agent:latest',
     LAUNCHER_WORK_DIR: workDir,
     SANDBOX_WORK_VOLUME: 'test-work-volume',
     SANDBOX_API_KEY: 'testkey',
-    PORT: String(port),
     SANDBOX_DOCKER_CONCURRENCY: '1',
     AWS_REGION: 'us-east-1',
     ...env,
