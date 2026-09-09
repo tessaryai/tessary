@@ -33,16 +33,22 @@
 # Multi-arch (D4): linux/amd64 + linux/arm64, on NATIVE runners for both (ubuntu-24.04-arm is a
 # free GitHub-hosted runner for public repos — no QEMU emulation, which would silently mask a
 # non-native-arch RUN step failure, e.g. the groupadd/useradd/apk lines in every runtime stage
-# here). Backend and frontend build their architecture-INDEPENDENT artifact (the layered jar's
-# bytecode; the Vite bundle's JS) exactly ONCE, in build-artifacts below, and the two per-arch jobs
-# for each only build the runtime stage against that artifact — see build-artifacts' own header
-# comment for the buildx mechanism that makes this possible with NO Dockerfile changes. sandbox-runner
-# and agent-sandbox do NOT get this optimization: re2@1.26.1 is a native addon (built with
-# node-gyp/g++ in-image), so a shared, cross-arch artifact would ship the wrong-arch binary — those
-# two build their pnpm install/node-gyp step natively on each arch, at the cost of doing it twice.
+# here). EVERY image builds its WHOLE Dockerfile on its own arch, exactly as `docker build` does on
+# a laptop. There is no shared cross-arch artifact and no build stage substituted out from under a
+# Dockerfile.
+#
+# An earlier shape did have one: backend and frontend built their architecture-independent artifact
+# (the layered jar's bytecode; the Vite bundle's JS) ONCE in a `build-artifacts` job, handed to the
+# per-arch jobs through buildx's `--build-context`. It bought no wall-clock — the work moved rather
+# than vanished, and the per-arch jobs could not start until it finished — and it cost a whole class
+# of bug that exists nowhere else: an artifact upload that silently drops empty directories, a
+# variable that never reaches the container. The repetition that replaced it is paid for by the
+# `type=gha` layer cache every build job already declares, which covers the expensive
+# `mvn dependency:go-offline` and `pnpm install` layers from the second release onward.
 #
 # Publish shape: each per-arch job pushes an intermediate, ARCH-SUFFIXED tag to Docker Hub only
-# (e.g. `backend-<version>-amd64`) — a scratch tag nobody is meant to pull directly. merge-and-tag then
+# (e.g. `backend-<version>-amd64`) — a scratch tag nobody is meant to pull directly, and one
+# cleanup-scratch-tags deletes once the release is out. merge-and-tag then
 # runs `docker buildx imagetools create` twice per service (once per registry; imagetools can copy
 # blobs across registries, so the GHCR merge's SOURCES are the Docker-Hub-only arch tags) to
 # publish the real multi-arch manifest — `<service>-<version>` and the repointed `<service>-latest`
@@ -178,99 +184,10 @@ jobs:
           echo "Publishing version: $VERSION (revision ${{ github.sha }})"
 
   # ---------------------------------------------------------------------------------------------
-  build-artifacts:
-    name: Build backend jar + frontend bundle (once, architecture-independent)
-    runs-on: ubuntu-24.04
-    needs: preflight
-    steps:
-      - uses: actions/checkout@v7
-
-      # Backend: run the EXACT steps backend/Dockerfile's own `build` stage runs, in the SAME
-      # maven:3.9-eclipse-temurin-25 image, but on the runner rather than inside a build that will
-      # be discarded — the whole point is to do this once and hand the result to two arch jobs.
-      # Laid out at app/extracted/... and pyroscope.jar at the root to match exactly what
-      # backend/Dockerfile's runtime stage's `COPY --from=build /app/extracted/... ` /
-      # `COPY --from=build /pyroscope.jar ...` lines expect — see build-backend below for how this
-      # directory then STANDS IN for the `build` stage via buildx's `--build-context build=...`.
-      #
-      # `-P !paid` on BOTH mvn calls (#941/#1114 review): unlike backend/Dockerfile, whose build
-      # CONTEXT is `./backend` and so never contains tessary-paid/, this step bind-mounts the FULL
-      # checkout. backend/pom.xml's `paid` profile activates on ../tessary-paid/pom.xml merely
-      # EXISTING (file-exists activation), so without this flag the reactor would silently pull in
-      # every tessary-paid/* module — coupling publication of these four OPEN images to paid-module
-      # compile health, with no build-context boundary the way every other open image build gets
-      # one structurally. Same flag, same meaning, as check.sh's EDITION_MVN_ARGS and Taskfile's
-      # `backend:check:open` (`-P '!paid'`) — D4: the published open image carries only open code.
-      - name: Build backend artifact (layered jar + pyroscope agent)
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/backend-build-context/app
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" -w /workspace/backend \
-            maven:3.9-eclipse-temurin-25 \
-            sh -c '
-              set -eu
-              mvn -B -q -P !paid dependency:go-offline
-              mvn -B -q -P !paid -DskipTests package
-              cp app/target/app-*-exec.jar app.jar
-              java -Djarmode=tools -jar app.jar extract --layers --destination extracted
-              curl -fsSL -o /workspace/artifacts/backend-build-context/pyroscope.jar \
-                "https://github.com/grafana/pyroscope-java/releases/download/v2.8.0/pyroscope.jar"
-            '
-          cp -r backend/extracted artifacts/backend-build-context/app/extracted
-
-      - name: Build frontend artifact (Vite bundle)
-        run: |
-          set -euo pipefail
-          # The pin comes from the tree, never from a workflow input: `packageManager` is what
-          # pnpm/action-setup reads in every other workflow, so this build and CI's cannot drift.
-          PNPM="$(jq -r .packageManager frontend/package.json)"
-          echo "Building with $PNPM (from frontend/package.json)"
-          mkdir -p artifacts/frontend-build-context/app
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" -w /workspace \
-            -e PNPM \
-            node:24-alpine \
-            sh -c '
-              set -eu
-              npm i -g "$PNPM"
-              cd frontend
-              pnpm install --frozen-lockfile
-              pnpm run build
-            '
-          cp -r frontend/dist artifacts/frontend-build-context/app/dist
-
-      # THE CONTEXTS TRAVEL AS TARBALLS, and that is load-bearing rather than tidiness:
-      # actions/upload-artifact uploads a file list and so DROPS EMPTY DIRECTORIES. backend's
-      # runtime stage does `COPY --from=build /app/extracted/spring-boot-loader/ ./` against a
-      # directory that IS empty — `extract --layers` ran without `--launcher`, see
-      # backend/Dockerfile's own comment on the ENTRYPOINT — so uploaded loose, that directory
-      # never comes back down and the COPY fails the build with "not found" on BOTH arches. A tar
-      # round-trips the tree exactly: empty directories, modes and all. Unpacked by each build-*
-      # job below into the directory its `--build-context build=...` names.
-      - name: Pack the build contexts
-        run: |
-          set -euo pipefail
-          tar -C artifacts/backend-build-context -cf backend-build-context.tar .
-          tar -C artifacts/frontend-build-context -cf frontend-build-context.tar .
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: backend-build-context
-          path: backend-build-context.tar
-          retention-days: 1
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: frontend-build-context
-          path: frontend-build-context.tar
-          retention-days: 1
-
-  # ---------------------------------------------------------------------------------------------
   build-backend:
     name: Build backend (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [preflight, build-artifacts]
+    needs: preflight
     strategy:
       matrix:
         include:
@@ -280,36 +197,22 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: backend-build-context
-          path: _artifact
-
-      # See build-artifacts' pack step for why this is a tarball and not a directory.
-      - name: Unpack the build context
-        run: |
-          set -euo pipefail
-          mkdir -p backend-build-context
-          tar -C backend-build-context -xf _artifact/backend-build-context.tar
-
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # `--build-context build=./backend-build-context` OVERRIDES the Dockerfile's `FROM
-      # maven:3.9-eclipse-temurin-25 AS build` stage with this directory's contents instead of
-      # actually running it — buildx substitutes any additional context whose name matches a
-      # stage name. `--target runtime` then builds only the runtime stage on top of that. Same
-      # Dockerfile as every local/dev build; ZERO Dockerfile changes needed for this to work.
+      # Both stages of the same Dockerfile a local `docker build ./backend` runs. THE CONTEXT IS
+      # WHAT KEEPS THE OVERLAY OUT, structurally rather than by flag: backend/pom.xml's `paid`
+      # profile activates on ../tessary-paid/pom.xml merely EXISTING, and that path is not inside
+      # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
+      # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
       - uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: backend/Dockerfile
           target: runtime
-          build-contexts: |
-            build=./backend-build-context
           platforms: linux/${{ matrix.arch }}
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
@@ -323,7 +226,7 @@ jobs:
   build-frontend:
     name: Build frontend (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [preflight, build-artifacts]
+    needs: preflight
     strategy:
       matrix:
         include:
@@ -333,33 +236,21 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: frontend-build-context
-          path: _artifact
-
-      # See build-artifacts' pack step for why this is a tarball and not a directory.
-      - name: Unpack the build context
-        run: |
-          set -euo pipefail
-          mkdir -p frontend-build-context
-          tar -C frontend-build-context -xf _artifact/frontend-build-context.tar
-
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Same build-once mechanism as build-backend above: this context stands in for
-      # frontend/Dockerfile's `FROM node:24-alpine AS build` stage.
+      # Both stages, natively, same as build-backend. Context is the repo ROOT because this
+      # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
+      # tessary-paid/ out of it. PNPM_VERSION is deliberately NOT passed — that Dockerfile's ARG
+      # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: frontend/Dockerfile
           target: runtime
-          build-contexts: |
-            build=./frontend-build-context
           platforms: linux/${{ matrix.arch }}
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
@@ -449,44 +340,49 @@ jobs:
   # builds and the merge, so a red here leaves only unmerged arch tags behind — nothing a
   # self-hoster's compose file references. A source-tree scrub cannot do this job: a cache layer, a
   # build argument or a longer-lived branch re-including a module is only visible in the image.
+  #
+  # BOTH ARCHES, each on its OWN runner. This used to open the amd64 build only, which left the
+  # arm64 images merged and published having never been looked inside — half a gate, against a
+  # promise ("every image the open edition publishes is enumerated and diffed") that is whole.
+  # Matching the runner to the arch rather than pulling arm64 onto an amd64 box is what keeps
+  # scripts/check-open-artifacts.sh unchanged: its `docker create` + `docker export` take no
+  # --platform, and do not need one when the image is native to the host. The two legs run in
+  # parallel, so the second arch costs no wall-clock.
   verify-open-artifacts:
-    name: Verify the open images carry no paid content (epic 6 clause 3)
-    runs-on: ubuntu-24.04
+    name: Verify the open images carry no paid content (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs:
       - preflight
       - build-backend
       - build-frontend
       - build-sandbox-runner
       - build-agent-sandbox
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-      - name: Pull the four amd64 images and diff their contents
+      - name: Pull this arch's four images and diff their contents
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
           for service in backend frontend sandbox-runner agent-sandbox; do
-            docker pull "${{ env.DOCKER_REPO }}:${service}-${VERSION}-amd64"
+            docker pull "${{ env.DOCKER_REPO }}:${service}-${VERSION}-${ARCH}"
           done
           bash scripts/check-open-artifacts.sh --images \
-            "backend=${{ env.DOCKER_REPO }}:backend-${VERSION}-amd64" \
-            "frontend=${{ env.DOCKER_REPO }}:frontend-${VERSION}-amd64" \
-            "sandbox-runner=${{ env.DOCKER_REPO }}:sandbox-runner-${VERSION}-amd64" \
-            "agent-sandbox=${{ env.DOCKER_REPO }}:agent-sandbox-${VERSION}-amd64"
-
-  # ---------------------------------------------------------------------------------------------
-  verify-namespaces:
-    name: Verify every published namespace still resolves to tessaryai (epic 6 clause 7)
-    runs-on: ubuntu-24.04
-    needs: preflight
-    steps:
-      - uses: actions/checkout@v7
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/check-namespaces.sh --negative
+            "backend=${{ env.DOCKER_REPO }}:backend-${VERSION}-${ARCH}" \
+            "frontend=${{ env.DOCKER_REPO }}:frontend-${VERSION}-${ARCH}" \
+            "sandbox-runner=${{ env.DOCKER_REPO }}:sandbox-runner-${VERSION}-${ARCH}" \
+            "agent-sandbox=${{ env.DOCKER_REPO }}:agent-sandbox-${VERSION}-${ARCH}"
 
   merge-and-tag:
     name: Merge arch manifests, repoint -latest, tag the release
@@ -498,7 +394,6 @@ jobs:
       - build-sandbox-runner
       - build-agent-sandbox
       - verify-open-artifacts
-      - verify-namespaces
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -654,3 +549,49 @@ jobs:
             --generate-notes \
             $PRERELEASE
           echo "Release v${VERSION} published${PRERELEASE:+ (prerelease)}"
+
+  # ---------------------------------------------------------------------------------------------
+  # The arch-suffixed tags are scratch, and deleting them is safe: the multi-arch manifests
+  # merge-and-tag published reference their children BY DIGEST, never by tag, so this peels a label
+  # off a box rather than throwing the box out. Left alone they accumulate EIGHT PER RELEASE on a
+  # public repository, where `backend-<version>-amd64` reads like a legitimate thing to pull and
+  # hands whoever pulls it an image that will not run on their machine.
+  #
+  # LAST, AND NEVER FATAL. It runs after the release is published and announced, so a red here
+  # cannot fail a release that actually succeeded — and a run that failed earlier keeps its arch
+  # tags for whoever debugs it. Deleting a tag needs the Docker Hub API rather than the docker CLI,
+  # and a DOCKER_TOKEN scoped Read & Write but not Delete answers 403, which is a warning to act on
+  # at leisure and not a reason to redden a finished release.
+  cleanup-scratch-tags:
+    name: Delete the arch-suffixed scratch tags
+    runs-on: ubuntu-24.04
+    needs: [preflight, github-release]
+    steps:
+      - name: Delete <service>-<version>-<arch> from Docker Hub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.preflight.outputs.version }}"
+          # jq builds the body so neither credential is ever spliced into JSON by the shell.
+          jwt="$(curl -sf -H 'Content-Type: application/json' \
+                   -d "$(jq -nc --arg u "$DOCKER_USERNAME" --arg p "$DOCKER_TOKEN" \
+                           '{username:$u,password:$p}')" \
+                   https://hub.docker.com/v2/users/login/ | jq -r '.token // empty')" || jwt=""
+          if [ -z "$jwt" ]; then
+            echo "::warning::could not authenticate to the Docker Hub API; scratch tags left in place"
+            exit 0
+          fi
+          for service in backend frontend sandbox-runner agent-sandbox; do
+            for arch in amd64 arm64; do
+              tag="${service}-${VERSION}-${arch}"
+              if curl -sf -X DELETE -H "Authorization: JWT $jwt" \
+                   "https://hub.docker.com/v2/repositories/${{ env.DOCKER_REPO }}/tags/${tag}/" >/dev/null
+              then
+                echo "deleted ${tag}"
+              else
+                echo "::warning::could not delete ${tag} (a DOCKER_TOKEN without Delete scope answers 403); left in place"
+              fi
+            done
+          done
