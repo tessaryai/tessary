@@ -49,7 +49,6 @@ if [ "${VERSION_SOURCE_SELFTEST:-0}" = "1" ]; then
     trap 'rm -rf "$T"' EXIT
     mkdir -p "$T/scripts/lib" "$T/docs/self-hosting" "$T/sandbox-runner/launcher"
     for f in docker-compose.yml docker-compose.dev.yml .env.example \
-             docs/self-hosting/setup.mdx docs/self-hosting/upgrading.mdx \
              sandbox-runner/launcher/server.js scripts/check-version-consistency.sh; do
         cp "$ROOT/$f" "$T/$f"
     done

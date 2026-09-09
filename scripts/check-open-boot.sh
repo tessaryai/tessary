@@ -8,7 +8,7 @@
 # stack keyless, and drives an authenticated triage flow through tessary's own identity provider.
 #
 # NEVER RUN AGENT-SIDE. This needs Docker and Compose to build and boot a real stack; run it via
-# `task check:open:boot` or the dispatch-only `.github/workflows/open-edition-boot.yml`, never as
+# `task check:open:boot` or the dispatch-only `.github/workflows/boot-checks.yml`, never as
 # part of `task check` or `scripts/check.sh`.
 #
 # Exports the working tree into a scratch copy, deletes tessary-paid/ from the copy, then runs a

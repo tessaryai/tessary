@@ -45,7 +45,7 @@
 #
 # Needs Docker, the network (to pull), and ports 80 and 443 free on the host, because those are the
 # compose file's defaults and the page names no other. Never run this agent-side. Run by a person
-# (`task check:selfhost:quickstart`) or the dispatch-only open-edition-boot.yml; excluded from
+# (`task check:selfhost:quickstart`) or the dispatch-only boot-checks.yml; excluded from
 # `task check`. No cron re-arms this.
 set -euo pipefail
 P=check-selfhost-quickstart

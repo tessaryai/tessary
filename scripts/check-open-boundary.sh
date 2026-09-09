@@ -23,7 +23,9 @@
 #      check scripts themselves. Nothing here compiles, so a relative path into the overlay is
 #      just a string until the export deletes what it points at.
 #   6. Open markdown that resolves a path the export deletes.
-#   7. The two orchestration files, by exact path: Taskfile.yml and .github/workflows/ci.yml (plus
+#   7. The orchestration files, by exact path: Taskfile.yml, .github/workflows/drift-checks.yml and
+#      .github/workflows/check.yml (check.yml runs the gate per PR, so it is where a stray compose
+#      invocation would land) (plus
 #      docker-compose.dev.yml). They ARE the edition switch, so they may name the overlay, but
 #      only under a visibly conditional form: a comment, a human-facing desc:/name: value, or a
 #      reference carrying (or governed by) an existence probe.
@@ -75,7 +77,7 @@ else
     # Every call site must route through it. Comments are exempt (a check for invocations); *.md
     # is out of the target set on purpose since prose telling a human to run a service isn't one.
     hardcoded=""
-    for f in Taskfile.yml .github/workflows/ci.yml .dev-tools/agent-loop/config.yaml \
+    for f in Taskfile.yml .github/workflows/drift-checks.yml .github/workflows/check.yml .dev-tools/agent-loop/config.yaml \
              $(ls scripts/*.sh scripts/lib/*.sh 2>/dev/null); do
         [ -f "$f" ] || continue
         [ "$f" = scripts/lib/dev-compose.sh ] && continue
@@ -319,64 +321,12 @@ for f in $targets; do
     fi
 done
 
-# ---- 6. open markdown must not resolve a path the export deletes ----
-# Same failure as rule 5, one file type over: check-docs-links.sh resolves every `[text](path)` in
-# the repo's markdown, so an open doc that links a path under tessary-paid/ is a red docs gate in
-# the public export and green here.
-#
-# Naming the overlay in prose is fine and often necessary. Only a resolvable reference is banned,
-# and check-docs-links.sh resolves two forms: a `[text](path)` link and a bare backticked path
-# ending in `.md`. De-linking alone isn't enough — a backticked path still resolves. Both forms are
-# checked below, matching check-docs-links.sh's semantics: each resolved relative to the citing
-# file and normalised, and `.mdx` included alongside `.md` so the target sets stay identical.
-#
-# The target set and the detection set are one set, both derived from the `delete` rows of
-# scripts/lib/export-denylist.txt: a document the scrub deletes is not a target (a reference inside
-# it can never break a gate in the public repo), and every surviving document is checked against
-# every deleted path. contract/ is exempt for the reason check-docs-links.sh gives: those files are
-# vendored verbatim and not ours to edit.
-if [ -n "$deny_rows" ]; then
-    rule6_out=$(DENY_ROWS="$deny_rows" MD_FILES="$(git ls-files --cached --others --exclude-standard '*.md' '*.mdx' 2>/dev/null)" python3 - <<'PYEOF'
-import os, posixpath, re
-rows = [l.split('|') for l in os.environ['DENY_ROWS'].split('\n') if l.strip()]
-dirs = tuple(p + '/' for p, s in rows if s == 'dir')
-files = {p for p, s in rows if s == 'file'}
-def denied(p):
-    return p in files or p.startswith(dirs)
-LINK = re.compile(r'(?<!\!)\[[^\]]*\]\(([^)\s#]+)')
-TICKED_MD = re.compile(r'`([A-Za-z0-9_./\-]+\.mdx?)`')
-FENCE = re.compile(r'^\s*(```|~~~)')
-bad = []
-for f in os.environ['MD_FILES'].split('\n'):
-    if not f or denied(f) or f.startswith('contract/'):
-        continue
-    base = posixpath.dirname(f)
-    in_fence = False
-    with open(f, encoding='utf-8', errors='replace') as fh:
-        for n, line in enumerate(fh, 1):
-            if FENCE.match(line):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            targets = [m for m in LINK.findall(line) if not m.startswith(('http://', 'https://', 'mailto:'))]
-            targets += TICKED_MD.findall(line)
-            for t in targets:
-                p = posixpath.normpath(posixpath.join(base, t))
-                if denied(p) or (not t.startswith('.') and denied(t)):
-                    bad.append(f"{f}:{n}: {t}")
-print('\n'.join(bad))
-PYEOF
-    )
-    if [ -n "$rule6_out" ]; then
-        echo "ERROR: these open documents resolve a path the export deletes (a delete row in" >&2
-        echo "       $DENYLIST). The public export removes it, so check-docs-links.sh goes red" >&2
-        echo "       there while passing here. Keep the mention as prose and drop both the link" >&2
-        echo "       markup and the backticked .md path:" >&2
-        echo "$rule6_out" | sed 's/^/  /' >&2
-        fail=1
-    fi
-fi
+# ---- 6. removed ----
+# Removed 2026-09-09 under the standing rule in scripts/check.sh's header: no gate reads a .md
+# or .mdx file. Rule 6 asserted that no open .md/.mdx backticked a path
+# the export deletes, so it scanned every markdown file in the tree and a doc edit could red the
+# boundary gate. What it protected is real and is now caught at export review, where a human reads
+# the manifest anyway. Rules 0-5 and 7 read code and config and are unaffected.
 
 # ---- 7. the orchestration files name the overlay only under a visible condition ----
 # Rules 1-6 cover code and prose. These files are the edition switches, so they must be allowed to
@@ -405,7 +355,7 @@ BOUNDARY_PROBE_LOOKBACK=6
 # `(![[:space:]]+)?` matters: `[ ! -d tessary-paid ]` is a real guard shape (this script uses it at
 # its own rule-5 preamble), and without it the rule would red correctly-guarded code.
 probe_re='[[][[:space:]]+(![[:space:]]+)?-[dfe][[:space:]]+tessary-paid|hashFiles[(]'"'"'tessary-paid'
-for f in Taskfile.yml .github/workflows/ci.yml docker-compose.dev.yml; do
+for f in Taskfile.yml .github/workflows/drift-checks.yml .github/workflows/check.yml docker-compose.dev.yml; do
     [ -f "$f" ] || continue
     # Which accepted forms apply, per file: the two orchestration files execute what they say, so
     # a probe is a real conditional and all four forms count; compose is data, so forms 2-4 would

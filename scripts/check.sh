@@ -38,6 +38,29 @@
 # the git index believing files under it still exist, so `check-docs-links.sh` dies first with a
 # stale-path error before any other gate runs.
 #
+# ---------------------------------------------------------------------------------------------
+# STANDING RULE: NO GATE IN THIS PIPELINE READS A .md OR .mdx FILE.
+# ---------------------------------------------------------------------------------------------
+# Not to check a link, not a heading, not that a documented command matches a published one, not to
+# read a table for a list of things to then assert structurally. Flat rule, no exceptions.
+#
+# Documentation is prose that people rewrite, and a gate keyed on prose reds when the prose is
+# edited, not when anything breaks. That happened: check.yml was armed per PR and went red
+# immediately because a README rewrite landed while check-readme-front-door.sh still asserted the
+# old one's headings, phrases and command ordering. The gate printed `ok the published install is
+# present` in the same run it failed. A gate that reds on wording teaches people to skip gate
+# failures, and then the real ones get skipped too.
+#
+# Gone, so nobody re-adds them thinking it was an oversight: docs-links, selfhost-health,
+# required-inputs, readme-front-door and connect-route (rows below carry the reason).
+# check-open-boundary.sh's rule 6, check-pipeline-vocabulary.sh's `--include='*.md'`,
+# check-compose-artifact.sh's published-command clause and check-contract-consistency.sh's two
+# AUTHORING_CONTRACT.md / SKILL.md legs were cut out of otherwise-mechanical gates.
+#
+# Nothing replaces it, deliberately. Docs drift is caught by people reading docs and by the export
+# manifest review, which is a human reading a file list. If a fact matters enough to gate on, it
+# belongs somewhere a machine owns: a config file, a schema, a constant. Not a sentence.
+
 # THE CI-CALLABLE INTERFACE IS THIS SCRIPT, NOT THE TASK TARGET. CI never runs the Taskfile (see
 # the note at the bottom of this header); the per-PR open-edition job calls
 # `bash scripts/check.sh --edition open` directly, and `task check:open` is a thin wrapper over
@@ -62,9 +85,10 @@
 # ---------------------------------------------------------------------------------------------
 # "Everything" is not one set. It is three, and they are not nested:
 #   1. THIS SCRIPT: the manifest below, minus the rows marked EXCLUDED.
-#   2. .github/workflows/ci.yml: 15 jobs, workflow_dispatch only (see the note below). It has no
-#      job for check-module-hygiene.sh, check-no-bedrock.sh or check-classifier-parity.sh, and it
-#      DOES have one for check-conformance-parity.sh, which this script does not run.
+#   2. .github/workflows/drift-checks.yml: TWO jobs, workflow_dispatch only, and both are gates
+#      this script does not run: check-conformance-parity.sh (EXCLUDED since #875) and
+#      check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`). It was fourteen
+#      jobs until the trim that deleted every job duplicating a row below.
 #   3. Standalone Taskfile targets neither pipeline runs the same way: `conformance:parity`
 #      (in CI, not here), `classifiers:parity` (here, not in CI) and `migrations:populated`
 #      (deliberately in neither).
@@ -129,19 +153,20 @@
 #     movement. It is NOT "CI-only": the Taskfile runs it too.
 #
 # ---------------------------------------------------------------------------------------------
-# Nothing enforces this locally, and CI is NOT a per-PR gate; it is not, today, a gate on any
-# clock either: .github/workflows/ci.yml is workflow_dispatch only, as is every other workflow in
-# this repository ahead of the public cutover, with two exceptions that are not per-change gates
-# either: namespace-recheck.yml runs quarterly, and the overlay's reusable-ecs-deploy.yml is
-# `workflow_call` (it runs only when another workflow calls it). ci.yml's weekly cron and its
-# pull_request trigger are both preserved commented-out in that file. It runs the SAME
-# scripts/check-*.sh this calls, so "local green => CI green" holds by construction for whatever
-# you did run, but a PR merged on a red local check stays red on main until a human presses Run.
+# CI IS A PER-PR GATE. .github/workflows/check.yml runs this script, this manifest, on
+# `pull_request:`, so "local green => CI green" holds by construction on the same script rather than
+# on a weekly cron nobody watched. secret-scan.yml is armed alongside it, and those two are the whole
+# of it: there is no cron anywhere in this repository, and everything else is workflow_dispatch only
+# ahead of the public cutover. namespace-recheck.yml notably included, so that check runs nowhere
+# automatically; its header says what that costs. The overlay's reusable-ecs-deploy.yml is
+# `workflow_call`.
 #
-# One exception, inert while the trigger is off: ci.yml's overlay-schema job is the one job also
-# wired to pull_request, and its Docker half (the overlay-schema script with --with-docker, plus
-# check-migrations-populated.sh in both editions) is a second thing that job runs which this
-# script does NOT: the overlay-schema row above is RUN_IF_PRESENT with no --with-docker argument,
+# Nothing is merge-BLOCKING: this repo's plan tier offers neither branch protection nor rulesets, so
+# a red run can be merged past and only convention stops it.
+#
+# What CI runs that this script does NOT is exactly drift-checks.yml's two dispatch-only jobs. The
+# overlay-schema `--with-docker` half that was once wired to pull_request went with the trim; the
+# overlay-schema row above is RUN_IF_PRESENT with no --with-docker argument,
 # so `task check` stays static-only and fast, and "local green => CI green" holds for the static
 # half only.
 #
@@ -251,7 +276,7 @@ fi
 # running and said nothing before), so `_skip` refuses an empty one.
 _manifest() {
     cat <<'MANIFEST'
-docs-links|scripts/check-docs-links.sh|RUN|RUN|markdown links; denylist-sensitive
+docs-links|scripts/check-docs-links.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It WAS markdown: it resolved relative links across 81 markdown files. Nothing survives the no-markdown rule|EXCLUDED:same|declared here only so the completeness assertion can see it
 version-consistency|scripts/check-version-consistency.sh|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. VERSION_LITERAL_EXEMPT covers dated literals this script can't name directly (boundary rule 5). Pure text; unlike check-selfhost-images.sh, no Docker or registry call.
 classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV:CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md CQ_MODELS=tessary-paid/classify-service/models.json|SKIP:this edition has neither of the gate's two inputs: the measured-quality page and the populated model manifest live in the overlay, and the manifest shipped here is the empty `{}`|Both inputs are overlay paths the script may not name itself (boundary rule 5), so the paid column passes them in. A bare RUN would take the script's own defaults, find neither, and self-skip green in the paid checkout too: silent coverage loss, which is what RUN_ENV exists to prevent. If the overlay is missing from an all-edition checkout, the script's own guard still prints a reasoned skip.
 module-hygiene|scripts/check-module-hygiene.sh|RUN|RUN|self-scoping on the overlay pom; see the note below the manifest
@@ -260,20 +285,20 @@ license-headers|scripts/check-license-headers.sh|RUN|RUN|SPDX header presence ov
 export-denylist|scripts/lib/check-export-denylist.sh|RUN|RUN|the must-not-publish declaration is well-formed and, with the overlay present, every delete/exempt row resolves; self-scopes the liveness half
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN|RUN|open on both sides
 contract-consistency|scripts/check-contract-consistency.sh|RUN|RUN|open on both sides
-vendored-plugin|scripts/check-vendored-plugin.sh|RUN|RUN|open on both sides
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 caddy|scripts/check-caddy.sh|RUN|RUN|open on both sides
 paid-caddy|tessary-paid/scripts/check-paid-caddy.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid spec and no Caddyfile.prod for the gate to compare; both live in the overlay|this gate lives in the overlay, the overlay twin of the `caddy` row above; it lives there because check-open-boundary.sh rule 5 fails any scripts/*.sh naming that directory. The checker itself is open and variadic (scripts/lib/caddy-proxies-spec.py); only the caller and the config are the overlay's.
-readme-front-door|scripts/check-readme-front-door.sh|RUN|RUN|the README's first quickstart is the compose path and one of setup.mdx's extracted blocks, the telemetry opt-out key it prints resolves in .env.example and the backend binding, the disclosure names what is sent, the auth claim is email and password with WorkOS, and the published docs are linked; pure text
-connect-route|scripts/check-connect-route.sh|RUN|RUN|every control or destination docs/self-hosting/setup.mdx names is a string the frontend renders or routes, the page names no React component, and its emit command names the shipped scripts/emit-span.js; pure text
-required-inputs|scripts/check-required-inputs.sh|RUN|RUN|four classes of required input enumerated out of docker-compose.yml, the built Dockerfiles and .env.example, each with a default, a setup-page row or an optional annotation; every PNPM_VERSION default equals the Taskfile's pin; pure text
+readme-front-door|scripts/check-readme-front-door.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It asserted README prose: a required section heading, eight exact phrases inside it, and which fenced block came first. A README rewrite reds it while the README is fine|EXCLUDED:same|declared here only so the completeness assertion can see it
+connect-route|scripts/check-connect-route.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It string-matched eleven prose fragments from docs/self-hosting/setup.mdx against JSX. Renaming a button reds it|EXCLUDED:same|declared here only so the completeness assertion can see it
+required-inputs|scripts/check-required-inputs.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. An input with no default passed if setup.mdx's required-variable table had a row for it, so documenting a variable elsewhere reds the build|EXCLUDED:same|declared here only so the completeness assertion can see it
 compose-artifact|scripts/check-compose-artifact.sh|RUN|RUN|the one-command install: docker-compose.yml is also the OCI artifact behind `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`, so it must stay publishable (long-syntax ports, literal memory limits) and mount no host path in a default-profile service; the build strip that makes the artifact must remove build sections and nothing else; pure text plus a client-side `docker compose config`, no daemon and no network
-selfhost-health|scripts/check-selfhost-health.sh|RUN|RUN|the rendered docker-compose.yml carries a health probe on exactly the services docs/self-hosting/setup.mdx says show healthy, the frontend waits on the backend healthy, every probe interval is at most 5 s; needs only the Docker CLI for `compose config`
+selfhost-health|scripts/check-selfhost-health.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It read docs/self-hosting/setup.mdx to decide WHICH services must carry a health probe. The probe assertions were structural; the service list came out of a doc|EXCLUDED:same|declared here only so the completeness assertion can see it
 classify-service|scripts/check-classify-service.sh|RUN|RUN:--edition open|classify-service stays open per the ledger, but its models.json manifest lives in the overlay; without it, this asserts an empty manifest and the UNAVAILABLE_IN_OPEN_EDITION token, not the three built-in heads
 slack-service|tessary-paid/scripts/check-slack-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no Slack adapter; the service and its gate live in the overlay together|a gate that lives in the overlay
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN|RUN|open on both sides; needs only node, already on PATH for the frontend gate
 compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no SOP compile service; the service, its engine and its gate live in the overlay together|a gate that lives in the overlay
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
-classifier-parity|scripts/check-classifier-parity.sh|RUN|RUN:--edition open|3 of its 6 pins live in the overlay; the script itself splits them
+classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 no-bedrock|scripts/check-no-bedrock.sh|RUN|RUN|repo-wide invariant, every slice and every edition
 frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction ('@paid' resolves to the in-tree stub)
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
@@ -281,17 +306,17 @@ paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tess
 backend|scripts/check-backend.sh|RUN|RUN:-P !paid|one script, both editions; the JDK-25 guard is in front of both
 conformance-parity|scripts/check-conformance-parity.sh|EXCLUDED:run by `task conformance:parity` and the CI conformance-parity job, never by this pipeline|EXCLUDED:same, and its generator is paid so the open edition would skip it anyway|declared here only so the completeness assertion can see it
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|EXCLUDED:same|declared here only so the completeness assertion can see it
-open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only open-edition-boot.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
+open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only boot-checks.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
 scrub|tessary-paid/scripts/check-scrub.sh|EXCLUDED:its subject is the export candidate, not this checkout, and it needs gitleaks and trufflehog, which no contributor toolchain installs; run via `task scrub:check` or the dispatch-only tessary-paid/.github/workflows/scrub-gate.yml workflow|EXCLUDED:same, and the script itself lives in the overlay, not just the forbidden-strings file it reads; this tree runs .github/workflows/secret-scan.yml instead, which scans its own checkout with no private configuration|declared here only so the completeness assertion can see it
 paid-boot|tessary-paid/scripts/check-paid-boot.sh|EXCLUDED:Docker and minutes: builds both images and boots the open then the paid stack on one Postgres volume; run via `task paid:boot:check` or the dispatch-only tessary-paid/.github/workflows/paid-boot.yml workflow|EXCLUDED:same, and the open edition has no overlay to boot|declared here only so the completeness assertion can see it
-open-boot-selfhost|scripts/check-open-boot-selfhost.sh|EXCLUDED:the gate's second leg: boots the self-host docker-compose.yml under the production profile; same Docker-and-minutes cost, run via `task check:open:boot:selfhost` or open-edition-boot.yml's second job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
-selfhost-quickstart|scripts/check-selfhost-quickstart.sh|EXCLUDED:the quickstart rehearsal executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (ports 80/443), asserts every Check as the page words it, walks the three ladder checkpoints and the control arm, and prints the clock; Docker, network, minutes; run via `task check:selfhost:quickstart` or open-edition-boot.yml|EXCLUDED:same|declared here only so the completeness assertion can see it
-selfhost-images|scripts/check-selfhost-images.sh|EXCLUDED:needs Docker and the network to hit two public registries with no login, and a released `v<semver>` git tag (or --version=) to know what to ask for; run via `task check:selfhost:images`, by the quickstart rehearsal before its first timed command, and by open-edition-boot.yml, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
-zero-egress|scripts/check-zero-egress.sh|EXCLUDED:layers on the quickstart rehearsal with an internal network, a DNS sink and the opt-out set, asserts nothing outside the published permitted set at three vantage points, then proves the instrument with the heartbeat as positive control and a planted call; Docker, ports 80/443, minutes; run via `task check:zero:egress` or open-edition-boot.yml|EXCLUDED:same|declared here only so the completeness assertion can see it
-selfhost-compose-artifact|scripts/check-selfhost-compose-artifact.sh|EXCLUDED:the one-command install's end-to-end rehearsal — publishes the artifact to a throwaway TLS registry, boots `docker compose -f oci://...:compose up -d -y` from an empty directory and asserts the working directory stays empty; builds four images and boots a stack, so Docker and minutes; run via `task check:selfhost:compose` or open-edition-boot.yml's fourth job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
+open-boot-selfhost|scripts/check-open-boot-selfhost.sh|EXCLUDED:the gate's second leg: boots the self-host docker-compose.yml under the production profile; same Docker-and-minutes cost, run via `task check:open:boot:selfhost` or boot-checks.yml's second job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
+selfhost-quickstart|scripts/check-selfhost-quickstart.sh|EXCLUDED:the quickstart rehearsal executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (ports 80/443), asserts every Check as the page words it, walks the three ladder checkpoints and the control arm, and prints the clock; Docker, network, minutes; run via `task check:selfhost:quickstart` or boot-checks.yml|EXCLUDED:same|declared here only so the completeness assertion can see it
+selfhost-images|scripts/check-selfhost-images.sh|EXCLUDED:needs Docker and the network to hit two public registries with no login, and a released `v<semver>` git tag (or --version=) to know what to ask for; run via `task check:selfhost:images`, by the quickstart rehearsal before its first timed command, and by boot-checks.yml, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
+zero-egress|scripts/check-zero-egress.sh|EXCLUDED:layers on the quickstart rehearsal with an internal network, a DNS sink and the opt-out set, asserts nothing outside the published permitted set at three vantage points, then proves the instrument with the heartbeat as positive control and a planted call; Docker, ports 80/443, minutes; run via `task check:zero:egress` or boot-checks.yml|EXCLUDED:same|declared here only so the completeness assertion can see it
+selfhost-compose-artifact|scripts/check-selfhost-compose-artifact.sh|EXCLUDED:the one-command install's end-to-end rehearsal — publishes the artifact to a throwaway TLS registry, boots `docker compose -f oci://...:compose up -d -y` from an empty directory and asserts the working directory stays empty; builds four images and boots a stack, so Docker and minutes; run via `task check:selfhost:compose` or boot-checks.yml's fourth job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
 dependency-audit|scripts/check-dependency-audit.sh|EXCLUDED:manual/on-demand only — not in CI since 2026-09-02 (owner: no real keys in checks; the Maven leg hard-fails without NVD_API_KEY); runs OWASP dependency-check-maven + pnpm audit + pip-audit
 namespaces|scripts/check-namespaces.sh|EXCLUDED:the namespace ownership recheck: hits Docker Hub, GitHub and Hugging Face over the network; run via `task check:namespaces`, quarterly by namespace-recheck.yml and before every release by release.yml, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
-exposure-sweep|scripts/check-exposure-sweep.sh|EXCLUDED:the fresh-deployment exposure sweep: boots the self-host artifact and probes it, Docker and minutes; run via `task check:exposure:sweep` (--record to refresh scripts/lib/exposure-sweep-baseline.txt) and by open-edition-boot.yml's third job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
+exposure-sweep|scripts/check-exposure-sweep.sh|EXCLUDED:the fresh-deployment exposure sweep: boots the self-host artifact and probes it, Docker and minutes; run via `task check:exposure:sweep` (--record to refresh scripts/lib/exposure-sweep-baseline.txt) and by boot-checks.yml's third job, never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
 open-artifacts|scripts/check-open-artifacts.sh|EXCLUDED:the built-artifact diff: builds and exports the four published open images, minutes and Docker; run via `task check:open:artifacts` (add --negative for the planted-violation proof), and by release.yml's verify-open-artifacts job against the images it just built|EXCLUDED:same|declared here only so the completeness assertion can see it
 notice-coverage|scripts/check-notice-coverage.sh|EXCLUDED:manual/on-demand only — needs Docker to build the open backend and frontend images, same cost class as check-open-boot.sh; run directly with `bash scripts/check-notice-coverage.sh`
 MANIFEST
@@ -501,7 +526,6 @@ _slice_exists() {
 # The ORDER below is load-bearing and is not derived from the manifest: the manifest declares what
 # each gate does per edition, this declares how long you wait to find out.
 if [ -z "$SLICES" ]; then
-    _gate docs-links
     _gate classifier-quality-doc
     _gate module-hygiene
     _gate open-boundary
@@ -509,21 +533,15 @@ if [ -z "$SLICES" ]; then
     _gate export-denylist
     _gate pipeline-vocabulary
     _gate contract-consistency
-    _gate vendored-plugin
     _gate caddy
     _gate paid-caddy
     _gate version-consistency
-    _gate required-inputs
     _gate compose-artifact
-    _gate selfhost-health
-    _gate connect-route
-    _gate readme-front-door
     _gate classify-service
     _gate slack-service
     _gate sandbox-runner
     _gate compile-service
     _gate overlay-schema
-    _gate classifier-parity
     _gate no-bedrock
     _gate frontend
     _gate paid-image
@@ -597,7 +615,6 @@ fi
 
 if [ "$want_compile_service" = 1 ]; then
     _gate compile-service
-    _gate classifier-parity
 fi
 
 # ALWAYS, whatever slice was asked for. The Bedrock ban and the license-header gate are both

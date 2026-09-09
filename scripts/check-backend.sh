@@ -5,7 +5,7 @@
 # phase, which runs after the test phase, so a single `mvn verify` covers tests AND linting.
 #
 # Single source of truth for the backend gate: invoked by both the Taskfile (`task backend:check`,
-# and thus `task check`) and CI (.github/workflows/ci.yml). Keep both callers
+# and thus `task check`) and CI (.github/workflows/check.yml, via scripts/check.sh). Keep both callers
 # thin wrappers around this script so the local gate and CI can never drift.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

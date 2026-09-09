@@ -37,7 +37,7 @@
 # scripts/check-selfhost-images.sh, which asks the real registry whether the real tags resolve.
 #
 # NEVER RUN AGENT-SIDE, EVER — needs Docker, builds four images and boots a stack. Run by a human
-# (`task check:selfhost:compose`) or .github/workflows/open-edition-boot.yml. Not part of
+# (`task check:selfhost:compose`) or .github/workflows/boot-checks.yml. Not part of
 # `task check`; see its EXCLUDED manifest row in scripts/check.sh.
 set -euo pipefail
 P=check-selfhost-compose-artifact

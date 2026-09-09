@@ -14,7 +14,7 @@
 # is the findings, never the diff; a baseline is a record, not an allowlist.
 #
 # Never run agent-side: needs Docker, the network and minutes. Run by a human
-# (`task check:exposure:sweep`) or the dispatch-only open-edition-boot.yml. Excluded from
+# (`task check:exposure:sweep`) or the dispatch-only boot-checks.yml. Excluded from
 # `task check` (see scripts/check.sh's manifest).
 set -euo pipefail
 P=check-exposure-sweep
@@ -35,7 +35,7 @@ for tool in docker curl jq python3 shasum; do command -v "$tool" >/dev/null || {
 #
 # When the list is not there the sweep records `not-scanned` rather than silently dropping the
 # row, so the absence is visible. It is NOT a finding: this repo has no such list, so
-# open-edition-boot.yml legitimately runs this arm without it, and a permanently red public gate
+# boot-checks.yml legitimately runs this arm without it, and a permanently red public gate
 # is the failure mode that gets a gate switched off.
 EXPOSURE_FORBIDDEN="${EXPOSURE_FORBIDDEN:-scripts/lib/export-forbidden-strings.txt}"
 docker info >/dev/null 2>&1 || { echo "$P: the docker daemon is not reachable" >&2; exit 2; }

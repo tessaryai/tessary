@@ -147,11 +147,11 @@
 .env.example
 .github/dependabot.yml
 .github/dependency-suppressions.yml
-.github/workflows/ci.yml
+.github/workflows/boot-checks.yml
+.github/workflows/check.yml
 .github/workflows/codeql.yml
+.github/workflows/drift-checks.yml
 .github/workflows/namespace-recheck.yml
-.github/workflows/open-edition-boot.yml
-.github/workflows/open-edition.yml
 .github/workflows/price-book-refresh.yml
 .github/workflows/release.yml
 .github/workflows/secret-scan.yml

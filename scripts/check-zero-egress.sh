@@ -40,7 +40,7 @@
 #
 # Needs Docker, ports 80 and 443 free, and minutes. `--build` is passed through while the images
 # are unpublished. NEVER RUN AGENT-SIDE. `task check:zero:egress`; a dispatch-only job in
-# open-edition-boot.yml; EXCLUDED from `task check`; no cron.
+# boot-checks.yml; EXCLUDED from `task check`; no cron.
 set -euo pipefail
 P=check-zero-egress
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

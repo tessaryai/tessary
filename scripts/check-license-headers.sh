@@ -47,7 +47,7 @@
 #   - it is wired into `task check`, the thing every contributor is expected to run before opening
 #     a PR, the same de facto per-PR enforcement point `task check` already is for
 #     check-open-boundary.sh, check-docs-links.sh and every other fast source-tree gate here;
-#   - it also runs as a weekly `schedule` + `workflow_dispatch` job in ci.yml, a backstop that
+#   - it also runs on every pull request through check.yml, which calls scripts/check.sh, a backstop that
 #     covers a skipped local run.
 #   Until a merge-blocking required status check is available, a broken header reaching `main` is
 #   caught at the next `task check` run or the next Monday's cron, not refused at the merge button.

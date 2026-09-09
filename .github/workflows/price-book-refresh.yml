@@ -25,7 +25,7 @@ name: Price book refresh
 #      `pull_request` — but it's worth stating so a reviewer isn't confused by the opened PR
 #      showing no CI status check.
 #
-# GitHub disables scheduled workflows after 60 days without repository activity (ci.yml's header
+# GitHub disables scheduled workflows after 60 days without repository activity (drift-checks.yml's header
 # carries the same caveat). A daily cron does not fix this — the disable trips on repository
 # inactivity, not on cron frequency — and it does not make it worse either.
 # ALL AUTOMATIC TRIGGERS ARE DISABLED. Nothing in this repository starts a workflow run on its
@@ -34,13 +34,13 @@ name: Price book refresh
 # commented-out immediately below — re-enabling is uncommenting it, nothing else.
 # on:
 #   schedule:
-#     # DAILY 05:00 UTC. Unlike every other cron in this repo (ci.yml 0 3 * * 1, codeql.yml 0 4 * * 1 — all Mondays-only), this one runs every day ON PURPOSE: a
+#     # DAILY 05:00 UTC. Unlike every other cron in this repo (drift-checks.yml 0 3 * * 1, codeql.yml 0 4 * * 1 — all Mondays-only), this one runs every day ON PURPOSE: a
 #     # stale price book doesn't just mis-render a number, it corrupts the cost_drift classifier's
 #     # output (MetricSource reads TokenPriceBook, which reads this same vendored file), so the
 #     # staleness window is a correctness window, not a display-freshness nicety. Upstream commits to
 #     # this file 10-20 times a day, so even daily bundles a dozen changes per PR; weekly would
 #     # bundle ninety, which nobody reviews honestly. On Mondays this still lands clear of the other
-#     # three (one hour after codeql.yml's 04:00, two after ci.yml's 03:00). On a no-change day the
+#     # three (one hour after codeql.yml's 04:00, two after drift-checks.yml's 03:00). On a no-change day the
 #     # job costs a curl, a diff and an exit.
 #     - cron: '0 5 * * *'
 #   workflow_dispatch:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # classify-service gate. Single source of truth: invoked by both the Taskfile
-# (`task classify:check`) and CI (.github/workflows/ci.yml). Fast static checks only, no model
+# (`task classify:check`) and CI (.github/workflows/check.yml, via scripts/check.sh). Fast static checks only, no model
 # download (the image build's offline warmup validation covers the heads).
 #
 # The scoring code in classify.js is open source; models.json, the manifest binding each head to
