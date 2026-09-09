@@ -138,7 +138,11 @@ describe("resolveState", () => {
 
   it("never abbreviates a count", () => {
     const s = resolveState(watching({ traces_total: 4_812_003, open_findings: 0 }), onboarding(), BASE, HAS_PROVIDER);
-    expect(s.body).toContain("4,812,003");
+    // Grouped in the runner's locale, not hard-coded: `count` formats with toLocaleString, so an
+    // en-IN machine groups this 48,12,003 and an en-US one 4,812,003. Both are the full number,
+    // which is what this pins — an abbreviation ("4.8M") contains neither.
+    expect(s.body).toContain((4_812_003).toLocaleString());
+    expect(s.body).not.toMatch(/\d[\d,.\u00a0\u202f]*\s?[kKmM]\b/);
   });
 
   describe("the stopped-exporter modifier", () => {
@@ -162,7 +166,7 @@ describe("resolveState", () => {
     it("still prints the traces the project has, rather than denying them", () => {
       // The bug this whole screen replaced: a headline of "Nothing is arriving." over 12,481 traces.
       const s = resolveState(watching({ traces_last_day: 0 }), onboarding(), BASE, HAS_PROVIDER);
-      expect(s.nodes[0].value).toBe("12,481");
+      expect(s.nodes[0].value).toBe((12_481).toLocaleString());
       expect(s.nodes[0].sub).toMatch(/^last trace \d+d ago$/);
       expect(s.title).not.toMatch(/no traces/i);
     });

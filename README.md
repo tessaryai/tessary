@@ -89,13 +89,13 @@ Traces are never used to train a shared model, for any customer. Every classifie
 
 ## Telemetry
 
-A self-hosted instance sends one anonymous heartbeat to `home.tessary.ai` at backend start and every 24 hours after. It carries an install id, the edition and version, the host OS family and CPU architecture, and bucketed counts of orgs, projects, and daily trace volume. It never carries trace or prompt content, an email address, an org or project name, a hostname, or an IP address. That heartbeat is the only outbound destination a default install has.
+A self-hosted instance sends one anonymous heartbeat to `home.tessary.ai` at backend start and every 24 hours after. It carries a schema version and a timestamp, an install id (a random UUID minted at first boot and kept in the database), the edition, the app version, the host OS family and CPU architecture, and bucketed counts of orgs, projects, and daily trace volume. It never carries trace or prompt content, an email address, an org or project name, a hostname, or a retained IP address. That heartbeat is the only outbound destination a default install has.
 
 ```bash
 TESSARY_TELEMETRY_ENABLED=false
 ```
 
-Set that in `.env` and the instance makes no call to that host, DNS lookups included, and loses nothing. The field-by-field contract is [the telemetry contract](./devdocs/reference/telemetry-contract.md).
+Set that in `.env` and the instance makes no call to that host, DNS lookups included, and loses nothing: no feature, license check, or in-app behavior depends on the heartbeat reaching us. Because the install id lives in the database, a reinstall on a fresh volume counts as a new install on our side, and that is the extent of what we can tell apart. The field-by-field contract is [the telemetry contract](./devdocs/reference/telemetry-contract.md).
 
 ## Contributing
 
