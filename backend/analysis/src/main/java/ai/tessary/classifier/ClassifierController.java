@@ -56,11 +56,11 @@ public class ClassifierController {
     }
 
     /**
-     * Per-signal sweep-job health for the project (gh#545) — status/attempts/last error/last-swept-at, so
+     * Per-signal sweep-job health for the project — status/attempts/last error/last-swept-at, so
      * a signal whose sweep has been failing for days is observable from the product instead of only
      * from Loki. A healthy signal reports {@link ClassifierJobRow#PENDING}/{@link ClassifierJobRow#DONE} with no
-     * {@code lastError}; a signal fast-failing its sweep reports {@link ClassifierJobRow#FAILED} (or the
-     * dead-letter state once gh#531 lands) with the error text and attempt count.
+     * {@code lastError}; a signal fast-failing its sweep reports {@link ClassifierJobRow#FAILED} with the
+     * error text and attempt count.
      */
     @GetMapping("/health")
     public ApiResponse<List<ClassifierHealthView>> health(
@@ -170,8 +170,8 @@ public class ClassifierController {
      * worst-first. A live derived read over {@code tool_call}; the signal {@code id} scopes/guards the
      * request.
      *
-     * <p>This was the rate-bearing surface for the {@code tool_error} built-in, which no longer exists
-     * (migration {@code 0030}). It survives because it never depended on that classifier — it reads the
+     * <p>This was the rate-bearing surface for the {@code tool_error} built-in, which no longer exists.
+     * It survives because it never depended on that classifier — it reads the
      * raw {@code tool_call} rows directly — but the project-wide tool-error rate a user sees now comes
      * from the {@code vitals} slice, which windows it, scopes it per call site and compares it against
      * a baseline. Treat this as the unwindowed all-time cut, not the product surface.

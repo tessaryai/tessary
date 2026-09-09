@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Nothing the docs do not tell you to set is required to boot (epic 7 clause 7, #1190). Four
+# Nothing the docs do not tell you to set is required to boot. Four
 # classes of required input are enumerated out of the published tree, and each member must have
 # a working default, a row in docs/self-hosting/setup.mdx's required-variable table, or (class iv
 # only) an "optional, leave blank" annotation beside it. No fifth option.

@@ -81,7 +81,7 @@ public class ToolCallRepository {
     }
 
     /**
-     * One JDBC batch of {@link #insert}s (#984 M2).
+     * One JDBC batch of {@link #insert}s.
      */
     public void insertAll(List<ToolCallRow> rows) {
         if (rows.isEmpty()) return;

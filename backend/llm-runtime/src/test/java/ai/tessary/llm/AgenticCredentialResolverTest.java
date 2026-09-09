@@ -21,9 +21,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * What an agentic (RCA/TRIAGE) run actually carries to the sandbox launcher, now that #939 D4 has
- * removed the launcher's deployment-env-var credential path entirely and the database is the only
- * source. Two wire shapes come out of {@link AgenticCredentialResolver#resolve}, and the fields one
+ * What an agentic (RCA/TRIAGE) run actually carries to the sandbox launcher, now that the
+ * launcher's deployment-env-var credential path has been removed entirely and the database is the
+ * only source. Two wire shapes come out of {@link AgenticCredentialResolver#resolve}, and the fields one
  * shape leaves null are exactly the fields the other populates — so every shape test asserts the
  * ABSENCE of the other shape's fields too, not just the presence of its own. A resolver that filled
  * in both halves would satisfy a presence-only test while sending the launcher a credential its own

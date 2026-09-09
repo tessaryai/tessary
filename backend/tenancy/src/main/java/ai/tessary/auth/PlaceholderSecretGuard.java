@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * Refuses to start when this instance has a real domain and is still sealing its data with one of
  * the placeholder keys {@code docker-compose.yml} ships.
  *
- * <p><b>Why placeholder keys exist at all (#1230).</b> Before this, a self-hoster could not run
+ * <p><b>Why placeholder keys exist at all.</b> Before this, a self-hoster could not run
  * {@code docker compose up -d} without first writing a {@code .env} holding two generated keys, so
  * the ten-minute quickstart did not start with the command it is named after. Langfuse and Supabase
  * ship fixed placeholder secrets with a change-before-production banner; Appsmith, n8n and Gitea
@@ -36,7 +36,7 @@ import org.springframework.stereotype.Component;
  * on a real hostname is exactly as exposed.
  *
  * <p><b>Why throwing here is Spring-context-safe.</b> {@code AgenticRcaEngine#validateSandboxConfig}
- * records why #857 refused to make a blank {@code tessary.rca.agentic.mcp-base-url} fatal at bean
+ * records why a blank {@code tessary.rca.agentic.mcp-base-url} is not made fatal at bean
  * construction: nothing but compose sets it, so a bare {@code mvn test} boot would fail context
  * refresh on that line alone. This guard inverts that shape. It throws only when {@code SITE_DOMAIN}
  * IS set, and its default is blank, so every non-compose boot passes through silently.
@@ -76,8 +76,8 @@ public class PlaceholderSecretGuard {
 
     /**
      * The inert loopback address the static Caddyfile once needed as its {@code SITE_DOMAIN}
-     * default (#1052), before {@code frontend/caddy/render.sh} made a blank domain mean "no site"
-     * (#1225). Nothing passes it any more; tolerated so a {@code .env} that still carries the
+     * default, before {@code frontend/caddy/render.sh} made a blank domain mean "no site".
+     * Nothing passes it any more; tolerated so a {@code .env} that still carries the
      * literal reads as "no domain" rather than as a hostname.
      */
     private static final String NO_DOMAIN_SENTINEL = "http://127.0.0.1:9443";

@@ -15,11 +15,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * The dependency-free, zero-cloud-credential {@link AuthProvider}: the open edition's default,
- * per tessary-paid/OPEN-CORE.md's ledger ("`auth` gets a provider interface: dependency-free email/password
- * default plus the WorkOS adapter open for BYO credentials"). {@link #isEnabled()} is
- * unconditionally {@code true} — unlike {@link WorkOsClient}, there is no external configuration
- * that could be missing.
+ * The dependency-free, zero-cloud-credential {@link AuthProvider}: this build's default.
+ * {@link #isEnabled()} is unconditionally {@code true} — unlike {@link WorkOsClient}, there is no
+ * external configuration that could be missing.
  *
  * <p>Every WorkOS-shaped downstream call site ({@link AuthFilter#resolveCookie},
  * {@code TenantService.upsertUserFromWorkos}, the {@code auth.workos_failed}-style error handling
@@ -66,7 +64,7 @@ public class PasswordAuthProvider implements AuthProvider {
 
     @Override
     public boolean isEnabled() {
-        // No external config to be missing — this is the always-available open-edition default.
+        // No external config to be missing — this is the always-available default.
         return true;
     }
 
@@ -77,8 +75,8 @@ public class PasswordAuthProvider implements AuthProvider {
 
     @Override
     public String authorizationUrl(String state) {
-        // Unreachable once AuthController's supportsRedirectFlow() guard (step 5) is in place —
-        // GET /auth/login degrades to a frontend redirect instead of calling this. Kept as a loud
+        // Unreachable once AuthController's supportsRedirectFlow() guard is in place — GET
+        // /auth/login degrades to a frontend redirect instead of calling this. Kept as a loud
         // failure rather than a silent one in case some future call site forgets the guard.
         throw new UnsupportedOperationException(
                 "PasswordAuthProvider has no OAuth redirect flow; guard callers on supportsRedirectFlow()");
@@ -170,7 +168,7 @@ public class PasswordAuthProvider implements AuthProvider {
             @Nullable String displayName,
             @Nullable String avatarUrl) {
         // No refreshToken: AuthController seals the session cookie with
-        // AuthProperties.getCookieMaxAgeSeconds() as its own expiry (step 5), so the session simply
+        // AuthProperties.getCookieMaxAgeSeconds() as its own expiry, so the session simply
         // expires with the cookie instead of needing silent refresh. No accessToken either — nothing
         // downstream of this provider reads it for anything but presence (AuthController's
         // "malformed 2xx body" null-check), so a stable non-null placeholder satisfies that without

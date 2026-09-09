@@ -14,8 +14,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The aggregation-first read surface for the query API: {@code count} / {@code timeseries} /
- * {@code facets} / keyword {@code search} over the substrate (span / tool_call) and
- * {@code signal_event}. This is the project's established cross-feature <b>read</b> pattern — a
+ * {@code facets} / keyword {@code search} over the substrate (span / tool_call) and classifier
+ * events. This is the project's established cross-feature <b>read</b> pattern: a
  * dedicated {@code *Repository} holding raw {@code JdbcClient} SQL (like {@code SubstrateReadRepository}
  * and {@code AlertQueryRepository}); ArchUnit requires raw {@code JdbcClient} to live in a
  * {@code *Repository}, which this is. All query-API reads funnel through here, so callers

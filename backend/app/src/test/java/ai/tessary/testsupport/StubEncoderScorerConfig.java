@@ -15,8 +15,8 @@ import org.springframework.context.annotation.Primary;
  *
  * <p>The scores are deliberately not adjacent to a band edge — they must keep those three meanings
  * when the head's operating point moves, as it has three times: 0.75/0.5 → 0.6/0.4 when frustration
- * repointed to cirimus (#627), → 0.85/0.67 when the band was re-derived on human-labelled production
- * traffic (#639), → 0.90/0.66 when {@code disappointment} left the proxy (#640). A weak score sitting
+ * repointed to cirimus, → 0.85/0.67 when the band was re-derived on human-labelled production
+ * traffic, → 0.90/0.66 when {@code disappointment} left the proxy. A weak score sitting
  * exactly ON the new HIGH edge is what broke {@code ClassifierPrecisionModeIntegrationTest} the first
  * time; the second move stranded the weak score BELOW the new LOW edge, silencing it. Keep each score
  * mid-band, and re-check them here whenever the catalog's band changes — nothing else pins this file

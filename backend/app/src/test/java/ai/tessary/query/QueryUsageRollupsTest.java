@@ -92,7 +92,7 @@ class QueryUsageRollupsTest {
         Instant h1 = h0.plus(1, ChronoUnit.HOURS);
 
         // ingested_spans: 10 in hour 0, 4 in hour 1 (hourly grain). One row per (project, unit, bucket)
-        // since Track A collapsed the per-environment grain.
+        // since the per-environment grain was collapsed.
         seed(orgId, pid, "ingested_spans", 10, h0.toString());
         seed(orgId, pid, "ingested_spans", 4, h1.toString());
         // l1_evals: 1000 in hour 0 — a different unit, to verify metric filtering.

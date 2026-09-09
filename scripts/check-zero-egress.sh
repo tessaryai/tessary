@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Opt-out means silent (epic 7 clause 9, #1197): with TESSARY_TELEMETRY_ENABLED=false and no operator
+# Opt-out means silent: with TESSARY_TELEMETRY_ENABLED=false and no operator
 # credential, a booted stack plus a full clause-2 rehearsal resolves and connects to nothing outside
 # the published permitted set, observed at three vantage points, and the instrument is proven able to
 # fail by a positive control and a planted call.
@@ -40,7 +40,7 @@
 #
 # Needs Docker, ports 80 and 443 free, and minutes. `--build` is passed through while the images
 # are unpublished. NEVER RUN AGENT-SIDE. `task check:zero:egress`; a dispatch-only job in
-# open-edition-boot.yml; EXCLUDED from `task check`; no cron (#1184).
+# open-edition-boot.yml; EXCLUDED from `task check`; no cron.
 set -euo pipefail
 P=check-zero-egress
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

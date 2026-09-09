@@ -12,12 +12,12 @@ import org.jspecify.annotations.Nullable;
  * {@code argumentsRaw} keeping the verbatim, possibly non-JSON args); timestamps are timestamptz.
  * {@code errorType}/{@code isError} are what the tool-error signal keys off.
  *
- * <p><b>The two media ref columns are gone (0001).</b> {@code argumentsRef}/{@code resultRef} were
+ * <p><b>The two media ref columns are gone.</b> {@code argumentsRef}/{@code resultRef} were
  * declared with FKs into {@code media_object} and were NULL on every row ever written — this record
  * hardcoded null into both — so the schema looked like it knew who referenced an image while nothing
- * did. {@code media_ref} is that answer now (#761).
+ * did. {@code media_ref} is that answer now.
  *
- * <p><b>One key namespace, as of the teardown (0083).</b> {@code traceId}/{@code spanId} are the
+ * <p><b>One key namespace, as of the teardown.</b> {@code traceId}/{@code spanId} are the
  * producer's own keys — the pair every read joins on and the pair the row's primary key is derived from.
  * The row used to carry a second, surrogate pair ({@code observation_id} and a surrogate
  * {@code trace_id}) from the v1 enricher; those columns were dropped with the tables they pointed at,

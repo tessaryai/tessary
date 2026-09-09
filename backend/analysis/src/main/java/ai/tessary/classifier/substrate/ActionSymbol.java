@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The behaviour-drift alphabet: the pure reduction of one substrate action to a symbol
- * {@code <kind>:<normalized-name>[:err]}, per {@code tessary-paid/classifiers/behavior_drift/PROGRAM.md} §2.
+ * The behavior-drift alphabet: the pure reduction of one substrate action to a symbol
+ * {@code <kind>:<normalized-name>[:err]}.
  *
  * <p>Carrying the error flag <em>inside</em> the symbol is deliberate: "this tool now fails where it
  * used to succeed" is drift, and folding it into the alphabet means the n-gram machinery detects it
@@ -21,21 +21,21 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ActionSymbol {
 
-    /** Synthetic start padding — what makes "conversations now start differently" detectable. */
+    /** Synthetic start padding: what makes "conversations now start differently" detectable. */
     public static final String START = "^";
 
-    /** Synthetic end padding — what makes "the confirmation step disappeared" detectable. */
+    /** Synthetic end padding: what makes "the confirmation step disappeared" detectable. */
     public static final String END = "$";
 
     /** The name every below-floor name collapses to (per kind). */
     public static final String RARE = "__rare__";
 
-    /** The kind whose name is deliberately discarded — see {@link #of}. */
+    /** The kind whose name is deliberately discarded; see {@link #of}. */
     public static final String LLM_KIND = "llm";
 
     /**
      * The one symbol every LLM call reduces to (§2.1). A dispatching call never reaches the sequence
-     * as this symbol — {@link TrajectoryAssembler} replaces it with the fan-out it opened — so in
+     * as this symbol: {@link TrajectoryAssembler} replaces it with the fan-out it opened, so in
      * practice this marks the call that produced an answer rather than more tool calls.
      */
     public static final String LLM_ANSWER = LLM_KIND + ":answer";
@@ -58,7 +58,7 @@ public final class ActionSymbol {
     private static final String ERROR_SUFFIX = ":err";
     /**
      * The kinds whose name is unbounded in cardinality and must bucket to a container rather than be
-     * kept verbatim — a document or chunk id per call would make every sequence unique, which is the
+     * kept verbatim: a document or chunk id per call would make every sequence unique, which is the
      * "too fine" failure §2 opens with. Only {@code retrieval} was bucketed here while the Python
      * reference bucketed all three, so {@code embedding:vecs/x.pdf} reduced to {@code embedding:vecs}
      * offline and {@code embedding:vecs_x_pdf} in production. Both kinds are dispatchable, so the
@@ -81,7 +81,7 @@ public final class ActionSymbol {
      * a per-document name space cannot explode the vocabulary.
      *
      * <p>An LLM span's name is discarded entirely. Producers name that span after the tool batch it
-     * requested — {@code "llm → verify_member, get_policy, check_hospital"} — which is a description of
+     * requested ({@code "llm → verify_member, get_policy, check_hospital"}), which is a description of
      * the NEXT actions, not an action itself. Keeping it put the emission order of a concurrent batch
      * inside the alphabet: one measured project recorded 37 real batches as 68 distinct symbols, so
      * reordering a batch minted a brand-new symbol and fired novelty, while {@link #normalizeName}'s
@@ -143,18 +143,18 @@ public final class ActionSymbol {
     }
 
     /**
-     * True for every symbol the assembler synthesises rather than reads off a span — padding and the
+     * True for every symbol the assembler synthesises rather than reads off a span: padding and the
      * fan-out markers. None is subject to the rare-name floor: the floor exists to bound an unbounded
-     * NAME space, and these come from a closed set. Collapsing {@code fork:6} to {@code __rare__}
+     * name space, and these come from a closed set. Collapsing {@code fork:6} to {@code __rare__}
      * because wide batches are uncommon would erase the width and merge fan-outs of different degree
-     * into one symbol — the same information loss the floor is meant to prevent elsewhere.
+     * into one symbol, the same information loss the floor is meant to prevent elsewhere.
      */
     public static boolean isStructural(String symbol) {
         return isPadding(symbol) || JOIN.equals(symbol) || symbol.startsWith(FORK_PREFIX);
     }
 
     /**
-     * The {@code <kind>:__rare__} collapse for a below-floor name. The {@code :err} suffix survives —
+     * The {@code <kind>:__rare__} collapse for a below-floor name. The {@code :err} suffix survives:
      * the floor bounds the <em>name</em> space, and dropping the error flag with it would erase the
      * "this tool now fails" signal.
      */
@@ -165,7 +165,7 @@ public final class ActionSymbol {
 
     /**
      * The symbols in {@code corpus} whose share of all observations falls below {@code floorFraction}
-     * (default 0.1%) — the set the caller collapses with {@link #collapseRare}. {@linkplain
+     * (default 0.1%): the set the caller collapses with {@link #collapseRare}. {@linkplain
      * #isStructural Structural} symbols are exempt.
      */
     public static Set<String> rareSymbols(List<String> corpus, double floorFraction) {
@@ -204,7 +204,7 @@ public final class ActionSymbol {
         return List.copyOf(out);
     }
 
-    /** The stable string key for an n-gram — the {@code behavior_ngram.gram_key} column value. */
+    /** The stable string key for an n-gram: the {@code behavior_ngram.gram_key} column value. */
     public static String gramKey(List<String> parts) {
         return String.join(GRAM_SEPARATOR, parts);
     }

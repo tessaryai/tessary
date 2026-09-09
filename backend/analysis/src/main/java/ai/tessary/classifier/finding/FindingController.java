@@ -24,11 +24,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The findings read surface: the open findings, the correction loop, and the baseline changelog.
- * {@code /behavior/profiles}, the one route reading the paid {@link ProfileSource} port, moved to
- * {@code tessary-paid/behavior-drift} in #919 — see that module's {@code BehaviorProfileController},
- * which keeps its own separate {@code @RequestMapping} at the old {@code .../behavior} prefix.
- * This class was renamed from {@code BehaviorController} to {@code FindingController} in #921,
- * once the paid route above was the only thing still hanging off the {@code /behavior} name.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/findings")
@@ -62,7 +57,7 @@ public class FindingController {
     }
 
     /**
-     * One finding with its evidence parsed — what the finding's own page reads.
+     * One finding with its evidence parsed: what the finding's own page reads.
      *
      * <p>A separate call rather than a fatter list row: the evidence blob is the largest thing a finding
      * carries, and a list of fifty would ship fifty of them to render fifty headlines.
@@ -78,13 +73,11 @@ public class FindingController {
     }
 
     /**
-     * One page of a finding's evidence, joined to the spans it names — what the finding page's evidence
+     * One page of a finding's evidence, joined to the spans it names: what the finding page's evidence
      * table renders.
      *
-     * <p>Paged because a population is not a field. This set used to ride the finding view itself,
-     * uncapped, on this endpoint AND on the list beside it, so a single render of the Classifiers page
-     * shipped every ref of every finding on it. The default page is deliberately small: a reader looks
-     * at the first few and pages on if the shape is not already obvious.
+     * <p>The default page is small on purpose: a reader looks at the first few and pages on only if
+     * the shape isn't already obvious.
      */
     @GetMapping("/{id}/evidence")
     public ApiResponse<BehaviorDtos.FindingEvidenceSpanPage> findingEvidence(
@@ -103,7 +96,7 @@ public class FindingController {
     /**
      * Record the human judgement on a finding. Marking it Expected allowlists the gram permanently and
      * skips the graduation wait; Not expected pins it in quarantine so it never graduates and keeps
-     * firing. Doing nothing is also a valid answer — persistence graduation then runs as normal.
+     * firing. Doing nothing is also a valid answer: persistence graduation then runs as normal.
      */
     @PostMapping("/{id}/resolution")
     public ApiResponse<BehaviorFindingView> resolve(
@@ -117,21 +110,16 @@ public class FindingController {
     }
 
     /**
-     * Hand this finding to Layer 2 — a sandbox with the finding's claim materialized as a dossier and
-     * this platform's read surface for the evidence behind it. No repository, on any project.
+     * Hand this finding to Layer 2: a sandbox with the finding's claim materialized as a dossier and
+     * this platform's read surface for the evidence behind it, no repository on any project.
      *
-     * <p>The only thing that enqueues a triage. Both drift sweeps used to do it automatically;
-     * they no longer do, because a finding is a lead and every automatic escalation was a microVM
-     * spent to find out whether it was more than that.
+     * <p>{@code lane=grader} runs the call site's own rubrics against the same cited traces instead
+     * of the triage agent, writing to the same {@code triage_*} columns. Omitted or unrecognized
+     * means the triage agent.
      *
-     * <p><b>{@code lane=grader} picks the graders instead</b>: the call site's own rubrics, run against
-     * the same cited traces, ruling onto the same {@code triage_*} columns. Omitted (or unrecognized)
-     * means the triage agent, which is what the button always did.
-     *
-     * <p>409 without an exemplar trace — nothing to rule on, in either lane. <b>Not</b> 409 without a
-     * repo: triage never opens one, so a project with no connection reaches exactly the run every other
-     * project reaches. A second press returns 200 with {@code alreadyEscalated} — the cause is triaged
-     * once, and the press lands on the existing job.
+     * <p>409 without an exemplar trace, in either lane; never 409 for a missing repo, since triage
+     * never opens one. A second call returns 200 with {@code alreadyEscalated} instead of triaging
+     * twice.
      */
     @PostMapping("/{id}/analysis")
     public ApiResponse<BehaviorAnalysisView> analyze(

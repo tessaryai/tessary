@@ -7,11 +7,11 @@ import org.jspecify.annotations.Nullable;
 /**
  * An organization's stored credential for one LLM provider — one row per {@code (org_id, provider)}
  * (enforced by a unique index). Every project in the org shares it: there is no per-project override
- * and no per-environment variant (#939 D1). The credential is provider-scoped, not model-scoped: an
+ * and no per-environment variant. The credential is provider-scoped, not model-scoped: an
  * org adds a key for a provider once and every project may then judge with any catalog model that
  * provider hosts (see {@link ModelCatalog}).
  *
- * <p>{@code projectId} is historical only, as of #939 D1 (migration {@code 0020}): credentials were
+ * <p>{@code projectId} is historical only: credentials were
  * originally keyed {@code (project_id, provider)}, and the org-scope migration backfilled {@code
  * org_id} from each row's project, collapsing to one row per {@code (org_id, provider)} where a
  * customer had saved the same provider under two projects (last-write-wins by {@code updated_at}) and
@@ -20,7 +20,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Credential fields hold AES-GCM-sealed ciphertext (via {@link ai.tessary.crypto.SecretBox}).
  * Every provider requires user-provided credentials — there is no platform-funded, credential-free
- * platform any more (Ollama, the one exception, was removed by #939 D6's maker filter) — and a run
+ * platform any more (Ollama, the one exception, was removed by a maker filter) — and a run
  * fails with {@code MISSING_CREDENTIALS} when the org has none (see {@code
  * ChatModelFactory#resolveApiKey} / {@code buildBedrock}). The wire form never carries decrypted
  * secrets — the controller projects to a "redacted" view that just exposes boolean {@code has_*}
@@ -52,7 +52,7 @@ public record ProviderCredential(
          * {@link #AUTH_MODE_IAM_ROLE} — Bedrock/{@code BEDROCK_MANTLE} only. An explicit, user-set
          * opt-in: {@code ChatModelFactory#buildBedrock}/{@code buildMantle} refuse to fall back to the
          * ambient {@code DefaultCredentialsProvider} just because the sealed AWS keys are null (that
-         * refusal is what stops a customer's run from silently billing the platform, #1050), so IAM-role
+         * refusal is what stops a customer's run from silently billing the platform), so IAM-role
          * auth is reachable only when a project's own stored row says so — never inferred from absent
          * keys.
          */

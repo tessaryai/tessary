@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * How the backend reaches {@code compile-service/}, bound from {@code tessary.sop.compile.*}.
+ * How the backend reaches the compile service, bound from {@code tessary.sop.compile.*}.
  *
  * <p>The compile service fits a project's SOP-conformance bundle by running the Python engine's
  * {@code fit} + {@code export} over that project's traffic. The fitting code is sklearn and cannot
@@ -47,7 +47,7 @@ public class SopCompileProperties {
      *
      * <p><b>A bound on the WINDOW, never on any turn's content.</b> Whole conversations are loaded
      * and shipped verbatim — the engine's conversation-cumulative tool view is undefined over a
-     * conversation cut in half (frozen decision 2), and clipping trace text would change what the
+     * conversation cut in half, and clipping trace text would change what the
      * encoder reads. So the knob counts conversations, and everything inside the chosen ones goes.
      */
     private int fitWindowConversations = 2_000;

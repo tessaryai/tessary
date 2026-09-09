@@ -20,7 +20,7 @@ import org.springframework.stereotype.Repository;
  * {@code [bucketStart, bucketEnd)} window on {@code created_at}, served by the
  * {@code (project_id, created_at)} substrate index.
  *
- * <p><b>Two whole aggregation families left with Track A, and the reason matters.</b> This file used
+ * <p><b>Two whole aggregation families were removed, and the reason matters.</b> This file used
  * to carry {@code countL2Evals}, {@code sumLlmTokens} and {@code sumLlmCostMicros}, all three scanning
  * {@code FROM verdict} — a table that no longer exists. Their units ({@code l2_evals},
  * {@code llm_tokens}, both {@code llm_cost_micro_usd_*}) are retired rather than re-sourced. LLM spend
@@ -36,7 +36,7 @@ import org.springframework.stereotype.Repository;
  * producer's {@code environment_id} and return one amount per environment, and both reads carried an
  * {@code EnvironmentFilter}. The Environment concept was removed, so each query returns one number for
  * the project and the reads have no env predicate. Historical rows written under the old key survive:
- * the {@code 0016} changeset SUM-merges the per-env rows into a single row per
+ * the migration SUM-merges the per-env rows into a single row per
  * {@code (org, project, metric, bucket_start, granularity)} before dropping the column, so an org's
  * totals over any window are unchanged.
  *

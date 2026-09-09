@@ -55,13 +55,12 @@ import org.springframework.stereotype.Component;
  * The single instrumented entry point for every LLM chat call in the app. Wraps one
  * {@code chat()} in an OpenTelemetry {@code gen_ai.*} CLIENT span (the shape the Alloy
  * filter forwards to Langfuse), stamps token usage + Bedrock cost/cache details, and
- * applies the {@link LlmPacer} (rate-limit + 429 back-off). Every caller — the judge,
- * the deterministic-grader code generator, the agentic sandboxes — goes through here, so they
- * all reach Langfuse identically and no future caller can silently skip tracing.
+ * applies the {@link LlmPacer} (rate-limit + 429 back-off). Every caller goes through here,
+ * so they all reach Langfuse identically and no future caller can silently skip tracing.
  *
  * <p>Trace grouping is the caller's decision: pass the run span's {@link Context} as
  * {@code parentTrace} to nest under it, or {@code null} for a fresh trace. {@code null}
- * deliberately uses {@code setNoParent()} — it must NOT inherit an ambient HTTP-server
+ * deliberately uses {@code setNoParent()}: it must not inherit an ambient HTTP-server
  * span, which Alloy drops, orphaning the observation.
  */
 @Component
@@ -79,19 +78,18 @@ public class LlmCaller {
     private final ObjectMapper mapper;
 
     /**
-     * Prompt-cache TTL in millis, derived from {@code tessary.grader.cache.ttl} (default 5m).
+     * Prompt-cache TTL in millis, from the {@code tessary.grader.cache.ttl} property (default 5m).
      * A 429 back-off that, cumulatively, outlives this window likely lets the warm prompt
-     * cache expire — so a later grader on the unit that should have been a cache <i>read</i>
-     * silently becomes a re-<i>write</i> (billed at the premium). We can't observe the actual
-     * cache state, so this is the conservative proxy used only to log + count the likely event.
+     * cache expire, so a later call on the unit that should have been a cache <i>read</i>
+     * silently becomes a re-<i>write</i> (billed at the premium). The actual cache state cannot
+     * be observed, so this is the conservative proxy used only to log and count the likely event.
      */
     private final long cacheTtlMs;
 
     /**
-     * Counts judge calls whose cumulative 429 back-off exceeded the cache TTL — i.e. the
-     * warm prompt cache likely expired mid-retry, turning an intended cache read into a
-     * re-write. Tuning signal only (no behaviour change); correlate against the
-     * cache hit-rate/amortization telemetry and {@code tessary.judge.duplicate_verdict}.
+     * Counts calls whose cumulative 429 back-off exceeded the cache TTL: the warm prompt
+     * cache likely expired mid-retry, turning an intended cache read into a re-write. Tuning
+     * signal only; no behaviour change.
      */
     private final LongCounter cacheLikelyExpiryCounter;
 

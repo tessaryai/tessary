@@ -36,7 +36,7 @@ import org.jspecify.annotations.Nullable;
  * @param errorType the CLASS of failure — the producer's own {@code error.type} attribute, or a capped
  *     signature of its status message when it ships none. A short label, because every facet, breakdown
  *     and group-by in the product treats this column as a type. It used to hold the status message
- *     itself, which is how a facet key came to be 3,271 characters of agent markdown (#762).
+ *     itself, which is how a facet key once came to be 3,271 characters of agent markdown.
  * @param errorMessage the PROSE — the producer's status message, capped at write. Nothing renders it
  *     today; it is here so that switching {@code errorType} to a class does not throw the description of
  *     the failure away, and so a reader is not sent to {@code span_payload} for it.

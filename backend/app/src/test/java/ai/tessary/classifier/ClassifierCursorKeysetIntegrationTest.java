@@ -30,17 +30,17 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Regression for the keyset sweep cursor: with a batch size smaller than a group of spans that share
- * the <em>exact same</em> {@code created_at} (the realistic bulk-ingest case — {@code created_at}
- * defaults to {@code now()}, which in Postgres is TRANSACTION time, so one ingest batch stamps every
- * row in it identically), a {@code created_at}-only {@code >} cursor would advance past the timestamp
- * at a batch boundary and silently drop the rest of that group.
+ * Regression for the keyset sweep cursor: with a batch size smaller than a group of spans that
+ * share the <em>exact same</em> {@code created_at} (the realistic bulk-ingest case: {@code
+ * created_at} defaults to {@code now()}, which in Postgres is transaction time, so one ingest
+ * batch stamps every row in it identically), a {@code created_at}-only {@code >} cursor would
+ * advance past the timestamp at a batch boundary and silently drop the rest of that group.
  *
- * <p>The keyset is a TRIPLE in v2 — {@code (created_at, trace_id, id)} — because a span id is unique
- * only within its trace, and the cursor carries the two id halves as the composite handle
+ * <p>The keyset is a triple in v2: {@code (created_at, trace_id, id)}, because a span id is
+ * unique only within its trace, and the cursor carries the two id halves as the composite handle
  * {@code "<trace_id>:<span_id>"}. A handle written as a bare span id has no colon, parses as "no
- * cursor", and restarts the sweep from page one on every tick; this test would still pass on that bug,
- * so the assertion is joined by one on the stored cursor itself.
+ * cursor", and restarts the sweep from page one on every tick; this test would still pass on that
+ * bug, so the assertion is joined by one on the stored cursor itself.
  */
 @SpringBootTest
 @Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
@@ -94,35 +94,34 @@ class ClassifierCursorKeysetIntegrationTest {
 
     @Test
     void keysetCursorVisitsEverySpanSharingOneTimestamp() {
-        // Frustration is one of the four paid classifiers and OFF by default in an open build
-        // (#887/#888). It is the only TURN-grain built-in, which is exactly the shape this cursor
-        // regression needs (see seedAndFindFrustration below), so this grants it rather than repointing
-        // to another classifier — there is no open substitute with the same grain.
+        // Frustration needs its capability granted explicitly: it is off by default and is the
+        // only turn-grain built-in, which is exactly the shape this cursor regression needs (see
+        // seedAndFindFrustration below), so there is no substitute with the same grain.
         String pid = TenantFixture.bootstrap(
                         tenants, "signal-keyset", org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
                 .id();
         Instant now = Instant.now();
 
-        // SAME_TS_COUNT user-facing TURNS, each its own trace with a root llm span, each carrying a
+        // SAME_TS_COUNT user-facing turns, each its own trace with a root llm span, each carrying a
         // frustration keyword so the built-in Frustration detector fires exactly once per turn.
-        // Frustration is turn-grain, so the units that must survive the batch boundary are turns —
-        // several root spans under ONE turn would (correctly) collapse to a single detection and would
-        // not exercise the cursor at all.
+        // Frustration is turn-grain, so the units that must survive the batch boundary are turns:
+        // several root spans under one turn would (correctly) collapse to a single detection and
+        // would not exercise the cursor at all.
         //
-        // ONE CONVERSATION PER TURN, which this test used to share. The turn-grain sweep skips a turn
-        // whose conversation is already flagged at high (a conversation is one event, not one per turn
-        // — see ClassifierWorker#suppressAlreadyFlaggedConversations), so five frustrated turns in one
-        // conversation now correctly produce ONE detection. That is the intended behaviour and it makes
-        // detection count useless as a proxy for cursor coverage WITHIN a conversation. Separate
-        // conversations restore the proxy: each turn is independently flaggable, so a missing detection
-        // again means a dropped span rather than a suppressed duplicate. What this test is about — that
-        // the keyset cursor drops nothing at a created_at tie — is unchanged.
+        // Each turn gets its own conversation: the turn-grain sweep skips a turn whose conversation
+        // is already flagged at high (a conversation is one event, not one per turn; see
+        // ClassifierWorker#suppressAlreadyFlaggedConversations), so five frustrated turns in one
+        // conversation would correctly produce one detection, which makes detection count useless as
+        // a proxy for cursor coverage within a conversation. Separate conversations restore the
+        // proxy: each turn is independently flaggable, so a missing detection again means a dropped
+        // span rather than a suppressed duplicate.
         //
-        // Each conversation gets its own warm-up turn FIRST, at an earlier timestamp: frustration skips
-        // a conversation's opener (context_min_prior_user_turns=1 — the agent has not acted yet), so
-        // without a preceding turn the frustrated turn would be gated out and this test would read a
-        // dropped span as a cursor bug. The warm-ups sit outside the group's timestamp on purpose.
+        // Each conversation gets its own warm-up turn first, at an earlier timestamp: frustration
+        // skips a conversation's opener (context_min_prior_user_turns=1, the agent has not acted
+        // yet), so without a preceding turn the frustrated turn would be gated out and this test
+        // would read a dropped span as a cursor bug. The warm-ups sit outside the group's timestamp
+        // on purpose.
         Instant earlier = now.minusSeconds(60);
         List<SpanRef> group = new ArrayList<>();
         for (int i = 0; i < SAME_TS_COUNT; i++) {
@@ -131,9 +130,10 @@ class ClassifierCursorKeysetIntegrationTest {
             stampCreatedAt(pid, List.of(warmup), earlier);
             group.add(seedTurn(pid, sessionId, "this is frustrating, you're not listening", now));
         }
-        // One created_at across the whole group — the boundary case. Written explicitly rather than
-        // relied upon: the fixture writes each span in its own transaction, so the default now() would
-        // give every row a distinct stamp and the batch boundary would never land inside a tie.
+        // One created_at across the whole group: the boundary case. Written explicitly rather than
+        // relied upon, since the fixture writes each span in its own transaction, so the default
+        // now() would give every row a distinct stamp and the batch boundary would never land inside
+        // a tie.
         stampCreatedAt(pid, group, now);
 
         // Several ticks: each tick advances the cursor by at most one BATCH per sweep, so the group spans
@@ -151,8 +151,9 @@ class ClassifierCursorKeysetIntegrationTest {
                 service.eventsForClassifier(pid, frustration.id(), 100).size(),
                 "every span sharing one created_at is detected — the keyset cursor drops none at a boundary");
 
-        // The cursor is only doing its job if it PARSES. A sweep that stamps a bare span id restarts from
-        // page one every tick and still reaches every row, so the count above cannot tell the two apart.
+        // The cursor is only doing its job if it parses. A sweep that stamps a bare span id restarts
+        // from page one every tick and still reaches every row, so the count above cannot tell the
+        // two apart.
         List<String> cursors = jdbc.sql(
                         "SELECT cursor_id FROM job WHERE project_id = :pid AND kind = 'classifier' AND cursor_id IS NOT NULL")
                 .param("pid", pid)
@@ -176,7 +177,7 @@ class ClassifierCursorKeysetIntegrationTest {
                 .writeRef();
     }
 
-    /** Give a set of spans one identical {@code created_at} — the single-transaction ingest shape. */
+    /** Give a set of spans one identical {@code created_at}: the single-transaction ingest shape. */
     private void stampCreatedAt(String pid, List<SpanRef> refs, Instant at) {
         for (SpanRef ref : refs) {
             jdbc.sql("UPDATE span SET created_at = :at::timestamptz "

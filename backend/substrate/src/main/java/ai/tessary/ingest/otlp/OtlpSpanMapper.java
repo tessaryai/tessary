@@ -265,7 +265,7 @@ public final class OtlpSpanMapper {
             case BYTES_VALUE -> hex(v.getBytesValue().toByteArray());
             case ARRAY_VALUE -> arrayValueJson(v.getArrayValue());
             case KVLIST_VALUE -> kvListJson(v.getKvlistValue());
-            // OTLP 1.9+ dictionary encoding (opentelemetry-proto 1.11.0-alpha, #1056): a string given
+            // OTLP 1.9+ dictionary encoding (opentelemetry-proto 1.11.0-alpha): a string given
             // as an index into a string table carried elsewhere in the request. This mapper reads
             // plain values only and does not resolve that table, so the value is dropped (null, same
             // as unset) rather than misread as the index number. Exhaustive switch: a future case

@@ -9,7 +9,7 @@ Written for someone who did not build it. Every step names the exact query, log 
 
 ## 1. The objectives
 
-These are the numbers ingest is held to. They were absent until launch requirement J2 asked for them,
+These are the numbers ingest is held to. They were absent until a launch requirement asked for them,
 which is why "is ingest healthy?" had no answer that was not a shrug.
 
 | # | Objective | Number | Where it comes from |
@@ -46,8 +46,8 @@ regression behind a detector's normal slowness.
 
 ### The degradation contract
 
-Ingest buffers accepted batches in an `IngestSpool` (#984): the in-process spool by default, or the
-Kafka-API spool (`KafkaSpool`, #1299) when `tessary.ingest.spool.mode=kafka` names a broker, the bundled
+Ingest buffers accepted batches in an `IngestSpool`: the in-process spool by default, or the
+Kafka-API spool (`KafkaSpool`) when `tessary.ingest.spool.mode=kafka` names a broker, the bundled
 Redpanda under `docker compose --profile kafka` being the shipped one. The contract differs by mode, so
 the first thing to know about an install is which one it runs
 (`tessary.ingest.spool.mode`, `spool_mode` on the throughput line, `spool` on the
@@ -109,7 +109,7 @@ truncating silently or falling over.
 
 **Shedding is a capacity signal, and it is now the only reason a span does not land.** `shed_batches`
 moving means we could not keep up. There is no longer a second, benign explanation to rule out first:
-Track A removed sampling entirely, so `sampled_out` is gone from the heartbeat and every span a
+sampling has been removed entirely, so `sampled_out` is gone from the heartbeat and every span a
 producer sends is either written or shed.
 
 ---
@@ -194,7 +194,7 @@ Start here. Each branch ends in an action, not an observation.
    the effective policy: `SELECT * FROM retention_policy WHERE project_id = '…';` — no row means the
    platform default from `tessary.retention.*`. Settings → Data retention (or
    `GET /api/orgs/{org}/projects/{project}/retention`) shows the same answer per class, with the
-   install default beside any override (#1205).
+   install default beside any override.
 
 ### "Ingest is shedding" (O3 breached)
 
@@ -214,8 +214,8 @@ Start here. Each branch ends in an action, not an observation.
      spends it directly on heap, since a queued batch holds its payloads inline. It is the only
      admission bound: a batch can be 10 spans or 825, so there is no count to tune;
    - shorten that project's trace retention to relieve table and index size;
-   - ask the noisiest project to send less. There is no server-side sampling lever any more — Track A
-     removed it, deliberately, because "we watch every trace" cannot be true beside a knob that
+   - ask the noisiest project to send less. There is no server-side sampling lever any more — it was
+     removed deliberately, because "we watch every trace" cannot be true beside a knob that
      silently makes it false.
 4. **Is it a 2 GB Docker limit?** Locally, yes — this is expected and is what the shed path is for.
 
@@ -259,7 +259,7 @@ rather than an outage.
 | Retention kill switch | `tessary.retention.enabled` | true | `false` deletes nothing |
 | Retention cadence | `tessary.retention.interval-ms` | 3600000 | Sweep interval |
 | Retention work bound | `tessary.retention.batch-size` / `.max-batches-per-sweep` | 5000 / 20 | Rows per statement / statements per project-class per sweep |
-| Default TTLs | `tessary.retention.trace-ttl-days` / `.detection-` | 90 / 90 | Platform defaults; a `retention_policy` row overrides per project. `0` keeps forever. (`.embedding-ttl-days` was retired with the vector substrate, #1116) |
+| Default TTLs | `tessary.retention.trace-ttl-days` / `.detection-` | 90 / 90 | Platform defaults; a `retention_policy` row overrides per project. `0` keeps forever. (`.embedding-ttl-days` was retired with the vector substrate) |
 | Redaction kill switch | `tessary.redaction.enabled` | true | `false` persists content unredacted |
 
 Every key is also listed in [config-keys.md](../reference/config-keys.md).
@@ -268,7 +268,7 @@ Every key is also listed in [config-keys.md](../reference/config-keys.md).
 
 ## 5. Retention, as enforced
 
-Worth stating plainly, because these were rows nobody read until launch requirement J4.
+Worth stating plainly, because these were rows nobody read until a launch requirement made them matter.
 
 **Retention** is a bounded hourly sweep. Deleting a `trace` row cascades to its spans via
 `ON DELETE CASCADE`, but the traces class sweep still runs three statements per pass — payloads first
@@ -282,7 +282,7 @@ deleted — a live case whose evidence links are dead is worse than a slightly l
 **Sampling is gone.** It honoured exactly one kind (uniform `probabilistic`) and read three others only
 to warn and ignore them, because a *biased* sampler would make a detector fire on our own sampling
 policy. The default was no sampling at all, which is what "we watch every trace" has to mean to be
-true — so Track A removed the remaining knob rather than keep a lever whose only honest setting was
+true — so the remaining knob was removed rather than kept as a lever whose only honest setting was
 off. `SamplingGate`, `sampling_policy` and `tessary.ingest.sampling.*` are all deleted; a customer who
 wants less ingested sends less.
 

@@ -14,19 +14,16 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The always-present bean the two open import paths call, holding the optional {@link SopIntake}.
+ * The always-present bean both import paths call, holding the optional {@link SopIntake}.
  *
- * <p><b>Why a dispatcher rather than an {@code ObjectProvider} at each call site.</b> There are two
- * import paths — the multipart upload and the observer's auto-pull — and they must store SOPs
- * identically or a repo imported one way carries policy the other way does not. One resolved holder is
- * how that stays true; two providers is how the paths diverge the first time one of them is edited.
- * It is also what keeps both callers' constructors honest: they take a required bean that always
- * exists, so neither has to carry a nullable field and a null check that reads like a bug.
+ * <p>The multipart upload path and the observer's auto-pull path must store SOPs identically, so
+ * they share one resolved holder instead of each taking its own {@code ObjectProvider}: that keeps
+ * both callers' constructors honest, taking a required bean that always exists rather than a
+ * nullable field and a null check.
  *
- * <p>The provider is resolved ONCE, in the constructor, with {@code orderedStream().findFirst()} rather
- * than {@code getIfAvailable()}: the latter is declared to throw {@code BeansException}, and SpotBugs'
- * {@code CT_CONSTRUCTOR_THROW} fails a constructor that can. Same read, same shape
- * {@code ConformanceController} and {@code SopCompileWorker} use.
+ * <p>The provider is resolved once, in the constructor, with {@code orderedStream().findFirst()}
+ * rather than {@code getIfAvailable()}, which is declared to throw {@code BeansException} and so
+ * fails SpotBugs' {@code CT_CONSTRUCTOR_THROW} check.
  */
 @Component
 public class SopIntakeDispatch {
@@ -36,16 +33,10 @@ public class SopIntakeDispatch {
     private final @Nullable SopIntake intake;
 
     /**
-     * Latches the "no intake" INFO to ONE line per process.
-     *
-     * <p>This is not an error path, it is the open edition: no {@link SopIntake} ships, and
-     * {@code /import} is a per-REQUEST path a busy project hits on every push. Unlatched, a steady
-     * state that an operator can act on exactly once would be one egressed line per import, forever.
-     * {@code backend/AGENTS.md} names that shape under "log OUTCOMES and COST, not intent" — the
-     * 2026-07-31 incident where two sweep events were 77% of production log volume and said nothing
-     * actionable. Same idiom, same reason, as {@code SopCompileWorker}'s {@code sop.compile.no-compiler}
-     * one module over; INFO rather than WARN because, unlike a queue that fills and never drains, an
-     * absent intake leaves nothing behind to go wrong.
+     * Latches the "no intake" log line to once per process. {@code /import} runs on every push a
+     * busy project makes, so unlatched this would be one line per import forever for a steady state
+     * an operator can only act on once. INFO rather than WARN: unlike a queue that fills and never
+     * drains, an absent intake leaves nothing behind to go wrong.
      */
     private final AtomicBoolean loggedNoIntake = new AtomicBoolean();
 
@@ -54,13 +45,12 @@ public class SopIntakeDispatch {
     }
 
     /**
-     * Store the bundle's SOP documents, or do nothing at all in an edition that has no intake.
-     * Returns the number stored — 0 in the absent case, which is the same answer the paid
-     * implementation gives an org without {@code SOP_CONFORMANCE}.
+     * Stores the bundle's SOP documents, or does nothing if no intake is available. Returns the
+     * number stored, 0 in the absent case.
      *
-     * <p>{@code @Transactional} sits here as well as on the implementation so the absent case has the
-     * same transactional shape as the present one: both callers already run inside a transaction, and
-     * a propagation difference between editions is the kind of thing that only shows up under load.
+     * <p>{@code @Transactional} sits here as well as on the implementation so the absent case has
+     * the same transactional shape as the present one: both callers already run inside a
+     * transaction, and a propagation mismatch is the kind of thing that only shows up under load.
      */
     @Transactional
     public int importSops(String projectId, List<NamedBody> files, @Nullable String sourceCommitSha) {

@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
  * our lanes uses". Mixing them would blur who is being billed.
  *
  * <p>The {@code GET} returns the capability matrix alongside the current settings, so the UI can
- * render tier options per model generically — the same shape as
+ * render tier options per model generically, the same shape as
  * {@link ProviderCredentialController#catalog}, and the reason the frontend needs no hardcoded
  * knowledge of which models support Flex.
  *
@@ -54,7 +54,7 @@ public class ProjectModelSettingController {
     private final TenantPathResolver resolver;
     private final ModelResolver priceModels;
     private final PriceBookRepository priceBooks;
-    /** #939 D3: which providers the org has a credential for — drives the picker's disabled options. */
+    /** Which providers the org has a credential for; drives the picker's disabled options. */
     private final ProviderCredentialRepository providerCredentials;
 
     public ProjectModelSettingController(
@@ -76,9 +76,9 @@ public class ProjectModelSettingController {
      * One section of the settings page: a {@link LaneGroup}, its heading, the line of copy under it,
      * and which of the two per-request controls its rows should show at all.
      *
-     * <p>Sent as its own list rather than folded into each lane because a section is drawn once —
+     * <p>Sent as its own list rather than folded into each lane because a section is drawn once:
      * repeating the heading and copy on all five lanes would invite a client to render whichever copy
-     * it saw last and would make the section ORDER an accident of lane order.
+     * it saw last and would make the section order an accident of lane order.
      *
      * <p>{@code tiered} and {@code effortTunable} are both false for {@link LaneGroup#AGENT_VM}: those
      * lanes hand a model id to an agent inside a microVM and the agent composes every request, so
@@ -102,17 +102,17 @@ public class ProjectModelSettingController {
      * the group answers the tier question, the effort question and the section question together, and
      * it is the grouping the page is actually built from.
      *
-     * <p>{@code providerOptions} is this lane's option list, provider first and best first — see
+     * <p>{@code providerOptions} is this lane's option list, provider first and best first; see
      * {@link LanePriority}. Each entry names a provider, the models this lane offers on it (indexing
      * into {@code models}, and for an {@link LaneGroup#AGENT_VM} lane into {@code catalog_models} too),
      * and which of them automatic selection takes. Grouped by provider rather than sent flat because
      * that is the shape of the choice: a key is what an org has or does not have, so the page asks for
      * a provider and then for one of its models. The client narrows the list to
-     * {@code configured_providers} and shows nothing else; it never re-orders it, because the order IS
+     * {@code configured_providers} and shows nothing else; it never re-orders it, because the order is
      * the fallback rule.
      *
      * <p>{@code effectiveModelKey} is what the lane runs right now, and {@code automatic} says which
-     * of the two ways it got there — the project's own row, or the priority order resolved against the
+     * of the two ways it got there: the project's own row, or the priority order resolved against the
      * providers the org has keys for. Null means the org has no key for any model this lane offers, so
      * the lane runs nothing and the page asks for a provider instead of a model. There is no default
      * model to name here: a default named a provider the org might not have, which is how this page
@@ -133,10 +133,8 @@ public class ProjectModelSettingController {
      * one automatic selection takes.
      *
      * <p>The label ships from here rather than being spelled in the client for the same reason every
-     * other string on this page does — it is {@link PlatformCatalog}'s, and a second copy in a React
-     * component is a second answer that drifts. That mattered concretely: the page used to carry its
-     * own provider-name map purely to render "needs an AWS Bedrock key" suffixes, and it had already
-     * fallen out of step with the catalog it was copied from.
+     * other string on this page does: it is {@link PlatformCatalog}'s, and a second copy in a React
+     * component is a second answer that drifts.
      */
     public record ProviderOptionView(
             ModelProvider provider,
@@ -145,15 +143,15 @@ public class ProjectModelSettingController {
             @JsonProperty("default_model_key") String defaultModelKey) {}
 
     /**
-     * A (#994): one model's live per-MTok rate, read from the same {@code price_book} {@link
-     * ai.tessary.pricing.PlatformCallPricer} prices a completed sandbox run from — not a static
+     * One model's live per-MTok rate, read from the same {@code price_book}
+     * {@link ai.tessary.pricing.PlatformCallPricer} prices a completed sandbox run from: not a static
      * capability, so it does not belong on {@link BedrockModelProfile.ModelDescriptor}. Powers the
-     * settings page's price-gated warning on the TRIAGE lane (A.3): a project must never hardcode "$1
-     * / $5" as Haiku's rate, because the book can move.
+     * settings page's price-gated warning on the TRIAGE lane: a project must never hardcode "$1 / $5"
+     * as Haiku's rate, because the book can move.
      *
      * <p>Either field null means unpriced (no book in force carries a rate for this model), which the
-     * UI must read as "unknown", never as free — the same convention {@link
-     * ai.tessary.pricing.ModelRates} documents.
+     * UI must read as "unknown", never as free, the same convention
+     * {@link ai.tessary.pricing.ModelRates} documents.
      */
     public record ModelRateView(
             @JsonProperty("model_key") String modelKey,
@@ -167,21 +165,18 @@ public class ProjectModelSettingController {
     /**
      * The settings page's whole payload: the sections to draw, the lanes to render under them (each
      * carrying its own options, in order, and what it currently runs), the full model catalogue the
-     * keys index into, each model's live rate (A, #994), and the project's own explicit choices.
+     * keys index into, each model's live rate, and the project's own explicit choices.
      * {@code settings} holds only lanes someone has pinned by hand; every other lane's model is in its
      * {@link LaneView#effectiveModelKey}, resolved from the priority order and the org's keys.
      *
-     * <p>{@code catalogModels} is the non-Bedrock half of #939's {@code model_key} union (see {@link
-     * ProjectModelSettings}'s class javadoc): the agentic {@link ModelCatalog} entries (GEMINI/GLM/
-     * GROK/CUSTOM) an {@link LaneGroup#AGENT_VM} lane may also be pointed at, keyed the same
-     * {@code "<PROVIDER>:<model_name>"} way {@link ProjectModelSettings#set} accepts. Kept as its own
-     * list rather than folded into {@code models} because the two are genuinely different shapes — a
-     * catalog entry carries no Bedrock capability fields (tiers, cache TTLs, endpoint) — and because
-     * {@link ProviderCredentialController#catalog} already exposes this exact record over the wire, so
-     * reusing it here adds no new schema. Before this field existed, an AGENT_VM lane's {@code
-     * model_keys} only ever named Bedrock models: {@link ProjectModelSettings#validate}/{@code set}
-     * accepted a catalog key from any caller, but the settings page itself had no way to offer one, so
-     * GEMINI/GLM/GROK/CUSTOM were reachable only by hand-crafting a raw PUT.
+     * <p>{@code catalogModels} is the non-Bedrock half of the {@code model_key} union (see
+     * {@link ProjectModelSettings}'s class javadoc): the agentic {@link ModelCatalog} entries
+     * (GEMINI/GLM/GROK/CUSTOM) an {@link LaneGroup#AGENT_VM} lane may also be pointed at, keyed the
+     * same {@code "<PROVIDER>:<model_name>"} way {@link ProjectModelSettings#set} accepts. Kept as
+     * its own list rather than folded into {@code models} because the two are genuinely different
+     * shapes (a catalog entry carries no Bedrock capability fields: tiers, cache TTLs, endpoint), and
+     * because {@link ProviderCredentialController#catalog} already exposes this exact record over the
+     * wire, so reusing it here adds no new schema.
      */
     public record ModelSettingsView(
             List<GroupView> groups,
@@ -191,12 +186,12 @@ public class ProjectModelSettingController {
             List<ModelRateView> rates,
             List<ProjectModelSetting> settings,
             /**
-             * #939 D3: the providers the org has a credential for — the picker disables any option
-             * whose provider is absent here, with a link to Settings → Providers, rather than letting
+             * The providers the org has a credential for: the picker disables any option whose
+             * provider is absent here, with a link to Settings → Providers, rather than letting
              * the pair be selected and only failing at save (PUT, {@link ModelConfigError
              * #PROVIDER_NOT_CONFIGURED}) or at run time (resolve, {@link ModelConfigError
-             * #MISSING_CREDENTIALS}). A model whose descriptor names no {@link ModelProvider} at all —
-             * there is none today, but the field is optional per model, not derived — is never
+             * #MISSING_CREDENTIALS}). A model whose descriptor names no {@link ModelProvider} at all
+             * (there is none today, but the field is optional per model, not derived) is never
              * disabled by this check.
              */
             @JsonProperty("configured_providers") Set<ModelProvider> configuredProviders) {}
@@ -219,8 +214,8 @@ public class ProjectModelSettingController {
         List<GroupView> groups = Arrays.stream(LaneGroup.values())
                 .map(g -> new GroupView(g, g.label(), g.description(), g.tiered(), g.effortTunable()))
                 .toList();
-        // #939: the agentic ModelCatalog entries (GEMINI/GLM/GROK/CUSTOM) an AGENT_VM lane may also be
-        // pointed at — see ModelSettingsView#catalogModels's javadoc. Non-agentic entries (OpenAI,
+        // The agentic ModelCatalog entries (GEMINI/GLM/GROK/CUSTOM) an AGENT_VM lane may also be
+        // pointed at; see ModelSettingsView#catalogModels's javadoc. Non-agentic entries (OpenAI,
         // Anthropic direct, OpenRouter, Ollama, Moonshot, the Bedrock entries already covered by
         // BedrockModelProfile) are never offered on any lane today, so they are filtered out here
         // rather than left for the client to skip.
@@ -269,9 +264,9 @@ public class ProjectModelSettingController {
     }
 
     /**
-     * A (#994): one model's rate, resolved the same way {@link ai.tessary.pricing.PlatformCallPricer}
-     * resolves a completed call's — {@link ModelResolver#resolve} on the {@code inference_profile_id}
-     * (the id the model is priced under, on either endpoint — see that field's javadoc), then a book
+     * One model's rate, resolved the same way {@link ai.tessary.pricing.PlatformCallPricer}
+     * resolves a completed call's: {@link ModelResolver#resolve} on the {@code inference_profile_id}
+     * (the id the model is priced under, on either endpoint, see that field's javadoc), then a book
      * lookup. Best-effort: an unresolvable or unpriced model reports null rates rather than failing the
      * whole settings page over one row.
      */
@@ -286,7 +281,7 @@ public class ProjectModelSettingController {
 
     /**
      * Point one lane at a model + tier. The (model, tier) pair is validated against the capability
-     * matrix here rather than deferred to Bedrock — an unsupported pair (Flex on Haiku 4.5) would
+     * matrix here rather than deferred to Bedrock: an unsupported pair (Flex on Haiku 4.5) would
      * otherwise be accepted silently and then fail every call in that lane.
      */
     @PutMapping("/{lane}")
@@ -301,8 +296,8 @@ public class ProjectModelSettingController {
         // wire name ("grading"), and an unknown one must surface as our typed 400, not a 500.
         ModelLane parsed = ModelLane.fromWire(lane);
         ServiceTier tier = req.serviceTier() == null ? ServiceTier.STANDARD : req.serviceTier();
-        // #939 D3: the org-gated overload — this is an explicit user choice from the picker, which
-        // should already have disabled any provider the org has no credential for.
+        // The org-gated overload: this is an explicit user choice from the picker, which should
+        // already have disabled any provider the org has no credential for.
         settings.set(r.project().id(), r.org().id(), parsed, req.modelKey(), tier, req.reasoningEffort());
         // The model cache keys on (model, tier, effort), so a lane that just changed any of them would
         // keep serving the previous client until something else evicted it.
@@ -311,7 +306,7 @@ public class ProjectModelSettingController {
     }
 
     /**
-     * Drop this project's choice for one lane, returning it to the automatic answer — the best model
+     * Drop this project's choice for one lane, returning it to the automatic answer: the best model
      * in the lane's priority order that the org's configured providers can serve.
      *
      * <p>Returns the refreshed view, like the {@code PUT}, rather than a boolean ack: the lane it just

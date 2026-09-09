@@ -1,8 +1,8 @@
 # Runbook — upgrade the evals plugin contract
 
 The platform's import path mirrors the on-disk layout emitted by the
-`evals` plugin (`.tessary/pipeline/*`; the bundle's `graders/*.yaml` shards are read and ignored
-since Track A). When the
+`evals` plugin (`.tessary/pipeline/*`; the bundle's `graders/*.yaml` shards are read and ignored,
+since this platform has no grading). When the
 plugin ships a new release that changes that layout — new shard, renamed field,
 tightened schema — this runbook is the playbook for absorbing the change in
 one PR.
@@ -115,7 +115,7 @@ For every layout-level change, touch each of these in order:
    rather than corrupting a repo. It still wants a rebuild on a contract bump: `cd
    sandbox-runner/agent-sandbox && pnpm install && pnpm exec tsx build.ts` (needs the prod
    team's `E2B_API_KEY`). **The template must exist under the name `tessary-agent-sandbox` before
-   any E2B-backed deploy** — the rename landed with Track A and nothing in this repo can create the
+   any E2B-backed deploy** — nothing in this repo can create the
    cloud template.
 
 ### 4. Verify

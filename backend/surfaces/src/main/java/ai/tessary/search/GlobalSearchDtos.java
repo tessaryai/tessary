@@ -23,7 +23,7 @@ public final class GlobalSearchDtos {
      * a searchable entity is a one-line change on both sides rather than a stringly-typed contract.
      */
     public enum HitType {
-        // GRADER("grader") and DATASET("dataset") were here until Track A removed both stores. The enum
+        // GRADER("grader") and DATASET("dataset") were here until grading and datasets were removed. The enum
         // is kept at one constant rather than folded away: it is the wire contract the palette maps to a
         // detail route, and a second searchable entity is a one-line change on both sides.
         TRACE("trace");

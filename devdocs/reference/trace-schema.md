@@ -228,12 +228,12 @@ no parent pointer above the span; a key is `(project_id, …)` in every case.
 - **`retrieved_doc`** — same keying and same derived id; `list_role` (candidate|result), 1-based
   `rank`, `title`, `source_uri`, `data_source_id`; jsonb `metadata`.
 - **`media_object`** — inline **base64 media is externalized** here (content-addressed, deduped per
-  `(project_id, digest)`). The payload keeps an `image_ref` (or, since #985, `document_ref`) node naming the id; `media_ref` records
+  `(project_id, digest)`). The payload keeps an `image_ref` (or `document_ref`) node naming the id; `media_ref` records
   that reference as a row so the bytes can be found, and collected, by something other than a string
   search.
 
 **What is not here any more.** `context`, the v1 `trace`, `observation`, `message`, `message_block` and
-`feedback` were dropped by migration 0083 (folded into the baseline in the 2026-09 epic-3 partition
+`feedback` were dropped (folded into the baseline in the 2026-09 partition
 squash). Message content is not normalized into rows: it lives in
 `span_payload.input`/`.output` as the canonical `[{role, content}]` arrays the edge produced. The turn
 IS the trace, so there is no spine node between a session and a trace.

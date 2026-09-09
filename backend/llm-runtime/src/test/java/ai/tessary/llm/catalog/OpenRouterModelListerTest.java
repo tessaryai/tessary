@@ -21,7 +21,7 @@ import org.mockito.ArgumentCaptor;
 /**
  * Against a mocked {@link HttpClient} — see {@link OpenAiCompatModelListerTest}'s class javadoc for
  * why. Fixture ids are drawn from a real, live, unauthenticated read of
- * {@code https://openrouter.ai/api/v1/models} taken during #939 TASK 2's implementation, so the
+ * {@code https://openrouter.ai/api/v1/models}, so the
  * SIX-MAKER-INTERSECT behavior under test is exercised against namespace strings OpenRouter actually
  * uses today, not invented ones. {@code credential.baseUrl()} is irrelevant — {@link
  * OpenRouterModelLister} ignores it entirely, same reasoning as {@link AnthropicModelLister}.

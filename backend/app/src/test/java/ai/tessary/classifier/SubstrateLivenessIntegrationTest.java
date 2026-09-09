@@ -30,7 +30,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * semantics. This is the signal the cookie-auth {@code /substrate/status} endpoint surfaces to
  * {@code Setup.tsx}.
  *
- * <p>Also covers the connect-gate reads added for #1227 ({@link SubstrateReadRepository#hasTaggedSpan},
+ * <p>Also covers the connect-gate reads ({@link SubstrateReadRepository#hasTaggedSpan},
  * {@link SubstrateReadRepository#spansReceived}, {@link SubstrateReadRepository#taggedSpans}) —
  * additive, so they ride the same {@code writer.enqueue}/{@code oneTrace} fixtures the untagged-count
  * assertions already use rather than a second test method duplicating the setup.
@@ -103,7 +103,7 @@ class SubstrateLivenessIntegrationTest {
         assertEquals(2, substrate.untaggedSpans(pidA), "both untagged spans counted");
         assertEquals(0, substrate.untaggedSpans(pidB), "untagged count is project-scoped");
 
-        // #1227: hasTaggedSpan/spansReceived/taggedSpans are false/0/0 before this point (both prior
+        // hasTaggedSpan/spansReceived/taggedSpans are false/0/0 before this point (both prior
         // traces above are untagged) and flip only once a call-site-tagged span lands.
         assertFalse(substrate.hasTaggedSpan(pidA), "no tagged span has landed yet");
         assertEquals(2, substrate.spansReceived(pidA), "two untagged spans received so far");

@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-/** #939 D6's six-maker allowlist and the two alias tables that resolve into it. */
+/** The six-maker allowlist and the two alias tables that resolve into it. */
 class SupportedMakerTest {
 
     @Test
@@ -22,8 +22,8 @@ class SupportedMakerTest {
 
     @Test
     void openRouterPrefixDropsEveryUnsupportedMaker() {
-        // Confirmed real OpenRouter namespaces (live read, #939 TASK 2 implementation) that must NOT
-        // pass the filter — none of D6's six makers.
+        // Confirmed real OpenRouter namespaces (live read) that must NOT
+        // pass the filter — none of the six supported makers.
         assertEquals(Optional.empty(), SupportedMaker.fromOpenRouterPrefix("meta/muse-spark-1.3"));
         assertEquals(Optional.empty(), SupportedMaker.fromOpenRouterPrefix("mistralai/mistral-large"));
         assertEquals(Optional.empty(), SupportedMaker.fromOpenRouterPrefix("deepseek/deepseek-v4"));
@@ -56,7 +56,7 @@ class SupportedMakerTest {
 
     @Test
     void bedrockProviderNameDropsAnUnsupportedMaker() {
-        // Amazon/Nova is the entire point of #939 D6's Bedrock removal — must never resolve.
+        // Amazon/Nova is the entire point of the Bedrock maker removal — must never resolve.
         assertEquals(Optional.empty(), SupportedMaker.fromBedrockProviderName("Amazon"));
         assertEquals(Optional.empty(), SupportedMaker.fromBedrockProviderName("Meta"));
         assertEquals(Optional.empty(), SupportedMaker.fromBedrockProviderName(null));
@@ -64,7 +64,7 @@ class SupportedMakerTest {
 
     @Test
     void everySupportedMakerHasExactlySixValues() {
-        // Pins D6's own count so a maker silently added/removed here fails a test, not a code review.
+        // Pins the allowlist's own count so a maker silently added/removed here fails a test, not a code review.
         assertTrue(SupportedMaker.values().length == 6);
     }
 }

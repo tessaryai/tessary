@@ -15,19 +15,17 @@ import org.springframework.stereotype.Component;
  * at a relation that does not exist in the connected database.
  *
  * <p>Runs from {@link #afterSingletonsInstantiated()}, which Spring Boot calls after every singleton
- * bean has been fully initialized — including both {@code SpringLiquibase} beans, whose DDL runs
- * inside their own {@code afterPropertiesSet()} during singleton instantiation, strictly before
- * {@code SmartInitializingSingleton} callbacks fire. So this check is guaranteed to run after the
- * open master and (when present) the paid master have both already applied, with no explicit
- * {@code @DependsOn} on either — the ordering falls out of the Spring Boot lifecycle contract itself,
- * not out of a string naming a bean. That guarantee holds only as long as nothing in the chain
- * becomes {@code @Lazy}; a lazy Liquibase bean would defer its DDL past this check silently.
+ * bean has been fully initialized, including any {@code SpringLiquibase} bean, whose DDL runs inside
+ * its own {@code afterPropertiesSet()} during singleton instantiation, strictly before
+ * {@code SmartInitializingSingleton} callbacks fire. So this check is guaranteed to run after every
+ * Liquibase master present has already applied, with no explicit {@code @DependsOn} — the ordering
+ * falls out of the Spring Boot lifecycle contract itself, not out of a string naming a bean. That
+ * guarantee holds only as long as nothing in the chain becomes {@code @Lazy}; a lazy Liquibase bean
+ * would defer its DDL past this check silently.
  *
- * <p>No-ops when no {@code DataSource} bean is present — the shape every {@code ApplicationContextRunner}
- * test in this codebase uses, deliberately, so this class never forces a container onto a context
- * that was never asking for a live database. This is the failure-path proof only; a live-database
- * success-path proof (an actual missing table caught against a running Postgres) is out of scope
- * here per rule 10 / epic 5 — nothing in this PR deploys anywhere.
+ * <p>No-ops when no {@code DataSource} bean is present, the shape every
+ * {@code ApplicationContextRunner} test in this codebase uses, so this class never forces a
+ * container onto a context that was never asking for a live database.
  */
 @Component
 public class DetectionTableSchemaCheck implements SmartInitializingSingleton {

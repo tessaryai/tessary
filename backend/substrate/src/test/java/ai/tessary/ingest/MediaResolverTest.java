@@ -117,7 +117,7 @@ class MediaResolverTest {
 
     @Test
     void langfuse_pdfToken_resolvedToInlineDataUri() {
-        // #985, Decision 2: the images-only gate widens to also accept application/pdf.
+        // The images-only gate widens to also accept application/pdf.
         byte[] pdf = {0x25, 0x50, 0x44, 0x46}; // "%PDF" magic bytes, contents don't matter to the resolver
         FakeClient client = new FakeClient()
                 .addString(

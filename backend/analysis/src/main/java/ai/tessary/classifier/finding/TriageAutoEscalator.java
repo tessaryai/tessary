@@ -33,8 +33,8 @@ import org.springframework.stereotype.Component;
  * <h2>Off unless an org opts in</h2>
  *
  * <p>Gated on {@link Capability#TRIAGE_AUTOMATIC}, which is off by default in every edition — so this
- * component runs on every deployment and does nothing on every project, until an org turns it on for itself
- * (decision D5). A flag store that is empty, unreachable or erroring supplies no opinion and leaves that
+ * component runs on every deployment and does nothing on every project, until an org turns it on for itself.
+ * A flag store that is empty, unreachable or erroring supplies no opinion and leaves that
  * default standing, so the failure mode of the capability layer is "manual", never "spending".
  *
  * <h2>What bounds it, and what deliberately does not</h2>

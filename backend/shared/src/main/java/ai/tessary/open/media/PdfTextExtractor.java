@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Bounded best-effort PDF text extraction — the document/PDF modality's judge-and-render input
- * (#985, Epic 8 Track B, Decision 2: PDF only, no audio/video). Used at two call sites: ingest
+ * (PDF only; audio/video are out of scope). Used at two call sites: ingest
  * ({@code MediaExternalizer}, once per document, the extracted text persisted into the
  * {@code document_ref} node) and the judge boundary ({@code ContentBlocks}, on-demand for a
  * {@code document_b64} block that never went through externalization).

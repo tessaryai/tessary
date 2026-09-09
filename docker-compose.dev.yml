@@ -30,12 +30,11 @@ services:
     ports:
       # Exposed on host so devs can psql in: psql -h localhost -p 5433 -U tessary.
       # NOT loopback-bound, unlike every other publish in this file, and that is a known gap
-      # rather than an oversight: tessary-paid/scripts/apply-overlay-changelog.sh (task
-      # overlay:apply-changelog) reaches this port from INSIDE a throwaway container through
-      # host.docker.internal. On Docker Desktop that resolves to the host and a loopback publish
-      # would still answer; on Linux Docker Engine host-gateway is 172.17.0.1 and a loopback
-      # publish refuses it. Closing this means first moving that script onto the stack network to
-      # talk to postgres:5432 directly, which is its own change.
+      # rather than an oversight: some external tooling reaches this port from INSIDE a
+      # throwaway container through host.docker.internal. On Docker Desktop that resolves to
+      # the host and a loopback publish would still answer; on Linux Docker Engine host-gateway
+      # is 172.17.0.1 and a loopback publish refuses it. Closing this means first moving that
+      # tooling onto the stack network to talk to postgres:5432 directly, which is its own change.
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -71,7 +70,7 @@ services:
         -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     expose:
       - "8080"
-      # OTLP/gRPC trace receiver (#235) — reachable on the internal `tessary` network. Inert unless
+      # OTLP/gRPC trace receiver — reachable on the internal `tessary` network. Inert unless
       # tessary.ingest.otlp.enabled=true AND tessary.ingest.otlp.transport is grpc|both.
       - "4317"
     ports:
@@ -82,9 +81,9 @@ services:
       # bind would refuse the forwarded connection and the debugger would never attach.
       - "127.0.0.1:5005:5005"
       # Publish the OTLP/gRPC receiver to the host so a local exporter can push to localhost:4317 when
-      # the receiver is enabled (#235). A compose `ports:` mapping works without a Dockerfile `EXPOSE`
+      # the receiver is enabled. A compose `ports:` mapping works without a Dockerfile `EXPOSE`
       # (EXPOSE is metadata only); the `EXPOSE 4317` line in backend/Dockerfile is a protected path
-      # handed off to a human (see decision.md).
+      # that changes only with sign-off from a human, not automatically.
       - "127.0.0.1:4317:4317"
     env_file:
       # Pass the entire repo-root .env into the container. Optional — if absent
@@ -99,21 +98,21 @@ services:
       TESSARY_JDBC_URL: jdbc:postgresql://postgres:5432/tessary
       TESSARY_DB_USERNAME: tessary
       TESSARY_DB_PASSWORD: tessary
-      # The dev stack runs unauthenticated, and since #924 it has to SAY so. Absent WorkOS
+      # The dev stack runs unauthenticated, and it has to SAY so. Absent WorkOS
       # credentials used to be the off switch by themselves; they now fail closed, because
       # "no provider configured" is the normal state of a self-hosted open-edition instance
       # and must not be read as consent to serve it open. Set here rather than in .env so a
       # fresh clone's `task dev` works with no manual step -- it is wiring, not a secret.
       #
-      # Parameterized (#878), default UNCHANGED: every existing caller (`task dev`, `task
+      # Parameterized, default UNCHANGED: every existing caller (`task dev`, `task
       # dev:slim`, this file's other consumers) still gets "true" with zero config, same as
       # before. The one caller that overrides it is scripts/check-open-boot.sh, which exports
-      # TESSARY_AUTH_DISABLED=false on its own compose invocation ONLY -- the epic-2 gate needs to
+      # TESSARY_AUTH_DISABLED=false on its own compose invocation ONLY -- that gate needs to
       # exercise a REAL authenticated session (AuthFilter actually resolving a TenantContext from
       # the signed session cookie), and AuthFilter.shouldNotFilter bypasses itself for EVERY path
       # when this is set, which would make GET /auth/me (and everything past it) 401 unconditionally
       # regardless of whether the signup/login flow itself worked -- silently defeating the exact
-      # authenticated-flow proof #924 added to the gate. A hardcoded "true" literal cannot be
+      # authenticated-flow proof the gate depends on. A hardcoded "true" literal cannot be
       # overridden by any caller's env, which is what forced this one-line change.
       TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-true}
       # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
@@ -121,7 +120,7 @@ services:
       # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`;
       # unset everywhere, these bind blank exactly as before.
       TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-}
-      # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until #939 D4 — see docker-compose.yml's
+      # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — see docker-compose.yml's
       # identical removal note; the switch it fed had zero production callers.
       TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-}
       # Local dev: behavior-drift profiles re-fit after ≤10 min of idleness (prod: 6h) so a
@@ -135,7 +134,7 @@ services:
       SPRING_DEVTOOLS_LIVERELOAD_ENABLED: "false"
       # Pre-wired target for OTLP traces to the local Alloy agent (below), which forwards the
       # gen_ai (judge) spans on to Langfuse — so prompt-cache token usage is inspectable on
-      # local runs, same as prod. Off by default though (#864): the base application.yaml sets
+      # local runs, same as prod. Off by default though: the base application.yaml sets
       # management.tracing.export.otlp.enabled: false, and nothing here overrides that, so with
       # no opt-in this is dead config the exporter never reads. Bring up Alloy AND flip the
       # enabled flag to actually ship: `COMPOSE_PROFILES=observability
@@ -157,8 +156,8 @@ services:
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://alloy:4317
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT: grpc
       # The actual enable/disable flags the comment above refers to. Compose only forwards a host
-      # env var into the container when the compose YAML itself references it (crew review, PR
-      # #1013) — task dev:profiling exporting these into the shell does nothing on its own without
+      # env var into the container when the compose YAML itself references it —
+      # task dev:profiling exporting these into the shell does nothing on its own without
       # this line. Defaults to the base application.yaml's own "false" so plain `task dev` is
       # unaffected; task dev:profiling's TESSARY_PROFILING branch sets the shell var to "true" before
       # `docker compose up`, which this then passes through.
@@ -246,7 +245,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
       # The Taskfile exports PNPM_VERSION (mirrored by the PNPM_VERSION Actions variable in CI);
-      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh (#1190).
+      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
     image: tessary-frontend-dev:latest
@@ -310,7 +309,7 @@ services:
   # the provider's minimum cacheable length (OpenAI 1024, Anthropic Sonnet/Opus 1024, Haiku
   # 2048, Bedrock ~1024); small traces cache nothing and show 0 — that's expected.
   #
-  # Opt-in (#864): gated behind the `observability` Compose profile, so this is absent from a
+  # Opt-in: gated behind the `observability` Compose profile, so this is absent from a
   # default `task dev` / detached boot — that's exactly the path scripts/check-open-boot.sh
   # exercises, so this one gate is what actually satisfies "no Alloy container by default"
   # against the check that enforces it. Bring it up with `COMPOSE_PROFILES=observability
@@ -327,7 +326,7 @@ services:
       DEPLOYMENT_NAME: ${DEPLOYMENT_NAME:-development}
       # Langfuse OTLP target for the gen_ai-only trace branch. Endpoint + keys are read
       # from ./.env via Compose interpolation (the same values the ingest adapter uses).
-      # Off by default (#864): blank endpoint means the exporter has nothing to resolve, so
+      # Off by default: blank endpoint means the exporter has nothing to resolve, so
       # opting into `observability` without Langfuse keys doesn't also start dialing Langfuse
       # Cloud. Set LANGFUSE_OTLP_ENDPOINT in .env to re-enable.
       LANGFUSE_OTLP_ENDPOINT: ${LANGFUSE_OTLP_ENDPOINT:-}
@@ -374,19 +373,19 @@ services:
       - "8080"
     environment:
       PORT: "8080"
-      # Empty passthrough, same as docker-compose.yml (#1052): server.js's own default, `docker`
-      # (D7's open default since #855), wins when this is unset — so the dev stack and the
+      # Empty passthrough, same as docker-compose.yml: server.js's own default, `docker`,
+      # wins when this is unset — so the dev stack and the
       # self-host stack agree, and a fresh `.env` never manufactures an E2B_API_KEY dependency.
-      # Until #1052 this defaulted to `e2b` (this service's doc comment above and its Prereq note
+      # This used to default to `e2b` (this service's doc comment above and its Prereq note
       # are about exercising the E2B template path); to dev against E2B, set SANDBOX_BACKEND=e2b
       # in .env. The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir
       # mounts + group_add below) mirrors docker-compose.yml's sandbox-runner service so the
       # default actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
-      # SANDBOX_WORK_VOLUME (crew review, PR #1081). `task dev:local`'s separate host-process
+      # SANDBOX_WORK_VOLUME. `task dev:local`'s separate host-process
       # path is untouched either way.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
       # Same tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner
-      # service (D6/D9, #941/#1114) — the tag matches the E2B template alias tessary-agent-sandbox.
+      # service — the tag matches the E2B template alias tessary-agent-sandbox.
       # Unset floats to `-latest`; the version lives in the git tag, never in a literal here.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: ${SANDBOX_DOCKER_CONCURRENCY:-1}
@@ -398,7 +397,7 @@ services:
       SANDBOX_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
       E2B_API_KEY: ${E2B_API_KEY:-}
       E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary-agent-sandbox}
-      # #939 D4: FULL REMOVAL of every deployment-env-var credential this service used to read —
+      # FULL REMOVAL of every deployment-env-var credential this service used to read —
       # AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole AGENT_PROVIDER
       # dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY,
       # GEMINI_API_KEY, GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY, CUSTOM_OPENAI_BASE_URL/
@@ -454,7 +453,7 @@ services:
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
         # Bake the SOP-conformance encoder (~1.7 GB) into the DEV image, so `task dev` can
-        # run a compile-service fit and a conformance sweep against a real /embed. The
+        # run a conformance sweep against a real /embed. The
         # production passes it too, but only after the Fargate task was raised to 8 GB (see
         # classify-service/README.md) — which is why it stays an opt-in build arg rather than an
         # unconditional bake: the order is load-bearing. Local cost: a longer first build and

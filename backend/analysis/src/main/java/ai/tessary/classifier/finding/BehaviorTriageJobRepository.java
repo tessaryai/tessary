@@ -22,25 +22,20 @@ import org.springframework.stereotype.Repository;
  * for the re-looks the recurrence rule schedules, backed by the unique {@code ux_job_triage}).
  *
  * <p>A separate kind from {@code grader_run} because it is a different question. The call site's
- * grader set judges whether the ANSWER was good; this asks whether the detector's CLAIM is true —
+ * grader set judges whether the answer was good; this asks whether the detector's claim is true,
  * measured over enough of the population, and carried by the evidence it cites. A passing grader
  * says nothing about either, since an agent can answer well on traces a claim was mis-measured over,
  * so routing findings through the grader queue would audit them with the wrong instrument.
  *
  * <p>Finite-job grain like the RCA queue: no cursor. The dedupe key covers every status rather than
- * pending-only, so a finding gets exactly one triage run per look — the ruling is about the CAUSE, and
+ * pending-only, so a finding gets exactly one triage run per look: the ruling is about the cause, and
  * a later sweep bumping the counter does not make the cause new. A second look is a second key, issued
- * only by the recurrence rule, so the count of keys under a finding IS the count of looks it has had.
+ * only by the recurrence rule, so the count of keys under a finding is the count of looks it has had.
  */
 @Repository
 public class BehaviorTriageJobRepository {
 
-    /**
-     * A persisted value — {@code job_kind_check} and the partial unique index both name it. It moved
-     * from {@code behavior_adjudication} to this in migration 0009, which is a migration and not a
-     * rename: every row of the old kind was deleted, because a claimed job would otherwise resume into
-     * a worker whose verdict vocabulary its payload predates.
-     */
+    /** A persisted value; {@code job_kind_check} and the partial unique index both name it. */
     static final String KIND = "triage";
 
     private static final String COLS = "id, project_id, payload->>'finding_id' AS finding_id, "
@@ -49,7 +44,7 @@ public class BehaviorTriageJobRepository {
             + "status, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at, "
             + "payload->>'finding_kind' AS finding_kind, payload->>'conformance' AS conformance";
 
-    /** True for a look parked in {@code dead} whose cooldown floor has passed — see {@link #REVIVE_IF_COOLED}. */
+    /** True for a look parked in {@code dead} whose cooldown floor has passed; see {@link #REVIVE_IF_COOLED}. */
     private static final String REVIVABLE = LeasedJobSql.deadLetterCooldownGate("job", BehaviorTriageJobRow.DEAD);
 
     /**
@@ -80,14 +75,14 @@ public class BehaviorTriageJobRepository {
         this.props = props;
     }
 
-    /** The moment a dead-lettered look becomes revivable — bound as {@code :deadFloor} by both enqueues. */
+    /** The moment a dead-lettered look becomes revivable; bound as {@code :deadFloor} by both enqueues. */
     private String deadFloor() {
         return Instant.now()
                 .minus(Duration.ofSeconds(props.getDeadLetterCooldownSeconds()))
                 .toString();
     }
 
-    /** The enqueue outcome — the job this finding resolved to, and whether it was already queued. */
+    /** The enqueue outcome: the job this finding resolved to, and whether it was already queued. */
     public record EnqueueOutcome(String jobId, String jobStatus) {}
 
     /**
@@ -98,7 +93,7 @@ public class BehaviorTriageJobRepository {
      *
      * <p>Unlike the RCA queue this does not revive a job on every touch: triage is advisory evidence on
      * a finding, and a finding whose analysis failed should not re-spend a microVM on every subsequent
-     * sweep. Re-running is a deliberate human action — and {@link #REVIVE_IF_COOLED} is what makes that
+     * sweep. Re-running is a deliberate human action, and {@link #REVIVE_IF_COOLED} is what makes that
      * sentence true rather than aspirational. A dead-lettered look past its cooldown floor goes back to
      * {@code pending} with a fresh attempt budget; every other status is left untouched, exactly as
      * before. The automatic lane cannot reach this branch at all: {@code FindingRepository}'s escalation
@@ -136,7 +131,7 @@ public class BehaviorTriageJobRepository {
     }
 
     /**
-     * Enqueue the triage for a CONFORMANCE finding — same job kind, same dedupe key shape, same
+     * Enqueue the triage for a conformance finding: same job kind, same dedupe key shape, same
      * budget numerator as {@link #enqueue}, because a conformance escalation is not a second pipeline.
      * What differs is the payload: {@code finding_kind} routes the worker to the conformance store, and
      * the {@code conformance} object carries the SOP rule sentence, the expect/never obligation and the
@@ -199,7 +194,7 @@ public class BehaviorTriageJobRepository {
     }
 
     /**
-     * How many triages this project has enqueued since {@code since} — the numerator of automatic
+     * How many triages this project has enqueued since {@code since}: the numerator of automatic
      * mode's bound (launch requirement B5).
      *
      * <p>Counts every status and both triggers. A job that failed still cost a run, and a hand-press is
@@ -236,7 +231,7 @@ public class BehaviorTriageJobRepository {
      * Dead-letter jobs whose lease expired with attempts at/over the cap (hung or crashed mid-analysis).
      *
      * <p>Terminal status is the cooldown-gated {@code dead}, not the shared default {@code failed}: a
-     * {@code failed} triage was reachable by nothing at all — not the escalation sweep (it wants
+     * {@code failed} triage was reachable by nothing at all: not the escalation sweep (it wants
      * {@code escalated_at IS NULL}), not the recurrence re-open (it wants a {@code closed} ruling a
      * never-triaged finding never has), and not the enqueue path, which had no revival branch. The
      * finding stayed un-triaged with a NULL verdict for good. {@code dead} keeps the "don't re-spend a
@@ -257,15 +252,15 @@ public class BehaviorTriageJobRepository {
      *
      * <p>Read on the findings page so a run that gave up is distinguishable from one still going. Both
      * leave {@code triaged_at} NULL with {@code escalated_at} set, so from the {@code finding} table
-     * alone they are the same row — which is why a permanently-failed triage rendered as "Triaging"
+     * alone they are the same row, which is why a permanently-failed triage rendered as "Triaging"
      * indefinitely. This is the one fact the finding does not carry.
      *
-     * <p>Only dead-lettered rows: a job still retrying IS in flight, and reporting its interim
+     * <p>Only dead-lettered rows: a job still retrying is in flight, and reporting its interim
      * {@code last_error} would flap the surface between "failed" and "running" on every attempt. That
      * also means a job parked waiting on a missing credential reads as in-flight rather than failed,
-     * which is honest — it has spent no attempt and will run itself the moment the credential lands.
+     * which is honest: it has spent no attempt and will run itself the moment the credential lands.
      *
-     * <p>One query for the page rather than one per row — the alternative is an N+1 on the busiest
+     * <p>One query for the page rather than one per row: the alternative is an N+1 on the busiest
      * surface the classifiers have.
      */
     public Map<String, FailedTriage> failedByFinding(String projectId, List<String> findingIds) {
@@ -303,7 +298,7 @@ public class BehaviorTriageJobRepository {
      * Hand a failed run back to the queue: keep it {@code claimed}, expire its lease now, and record why.
      *
      * <p><b>Not {@code failed}.</b> A triage that did not produce a ruling leaves {@code triage_verdict}
-     * NULL, and a terminal job would strand that finding un-triaged forever — invisible, because nothing
+     * NULL, and a terminal job would strand that finding un-triaged forever, invisible because nothing
      * distinguishes it from one nobody has scheduled. Expiring the lease puts the row straight back in
      * {@link #claimBatch}'s reclaim leg while attempts remain, and {@link #failExhausted} dead-letters it
      * once they do not. Status is left alone rather than set to {@code pending} on purpose: the pending
@@ -318,7 +313,7 @@ public class BehaviorTriageJobRepository {
      * rather than immediately.
      *
      * <p>Immediate expiry meant the next tick re-claimed at once, so a job that fails deterministically
-     * spent all {@code maxAttempts} as fast as the scheduler could turn — no pause in which the thing
+     * spent all {@code maxAttempts} as fast as the scheduler could turn, with no pause in which the thing
      * it depends on might recover. The delay is the difference between a retry and a spin.
      */
     public void markRetryable(String id, @Nullable String error, long delaySeconds) {
@@ -337,7 +332,7 @@ public class BehaviorTriageJobRepository {
      * decremented to undo the increment {@code claimBatch} made.
      *
      * <p>For failures that were never about this job. A launcher refusing every request is not five
-     * chances to rule on a finding, it is zero — and letting it consume them dead-letters a queue of
+     * chances to rule on a finding, it is zero, and letting it consume them dead-letters a queue of
      * perfectly good findings for a reason that had nothing to do with any of them. Floored at zero so
      * a double release cannot drive the count negative.
      */
@@ -350,8 +345,8 @@ public class BehaviorTriageJobRepository {
      * now rather than immediately.
      *
      * <p>Immediate release is right for a launcher blip, where the breaker owns the pacing and the next
-     * tick is a fair probe. It is wrong for a condition only a human can clear — a missing provider
-     * credential — because the job would then be re-claimed, re-checked and re-released on every single
+     * tick is a fair probe. It is wrong for a condition only a human can clear (a missing provider
+     * credential), because the job would then be re-claimed, re-checked and re-released on every single
      * tick, forever. Worse, {@code claimBatch} takes {@code CLAIM_BATCH} rows per round in
      * {@code updated_at} order, so a backlog of permanently-unrunnable jobs would keep filling those
      * rounds and push genuinely runnable findings behind it. Not being due is what keeps them out of the
@@ -371,8 +366,8 @@ public class BehaviorTriageJobRepository {
     /**
      * Which look a press belongs to: the one already scheduled, or the next one.
      *
-     * <p>Two presses on the same finding must land on the SAME job — that is the once-per-cause
-     * guarantee — while a press after a recurrence re-open must start a new one. {@code escalatedAt} is
+     * <p>Two presses on the same finding must land on the same job, the once-per-cause guarantee,
+     * while a press after a recurrence re-open must start a new one. {@code escalatedAt} is
      * exactly that distinction: it is stamped when a look is scheduled and cleared by
      * {@code FindingRepository#reopenForTriage}, so a finding carrying one is mid-look and a finding
      * without one is due its next.
@@ -386,11 +381,11 @@ public class BehaviorTriageJobRepository {
     }
 
     /**
-     * How many looks this finding has had — one row per dedupe key under it, whatever became of the job.
+     * How many looks this finding has had: one row per dedupe key under it, whatever became of the job.
      *
      * <p>This is the "two looks" counter the recurrence rule stands on, and it is deliberately read off
-     * the queue rather than kept on the finding: the job row is what a look IS, so a counter beside it
-     * could disagree with reality after any partial write. A failed or dead-lettered look still counts —
+     * the queue rather than kept on the finding: the job row is what a look is, so a counter beside it
+     * could disagree with reality after any partial write. A failed or dead-lettered look still counts:
      * it spent a schedule, and the recurrence rule is about how many times we have already asked.
      */
     public int countLooks(String projectId, String findingId) {
@@ -406,7 +401,7 @@ public class BehaviorTriageJobRepository {
 
     /**
      * The key one look claims. The first look keeps the bare {@code <project>:<finding>} the queue has
-     * always used — it is the key every live row carries — and a re-look appends its ordinal, so the
+     * always used (it is the key every live row carries), and a re-look appends its ordinal, so the
      * recurrence rule can schedule a second run without the first one's row swallowing it.
      */
     private static String dedupeKey(String projectId, String findingId, int look) {

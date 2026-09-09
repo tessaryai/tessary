@@ -1,10 +1,11 @@
-# Scrub-gate allowlist (epic 4, gate clause 3). Read by tessary-paid/scripts/check-scrub.sh and
+# Scrub-gate allowlist. Read by this build's private scrub-gate script and
 # applied to BOTH scanners' findings, so an exemption exists in exactly one place. This file
 # PUBLISHES: a public-repo reviewer who cannot see what was exempted cannot review the exemption.
-# That is why it stayed here when #1293 moved the scrub gate itself and its forbidden-strings input
-# into the overlay — the strings we scan FOR cannot publish; the exemptions we granted must.
+# That is why it stayed here when the scrub gate itself and its forbidden-strings input moved
+# into this build's private tooling — the strings we scan FOR cannot publish; the exemptions we
+# granted must.
 #
-# TWO CONSUMERS NOW, and they must be kept in step BY HAND. The overlay's scrub gate reads this file
+# TWO CONSUMERS NOW, and they must be kept in step BY HAND. The private scrub gate reads this file
 # directly; the open tree's own scan (.github/workflows/secret-scan.yml) reads /.gitleaks.toml,
 # which carries the same rows in gitleaks' own allowlist format, one block per file with this file's
 # reason as its description. Nothing checks that the two agree. Add a row here, add the block there.

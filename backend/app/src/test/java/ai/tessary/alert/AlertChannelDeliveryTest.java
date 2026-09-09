@@ -41,18 +41,13 @@ import org.springframework.test.context.DynamicPropertySource;
  * Acceptance for alert channels. Exercised against the real pgvector Postgres
  * (Testcontainers) so the alert schema applies for real. Proves the full delivery path: a fired
  * {@link AlertFiredEvent} fans out through {@code AlertDeliveryListener} to all enabled channels for the
- * project, the real SPI impls serialize + sign + render the payload, each outbound call is recorded in the
- * delivery-attempt log, and the at-most-once guard de-dupes a re-fire.
- *
- * <p><b>Slack is present but withheld.</b> A Slack channel is created enabled and is expected NOT to be
- * delivered to, because {@code slack_enabled} is off by default — which is what pins that the capability
- * is enforced at fan-out rather than only at the API. Slack's own transport now lives out of process in
- * {@code tessary-paid/slack-service/} and has its own suite; nothing here reaches it.
+ * project, the real SPI impls serialize, sign, and render the payload, each outbound call is recorded in
+ * the delivery-attempt log, and the at-most-once guard de-dupes a re-fire.
  *
  * <p>Outbound HTTP is captured by a recording {@link HttpClient} installed via the {@link ChannelHttp}
- * test seam. The channels are configured with public TEST-NET-3 (203.0.113.x) URLs so {@code UrlGuard}
- * runs for real and passes; the recording client (which never opens a socket) then captures the request
- * URI, headers, and body — so the SSRF guard, the JSON bodies, the HMAC signature, and the connector auth
+ * test seam. Channels are configured with public TEST-NET-3 (203.0.113.x) URLs so {@code UrlGuard} runs
+ * for real and passes; the recording client (which never opens a socket) then captures the request URI,
+ * headers, and body, so the SSRF guard, the JSON bodies, the HMAC signature, and the connector auth
  * headers are all exercised end to end.
  */
 @SpringBootTest
@@ -103,15 +98,13 @@ class AlertChannelDeliveryTest {
     void firedAlertFansOutToSlackWebhookGenericWebhookAndPagerDuty() throws Exception {
         var fixture = TenantFixture.bootstrap(tenants, "alert-channel");
         String pid = fixture.project().id();
-        // The precondition the Slack assertion below rests on, stated rather than assumed. The open edition
-        // defaults every capability on except the four paid classifiers and triage_automatic, so Slack is NOT
-        // withheld here and what this test sees is the adapter path, not the capability gate. If that ever
-        // changes this fails here with the reason instead of leaving a delivery count nobody can interpret.
+        // The precondition the Slack assertion below rests on, stated rather than assumed: this test
+        // exercises the adapter path, not the capability gate.
         assertTrue(
                 capabilities.isEnabled(fixture.org().id(), ai.tessary.plan.Capability.SLACK),
                 "this test exercises the adapter path, so the org must HAVE slack_enabled");
 
-        // Generic webhook (with HMAC signing secret) — public TEST-NET URL passes UrlGuard.
+        // Generic webhook (with HMAC signing secret), public TEST-NET URL passes UrlGuard.
         channelService.create(
                 pid,
                 new UpsertChannelRequest(
@@ -119,15 +112,13 @@ class AlertChannelDeliveryTest {
                         "ops-webhook",
                         true,
                         json("{\"url\":\"https://203.0.113.10/hook\",\"secret\":\"sek\"}")));
-        // A Slack channel. Since Slack moved out of process, this no longer POSTs to Slack — it POSTs to
-        // slack-service, which is not deployed in this suite, so the attempt is expected to FAIL and to
-        // say why in the delivery log. That is the honest behaviour and worth pinning: an undeployed
-        // adapter must make Slack deliveries visibly fail rather than silently vanish.
+        // A Slack channel. This posts to slack-service, not to Slack directly, and that service is not
+        // deployed in this suite, so the attempt is expected to fail and say why in the delivery log: an
+        // undeployed adapter must make Slack deliveries visibly fail rather than silently vanish.
         //
-        // It is not captured by the recording client either, and deliberately: SlackDelivery uses its own
-        // HttpClient rather than the ChannelHttp seam, because ChannelHttp runs UrlGuard and the adapter
-        // lives at a PRIVATE address (http://slack:8090) that the SSRF guard would rightly reject. The
-        // Slack transport itself is covered by that service's own pytest suite.
+        // Not captured by the recording client either, deliberately: SlackDelivery uses its own HttpClient
+        // rather than the ChannelHttp seam, because the adapter lives at a private address that the SSRF
+        // guard would rightly reject.
         channelService.create(
                 pid,
                 new UpsertChannelRequest(
@@ -186,7 +177,7 @@ class AlertChannelDeliveryTest {
         assertEquals(AlertPayload.dedupKey(event), pd.get("dedup_key").asText());
 
         // Delivery-attempt log: the two direct channels delivered, the disabled one absent, and Slack
-        // recorded as a FAILURE naming the missing adapter — a delivery that cannot be made must leave a
+        // recorded as a failure naming the missing adapter. A delivery that cannot be made must leave a
         // trace, since this log is the only visibility surface the fan-out has.
         List<DeliveryAttemptRow> log = attempts.listByProject(pid, 100);
         long delivered = log.stream()
@@ -283,7 +274,7 @@ class AlertChannelDeliveryTest {
 
     /**
      * An {@link HttpClient} that records each request's path, headers, and body and returns a synthetic
-     * 202 — no socket is opened. Keyed by URI path so the test can assert per-channel payloads.
+     * 202, no socket is opened. Keyed by URI path so the test can assert per-channel payloads.
      */
     private static final class RecordingClient extends HttpClient {
         final Map<String, String> bodies = new ConcurrentHashMap<>();

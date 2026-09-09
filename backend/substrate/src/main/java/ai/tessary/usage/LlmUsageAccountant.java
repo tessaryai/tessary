@@ -14,12 +14,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * Records every platform LLM call into the {@code llm_call} ledger, so Settings → Usage can answer
- * "which part of the product burned these tokens, in which bucket, at what cost" for every lane rather
- * than only for grading (whose spend {@code verdict} already carried, as one lump total).
+ * "which part of the product burned these tokens, in which bucket, at what cost" for every lane.
  *
- * <p><b>Accounting must never break the thing it is accounting for.</b> Every method swallows its own
- * failures at WARN: an unwritable ledger row costs a line on a usage page, whereas a thrown one would
- * fail a grading run for an LLM call that already happened — and was already paid for.
+ * <p>Accounting must never break the thing it is accounting for: every method swallows its own
+ * failures at WARN. An unwritable ledger row costs a line on a usage page, whereas a thrown one
+ * would fail a run for an LLM call that already happened, and was already paid for.
  *
  * <p>A call with no project id is dropped rather than stored: {@code llm_call} hangs off
  * {@code project}, and a call that cannot be attributed to a project cannot be attributed to an org
@@ -31,15 +30,13 @@ public class LlmUsageAccountant {
     private static final Logger log = LoggerFactory.getLogger(LlmUsageAccountant.class);
 
     /**
-     * What one run was FOR — the unit of work the spend is attributable to, beyond the lane that did it.
-     *
-     * <p>Launch requirement H2 asks for spend "per org and per triage". The lane alone answers the
-     * first and not the second: it says the triage agent cost a project $X this week, and cannot say which
-     * rulings that was. {@code kind} is the subject's TABLE name so the pointer is resolvable without a
-     * lookup table of its own — {@code behavior_finding} for a Layer-2 ruling.
+     * What one run was for: the unit of work the spend is attributable to, beyond the lane that did
+     * it. The lane alone can say the triage agent cost a project $X this week, but not which
+     * rulings that was. {@code kind} is the subject's table name so the pointer is resolvable
+     * without a lookup table of its own: {@code behavior_finding} for a Layer-2 ruling.
      *
      * @param kind the subject's table name
-     * @param id the subject row's id — an opaque pointer, not an FK (migration {@code 0051})
+     * @param id the subject row's id, an opaque pointer, not an FK
      */
     public record Subject(String kind, String id) {}
 
@@ -82,36 +79,32 @@ public class LlmUsageAccountant {
                 costUsd,
                 priceBookVersion,
                 latencyMs,
-                // The per-call lanes have no single unit of work behind one call — a grading call is
-                // one verdict among thousands, and pointing it at one is not attribution.
+                // The per-call lanes have no single unit of work behind one call: a lane call is one
+                // among many, and pointing it at one is not attribution.
                 null);
     }
 
     /**
-     * Record one agent-sandbox run (the coding agent in an E2B microVM — RCA, Layer-2 triage; the
-     * synthesis/codegen/drift-observer sandboxes this javadoc used to also name were removed by
-     * Track A / epic 8's Track A before this method's only two remaining callers, {@code
-     * E2bRcaSandbox}/{@code E2bTriageSandbox}, ever passed it {@code platformFunded=false}). The whole
-     * run is one ledger entry: the launcher reports usage for the run, not per turn, and the run is
-     * what the lane is billed for.
+     * Record one agent-sandbox run: the coding agent in an E2B microVM, for RCA or Layer-2 triage.
+     * The whole run is one ledger entry: the launcher reports usage for the run, not per turn, and
+     * the run is what the lane is billed for.
      *
-     * <p><b>#939 D4: {@code platformFunded} is now a real parameter, not a hardcoded {@code true}.</b>
-     * RCA/TRIAGE run on the org's OWN injected credential now (see {@code AgenticCredentialResolver}
-     * on the caller side) — there is no ambient platform identity funding these lanes any more — so a
-     * caller passes {@code false} for the ordinary case and this stays parameterized rather than
-     * silently misattributing every sandbox run's cost to the platform.
+     * <p>{@code platformFunded} is a real parameter, not a hardcoded {@code true}: RCA and TRIAGE run
+     * on the org's own injected credential (see {@code AgenticCredentialResolver} on the caller
+     * side), so a caller passes {@code false} for the ordinary case rather than silently
+     * misattributing every sandbox run's cost to the platform.
      *
-     * <p>Unlike the per-call lanes, a sandbox run HAS a unit of work — one ruling, one report, one
-     * grader — so {@code subject} is the thing the money was spent on and is what turns "the triage agent
-     * cost this project $40" into "these eleven rulings cost $40". Null where the caller genuinely has no
+     * <p>Unlike the per-call lanes, a sandbox run has a unit of work: one ruling, one report. So
+     * {@code subject} is the thing the money was spent on, and is what turns "the triage agent cost
+     * this project $40" into "these eleven rulings cost $40". Null where the caller genuinely has no
      * single subject.
      *
-     * <p><b>The harness is not the pricing authority.</b> It either reports no cost at all, or reports one
-     * that omits cache reads — and cache reads dominate a repo-grounded run, so a harness-reported figure
-     * would understate the lane by most of its actual spend. A null {@code costUsd} is therefore priced
-     * here from the raw token counts against the same {@code price_book} every in-process call is priced
-     * from, and the row is stamped with the book that did it. Still null when no book in force carries the
-     * model: an absent cost is honest, a wrong one is not.
+     * <p>The harness is not the pricing authority: it either reports no cost at all, or reports one
+     * that omits cache reads, and cache reads dominate a repo-grounded run, so a harness-reported
+     * figure would understate the lane by most of its actual spend. A null {@code costUsd} is
+     * therefore priced here from the raw token counts against the same {@code price_book} every
+     * in-process call is priced from, and the row is stamped with the book that did it. Still null
+     * when no book in force carries the model: an absent cost is honest, a wrong one is not.
      */
     public void recordSandboxRun(
             @Nullable String projectId,
@@ -140,7 +133,7 @@ public class LlmUsageAccountant {
                 out,
                 cacheRead,
                 cacheWrite,
-                // A harness-reported cost is taken verbatim when there is one, but it is NOT stamped with a
+                // A harness-reported cost is taken verbatim when there is one, but it is not stamped with a
                 // book version: no book produced it, and naming one would misattribute the number.
                 costUsd != null ? costUsd : (priced == null ? null : priced.total()),
                 costUsd != null ? null : (priced == null ? null : priced.priceBookVersion()),

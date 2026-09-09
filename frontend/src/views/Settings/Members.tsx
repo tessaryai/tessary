@@ -325,7 +325,7 @@ export function Members() {
         </span>
       </div>
 
-      {/* Sign-up policy (owner + admin): who may create an account on this install (#1226). */}
+      {/* Sign-up policy (owner + admin): who may create an account on this install. */}
       {canManage && (
         <div className="mt-6">
           <div className="flex items-baseline gap-2.5">

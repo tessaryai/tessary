@@ -19,7 +19,7 @@ import org.jspecify.annotations.Nullable;
  *     {@link #documentB64(String, String, String)}.
  *   - document_url  → http(s) URL, mirroring {@code image_url}'s field layout exactly. Display-only:
  *     never fetched server-side (ingest, the judge boundary, or export) — a deliberate decision, not
- *     an omission (documented in {@code docs/reference/media-contract.md}).
+ *     an omission (documented in {@code devdocs/reference/media-contract.md}).
  *   - tool_call / tool_result / reasoning → structured gen_ai parts: {@code text} is a readable
  *     summary (what the judge/model sees when flattened) and {@code data} carries the structured
  *     JSON payload (the tool_call/tool_result part), persisted to {@code span_payload.input}/
@@ -180,7 +180,7 @@ public record ContentBlock(
      * {@code isImage()} stays a separate, narrower predicate because the two modalities are shaped
      * differently on the wire: an image is a first-class image part, a document flattens to text. It
      * USED to carry a second consequence — at the judge's request build an image forced Bedrock
-     * system-block caching off while a document did not — but Track A removed grading and that
+     * system-block caching off while a document did not — but grading is gone now and that
      * boundary with it, so the distinction now describes the block alone.
      *
      * <p>{@link JsonIgnore}: this is a derived predicate over {@code type}, not a wire field. The

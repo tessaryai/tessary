@@ -20,13 +20,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * No test existed for {@link OnboardingRepository} before #1227 (per that issue's own grounding
- * pass). This one exists to pin the exact invariant #1227 Part 6 depends on being additive rather
- * than a silent regression of: {@link OnboardingRepository#trafficWindow} advances the onboarding
- * ladder's LISTENING → FITTING rung on ANY span, tagged or not — it must NOT gain a call-site
- * predicate, because that is the epic 7 gate-clause-5 instrument #1193/#1194 already measure (see
- * that method's own javadoc). The connect gate's stricter, additive question — has a TAGGED span
- * arrived — lives entirely in {@code SubstrateReadRepository#hasTaggedSpan} instead.
+ * Pins the exact invariant {@link OnboardingRepository#trafficWindow} depends on being additive
+ * rather than a silent regression of: it advances the onboarding ladder's LISTENING → FITTING
+ * rung on ANY span, tagged or not — it must NOT gain a call-site predicate, because that is what
+ * the gate-clause instrument already measures (see that method's own javadoc). The connect gate's
+ * stricter, additive question — has a TAGGED span arrived — lives entirely in
+ * {@code SubstrateReadRepository#hasTaggedSpan} instead.
  */
 @SpringBootTest
 class OnboardingRepositoryTest {
@@ -53,7 +52,7 @@ class OnboardingRepositoryTest {
         assertTrue(onboarding.trafficWindow(projectId).isEmpty(), "no traffic yet -- stays at LISTENING");
 
         // An UNTAGGED span (no tessary.call_site.id) -- the ladder must still advance on it. This is
-        // the exact behaviour #1227's SubstrateReadRepository#hasTaggedSpan is NOT allowed to change.
+        // the exact behaviour SubstrateReadRepository#hasTaggedSpan is NOT allowed to change.
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
         writer.enqueue(
                 projectId,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Namespace ownership recheck (epic 6 clause 7, #1152). Two halves:
+# Namespace ownership recheck. Two halves:
 #
 #   1. Every row of scripts/lib/namespace-inventory.txt resolves, through the platform's own
 #      ownership signal, to the account the row names, and where the platform exposes a stable
@@ -136,7 +136,7 @@ echo "$P: $rows rows: $((rows - unverified)) verified, $unverified unverified"
 # `.env.example`). The instrument and the inventory skip themselves. A trailing dot is sentence
 # punctuation, not part of a name, and neither is the `.git` a clone URL ends in — without that
 # strip, `git clone https://github.com/tessaryai/<repo>.git` reads as a coordinate no inventory
-# row can ever match, which is what it did (unnoticed, on the old name) before #1293.
+# row can ever match, which is what it did (unnoticed, on the old name) before this was fixed.
 _tree_files() {
     if git ls-files >/dev/null 2>&1; then git ls-files -z --cached --others --exclude-standard
     elif command -v jj >/dev/null && jj root >/dev/null 2>&1; then jj file list | tr '\n' '\0'

@@ -7,7 +7,7 @@ springdoc:
     # springdoc WARNs at startup on every boot that /v3/api-docs is public unless this is set
     # (obs Gap 3 noise). Nothing in prod serves off the live endpoint — the frontend generates its
     # TypeScript types from the checked-in backend/contract spec at build time (see
-    # docs/reference/architecture.md), and OpenApiSpecDriftTest/`task contract:openapi` run under
+    # devdocs/reference/architecture.md), and OpenApiSpecDriftTest/`task contract:openapi` run under
     # the default/test profile, not `production` — so disabling it here only affects the deployed
     # server, never the build-time contract-drift guard.
     enabled: false
@@ -38,8 +38,8 @@ spring:
 # is honoured via server.forward-headers-strategy). Without this flag the cookie
 # would ship without `Secure` and could be exfiltrated by any plain-HTTP request
 # to a sibling subdomain. Lives under tessary.auth (not workos), same as the rest
-# of the session/cookie config since #851 moved it off the WorkOS-specific
-# properties onto the provider-agnostic AuthProperties.
+# of the session/cookie config, which sits on the provider-agnostic AuthProperties
+# rather than WorkOS-specific properties.
 tessary:
   auth:
     cookie-secure: true
@@ -74,7 +74,7 @@ management:
   # breaks gRPC). The Logback appender is installed in OtelExportConfig.
   # This block only supplies endpoint/transport -- whether export actually fires is governed by
   # management.tracing.export.otlp.enabled / management.logging.export.otlp.enabled, which live in
-  # the base application.yaml (off by default, #864) and are NOT overridden here, so this profile
+  # the base application.yaml (off by default) and are NOT overridden here, so this profile
   # stays inert until a self-hoster flips those two flags on.
   opentelemetry:
     tracing:
@@ -90,7 +90,7 @@ management:
   otlp:
     # Metrics ride Micrometer's OTLP registry (separate from the OTel SDK), which
     # is HTTP/protobuf only, so it must hit Alloy's HTTP receiver (4318).
-    # Off by default (#864): url/step below are only meaningful once a self-hoster sets
+    # Off by default: url/step below are only meaningful once a self-hoster sets
     # MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true. Unlike tracing/logging above, this profile
     # DOES set `enabled` itself (Micrometer's OTLP registry is a different autoconfig from the
     # OTel SDK's), so it has to be flipped here, not just left to application.yaml.

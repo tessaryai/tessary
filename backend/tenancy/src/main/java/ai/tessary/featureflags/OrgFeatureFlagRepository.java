@@ -11,16 +11,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * CRUD for {@code org_feature_flag} — the open edition's per-org capability overrides. Mirrors the
+ * CRUD for {@code org_feature_flag}, the per-org capability overrides. Mirrors the
  * JdbcClient + static-mapper shape of {@code OrgQuotaOverrideRepository}.
  *
- * <p>The rows are SPARSE. An org with no row for a capability has no opinion about it, and the resolution
- * layer above ({@code CapabilityService}) supplies the open-edition default. Nothing here ever writes a row to
- * mean "leave it at the default" — {@link #delete} is how an operator gets back there.
+ * <p>Rows are sparse: an org with no row for a capability has no opinion about it, and the
+ * resolution layer above ({@code CapabilityService}) supplies the default. Nothing here ever
+ * writes a row to mean "leave it at the default"; {@link #delete} is how an operator gets back
+ * there.
  *
- * <p>There is exactly one read, {@link #findByOrg}, and it loads the whole org at once. That is not an
- * optimization detail: resolving a capability payload asks about all 21 capabilities, and a per-key read would
- * make one HTTP request 21 round trips. {@code DbFeatureFlags} caches what this returns.
+ * <p>{@link #findByOrg} loads the whole org at once rather than reading per key, since resolving
+ * a capability payload asks about all of them and a per-key read would turn one HTTP request into
+ * many round trips. {@code DbFeatureFlags} caches what this returns.
  */
 @Repository
 public class OrgFeatureFlagRepository {
@@ -42,7 +43,7 @@ public class OrgFeatureFlagRepository {
                 .collect(Collectors.toMap(Row::flagKey, Row::enabled));
     }
 
-    /** The raw rows for an org, in key order — the admin read surface. */
+    /** The raw rows for an org, in key order: the admin read surface. */
     public List<Row> listByOrg(String orgId) {
         return jdbc.sql("SELECT flag_key, enabled FROM org_feature_flag WHERE org_id = :oid ORDER BY flag_key")
                 .param("oid", orgId)
@@ -67,7 +68,7 @@ public class OrgFeatureFlagRepository {
     }
 
     /**
-     * Drop an org's opinion about one capability, which reverts it to the open-edition default. Deliberately
+     * Drop an org's opinion about one capability, which reverts it to the default. Deliberately
      * distinct from writing {@code false}: "I have not decided" and "I have decided against" resolve the same
      * way for a capability that defaults off, and differently for one that defaults on.
      *

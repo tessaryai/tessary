@@ -32,7 +32,7 @@ import org.jspecify.annotations.Nullable;
  * <p><b>Redaction runs first, and the detector reads what it left.</b> The persisted output is what
  * this detector sees, and on a default project almost every credential shape above (all but the
  * Stripe key and the rarer AWS prefixes) is also a built-in redaction rule applied on the write path, so the raw literal is gone by the time the sweep runs;
- * with the raw patterns alone the classifier was dead on the OTLP path (#1044). The redaction rules
+ * with the raw patterns alone the classifier was dead on the OTLP path. The redaction rules
  * substitute a token that names what was removed ({@code [REDACTED_API_KEY]} and its siblings, see
  * {@code BuiltInRedactionRules}), and that token is the record of the leak: the detector fires on it
  * at the confidence the corresponding raw shape carries, with the token itself as the evidence

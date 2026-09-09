@@ -73,7 +73,7 @@ public class OnboardingRepository {
     /**
      * How the metric detectors' baselines are coming along.
      *
-     * <p>This is the honest content of the warm-up wait (launch G4). A metric detector is not waiting on
+     * <p>This is the honest content of the warm-up wait. A metric detector is not waiting on
      * a clock, it is waiting on COMPARABLE SAMPLES: each {@code (bucket, measure)} accumulates a window,
      * and stays {@code learning} — waiting, never skipped — until both the window it is filling and the
      * one it would compare against clear {@code min_sample}. So "nothing yet" has a number behind it, and
@@ -118,7 +118,7 @@ public class OnboardingRepository {
     /**
      * Cases, and the subset that reached the onboarding milestone.
      *
-     * <p>Launch decision D9: the "first case" milestone means an <b>LLM-triaged</b> case. A human
+     * <p>The "first case" milestone means an <b>LLM-triaged</b> case. A human
      * pressing <i>Real deviation</i> opens a perfectly real case and does not count here — the milestone
      * is about whether the product got there unaided, and a case a person had to open is a case the
      * product did not produce. {@code finding.triaged_at} is non-null exactly when a triage run completed

@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Wire DTOs for the usage-metering read API. Snake_case on the wire, camelCase in Java (the
  * {@code QueryDtos} convention). Every usage view carries an {@code as_of} freshness instant so a caller
- * can tell "no usage yet this period" apart from "the rollup hasn't run yet" — usage lags by up to one
+ * can tell "no usage yet this period" apart from "the rollup hasn't run yet": usage lags by up to one
  * bucket grain because only closed buckets are metered.
  */
 public final class MeteringDtos {
@@ -39,7 +39,7 @@ public final class MeteringDtos {
     }
 
     /**
-     * One group of LLM usage — a lane, a project, a model, or the whole org — with the token buckets
+     * One group of LLM usage: a lane, a project, a model, or the whole org, with the token buckets
      * kept apart rather than collapsed to a total, because they are priced apart.
      *
      * <p>{@code key} is the group's stable identifier ({@code lane} wire value, project id, model id;
@@ -84,12 +84,12 @@ public final class MeteringDtos {
     }
 
     /**
-     * The org's platform LLM consumption over {@code [from, to)} — one total plus the same total cut
+     * The org's platform LLM consumption over {@code [from, to)}: one total plus the same total cut
      * three ways (by product lane, by project, by model). Unlike {@link UsageTimeseriesView} this is
      * read live off the per-call ledger rather than off closed rollup buckets, so {@code asOf} is
      * genuinely now: it includes the call that finished a second ago.
      *
-     * <p>A null {@code from}/{@code to} is an open bound — the org's whole history on that side.
+     * <p>A null {@code from}/{@code to} is an open bound: the org's whole history on that side.
      */
     public record LlmUsageView(
             @Nullable String from,
@@ -101,7 +101,7 @@ public final class MeteringDtos {
             @JsonProperty("by_model") List<LlmUsageSliceView> byModel) {}
 
     /**
-     * One {@code (bucket, series)} cell of the LLM usage timeseries — the value of one bar segment.
+     * One {@code (bucket, series)} cell of the LLM usage timeseries: the value of one bar segment.
      *
      * <p>{@code bucketStart} is the bucket's inclusive start as a UTC instant and joins to an entry of
      * {@link LlmUsageSeriesView#buckets}. {@code key} identifies the series within the requested
@@ -137,12 +137,12 @@ public final class MeteringDtos {
     }
 
     /**
-     * The org's LLM consumption over {@code [from, to)} as a bucketed timeseries — what the usage chart
+     * The org's LLM consumption over {@code [from, to)} as a bucketed timeseries: what the usage chart
      * draws. Same live per-call ledger as {@link LlmUsageView}, cut on two more axes: {@code grain} (the
      * bucket width) and {@code grouping} (the series axis), with an optional lane / project / model
      * narrowing already applied.
      *
-     * <p>{@code buckets} is the complete x-axis, ascending, including buckets with no calls —
+     * <p>{@code buckets} is the complete x-axis, ascending, including buckets with no calls;
      * {@code cells} only carries the non-empty ones, so a client renders a gap for a quiet bucket
      * instead of silently compressing the time axis. {@code total} is the whole window under the same
      * filter, so the headline figures and the bars can never disagree.
@@ -158,12 +158,12 @@ public final class MeteringDtos {
             List<LlmUsageCellView> cells) {}
 
     /**
-     * What one Layer-2 ruling cost — one row of {@link TriageSpendView}.
+     * What one Layer-2 ruling cost: one row of {@link TriageSpendView}.
      *
      * @param findingId the {@code behavior_finding} the ruling was about, so the spend and the verdict
      *     can be put side by side
      * @param runs sandbox runs booked against it, normally 1; above 1 means it was re-triaged
-     * @param unpricedRuns runs the pricing catalog held no rate for — the gap behind {@code cost_usd}
+     * @param unpricedRuns runs the pricing catalog held no rate for: the gap behind {@code cost_usd}
      */
     public record TriageSpendRowView(
             @JsonProperty("finding_id") String findingId,
@@ -174,14 +174,13 @@ public final class MeteringDtos {
             @JsonProperty("last_at") String lastAt) {}
 
     /**
-     * The org's triage spend, per ruling, costliest first — the read launch requirement H2 means by
-     * "attributable per triage", and the one H3 turns on.
+     * The org's triage spend, per ruling, costliest first.
      *
-     * <p>{@code costPerRulingUsd} is the whole point. The lane total already says the triage agent cost
-     * this org $X; only dividing it by the number of rulings answers whether an agent session per
-     * distinct cause is the right price for a filter, which is the question the one-path amendment (D14)
-     * left open. Null when nothing was priced — an absent number rather than a misleading zero, the same
-     * convention {@code llm_call.cost_usd} carries.
+     * <p>{@code costPerRulingUsd} is the whole point. The lane total already says the triage
+     * agent cost this org $X; only dividing it by the number of rulings answers whether an agent
+     * session per distinct cause is the right price for a filter. Null when nothing was priced:
+     * an absent number rather than a misleading zero, the same convention
+     * {@code llm_call.cost_usd} carries.
      */
     public record TriageSpendView(
             @Nullable String from,

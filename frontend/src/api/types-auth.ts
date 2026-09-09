@@ -8,9 +8,9 @@ type S = components["schemas"];
 export type OrgRole = "owner" | "admin" | "member" | "viewer" | "billing";
 
 /**
- * `GET /auth/mode` (#853): which flow the active {@code AuthProvider} drives. `redirectFlow=true`
- * means WorkOS (or any future redirect-based provider) is active and the Login/Signup views must
- * bounce to `auth.loginUrl()` instead of rendering a form; `false` means the dependency-free
+ * `GET /auth/mode`: which flow the active {@code AuthProvider} drives. `redirectFlow=true` means
+ * WorkOS (or any future redirect-based provider) is active and the Login/Signup views must bounce
+ * to `auth.loginUrl()` instead of rendering a form; `false` means the dependency-free
  * email/password provider is active and the form is the real UI. Polled on mount rather than baked
  * into the client bundle so a deployment can switch providers (e.g. a self-hoster adding WorkOS
  * credentials) without a rebuild.
@@ -18,21 +18,21 @@ export type OrgRole = "owner" | "admin" | "member" | "viewer" | "billing";
 export interface AuthMode {
   redirectFlow: boolean;
   /**
-   * True when this deployment has no account yet (#1227), so `/login` hands the visitor straight to
+   * True when this deployment has no account yet, so `/login` hands the visitor straight to
    * `/signup` rather than showing a sign-in form nothing can satisfy. Always false under a
    * redirect-flow provider, which owns its own signup screen. Goes false for good the moment the
    * first account exists.
    */
   firstRun: boolean;
   /**
-   * The sign-up policy in force (#1226): `open`, `domain`, or `invite`. A courtesy for the sign-up
-   * screen, so it can say what the server will refuse before the visitor fills in a form; the
-   * enforcement is server-side regardless.
+   * The sign-up policy in force: `open`, `domain`, or `invite`. A courtesy for the sign-up screen,
+   * so it can say what the server will refuse before the visitor fills in a form; the enforcement
+   * is server-side regardless.
    */
   signupPolicy: SignupPolicyMode;
 }
 
-/** Who may create an account on this install (#1226). Owner/admin-managed under Settings → Members. */
+/** Who may create an account on this install. Owner/admin-managed under Settings → Members. */
 export type SignupPolicyMode = "open" | "domain" | "invite";
 
 export interface SignupPolicy {
@@ -48,7 +48,7 @@ export interface SignupPolicy {
 }
 
 /**
- * The shared body of `POST /auth/signup` and `POST /auth/login` (#852) — mirrors the backend's
+ * The shared body of `POST /auth/signup` and `POST /auth/login`, mirrors the backend's
  * `AuthController.SignupRequest`/`LoginRequest` records. springdoc infers these from `@RequestBody`
  * types today, but the response shape below is a raw `Map.of(...)` (see
  * `AuthController.establishSession`) that generation cannot see, so this file hand-authors both for
@@ -60,7 +60,7 @@ export interface CredentialAuthRequest {
 }
 
 /**
- * The 200 body of `POST /auth/signup` and `POST /auth/login` — mirrors
+ * The 200 body of `POST /auth/signup` and `POST /auth/login`, mirrors
  * `AuthController.establishSession`'s `Map.of("id", ..., "email", ..., "orgId", ...)`. Not
  * generated: springdoc can't infer a type from a raw `Map` response.
  */
@@ -82,11 +82,10 @@ export interface Me {
   email: string;
   orgs: MeOrg[];
   /**
-   * Whether this user is on the deployment's platform-staff allowlist. A rendering hint only, and one with
-   * NO reader today in either bundle: its only consumer was the staff plan control on the billing screen,
-   * deleted with that screen in #883. It stays on the wire because the staff routes it hints at are alive
-   * and paid (`/api/admin/orgs/{orgSlug}/plan`), and because every staff route re-checks identity AND
-   * owner/admin standing in the target org server-side — nothing is gated on this value.
+   * Whether this user is on the deployment's platform-staff allowlist. A rendering hint only, with
+   * no reader today: it stays on the wire because the staff routes it hints at are still live
+   * (`/api/admin/orgs/{orgSlug}/plan`), and because every staff route re-checks identity and
+   * owner/admin standing in the target org server-side, so nothing is gated on this value.
    */
   platform_staff: boolean;
 }
@@ -119,7 +118,7 @@ export interface Project {
   /**
    * One-way delete marker (ISO instant). Non-null means DELETE was accepted: the project's API keys
    * are already revoked, every project-scoped route now 404s, and a background worker is removing its
-   * data. Unlike `archived_at` this never clears — the row's next state is gone. Only the org's
+   * data. Unlike `archived_at` this never clears: the row's next state is gone. Only the org's
    * project list still returns these, so settings can show the state instead of the row vanishing
    * before its data has actually drained.
    */
@@ -127,10 +126,10 @@ export interface Project {
 }
 
 /**
- * Mirrors the backend's {@code Project#isSample()} (#1227): true for the quiet, lazily-created sample
+ * Mirrors the backend's {@code Project#isSample()}: true for the quiet, lazily-created sample
  * project a "Start with a sample project" click mints, marked by {@code {"sample": true}} in the
  * project's own `settings` blob rather than a dedicated column. A malformed or absent `settings`
- * reads as false, the same false-negative-is-safe direction the backend takes — this flag only picks
+ * reads as false, the same false-negative-is-safe direction the backend takes: this flag only picks
  * which shell chrome renders and which project implicit "first project" navigation skips, never
  * anything that should 500 on a parse failure.
  */
@@ -144,7 +143,7 @@ export function isSampleProject(project: Pick<Project, "settings">): boolean {
 }
 
 /**
- * A per-project environment (dev/staging/prod) — the scoping dimension. Every project gets
+ * A per-project environment (dev/staging/prod), the scoping dimension. Every project gets
  * dev/staging/prod on creation; data surfaces filter by the selected environment.
  */
 export interface Environment {
@@ -213,12 +212,12 @@ export interface IssueTokenResponse {
   warning: string;
 }
 
-// ---- Managed API keys — project-scoped, ORG_MANAGE to mint ----
+// ---- Managed API keys: project-scoped, ORG_MANAGE to mint ----
 // Distinct from the member-mintable MCP personal tokens: managed keys add scope
 // (write/query/admin), per-environment scoping, rotation, and an audit trail.
 
 /**
- * What an API key may do — the backend's wire vocabulary (`KeyScope`): `write` ingests traces,
+ * What an API key may do, the backend's wire vocabulary (`KeyScope`): `write` ingests traces,
  * `query` reads the query API, `admin` grants tool access over /mcp (and is the superset that
  * also satisfies write/query).
  */
@@ -244,10 +243,10 @@ export interface CreateKeyRequest {
   scope: KeyScope;
 }
 
-/** Returned by create and rotate (HTTP 201) — the only place the plaintext appears. */
+/** Returned by create and rotate (HTTP 201): the only place the plaintext appears. */
 export interface IssuedKeyResponse {
   key: ApiKey;
-  /** THE PLAINTEXT SECRET — returned only here, never stored. */
+  /** The plaintext secret, returned only here, never stored. */
   plaintext: string;
   warning: string;
 }
@@ -273,22 +272,19 @@ export interface ApiKeyAudit {
 }
 
 // ---- Capabilities ----
-// Stable snake_case wire values from the backend `Capability` enum.
-//
-// Plan tiers and quotas used to live here too. Both moved to the paid overlay with the entitlement
-// engine (open-core epic 1 issue 1) and no longer exist on the open wire: the open edition has one
-// tier and uncapped ingest, so there is no tier to name and no cap to report.
+// Stable snake_case wire values from the backend `Capability` enum. This build has one tier and
+// uncapped ingest, so there is no tier to name and no cap to report.
 
 /**
- * Every capability key — the mirror of the backend `ai.tessary.plan.Capability` enum's `wire()` values,
- * which are also the LaunchDarkly flag keys. Keep in sync with that enum.
+ * Every capability key, the mirror of the backend `ai.tessary.plan.Capability` enum's `wire()`
+ * values, which are also the LaunchDarkly flag keys. Keep in sync with that enum.
  *
- * The browser has no LaunchDarkly client and no plan logic: the backend resolves all of this per session and
- * the SPA only reads the answer.
+ * The browser has no LaunchDarkly client and no plan logic: the backend resolves all of this per
+ * session and the SPA only reads the answer.
  */
 export type CapabilityWire =
   // "graders_enabled", "observer_enabled", "human_review_enabled" and "agentic_synthesis_enabled"
-  // were here until Track A removed grading, the observer and the review queues. Do not reintroduce
+  // were here until grading, the observer and the review queues were removed. Do not reintroduce
   // one of those keys: the backend enum no longer defines it, so a gate reading it would fail closed
   // on every org.
   | "ci_integration_enabled"
@@ -310,13 +306,13 @@ export type CapabilityWire =
   | "triage_automatic_enabled";
 
 /**
- * The org's capability object (`GET /api/orgs/{org}/capabilities`) — the any-member read the whole SPA is
- * assembled from. Every capability is present with an explicit boolean, so an absent key is a version skew
- * rather than a meaningful "off".
+ * The org's capability object (`GET /api/orgs/{org}/capabilities`), the any-member read the whole
+ * SPA is assembled from. Every capability is present with an explicit boolean, so an absent key is
+ * a version skew rather than a meaningful "off".
  *
- * `unavailable` answers the second question separately: a capability can be off because nobody turned it on,
- * or absent because this edition does not carry the code behind it. Those need different UI — a switch versus
- * an explanation — and the difference is not derivable from the map.
+ * `unavailable` answers the second question separately: a capability can be off because nobody
+ * turned it on, or absent because this build does not carry the code behind it. Those need
+ * different UI, a switch versus an explanation, and the difference is not derivable from the map.
  */
 export interface CapabilitiesView {
   capabilities: Record<CapabilityWire, boolean>;
@@ -336,31 +332,31 @@ export interface GradingStatusView {
 
 /**
  * One billable unit's total metered consumption for an org over the period.
- * Field names are serialized verbatim from the backend `UsageLine` record (no renames) — the
+ * Field names are serialized verbatim from the backend `UsageLine` record (no renames); the
  * amount is `value`, matching `record UsageLine(String unit, long value)`.
  */
 export type UsageLine = S["UsageLine"];
 
 /**
- * One group of platform LLM usage — a lane, a project, a model, or the whole org. Serialized
+ * One group of platform LLM usage: a lane, a project, a model, or the whole org. Serialized
  * verbatim from the backend `LlmUsageSliceView`.
  *
  * The four token buckets are carried apart because they are priced apart; `total_tokens` is their
  * sum. `cost_usd` covers only the calls the pricing catalog held a rate for, so a non-zero
  * `unpriced_calls` means the true cost is higher than the figure shown. `platform_cost_usd` and
- * `byo_cost_usd` split that same total by whose credential paid — never add them to `cost_usd`.
+ * `byo_cost_usd` split that same total by whose credential paid; never add them to `cost_usd`.
  */
 export type LlmUsageSlice = S["LlmUsageSliceView"];
 
 /**
  * The org's LLM token + cost breakdown over `[from, to)` (an open bound = the org's whole history
- * on that side), read live off the per-call ledger — `as_of` is genuinely now, unlike the bucketed
+ * on that side), read live off the per-call ledger. `as_of` is genuinely now, unlike the bucketed
  * `BillingSummary.usage` totals.
  */
 export type LlmUsage = S["LlmUsageView"];
 
 /**
- * One `(bucket, series)` cell of the bucketed LLM usage read — the value of a single bar segment.
+ * One `(bucket, series)` cell of the bucketed LLM usage read: the value of a single bar segment.
  * `bucket_start` joins to an entry of `LlmUsageSeries.buckets`; `key` identifies the series within
  * the requested grouping (empty string both for the ungrouped series and for calls that reported no
  * lane/model).
@@ -368,7 +364,7 @@ export type LlmUsage = S["LlmUsageView"];
 export type LlmUsageCell = S["LlmUsageCellView"];
 
 /**
- * The org's LLM usage over `[from, to)` bucketed at `grain` and cut into series by `grouping` — the
+ * The org's LLM usage over `[from, to)` bucketed at `grain` and cut into series by `grouping`, the
  * usage chart's feed. `buckets` is the complete x-axis including quiet buckets, while `cells` only
  * carries the buckets that had calls, so a gap stays a gap instead of compressing the time axis.
  * `total` is the same window under the same filters, so headline figures and bars always agree.
@@ -383,9 +379,9 @@ export type UsageGrouping = "none" | "lane" | "project" | "model";
 
 /**
  * Cross-project billing rollup for an org (BILLING_MANAGE-gated). `plan`/`billing_email` are
- * permanently dead placeholder fields — #883 deleted the charging integration but left the wire shape
- * — and `usage` is the real metered totals per unit.
- * `billing_email` is omitted from the JSON when null (ApiResponse is NON_NULL).
+ * permanently dead placeholder fields left behind after the charging integration was removed, and
+ * `usage` is the real metered totals per unit. `billing_email` is omitted from the JSON when null
+ * (ApiResponse is NON_NULL).
  */
 export interface BillingSummary {
   org_id: string;

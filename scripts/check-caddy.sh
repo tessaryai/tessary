@@ -3,12 +3,12 @@
 # Caddyfile gate. Two halves:
 #
 # SYNTAX: the dev Caddyfile, and every configuration frontend/caddy/render.sh can emit for the open
-# image (#1225): localhost only, a domain in each of the three TLS modes, and upstream mode with
+# image: localhost only, a domain in each of the three TLS modes, and upstream mode with
 # trusted proxies. owncert is validated against a throwaway self-signed pair, because
 # `caddy validate` loads the certificate it is told to serve.
 #
 # COVERAGE: every operation in the open OpenAPI spec is proxied to the backend by the configs that
-# actually ship (#1255). A validating config can still be a broken one — an unproxied /v1/... path
+# actually ship. A validating config can still be a broken one — an unproxied /v1/... path
 # does not 404, it falls through to the SPA and answers index.html with a 200, so the failure is a
 # page of HTML where an API response belongs, reported by nothing.
 set -euo pipefail

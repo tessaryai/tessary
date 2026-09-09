@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md, overlay-owned
-# since #1293 — see CQ_DOC below) to the config it describes.
+# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md, which lives
+# outside this tree — see CQ_DOC below) to the config it describes.
 #
 # WHY. That page states the measured precision/recall/F1 of the classifiers that fire on customer
 # traffic, and those numbers are only true for the heads and thresholds they were measured against.
-# Retrain a head or move a threshold without touching the page and it keeps asserting a quality it
-# no longer has, which is worse than no page because it reads as verified. A date stamp does not
-# catch that; nothing reads a date stamp.
+# Retrain a head or move a threshold without updating the page and it keeps asserting a quality it
+# no longer has, which is worse than no page because it reads as verified.
 #
-# WHAT IS AND IS NOT CHECKED. The machine-readable half only: served model REVISIONS
-# (the served model manifest, CQ_MODELS) and THRESHOLDS (BuiltInClassifierCatalog, which stays
-# open). Whether a number is
-# still the right number for a changed eval set is a judgement no script can make, and stays a
-# co-update rule in AGENTS.md. Two of three rot paths gated is the honest split.
+# WHAT IS AND IS NOT CHECKED. The machine-readable half only: served model revisions (CQ_MODELS)
+# and thresholds (BuiltInClassifierCatalog, which is in this tree). Whether a number is still
+# right for a changed eval set is a judgement no script can make, and stays a co-update rule in
+# AGENTS.md.
 #
 # The page carries its expected values in HTML comments of the form
 #   <!-- pinned: key=value key=value -->
@@ -22,26 +20,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# WHERE ITS TWO INPUTS LIVE, AND WHY THEY ARE VARIABLES (#1293). The page and the populated model
-# manifest both moved into the paid overlay; the catalog it compares them against stayed open. This
-# script may not name the overlay — check-open-boundary.sh rule 5 fails any scripts/*.sh outside a
-# four-name allowlist that does — so the caller passes the paths in and the defaults are the OPEN
-# ones. Same shape as check-migrations-populated.sh's MIGPOP_OVERLAY_EXPECTS, and the same reason.
-# A caller that has the overlay (ci.yml's job, and the overlay repo's own runs) sets both; nothing else does.
+# WHERE ITS TWO INPUTS LIVE, AND WHY THEY ARE VARIABLES. The page and the populated model manifest
+# live outside this tree; the catalog they're compared against is here. This script may not name
+# that other location — check-open-boundary.sh enforces that — so the caller passes the paths in,
+# and the defaults are just what this checkout has (hence the skip branches below). Same shape as
+# check-migrations-populated.sh's MIGPOP_OVERLAY_EXPECTS, for the same reason. A caller with access
+# to that other tree sets both; nothing else does.
 CQ_DOC="${CQ_DOC:-devdocs/reference/classifier-quality.md}"
 CQ_MODELS="${CQ_MODELS:-classify-service/models.json}"
 export CQ_DOC CQ_MODELS
 
-# The open edition has nothing to pin: the page is gone with the overlay and the manifest it would
-# read is the empty `{}` the open edition ships. Say so rather than dying on an unguarded open() or
-# a KeyError. The manifest also marks this gate SKIP in the open column; the branch is here as well
-# so a direct call (Taskfile, CI) cannot report a traceback as red.
+# This tree has nothing to pin: the page isn't here, and the manifest it would read is the empty
+# `{}` this tree ships. Say so rather than dying on an unguarded open() or a KeyError. The gate
+# registry also marks this check SKIP here, but the branch stays so a direct call (Taskfile, CI)
+# cannot report a traceback as red.
 if [ ! -f "$CQ_DOC" ]; then
-  echo "classifier-quality-doc skipped: $CQ_DOC is not in this checkout (the page is overlay-owned since #1293; the open edition has no measured-quality page to pin)"
+  echo "classifier-quality-doc skipped: $CQ_DOC is not in this checkout (no measured-quality page to pin)"
   exit 0
 fi
 if [ ! -s "$CQ_MODELS" ] || [ "$(tr -d '[:space:]' < "$CQ_MODELS")" = '{}' ]; then
-  echo "classifier-quality-doc skipped: $CQ_MODELS is the open edition's empty manifest, so there are no served revisions to pin against"
+  echo "classifier-quality-doc skipped: $CQ_MODELS is an empty manifest, so there are no served revisions to pin against"
   exit 0
 fi
 
@@ -64,9 +62,9 @@ catalog = open(
     encoding='utf-8').read()
 
 
-# The catalog holds one config literal per classifier and BOTH frustration and groundedness carry
-# threshold_high/threshold_low, so a bare search finds whichever appears first. Each block is
-# identified by something only that classifier's config contains.
+# Both frustration and groundedness carry threshold_high/threshold_low, so a bare search finds
+# whichever block appears first — each block is identified by something only that classifier's
+# config contains.
 def config_block(marker):
     """The config-string literal for the classifier whose block contains `marker`."""
     for block in re.findall(r'"\{\\"threshold_high.*?\}",', catalog, re.S):

@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
  * {@link TriageSource}s can silently get wrong, and as statics they are testable without Spring, without
  * a database and therefore on any machine. {@code FindingServiceMergeTest} holds both.
  *
- * <p>Both were lifted verbatim out of {@code BehaviorDriftService.findings} when #839 split it. The
+ * <p>Both were lifted verbatim out of {@code BehaviorDriftService.findings} when it was split. The
  * relative order is preserved with them: the flag-layer filter runs first, the SOP de-dup second, and
  * the conformance predicate decides whether the conformance source contributes at all.
  */

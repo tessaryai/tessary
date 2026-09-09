@@ -41,7 +41,7 @@ class ModelResolverIntegrationTest {
     @DisplayName("an undated Bedrock id falls back through the vendor prefix")
     void resolve_vendorPrefixStripped() {
         // The snapshot carries `claude-haiku-4-5` and the dated `anthropic.claude-haiku-4-5-20251001-v1:0`
-        // but NOT this spelling, which a real producer emits — before the vendor strip an entire project's
+        // but NOT this spelling, which a real producer emits: before the vendor strip an entire project's
         // spend read as unpriced.
         assertEquals(Optional.of("claude-haiku-4-5"), resolver.resolve("anthropic.claude-haiku-4-5"));
     }
@@ -51,7 +51,7 @@ class ModelResolverIntegrationTest {
     void resolve_regionPrefixStopsTheFallback() {
         // Bedrock charges a regional premium: us./eu./au./jp. are +10% and us-gov. +20% over the bare
         // model. `us.anthropic.claude-haiku-4-5` is absent verbatim, and stripping BOTH prefixes would land
-        // on claude-haiku-4-5 at 1.00 per 1M when the regional rate is 1.10 — a silent 10% under-report,
+        // on claude-haiku-4-5 at 1.00 per 1M when the regional rate is 1.10, a silent 10% under-report,
         // worse than the unpriced-and-counted it would replace.
         assertEquals(Optional.empty(), resolver.resolve("us.anthropic.claude-haiku-4-5"));
         // The exact regional id still resolves, from its own entry.

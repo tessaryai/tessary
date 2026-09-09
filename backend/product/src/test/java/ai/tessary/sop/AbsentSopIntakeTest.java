@@ -20,27 +20,18 @@ import org.springframework.beans.factory.ObjectProvider;
 /**
  * With no {@link SopIntake} on the classpath, a bundle import stores nothing and says so once.
  *
- * <p><b>Why this test exists.</b> #842 took {@code SopIntakeService} to {@code tessary-paid/sop} while
- * both of its callers stayed open — {@code ImportController}, behind the live {@code /import} route,
- * and {@code BundleImportService}, on the observer's auto-import critical path. Had either taken
- * {@link SopIntake} as a plain required constructor parameter, the open edition would have compiled,
- * passed the enforcer, passed {@code check-open-boundary.sh} and every ArchUnit rule, and then refused
- * to START: a required parameter with no candidate bean is an UNSATISFIED dependency in Spring, not a
- * null. That is the boot-failure-with-green-gates shape tessary-paid/OPEN-CORE.md records for {@code SopCompiler},
- * and this is the third time this epic has hit it. {@link SopIntakeDispatch} is the answer, and this
- * pins it.
+ * <p>Neither {@code ImportController} nor {@code BundleImportService} may take {@link SopIntake} as a
+ * plain required constructor parameter: a required parameter with no candidate bean is an unsatisfied
+ * dependency in Spring, and the app refuses to start. {@link SopIntakeDispatch} is the seam that
+ * avoids that, and this test pins its behavior.
  *
- * <p><b>The return value is the contract, not just the absence of a crash.</b> Zero is what the paid
- * implementation already returns for an org without {@code SOP_CONFORMANCE}, at its first line. Both
- * callers ignore the count and neither branches on it, so an edition with no SOP intake and an org that
- * has not bought it produce the identical {@code /import} response — the same
- * absence-equals-withholding rule {@code FitReportSource} states for the conformance surface.
+ * <p>Zero is the contract, not just the absence of a crash: both callers ignore the count and neither
+ * branches on it, so an absent intake and a withheld capability produce the identical {@code /import}
+ * response.
  *
- * <p>The second assertion is the one that would otherwise rot. {@code /import} is a PER-REQUEST path,
- * not a heartbeat, so an unlatched line about a permanent steady state is one egressed OPS log per push
- * for the life of the deployment — the shape {@code backend/AGENTS.md} names under "log OUTCOMES and
- * COST, not intent". Plain JUnit: no Spring, no database, and it runs on a machine that cannot finish
- * the Testcontainers suite.
+ * <p>The second assertion is the one that would otherwise rot. {@code /import} is a per-request path,
+ * not a heartbeat, so an unlatched line about a permanent steady state is one egressed log per push for
+ * the life of the deployment. Plain JUnit: no Spring, no database.
  */
 class AbsentSopIntakeTest {
 
@@ -48,9 +39,8 @@ class AbsentSopIntakeTest {
             List.of(new NamedBody(".tessary/sops/support_agent.yaml", "agent: support::reply\n"));
 
     /**
-     * An empty {@code ObjectProvider} — the open edition's own state, since #842 took the only
-     * implementation to the overlay. Non-null because the dispatcher resolves the provider eagerly in
-     * its constructor rather than storing it.
+     * An empty {@code ObjectProvider}, non-null because the dispatcher resolves the provider eagerly
+     * in its constructor rather than storing it.
      */
     @SuppressWarnings("unchecked")
     private static ObjectProvider<SopIntake> noIntake() {

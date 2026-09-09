@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The README is the front door (epic 7 clause 8, #1196): its first quickstart is the self-host
-# compose path and agrees with the setup page, it says the open edition signs in with email and
-# password, it links the published docs, and it carries the D6 telemetry disclosure with an opt-out
-# key that RESOLVES. Reds on substance, not on two deleted literals:
+# The README is the front door: its first quickstart is the self-host compose path and agrees
+# with the setup page, it says the open build signs in with email and password, it links the
+# published docs, and it carries the telemetry disclosure with an opt-out key that resolves. Reds
+# on substance, not on two deleted literals:
 #
-#   1. the README's first fenced command is the PUBLISHED ONE-COMMAND INSTALL, above any `task dev`
+#   1. the README's first fenced command is the published one-command install, above any `task dev`
 #      line, and every `docker compose` command in a README fence is one of setup.mdx's own
-#      extracted blocks (clause 2's set), so the two pages cannot drift apart. The literal moved
-#      from `docker compose up -d` to the `oci://` reference when the compose file itself began
-#      shipping as a published artifact: `docker compose up -d` is the FROM-A-CLONE path now, and a
-#      front door that leads with it sends a reader to clone a repository they do not need.
+#      extracted blocks, so the two pages cannot drift apart. A front door that leads with
+#      `docker compose up -d` sends a reader to clone a repository they do not need; the published
+#      install is the `oci://` reference instead.
 #   2. the telemetry key the README prints is the same name .env.example ships and the backend
 #      binds (application.yaml's `${KEY:...}`), and the heartbeat host the README names is the one
 #      the backend client hardcodes, so renaming either reds the README rather than stranding a
 #      reader;
 #   3. the disclosure names what is sent (install id, version, bucketed counts) and what is never
-#      sent (trace content), and the reinstall limitation #955 requires;
+#      sent (trace content), and the reinstall limitation it requires;
 #   4. the auth claim: "email and password" appears, and every line naming WorkOS also names the
 #      hosted product, so no self-hoster is routed to a provider they do not have;
 #   5. the README links docs/index.mdx or docs/self-hosting/setup.mdx.

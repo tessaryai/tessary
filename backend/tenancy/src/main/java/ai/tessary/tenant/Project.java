@@ -39,7 +39,7 @@ public record Project(
 
     /**
      * True for the quiet, lazily-created "sample project" every org can start with from the connect
-     * gate (#1227) — a real project row, marked by {@code {"sample": true}} in its own {@code settings}
+     * gate — a real project row, marked by {@code {"sample": true}} in its own {@code settings}
      * blob rather than a dedicated column, the same "reuse the existing extensible blob" move
      * {@link #isArchived} and {@link #isDeleting} would have taken had {@code archived_at}/{@code
      * deleting_at} not already existed. A parse failure (malformed settings, written by hand or by a

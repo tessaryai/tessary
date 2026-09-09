@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * <p>Which tiers a given model actually supports is per-model and NOT uniform — every Claude model on
  * Bedrock is Standard only (no Flex, no Priority), and so is the GPT-5.6 line on bedrock-mantle. (Amazon
  * Nova 2 Lite, which supported all three, was the one model that offered Flex/Priority — it left the
- * platform's offered set with #939 D6's maker filter, since Amazon is not a supported maker; the tiers
+ * platform's offered set since Amazon is not a supported maker; the tiers
  * themselves stay real Bedrock concepts, just currently unoffered.) That matrix lives in
  * {@link BedrockModelProfile}; this enum is just the vocabulary.
  */

@@ -12,7 +12,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.CacheTTL;
  * The provider capability matrix: the single "caching" flag is split into three
  * independent capabilities — caching, warm-fan-out eligibility, and pacing — so OpenAI
  * could be fanned out without un-pacing the rate-limited OpenRouter/Moonshot (Ollama was dropped
- * by #939 D6's maker filter)
+ * by the maker filter)
  * tiers. This pins each axis so a future provider edit can't silently re-couple them
  * (e.g. accidentally un-pacing a rate-limited compat tier).
  */

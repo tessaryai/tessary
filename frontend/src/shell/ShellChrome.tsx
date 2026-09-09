@@ -21,7 +21,7 @@ export function ShellChrome({
   isSample = false,
 }: {
   children: ReactNode;
-  /** #1227: renders the persistent "Sample data" banner above the content column
+  /** Renders the persistent "Sample data" banner above the content column
    *  (never the sidebar) on every screen inside the sample project. Computed by the caller
    *  (App.tsx's ProjectShell) rather than here, since it already runs the `listProjects` read this
    *  needs and there is no reason for ShellChrome to issue a second one. */

@@ -1,23 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=bash
-# Shared pieces of the two open-edition BOOT legs — scripts/check-open-boot.sh (the dev stack,
-# docker-compose.dev.yml, plus the authenticated triage flow) and scripts/check-open-boot-selfhost.sh
-# (the self-host artifact, docker-compose.yml, production profile) — factored here (#1052) so the
-# second leg did not copy the first's readiness poll and credential deny-list checks. Sourced, not
-# executed; every function takes a log prefix so each leg's lines stay attributable in a CI log.
+# Shared pieces of scripts/check-open-boot.sh (dev stack) and scripts/check-open-boot-selfhost.sh
+# (self-host artifact), so the second leg doesn't duplicate the first's readiness poll and
+# credential deny-list checks. Sourced, not executed; every function takes a log prefix so each
+# leg's lines stay attributable in a CI log.
 #
-# Callers must have sourced scripts/lib/cloud-credential-denylist.sh first (CLOUD_CREDENTIAL_DENYLIST).
+# Callers must source scripts/lib/cloud-credential-denylist.sh first (CLOUD_CREDENTIAL_DENYLIST).
 #
-# Lives under scripts/lib/ for the same reason dev-compose.sh does: it is not a gate itself, so
-# scripts/check.sh's manifest-completeness glob (`scripts/check-*.sh`) must not see it, and
-# check-open-boundary.sh rule 5's `ls scripts/*.sh` target set does not recurse.
+# Lives under scripts/lib/, not scripts/, so scripts/check.sh's manifest glob and
+# check-open-boundary.sh rule 5 don't pick it up as a gate.
 
 # open_boot_wait_for <prefix> <desc> <url> <want-http-code> [tries]
-# Poll rather than sleep-and-hope: 45 tries at 2s (90s) is generous for a cold `--build`, matching
-# the order of magnitude #886's own boot measurement reported. Returns 1 (and says what it last
-# saw) when the budget runs out.
-# Both waits leave the seconds they spent in OPEN_BOOT_ELAPSED_S, because epic 7 clause 3's
-# clock is measured through them rather than beside them.
+# Polls rather than sleeping blind: 45 tries at 2s (90s) covers a cold `--build`. Returns 1 (and
+# says what it last saw) when the budget runs out.
+# Both waits leave the seconds they spent in OPEN_BOOT_ELAPSED_S, measured through the poll
+# rather than beside it.
 OPEN_BOOT_ELAPSED_S=0
 open_boot_wait_for() {
     local prefix="$1" desc="$2" url="$3" want="$4" tries="${5:-45}" code t0
@@ -38,11 +35,10 @@ open_boot_wait_for() {
 }
 
 # open_boot_wait_healthy <prefix> <project-dir> <compose-cmd> <budget-seconds> <service>...
-# The stack's own readiness signal (epic 7 clause 4, #1189): every named service must report
-# `healthy` in `docker compose ps --format json`, and it is that, not an HTTP probe standing in
-# for it, that says "up". Returns 1 with the offending states when the budget runs out, or
-# EARLY when any named service is already `unhealthy` or has exited, because waiting on a
-# container Docker has given up on only hides the failure behind a timeout.
+# Every named service must report `healthy` in `docker compose ps --format json`; that, not an
+# HTTP probe standing in for it, is what says "up". Returns 1 with the offending states when the
+# budget runs out, or early when a service is already `unhealthy` or has exited, so a container
+# Docker has given up on doesn't hide behind a timeout.
 open_boot_wait_healthy() {
     local prefix="$1" dir="$2" compose="$3" budget="$4"; shift 4
     local t0 rows state health svc bad pending
@@ -99,16 +95,15 @@ _open_boot_denylist_pattern() {
 }
 
 # open_boot_check_denied_credentials <prefix> <project-dir> <compose-cmd> <service>...
-# The POST-boot credential deny-list (#878), two passes because they catch two different bugs:
-#   (a) `docker compose config` — the RENDERED compose file, after every ${VAR:-default}
-#       interpolation AND every `env_file` resolves. Catches a default value baked into the
-#       compose YAML itself (a future `E2B_API_KEY: ${E2B_API_KEY:-some-default}`).
-#   (b) `docker exec <container> env` on every named service — the CONTAINER's actual runtime
-#       env, which is what a value baked into a Dockerfile `ENV` line (never touching compose at
-#       all) would only show up in. `docker compose config` cannot see that class of leak.
+# Two passes, because they catch different bugs:
+#   (a) `docker compose config`: the rendered compose file after `${VAR:-default}` interpolation
+#       and `env_file` resolution. Catches a default value baked into the compose YAML itself.
+#   (b) `docker exec <container> env` on every named service: the container's actual runtime env,
+#       the only place a value baked into a Dockerfile `ENV` line would show up.
+#       `docker compose config` can't see that class of leak.
 # Prints every hit (values redacted) and returns 1 if there was any; 0 when the stack is clean.
-# Must run with the SAME environment the stack was brought up with — `config` re-interpolates,
-# and a compose file with `${VAR:?must be set}` keys renders nothing at all without them.
+# Must run with the same environment the stack was brought up with: `config` re-interpolates, and
+# a compose file with `${VAR:?must be set}` keys renders nothing without them.
 open_boot_check_denied_credentials() {
     local prefix="$1" dir="$2" compose="$3"; shift 3
     local hits=0 _cred_var _resolved _rendered_config _svc _cid _container_env _hit
@@ -116,11 +111,10 @@ open_boot_check_denied_credentials() {
     echo "$prefix: checking the rendered compose config for a denied credential…"
     _rendered_config="$(cd "$dir" && $compose config 2>/dev/null || true)"
     for _cred_var in "${CLOUD_CREDENTIAL_DENYLIST[@]}"; do
-        # `|| true` is load-bearing: under `set -euo pipefail` a denylisted var that is simply
-        # ABSENT from the rendered config makes grep exit 1, the pipeline fails, the assignment
-        # fails, and errexit kills the caller silently — no "FAILED" line, only the EXIT-trap
-        # teardown and exit 1. That was the whole story of the first dispatched gate run
-        # (33613152714, fixed in #1043). Absent IS the passing case.
+        # `|| true` is load-bearing: under `set -euo pipefail`, a denylisted var absent from the
+        # rendered config makes grep exit 1, the pipeline fails, the assignment fails, and
+        # errexit kills the caller silently: no "FAILED" line, just the EXIT-trap teardown.
+        # Absent IS the passing case.
         _resolved="$(printf '%s\n' "$_rendered_config" \
             | grep -E "^[[:space:]]*${_cred_var}:" \
             | head -1 \
@@ -148,36 +142,21 @@ open_boot_check_denied_credentials() {
 }
 
 # open_boot_overlay_table_names <overlay-db-resources-dir>
-# <overlay-db-resources-dir> is the paid overlay's `db` module resources root, the same directory
-# tessary-paid/scripts/check-overlay-schema.sh calls $PAID_RESOURCES ($PAID/db/src/main/resources),
-# and the same one the Taskfile probe hands the sibling instruments as MIGPOP_OVERLAY_DIR /
-# EQCHK_OVERLAY_DIR (#1076: OPEN_BOOT_OVERLAY_DIR is this feature's own name for that convention).
-# Resolves db/changelog/paid/db.changelog-paid.yaml under it, walks the changeset SQL files it
-# includes, greps every `CREATE TABLE public.<name>` and prints the deduped, sorted bare names,
-# one per line, to stdout.
+# Resolves db/changelog/paid/db.changelog-paid.yaml under <dir>, walks the changeset SQL files
+# it includes, and prints the deduped, sorted `CREATE TABLE public.<name>` names, one per line.
 #
-# The table-name-derivation expression below is COPIED, not sourced, from check-overlay-schema.sh's
-# own rule1(), sourcing a tessary-paid/ script from an open one would itself be an open->paid
-# reference and fail check-open-boundary.sh's rule 5 sweep (tessary-paid/OPEN-CORE.md's partition-commit row:
-# "no open file names an overlay relation"). Keep the two expressions in sync by hand if either
-# changes; they are two lines of grep, not worth a shared file that would have to live somewhere
-# both sides can reach without crossing the boundary either way.
+# The table-name-derivation expression is copied, not sourced, from check-overlay-schema.sh's own
+# rule1(): sourcing it from this file would cross the boundary check-open-boundary.sh's rule 5
+# enforces. Keep the two in sync by hand; it's two lines of grep, not worth sharing a file both
+# sides would have to reach.
 #
-# Two distinct non-error outcomes, both spelled out on purpose, a silent one here is exactly the
-# #1043 bug class open_boot_check_denied_credentials's comment above already tells that story for:
-#   - directory unset, absent, or present but not (yet) an overlay checkout, no
-#     db/changelog/paid/db.changelog-paid.yaml under it, which is also what an empty/nonexistent
-#     tmp dir looks like: this is the documented "no overlay to derive table names from" SKIP.
-#     One spoken line to stderr, empty stdout, returns 0, it is the caller's job to decide that
-#     an unset directory means its own assertion gets skipped too (exactly what check-open-boot.sh's
-#     OPEN_BOOT_OVERLAY_DIR-gated block below does).
-#   - a real db.changelog-paid.yaml IS present, but it derives ZERO table names: this is NOT "an
-#     empty overlay is fine", a real `tessary-paid/db` checkout with a real changelog always
-#     resolves at least the P0000 baseline's tables, so zero here means a file it lists went
-#     missing or the CREATE TABLE shape changed underneath this grep. check-overlay-schema.sh's own
-#     rule1() already treats this shape as a hard failure rather than "nothing to check against,
-#     therefore trivially true", this function matches that judgment call rather than re-deciding
-#     it.
+# Two non-error outcomes, both deliberate:
+#   - no overlay checkout under <dir> (unset, absent, or missing the changelog): a documented
+#     SKIP. One line to stderr, empty stdout, returns 0.
+#   - the changelog is present but derives zero table names: a real changelog always resolves at
+#     least the baseline tables, so zero means a listed file went missing or the CREATE TABLE
+#     shape changed underneath this grep. Treated as a hard failure, matching
+#     check-overlay-schema.sh's own judgment call.
 open_boot_overlay_table_names() {
     local dir="$1" master files f names
 
@@ -211,7 +190,7 @@ open_boot_overlay_table_names() {
     names="$(printf '%s\n' $names | sort -u | grep -v '^$' || true)"
 
     if [ -z "$names" ]; then
-        echo "open_boot_overlay_table_names: derived zero overlay table names from $master's own CREATE TABLE statements - failing loud rather than treating zero-to-check-against as trivially true (the #1043 bug class)" >&2
+        echo "open_boot_overlay_table_names: derived zero overlay table names from $master's own CREATE TABLE statements - failing loud rather than treating zero-to-check-against as trivially true" >&2
         return 1
     fi
 

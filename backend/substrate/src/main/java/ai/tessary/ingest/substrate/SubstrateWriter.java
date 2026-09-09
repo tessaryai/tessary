@@ -17,59 +17,45 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * The batched/async write buffer in front of the substrate: ingest call-sites hand a fetched
+ * The batched/async write buffer in front of the substrate: ingest call sites hand a fetched
  * {@link RawEntry} batch to {@link #enqueue} and return immediately; one or more drainer virtual threads
- * (one in {@code memory} mode, {@code tessary.ingest.spool.kafka.consumers} in {@code kafka} mode) run the {@link SpanBatchWriter} and writes {@code session → trace → span} off the hot path. This
- * decouples ingest/grading throughput from substrate persistence — a substrate failure never fails
- * (or slows) a grading run.
+ * run the {@link SpanBatchWriter} and write {@code session -> trace -> span} off the hot path. This
+ * decouples ingest/grading throughput from substrate persistence: a substrate failure never fails or
+ * slows a grading run.
  *
- * <p><b>The buffer is an {@link IngestSpool} (#984).</b> The in-process spool is the default; a
- * Kafka-API spool is the opt-in for "accepted means persisted". This class is the drain over
- * whichever is wired: claim, redact once, write with retry, ack or nack.
+ * <p>The buffer is an {@link IngestSpool}. The in-process spool is the default; a Kafka-API spool is the
+ * opt-in for "accepted means persisted". This class is the drain over whichever is wired: claim, redact
+ * once, write with retry, ack or nack.
  *
- * <p><b>Backpressure decision — shed rather than block, and tell the caller.</b> {@link #enqueue} hands
- * the batch to the spool (the in-process spool answers at once; the Kafka spool waits for the broker's
- * acknowledgement, bounded by its publish timeout). When the spool has no room the batch is SHED (WARN +
- * counter, no trace content in the log) rather than blocking the producer: the grading path's latency is
- * the priority, and the substrate self-heals on the next ingest of the same data because the whole write
- * path is idempotent (natural keys + {@code ON CONFLICT DO NOTHING}). The shed is reported back — {@link
- * #enqueue} returns {@code false} — so the ingest edge can answer the producer with a retryable error
- * rather than a 200: re-ingest only happens if something re-sends, and a shed the sender never learns
- * about is silent data loss, not self-healing.
+ * <p>Backpressure sheds rather than blocks. {@link #enqueue} hands the batch to the spool; when the spool
+ * has no room the batch is shed (warn + counter, no trace content in the log) rather than blocking the
+ * producer, since the grading path's latency is the priority and the substrate self-heals on the next
+ * ingest of the same data (natural keys + {@code ON CONFLICT DO NOTHING}). {@link #enqueue} returns
+ * {@code false} on a shed, so the ingest edge can answer with a retryable error rather than a 200.
  *
- * <p><b>In the in-process spool the bound is BYTES.</b> A batch carries its entries' payloads inline, so
- * its size is set by what the producer sent, not by how many batches are in flight: one bulk upload's
- * batches ranged from 10 spans to 825 spans and 24.5 MB. A count therefore bounds nothing — at 512
- * batches the queue once retained enough to exhaust the heap, and the {@code OutOfMemoryError} killed
- * this class's then-lone drainer thread outright. The spool reserves a batch's measured size against
- * {@code tessary.ingest.substrate.queue-max-bytes} before queueing it and releases exactly that
- * reservation on ack or nack, so the accounting cannot drift from what is retained. A batch larger than
- * the whole budget is refused rather than parked: parking it would wedge the queue against a
- * reservation that can never be satisfied.
+ * <p>In the in-process spool the bound is bytes, not batch count: a batch carries its entries' payloads
+ * inline, so its size is set by what the producer sent. The spool reserves a batch's measured size
+ * against {@code tessary.ingest.substrate.queue-max-bytes} before queueing it and releases exactly that
+ * reservation on ack or nack. A batch larger than the whole budget is refused rather than parked, which
+ * would wedge the queue against a reservation that can never be satisfied.
  *
- * <p><b>The drainer is supervised.</b> {@link #ensureDrainerAlive()} is called from the throughput
- * reporter's tick and starts a replacement if the thread is gone. {@code drainLoop}'s
- * {@code catch (RuntimeException)} is deliberately NOT widened to {@code Throwable}: surviving an
- * {@code OutOfMemoryError} says nothing about whether the heap is still coherent, and {@code Error}'s own
- * contract is that a reasonable application should not try to catch it. The JVM is configured to dump and
- * exit on OOM instead (see {@code backend/Dockerfile}), which makes the orchestrator — not a catch block
- * — responsible for the restart. The supervisor here covers every other way a thread can be lost.
+ * <p>The drainer is supervised: {@link #ensureDrainerAlive()} is called from the throughput reporter's
+ * tick and starts a replacement if the thread is gone. {@code drainLoop}'s
+ * {@code catch (RuntimeException)} is deliberately not widened to {@code Throwable}: surviving an
+ * {@code OutOfMemoryError} says nothing about whether the heap is still coherent, and the JVM is
+ * configured to dump and exit on OOM instead, making the orchestrator responsible for that restart.
  *
- * <p><b>Delivery — at-least-once, first-write-wins.</b> The drainer retries a failed batch up to
+ * <p>Delivery is at-least-once, first-write-wins. The drainer retries a failed batch up to
  * {@code tessary.ingest.substrate.max-attempts} with linear backoff; a replay of a partially-written
- * batch only fills in missing rows. What happens to batches accepted but not yet written on a crash
- * is the spool's contract: the in-process spool loses them (accepted, and published as such in the
- * ingest runbook); the Kafka spool replays them, because it commits an offset only after the write.
+ * batch only fills in missing rows. What happens to a batch accepted but not yet written on a crash is
+ * the spool's contract: the in-process spool loses it, the Kafka spool replays it, since it commits an
+ * offset only after the write.
  *
- * <p><b>Throughput SLO.</b> Producer-side: in the in-process mode {@code enqueue} does no I/O and never
- * blocks, so the tee adds O(1) work per ingest batch regardless of burst; in the Kafka mode it costs one
- * acknowledged publish. Drainer-side target: sustain ≥ 200
- * observations/second against the reference Postgres (the Testcontainers setup) — a full
- * ingest batch of ~1000 spans drains in ≤ 5s.
- * {@code SubstrateWriteIntegrationTest} exercises a 1000-span burst against this budget
- * (with CI headroom) and asserts the enqueue side returns in milliseconds.
+ * <p>Throughput SLO: producer-side, {@code enqueue} does no I/O and never blocks in the in-process mode;
+ * drainer-side, the target is sustaining >= 200 observations/second against the reference Postgres, with
+ * a full ~1000-span batch draining in <= 5s. {@code SubstrateWriteIntegrationTest} exercises that budget.
  *
- * <p>No LLM/classifier call happens anywhere on this path — all signal evaluation is async.
+ * <p>No LLM/classifier call happens anywhere on this path; all signal evaluation is async.
  */
 @Component
 public class SubstrateWriter {
@@ -120,31 +106,17 @@ public class SubstrateWriter {
 
     /**
      * Tee one ingest batch to the substrate. Non-blocking, never throws, no-op when disabled or empty.
-     * Entries are taken as-is — content is never clipped here or anywhere downstream (telemetry is bound
+     * Entries are taken as-is, content is never clipped here or anywhere downstream (telemetry is bound
      * by count, never truncation).
      *
-     * <p><b>PII redaction guard — applied on the DRAIN side.</b> The project's enabled redaction rules
-     * are applied by the drainer, immediately before the substrate write ({@link
-     * RedactionService#redactBatch}), so no unredacted PII is ever <em>persisted</em>. Redaction is a
-     * deliberate, operator-authored transform (the playground), <em>not</em> a silent truncation — the
-     * content is substituted, never clipped. A project with no rules (or the guard disabled) is a cheap
-     * no-op that hands the batch through unchanged.
-     *
-     * <p>It used to run here, before the {@code offer}, which broke the O(1) contract above: on
-     * 2026-07-31 a thread dump taken at 100% CPU showed {@code OtlpTraceController.export} →
-     * {@code enqueue} → {@code redactBatch} → {@code java.util.regex}, i.e. full regex over every entry
-     * <em>synchronously on the HTTP request thread</em>, saturating both vCPUs and stalling the sender.
-     * The queue, the drainer and the shed policy were all already here — the expensive work was simply
-     * on the wrong side of the boundary.
-     *
-     * <p><b>What moving it changes, precisely:</b> unredacted entries now sit in the in-process queue
-     * for the (bounded) time before the drainer reaches them. That is not a new exposure of data the
-     * process did not already hold — the raw payload arrived in this same heap on the request thread —
-     * and the guarantee that matters, "nothing unredacted is persisted", is unchanged because redaction
-     * still precedes every write. It does mean a heap dump taken mid-flight could contain unredacted
-     * content that previously it would not have. Accepted deliberately; if that trade is ever
-     * unacceptable, the fix is a durable redacted-on-write queue, not moving the cost back onto the
-     * request thread.
+     * <p>PII redaction runs on the drain side, not here. The project's enabled redaction rules are
+     * applied by the drainer, immediately before the substrate write ({@link
+     * RedactionService#redactBatch}), so no unredacted PII is ever persisted. Redaction substitutes
+     * content rather than clipping it; a project with no rules is a cheap no-op that hands the batch
+     * through unchanged. Running redaction here instead would put a full regex pass over every entry on
+     * the HTTP request thread, which is why it stays on the drain side: unredacted entries sit in the
+     * in-process queue for a bounded time, but that is not new exposure, since the raw payload already
+     * arrived in this same heap on the request thread, and redaction still precedes every write.
      *
      * @return {@code true} when the batch is the substrate's problem now, {@code false} ONLY when the
      *     bounded queue was full and the batch was shed. An empty batch is {@code true}: nothing was
@@ -198,7 +170,7 @@ public class SubstrateWriter {
                 // MUST catch here, not rely on writeWithRetry's internal handler: redactBatch runs
                 // BEFORE that method is entered, and compiledFor() does a JdbcClient read on a cache
                 // miss. Without this, one transient DataAccessException would escape drainLoop and
-                // kill the single substrate-writer thread permanently — every later batch shed, and
+                // kill the single substrate-writer thread permanently, every later batch shed, and
                 // awaitIdle never true again. On the request thread (where this used to run) the same
                 // throw failed one HTTP request; on a lone drainer it is unrecoverable.
                 // No throwable on the WARN: a Postgres error can echo raw trace content into its
@@ -211,7 +183,7 @@ public class SubstrateWriter {
                         e.getClass().getSimpleName());
                 log.debug("substrate pre-write failure detail", e);
             } finally {
-                // Settle the claim on every path out of the batch — written, retried to exhaustion, or
+                // Settle the claim on every path out of the batch, written, retried to exhaustion, or
                 // dropped before the write. A claim that can be left open is a leak that ends with the
                 // spool refusing everything while holding nothing; and pending must fall even when the
                 // settlement itself throws (a broker commit that fails), or awaitIdle never comes true.
@@ -239,12 +211,10 @@ public class SubstrateWriter {
      * Restart the drainer if it is gone. Called from the throughput reporter's tick, so the check costs
      * one {@code isAlive()} per reporting interval and needs no scheduler of its own.
      *
-     * <p>This exists because losing the drainer is unrecoverable and, until now, silent: the queue simply
-     * stopped draining while the HTTP surface kept accepting and answering. SEI CERT TPS03-J puts it as a
-     * requirement rather than a nicety — a task must provide some mechanism for notifying the application
-     * when it terminates abnormally. Note the deliberate non-choice of {@code scheduleWithFixedDelay} for
-     * the drain loop itself: a task that throws there has its subsequent executions <em>suppressed</em>,
-     * per its own javadoc, which is this same failure wearing a different hat.
+     * <p>This exists because losing the drainer is otherwise unrecoverable and silent: the queue simply
+     * stops draining while the HTTP surface keeps accepting and answering. Note the deliberate non-choice
+     * of {@code scheduleWithFixedDelay} for the drain loop itself: a task that throws there has its
+     * subsequent executions suppressed, which is the same failure wearing a different hat.
      */
     public void ensureDrainerAlive() {
         if (!running) return;
@@ -317,7 +287,7 @@ public class SubstrateWriter {
     /**
      * Test hook: wait until the buffer is fully drained (no batch queued or in flight).
      *
-     * <p>Scoped to what this process enqueued — see {@link #pending}. A Kafka-spool deployment asking
+     * <p>Scoped to what this process enqueued, see {@link #pending}. A Kafka-spool deployment asking
      * "is the spool drained" wants the broker's lag, which {@link IngestSpool#stats()} reports and the
      * ingest health indicator publishes; this counter cannot see a batch another run accepted.
      */

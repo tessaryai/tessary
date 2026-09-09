@@ -4,7 +4,7 @@
 A ``Scorer`` is any callable ``list[str] -> list[float]``. Two ship:
 
 - ``ClassifyServiceScorer`` — calls the standalone **classify-service** ``/classify`` (extracted
-  from the launcher onto its own box, #524), so we baseline the *actual* head the platform runs.
+  from the launcher onto its own box), so we baseline the *actual* head the platform runs.
 - ``LocalHFScorer`` — loads a local HuggingFace/ONNX model directly, for evaluating a freshly
   trained artifact before it's deployed to the classify-service.
 """

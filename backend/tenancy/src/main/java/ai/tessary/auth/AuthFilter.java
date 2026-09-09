@@ -31,19 +31,18 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <ul>
  *   <li><b>Bypassed</b> ({@code shouldNotFilter}): {@code /auth/login},
  *       {@code /auth/callback}, {@code /auth/logout}, {@code /auth/link/start},
- *       {@code /auth/link/poll}, {@code /actuator/health} and its two probes (NOT the rest
- *       of {@code /actuator/}, nor the bare {@code /actuator} index), any path a paid-contributed
- *       {@link SelfAuthenticatingPath} claims (empty by default in the open edition — see that
- *       interface), and — only when {@code TESSARY_AUTH_DISABLED} is set — every path,
- *       regardless of which {@link AuthProvider} is active (#852 re-decided this: with
- *       {@link PasswordAuthProvider} always enabled, "no provider configured" is no longer a state
- *       the open edition can be in). See {@link AuthProperties}.</li>
- *   <li><b>Everything else under {@code /actuator/}</b>: having a principal at all is not enough
- *       (#935). These paths name no org, so the org-scoped {@link PlatformStaff#canAdminister} has
- *       nothing to resolve against; instead they're gated on the org-independent
+ *       {@code /auth/link/poll}, {@code /actuator/health} and its two probes (not the rest
+ *       of {@code /actuator/}, nor the bare {@code /actuator} index), any path a
+ *       {@link SelfAuthenticatingPath} claims (empty by default; see that interface), and,
+ *       only when {@code TESSARY_AUTH_DISABLED} is set, every path, regardless of which
+ *       {@link AuthProvider} is active: with {@link PasswordAuthProvider} always enabled,
+ *       "no provider configured" is not a reachable state. See {@link AuthProperties}.</li>
+ *   <li><b>Everything else under {@code /actuator/}</b>: having a principal at all is not
+ *       enough. These paths name no org, so the org-scoped {@link PlatformStaff#canAdminister}
+ *       has nothing to resolve against; instead they're gated on the org-independent
  *       {@link PlatformStaff#isStaff}, which also already excludes bearer/MCP contexts by
- *       construction. Authenticated-but-not-staff is a 403, not a 200 — #929 only proved you were
- *       someone, not that you were allowed to see JVM heapdumps and env vars.</li>
+ *       construction. Authenticated-but-not-staff is a 403, not a 200: proving you were someone
+ *       does not mean you were allowed to see JVM heapdumps and env vars.</li>
  *   <li><b>{@code /mcp}</b>: bearer-token auth only; cookies ignored. Missing/bad
  *       token = hard 401 with a JSON-RPC-shaped body the MCP client can parse.</li>
  *   <li><b>{@code /api/**}</b>: cookie session preferred; falls back to bearer
@@ -107,44 +106,41 @@ public class AuthFilter extends OncePerRequestFilter {
         // /api/link/** confirm endpoints stay under the cookie session + CSRF.
         if ("/auth/link/start".equals(path)) return true;
         if ("/auth/link/poll".equals(path)) return true;
-        // The /webhooks/git/ bypass was here. Its only endpoint, GitWebhookController, went with the
-        // observer in Track A, and an unauthenticated exemption for a path nothing serves is a strictly
-        // worse posture than no exemption: it says "the session filter stands aside" about a route that
-        // will 404 either way. Restore it together with a controller that verifies the provider HMAC.
-        // Paid-contributed self-authenticating paths (#920) — Slack's `/internal/slack/mention` today,
-        // generalises later per tessary-paid/OPEN-CORE.md issue 24. Each implementation is responsible for its own
-        // credential check before answering; this only says the session filter should stand aside.
-        // orderedStream().anyMatch on an empty stream is false by definition, so the open edition (zero
-        // implementations) bypasses nothing here — this is exactly the spot a silent fail-open would
-        // hide, so it does not get one: no implementation means no bypass, not an open door.
+        // The /webhooks/git/ bypass was here. Its only endpoint, GitWebhookController, is gone,
+        // and an unauthenticated exemption for a path nothing serves is a strictly worse posture
+        // than no exemption: it says "the session filter stands aside" about a route that will
+        // 404 either way. Restore it together with a controller that verifies the provider HMAC.
+        // Self-authenticating paths, e.g. Slack's `/internal/slack/mention`. Each implementation
+        // is responsible for its own credential check before answering; this only says the
+        // session filter should stand aside.
+        // orderedStream().anyMatch on an empty stream is false by definition, so with zero
+        // implementations registered this bypasses nothing: this is exactly the spot a silent
+        // fail-open would hide, so it does not get one. No implementation means no bypass, not
+        // an open door.
         if (paidBypasses.orderedStream().anyMatch(p -> p.bypasses(path))) return true;
         // GitHub App install callback: GitHub redirects the browser here with no
         // guaranteed cookie. The signed `state` param IS the credential (verified
         // in GithubCallbackController), so bypass the cookie/bearer session.
         if ("/git/github/callback".equals(path)) return true;
-        // GitHub App MANIFEST callback (#860's BYO-App wizard): same reasoning as the callback
-        // above — GitHub redirects the browser here with no cookie, and the signed `state` param
+        // GitHub App manifest callback (the BYO-App wizard): same reasoning as the callback
+        // above: GitHub redirects the browser here with no cookie, and the signed `state` param
         // (verified in GithubManifestController) is the credential.
         if ("/git/github/manifest/callback".equals(path)) return true;
-        // The health probes only, never the whole /actuator/ prefix (#929) — so widening
+        // The health probes only, never the whole /actuator/ prefix, so widening
         // `management.endpoints.web.exposure` cannot widen the unauthenticated surface with it.
         if (isPublicActuatorPath(path)) return true;
         // The generated OpenAPI contract (springdoc, Phase 3): the API spec is public — it is the
         // checked-in source of truth (backend/contract) and carries no secrets. No cookie/bearer session.
         if ("/v3/api-docs".equals(path) || path.startsWith("/v3/api-docs/")) return true;
-        // The operator's own explicit escape hatch (#924, re-decided #852). Originally gated on
-        // "AND no provider is configured", because the only provider (WorkOs) could be legitimately
-        // absent — that absence was the normal, unauthenticated-by-default state the flag existed to
-        // override. #852 added PasswordAuthProvider, the open edition's dependency-free default,
-        // which is unconditionally enabled: "no provider configured" is no longer a state the open
-        // edition can be in, so a condition requiring it could never fire again — the flag would be
-        // permanently dead, breaking the dev stack and every test that relies on it (#996 review).
+        // The operator's own explicit escape hatch. With PasswordAuthProvider always enabled as
+        // the dependency-free default, "no provider configured" is not a reachable state, so the
+        // flag is authoritative on its own: an operator (or the dev-only compose profile) who
+        // sets TESSARY_AUTH_DISABLED gets exactly that, full stop, regardless of which provider
+        // is selected.
         //
-        // The flag is now authoritative on its own: an operator (or the dev-only compose profile)
-        // who sets TESSARY_AUTH_DISABLED gets exactly that, full stop, regardless of which provider is
-        // selected. Tests that want auth ENFORCED despite the suite's global unauthenticated default
-        // (see TestAuthDisabledInitializer) must say so explicitly — override `tessary.auth.disabled`
-        // back to `false` in their own @DynamicPropertySource — rather than relying on a
+        // Tests that want auth enforced despite the suite's global unauthenticated default (see
+        // TestAuthDisabledInitializer) must say so explicitly: override `tessary.auth.disabled`
+        // back to `false` in their own @DynamicPropertySource, rather than relying on a
         // fake-but-realistic external provider key as an indirect toggle. See
         // TestAuthDisabledInitializer's javadoc for the convention this replaces and why.
         return authProps.isDisabled();
@@ -185,19 +181,19 @@ public class AuthFilter extends OncePerRequestFilter {
             req.setAttribute(TenantContext.ATTRIBUTE, ctx);
         }
 
-        // Actuator sits alongside /api/ here (#929): shouldNotFilter has already released the health
+        // Actuator sits alongside /api/ here: shouldNotFilter has already released the health
         // probes, so anything actuator-shaped reaching this point is a management endpoint, and
-        // without this arm it would reach chain.doFilter with a null context and be SERVED.
+        // without this arm it would reach chain.doFilter with a null context and be served.
         if (ctx == null && (path.startsWith("/api/") || isActuatorPath(path))) {
             reject401(res, "unauthorized");
             return;
         }
 
-        // Actuator, second gate (#935): having ANY principal was never the bar here — #929 only
-        // closed the "no credential at all" door. isPublicActuatorPath paths never reach this
-        // method (shouldNotFilter already released them), so the guard below is redundant-but-cheap
-        // symmetry with the 401 arm above, not load-bearing. isStaff, not canAdminister: these paths
-        // name no org, so the org-scoped predicate has nothing to resolve against.
+        // Actuator, second gate: having any principal was never the bar here, only closing the
+        // "no credential at all" door. isPublicActuatorPath paths never reach this method
+        // (shouldNotFilter already released them), so the guard below is redundant-but-cheap
+        // symmetry with the 401 arm above, not load-bearing. isStaff, not canAdminister: these
+        // paths name no org, so the org-scoped predicate has nothing to resolve against.
         if (isActuatorPath(path) && !isPublicActuatorPath(path)) {
             // ctx is guaranteed non-null here — the 401 arm above already returned for a null ctx
             // on every actuator path — but NullAway can't fold that proof across two separate `if`

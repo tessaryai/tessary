@@ -27,8 +27,7 @@ import org.springframework.stereotype.Service;
  * Assembles the debug bundle for one classifier, read-only against tables the production sweep
  * already writes: {@code job} (via {@link ClassifierJobRepository}) and {@code metric_baseline}
  * directly, and each classifier family's own fitted state through {@link ClassifierDebugContributor}.
- * Nothing here is computed fresh — see the plan this package implements: the gap was always in what
- * the product surface chose to render, not in what was persisted.
+ * Nothing here is computed fresh.
  */
 @Service
 public class ClassifierDebugService {
@@ -40,9 +39,8 @@ public class ClassifierDebugService {
     private final ClassifierJobRepository jobs;
     private final MetricBaselineRepository metricBaselines;
     /**
-     * The per-family fitted-state readers, discovered rather than referenced. Behaviour drift's epoch
-     * store used to be a field here, which made this class the only thing outside the drift feature
-     * holding it — and that feature is now a paid module this one may not name at all; see
+     * The per-family fitted-state readers, discovered rather than referenced, so a family's own
+     * fitted state (behavior drift's epoch store, for example) never needs to be a field here. See
      * {@link ClassifierDebugContributor}.
      */
     private final List<ClassifierDebugContributor> contributors;
@@ -58,19 +56,19 @@ public class ClassifierDebugService {
         this.classifiers = classifiers;
         this.jobs = jobs;
         this.metricBaselines = metricBaselines;
-        // ObjectProvider, not List<T>, and this is the difference between degrading and not booting.
-        // A required constructor `List<T>` parameter with NO candidate bean is an UNSATISFIED dependency
-        // in Spring, not an empty list: resolveMultipleBeans returns null and doResolveDependency then
-        // raises NoSuchBeanDefinitionException. So an edition that ships no adapter for this port would
-        // fail to START — with no compile error, no import to sever, and nothing for the boundary grep to
-        // see — while the field's own javadoc promises it degrades to what a classifier with no data
-        // shows. Held by AbsentAdapterContextTest.
+        // ObjectProvider, not List<T>: that is the difference between degrading and not booting. A
+        // required constructor `List<T>` parameter with no candidate bean is an unsatisfied dependency
+        // in Spring, not an empty list; resolveMultipleBeans returns null and doResolveDependency
+        // raises NoSuchBeanDefinitionException. So a deployment that registers no contributor for
+        // this port would fail to start, with no compile error and nothing to grep for, while the
+        // field's own javadoc promises it degrades to what a classifier with no data shows. Held by
+        // AbsentAdapterContextTest.
         this.contributors = contributors.orderedStream().toList();
         this.mapper = mapper;
     }
 
     /**
-     * The debug family a detector belongs to — {@code BuiltInClassifierCatalog}'s three execution tiers,
+     * The debug family a detector belongs to: {@code BuiltInClassifierCatalog}'s three execution tiers,
      * plus behaviour drift split out of "fitting" since its debug content (an n-gram profile) has nothing
      * in common with a metric baseline's numeric sketch.
      */
@@ -97,7 +95,7 @@ public class ClassifierDebugService {
                     .toList();
         } else if (Family.BEHAVIOR_DRIFT.equals(family)) {
             // Null when no contributor is registered for the family, which is what every other family
-            // already renders here — not an error, and not an empty list, which would claim the
+            // already renders here, not an error and not an empty list, which would claim the
             // classifier has been swept and holds no epochs.
             behavior = contributors.stream()
                     .filter(c -> family.equals(c.family()))
@@ -160,7 +158,7 @@ public class ClassifierDebugService {
             MetricSketch sketch = MetricSketch.fromJson(sketchJson);
             return new SketchSummary(sketch.count(), sketch.gridId());
         } catch (RuntimeException e) {
-            // A sketch predating a grid/format change should not 500 the debug view — it should say so.
+            // A sketch predating a grid/format change should not 500 the debug view; it should say so.
             return null;
         }
     }

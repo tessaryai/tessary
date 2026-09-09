@@ -147,9 +147,9 @@
         <!-- Testcontainers: the backend test datasource. A JVM-singleton
              pgvector/pgvector:pg16 container (TestPostgres) backs every @SpringBootTest,
              so tests run on real Postgres — identical to dev/prod — for the whole substrate.
-             (The image is pgvector/pgvector:pg16 for compose parity, D3, even though the
+             (The image is pgvector/pgvector:pg16 for compose parity, even though the
              baseline no longer activates the extension and there is no VectorIndex seam any
-             more — both left with the rest of the vector substrate, #1116.) Docker is
+             more — both left with the rest of the vector substrate.) Docker is
              required to run the suite. Versions come from the testcontainers-bom imported
              above. -->
         <dependency>
@@ -190,9 +190,9 @@
     <build>
         <plugins>
             <plugin>
-                <!-- The test tree as a jar, for tessary-paid/assembly (#882): a paid @SpringBootTest reuses the
-                     same fixtures (TenantFixture, SubstrateV2Fixtures, the initializers) the open suite runs on,
-                     without an open module naming the overlay and without moving tenant- or trace-shaped
+                <!-- The test tree as a jar: other @SpringBootTest suites reuse the
+                     same fixtures (TenantFixture, SubstrateV2Fixtures, the initializers) this suite runs on,
+                     without this module naming what depends on it and without moving tenant- or trace-shaped
                      fixtures below the layer that owns their types (devdocs/modules.md). -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -214,9 +214,8 @@
                      leaks into the shipped artifact. -->
                 <configuration>
                     <!-- `exec`: the repackaged boot jar becomes app-*-exec.jar and the plain jar stays
-                         the main artifact, so the paid overlay's assembly module (epic 5, #943/#882)
-                         can depend on `app` as an ordinary classpath jar. backend/Dockerfile extracts
-                         the exec jar. -->
+                         the main artifact, so other modules can depend on `app` as an ordinary
+                         classpath jar. backend/Dockerfile extracts the exec jar. -->
                     <classifier>exec</classifier>
                     <excludes>
                         <exclude>
@@ -230,8 +229,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <!-- `tessary.plan.default-key=enterprise` used to live here, so the suite ran with
-                     every capability on. It is gone with the plan tiers (open-core epic 1 issue 1):
-                     the open edition has no tiers, and the open default is already every capability
+                     every capability on. It is gone along with the plan tiers: this build has no
+                     tiers, and the default is already every capability
                      ON except behavior_drift, sop_conformance and triage_automatic. Removing it in
                      the same commit is deliberate — left in place it would have kept a stale
                      property deciding nothing while looking like it decided everything, and any
@@ -255,7 +254,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as every other plugin above. No coverage gate. -->
             <plugin>

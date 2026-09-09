@@ -5,7 +5,7 @@
 # =============================================================================
 # Run this inside the maintenance window, after the app is back up and the
 # backfill has been given time to converge, and again the next morning. It is
-# the executable half of docs/reference/substrate-v2-cutover.md: every check
+# the executable half of the substrate-v2 cutover runbook: every check
 # below is one the runbook would otherwise ask someone to eyeball at 2am.
 #
 #   ./scripts/substrate-v2-verify.sh                 # against the deployed stack
@@ -24,10 +24,10 @@
 # THIS SCRIPT EXPIRES WITH THE TEARDOWN, AND THAT IS ITS JOB.
 # ---------------------------------------------------------------------------
 # Sections 1 and 3 read `context`, `observation`, the v1 `trace` and
-# `substrate_v2_id_map`. Migration 0083 drops all four. So this runs against a
+# `substrate_v2_id_map`. The teardown migration drops all four. So this runs against a
 # database that has NOT yet had the teardown applied — which is exactly when it
-# is wanted: a green run here is the evidence that lets 0083 be deployed at all
-# (the plan calls it the zero-legacy gate). After 0083 it fails on a missing
+# is wanted: a green run here is the evidence that lets the teardown be deployed at all
+# (the plan calls it the zero-legacy gate). After the teardown it fails on a missing
 # relation, and that failure is the correct answer to "has the teardown already
 # happened?".
 #
@@ -249,10 +249,10 @@ fi
 section "6. Legacy vocabulary residue"
 
 # Four of the five tables this used to sum over -- verdict, annotation, annotation_queue_item and
-# label -- were DROPPED by 0016 (Track A), which takes their legacy-vocabulary rows with them. Whole
+# label -- were dropped by the teardown migration, which takes their legacy-vocabulary rows with them. Whole
 # tables of residue went away as data loss that was already sanctioned: the rows described gradings of
 # a substrate id that no longer resolves. failure_mode_instance is the one carrier left, so this is now
-# one count rather than five, and the number it prints is not comparable with one taken before 0016.
+# one count rather than five, and the number it prints is not comparable with one taken before the teardown.
 residue=$(q "SELECT count(*) FROM failure_mode_instance WHERE subject_kind IN ('context','observation')")
 echo "  ---- ${residue} rows still on the legacy subject vocabulary"
 echo "       Record this number. It is the teardown's baseline: PR C is gated on it having"

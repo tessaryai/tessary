@@ -28,8 +28,8 @@ import org.springframework.stereotype.Component;
  * changed file is a new version and therefore a new book rather than an edit to the old one. Rows already
  * priced keep pointing at the book they were priced under, which is the whole point of versioning them.
  *
- * <p><b>One book.</b> The vendored LiteLLM file is imported as {@code source='litellm'}. Until #1032 a
- * hand-maintained {@code source='manual'} file layered corrections over it; every row it carried is now
+ * <p><b>One book.</b> The vendored LiteLLM file is imported as {@code source='litellm'}. A
+ * hand-maintained {@code source='manual'} file used to layer corrections over it; every row it carried is now
  * either reconciled upstream or a genuine gap this platform prices as unpriced rather than guessed.
  */
 @Component

@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 /**
  * JdbcClient repository for the {@code annotation} node. Upsert-on-current (one row per
  * {@code (annotator_kind, key, subject)} via {@code ux_annotation_current}) plus subject and key reads.
- * There is no verdict read: {@code findByVerdict} went with the {@code of_verdict_id} column in Track A.
+ * There is no verdict read: {@code findByVerdict} was removed along with the {@code of_verdict_id} column.
  * The classifier training set lives here as {@code annotator_kind}-tagged boolean examples keyed by
  * classifier_key; a "mark wrong" correction as an {@code of_finding_id + agrees} row.
  *
@@ -48,7 +48,7 @@ public class AnnotationRepository {
      * <p>The annotator id is part of the key deliberately. Without it every human reviewing the same
      * subject collided on one row and the last write won, which made
      * {@code annotation_queue.reviewers_per_item} unimplementable and destroyed exactly the
-     * disagreement data inter-rater agreement is computed from (migration 0039).
+     * disagreement data inter-rater agreement is computed from.
      */
     public void upsert(AnnotationRow row) {
         bindRow(
@@ -131,8 +131,8 @@ public class AnnotationRepository {
      * and ignored for the others; every caller already holds it, because holding it is how they found
      * the subject at all.
      *
-     * <p>There is one vocabulary — {@code session}/{@code trace}/{@code span} — since 0094 migrated the
-     * rows that said the other one; see {@link AnnotationRow.SubjectKind}.
+     * <p>There is one vocabulary — {@code session}/{@code trace}/{@code span} — the rows that said the
+     * other one were migrated; see {@link AnnotationRow.SubjectKind}.
      */
     public List<AnnotationRow> findBySubject(
             String projectId, String subjectKind, @Nullable String traceId, String subjectId) {

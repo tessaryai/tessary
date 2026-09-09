@@ -20,9 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Credential policy: every provider requires an org-level {@link ProviderCredential} (#939 D1 —
- * credentials are org-keyed; D6 removed Ollama, the platform's one credential-free exception, so
- * there is no ambient-key fallback left at all). Resolution is by {@code (provider, modelName,
+ * Credential policy: every provider requires an org-level {@link ProviderCredential}.
+ * Credentials are org-keyed, and there is no ambient-key fallback: Ollama, the platform's one
+ * credential-free exception, was removed. Resolution is by {@code (provider, modelName,
  * effort)}; the key comes from the project's ORG credential for that provider.
  */
 class ChatModelFactoryCredentialsTest {
@@ -43,8 +43,8 @@ class ChatModelFactoryCredentialsTest {
         secretBox = mock(SecretBox.class);
         when(secretBox.open(anyString())).thenReturn("decrypted-key");
         ProviderCredentialRepository settingsCredRepo = mock(ProviderCredentialRepository.class);
-        // #939 TASK 2: not exercised here — every resolve() in this test names a Bedrock/mantle model,
-        // which short-circuits before either mock is touched. Mocked purely to satisfy the constructor.
+        // Not exercised here: every resolve() in this test names a Bedrock/mantle model, which
+        // short-circuits before either mock is touched. Mocked purely to satisfy the constructor.
         settings = new ProjectModelSettings(
                 noSettings(), settingsCredRepo, mock(ProjectOrgResolver.class), mock(ModelCatalogFetchService.class));
         factory = new ChatModelFactory(
@@ -64,7 +64,7 @@ class ChatModelFactoryCredentialsTest {
         return p;
     }
 
-    /** A repository that returns no per-lane rows — the state every existing project is in. */
+    /** A repository that returns no per-lane rows: the state every existing project is in. */
     private static ProjectModelSettingRepository noSettings() {
         ProjectModelSettingRepository r = mock(ProjectModelSettingRepository.class);
         when(r.findByProject(anyString())).thenReturn(java.util.List.of());
@@ -142,8 +142,8 @@ class ChatModelFactoryCredentialsTest {
     }
 
     /**
-     * #939: the null-key refusal above must still hold with the new {@code auth_mode} column present
-     * and defaulted — an explicit opt-in is required, not merely the column existing.
+     * The null-key refusal above must still hold with the {@code auth_mode} column present and
+     * defaulted: an explicit opt-in is required, not merely the column existing.
      */
     @Test
     void bedrockDefaultAuthModeWithNoAwsKeys_stillFailsWithMissingCredentials() {
@@ -157,8 +157,8 @@ class ChatModelFactoryCredentialsTest {
     }
 
     /**
-     * #939: a credential that has explicitly opted into {@code iam_role} builds successfully with no
-     * sealed AWS keys at all — the opt-in, not the absence of keys, is what unlocks the ambient
+     * A credential that has explicitly opted into {@code iam_role} builds successfully with no
+     * sealed AWS keys at all: the opt-in, not the absence of keys, is what unlocks the ambient
      * {@code DefaultCredentialsProvider} path.
      */
     @Test
@@ -179,8 +179,8 @@ class ChatModelFactoryCredentialsTest {
         assertEquals("gpt-5.5", resolved.modelName());
     }
 
-    /** #939 D6: a model not in the catalog throws UNKNOWN_MODEL — there is no platform default left
-     *  to fall back to (the ambient-identity lane resolver this used to fall through to is gone). */
+    /** A model not in the catalog throws UNKNOWN_MODEL: there is no platform default left to fall
+     *  back to. */
     @Test
     void danglingModelSelection_throwsUnknownModel() {
         TessaryException ex = assertThrows(
@@ -188,12 +188,11 @@ class ChatModelFactoryCredentialsTest {
         assertEquals(ModelConfigError.UNKNOWN_MODEL, ex.error());
     }
 
-    // ---- #939 TASK 2 corrective pass: the WARN tessary-paid/OPEN-CORE.md's divergence log claims for a Bedrock
-    // model with no BedrockModelProfile entry (see that file's 2026-09-04 row) — implemented here so
-    // the doc's claim is actually true, not just documented. ----
+    // ---- The unprofiled-Bedrock-model WARN: a resolve for a model with no BedrockModelProfile
+    // entry logs exactly once. ----
 
-    /** A model IN {@link BedrockModelProfile#PROFILES} must never trip the unprofiled-model WARN — it
-     *  is only for the gap case, not every Bedrock resolve. */
+    /** A model IN {@link BedrockModelProfile#PROFILES} must never trip the unprofiled-model WARN:
+     *  it is only for the gap case, not every Bedrock resolve. */
     @Test
     void aProfiledBedrockModel_resolvesWithNoUnprofiledWarning() {
         when(repo.findByOrgAndProvider(ORG, ModelProvider.BEDROCK))
@@ -221,10 +220,9 @@ class ChatModelFactoryCredentialsTest {
     }
 
     /**
-     * A Bedrock model that resolves with NO matching {@link BedrockModelProfile} entry — reachable
-     * once #939 TASK 2's live catalog makes such a model resolvable at all, per tessary-paid/OPEN-CORE.md's own
-     * divergence-log row — logs exactly one WARN naming the model, and a second resolve of the SAME
-     * model does not repeat it (latched per key, like {@code SopCompileWorker}'s no-compiler WARN).
+     * A Bedrock model that resolves with no matching {@link BedrockModelProfile} entry logs
+     * exactly one WARN naming the model, and a second resolve of the same model does not repeat
+     * it (latched per key, like {@code SopCompileWorker}'s no-compiler WARN).
      */
     @Test
     void anUnprofiledBedrockModel_warnsExactlyOncePerModelKey() {
@@ -239,7 +237,7 @@ class ChatModelFactoryCredentialsTest {
         factoryLog.addAppender(events);
         try {
             // "claude-sonnet-4-6" is a real ModelCatalog entry with no matching BedrockModelProfile
-            // row — resolve()'s cache is keyed by (provider, modelName, effort), so both calls below
+            // row: resolve()'s cache is keyed by (provider, modelName, effort), so both calls below
             // hit the same cacheParamsFor(...) call regardless of the ChatModel cache.
             assertNotNull(factory.resolve(PROJECT, ModelProvider.BEDROCK, "anthropic.claude-sonnet-4-6", null));
             assertNotNull(factory.resolve(PROJECT, ModelProvider.BEDROCK, "anthropic.claude-sonnet-4-6", null));

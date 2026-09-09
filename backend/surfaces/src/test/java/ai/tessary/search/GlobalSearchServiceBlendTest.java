@@ -21,7 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * Unit coverage for the lexical merge in {@link GlobalSearchService}: the reciprocal-rank fusion that,
  * over a single lexical input list, is a stable dedup-and-resort — the no-regression guard for the
  * ⌘K palette's output staying byte-identical now that the semantic leg this used to also blend in
- * (#382/#384) has been removed with the rest of the embedding substrate (#1116). {@link
+ * has been removed with the rest of the embedding substrate. {@link
  * GlobalSearchRepository} is stubbed so this exercises the merge math in isolation — the FTS plumbing is
  * proven by the Testcontainers tests.
  */

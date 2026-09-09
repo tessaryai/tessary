@@ -19,40 +19,38 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Per-principal in-memory token-bucket rate limiter for {@code /api/**} and
- * {@code /mcp}, plus — since #852 — the two credential-checking {@code /auth/**} routes. Runs
- * after {@link AuthFilter} so a {@link TenantContext} is already attached and we can rate-limit by
- * user id (or MCP token id for bearer-auth) rather than IP — one signed-up user could otherwise
- * hammer the single-threaded run executor from one machine, and an identity survives the client
- * changing address, which is what an abuse limit wants to key on.
+ * Per-principal in-memory token-bucket rate limiter for {@code /api/**} and {@code /mcp}, plus
+ * the two credential-checking {@code /auth/**} routes. Runs after {@link AuthFilter} so a {@link
+ * TenantContext} is already attached and we can rate-limit by user id (or MCP token id for
+ * bearer-auth) rather than IP: one signed-up user could otherwise hammer the single-threaded run
+ * executor from one machine, and an identity survives the client changing address, which is what
+ * an abuse limit wants to key on.
  *
- * <p>The bucket is sized for normal interactive use (a few requests per
- * second sustained, short bursts higher) — well under what a real frontend
- * generates and well above any cron-style polling. Hitting the limit means
- * something automated and probably hostile.</p>
+ * <p>The bucket is sized for normal interactive use (a few requests per second sustained, short
+ * bursts higher), well under what a real frontend generates and well above any cron-style
+ * polling. Hitting the limit means something automated and probably hostile.</p>
  *
- * <p><b>{@code /auth/signup} and {@code /auth/login} (#852).</b> Every other {@code /auth/**} path
- * (the OAuth GETs, {@code /auth/logout}, {@code /auth/me}, {@code /auth/link/*}) stays exempt
- * exactly as before — those either name no credential to guess or, for the OAuth dance, are shaped
- * by WorkOS-side rate limits already. The two POST credential routes are different: with
- * {@link PasswordAuthProvider} as the open edition's default provider, they are a real
- * password-guessing surface with nothing else standing in front of them. They have no
- * {@link TenantContext} — the whole point of hitting them is not having one yet — so the general
- * per-user bucket below cannot key on them; they get their own, much tighter, IP-keyed bucket
- * instead. {@code req.getRemoteAddr()} is the real client address, not the proxy's: the production
- * profile sets {@code server.forward-headers-strategy: native} with a Tomcat {@code internal-proxies}
- * allowlist, so Caddy's {@code X-Forwarded-For} is resolved before any filter runs, and
- * {@code DeviceLinkController} reads the same address the same way. A deployment that terminates
- * somewhere unlisted collapses every client onto one bucket instead, which throttles harder than
- * intended rather than less.
+ * <p><b>{@code /auth/signup} and {@code /auth/login}.</b> Every other {@code /auth/**} path (the
+ * OAuth GETs, {@code /auth/logout}, {@code /auth/me}, {@code /auth/link/*}) stays exempt: those
+ * either name no credential to guess or, for the OAuth dance, are shaped by WorkOS-side rate
+ * limits already. The two POST credential routes are different: with {@link PasswordAuthProvider}
+ * as the default provider, they are a real password-guessing surface with nothing else standing
+ * in front of them. They have no {@link TenantContext} (the whole point of hitting them is not
+ * having one yet), so the general per-user bucket below cannot key on them; they get their own,
+ * much tighter, IP-keyed bucket instead. {@code req.getRemoteAddr()} is the real client address,
+ * not the proxy's: the production profile sets {@code server.forward-headers-strategy: native}
+ * with a Tomcat {@code internal-proxies} allowlist, so Caddy's {@code X-Forwarded-For} is resolved
+ * before any filter runs, and {@code DeviceLinkController} reads the same address the same way. A
+ * deployment that terminates somewhere unlisted collapses every client onto one bucket instead,
+ * which throttles harder than intended rather than less.
  *
- * <p><b>Both pools are capped, and a full pool EVICTS rather than refuses.</b> The per-user pool's
- * key space is the user base; the credential pool's is whatever address a caller can send from, which
- * is not ours to bound — an IPv6 /64 is billions of free keys, and a map that only ever grows ends at
- * the heap. Refusing a key there is the tempting answer and the wrong one: a caller who can mint
- * addresses would be handed a fresh bucket for each anyway, so refusal costs them nothing and locks
- * out the one caller it does reach — the legitimate new sign-in. The cap is a MEMORY bound, so it is
- * paid for in memory: see {@link #MAX_BUCKETS}.
+ * <p><b>Both pools are capped, and a full pool evicts rather than refuses.</b> The per-user pool's
+ * key space is the user base; the credential pool's is whatever address a caller can send from,
+ * which is not ours to bound: an IPv6 /64 is billions of free keys, and a map that only ever grows
+ * ends at the heap. Refusing a key there is the tempting answer and the wrong one: a caller who
+ * can mint addresses would be handed a fresh bucket for each anyway, so refusal costs them nothing
+ * and locks out the one caller it does reach, the legitimate new sign-in. The cap is a memory
+ * bound, so it is paid for in memory: see {@link #MAX_BUCKETS}.
  */
 @Component
 @Order(20) // AuthFilter is @Order(10)
@@ -74,7 +72,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * Most buckets one pool keeps. Reached only under something pathological: 10k distinct principals
      * inside one refill window, or a caller rotating source addresses to mint keys. A bucket at full
      * tokens is indistinguishable from one that has never been used, so {@link #sweepIdle} can drop it
-     * without giving anyone back an allowance they had spent — which is what makes a cap safe here
+     * without giving anyone back an allowance they had spent, which is what makes a cap safe here
      * rather than a hole in the limit.
      */
     private static final int MAX_BUCKETS = 10_000;
@@ -83,18 +81,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * How far below {@link #MAX_BUCKETS} an eviction pass aims, so the next 1,000 or so new keys are
      * admitted without another O(n) pass. Amortises the pass to O(1) per insert.
      *
-     * <p>A pass removes AT LEAST this many rather than exactly: it evicts every bucket at or below the
-     * cutoff stamp, and {@code System.nanoTime()} is coarser than the gaps between concurrent inserts
-     * on some platforms, so buckets can share the cutoff. Over-evicting only hands those keys a fresh
-     * bucket early — the same thing the cap already grants whoever it evicts — so the imprecision costs
-     * churn, never a limit.
+     * <p>A pass removes at least this many rather than exactly: it evicts every bucket at or below
+     * the cutoff stamp, and {@code System.nanoTime()} is coarser than the gaps between concurrent
+     * inserts on some platforms, so buckets can share the cutoff. Over-evicting only hands those
+     * keys a fresh bucket early, the same thing the cap already grants whoever it evicts, so the
+     * imprecision costs churn, never a limit.
      */
     private static final int EVICTION_HEADROOM = MAX_BUCKETS / 10;
 
     /**
      * At most one reclaim pass per second per pool: the flood that fills a pool must not also pay
-     * O(n) on every request. Between passes a full pool keeps ADMITTING, so the ceiling is
-     * {@link #MAX_BUCKETS} plus one second of distinct new keys — bounded, and trimmed back on the
+     * O(n) on every request. Between passes a full pool keeps admitting, so the ceiling is
+     * {@link #MAX_BUCKETS} plus one second of distinct new keys, bounded, and trimmed back on the
      * next pass however far it overshot.
      */
     private static final long SWEEP_INTERVAL_NANOS = 1_000_000_000L;
@@ -113,21 +111,20 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest req) {
         String path = req.getServletPath();
         if (path == null) path = req.getRequestURI();
-        // Only rate-limit the user-facing API surfaces, plus (since #852) the two credential
-        // routes. The rest of /auth/** stays exempt: the OAuth GETs are shaped by WorkOS-side rate
-        // limits already; /auth/logout and /auth/me name no credential to guess. Everything else
-        // under /actuator/ is NOT exempt (#935): AuthFilter runs first (@Order(10) vs this filter's
-        // @Order(20)) and now requires a staff-verified TenantContext for those paths, so anything
-        // reaching here already carries a real principal and can be throttled like any other
-        // authenticated surface — leaving the whole prefix exempt was the same "one predicate
-        // forgets what its sibling knows" drift that #929 fixed on the auth side.
+        // Only rate-limit the user-facing API surfaces, plus the two credential routes. The rest
+        // of /auth/** stays exempt: the OAuth GETs are shaped by WorkOS-side rate limits already;
+        // /auth/logout and /auth/me name no credential to guess. The guarded (non-public) part of
+        // /actuator/ is not exempt: AuthFilter runs first (@Order(10) vs this filter's @Order(20))
+        // and requires a staff-verified TenantContext for those paths, so anything reaching here
+        // already carries a real principal and can be throttled like any other authenticated
+        // surface.
         //
-        // NOTE the polarity: this method returns true to SKIP filtering (exempt), so the guarded
-        // actuator paths must be an OR term OUTSIDE a bare isPublicActuatorPath check, not folded
-        // into one — `isPublicActuatorPath(path)` alone as a third disjunct here would flip the
+        // Note the polarity: this method returns true to skip filtering (exempt), so the guarded
+        // actuator paths must be an OR term outside a bare isPublicActuatorPath check, not folded
+        // into one: `isPublicActuatorPath(path)` alone as a third disjunct here would flip the
         // public probes to "rate limited" and leave the guarded paths untouched, the opposite of
         // the intent. What has to enter the "must be filtered" side is isActuatorPath(path) &&
-        // !isPublicActuatorPath(path) — a guarded (non-public) actuator path — not the public one.
+        // !isPublicActuatorPath(path), a guarded (non-public) actuator path, not the public one.
         boolean guardedActuator = AuthFilter.isActuatorPath(path) && !AuthFilter.isPublicActuatorPath(path);
         boolean credentialRoute = isCredentialRoute(path, req.getMethod());
         return !(path.startsWith("/api/") || path.startsWith("/mcp") || guardedActuator || credentialRoute);
@@ -139,12 +136,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         TenantContext ctx = (TenantContext) req.getAttribute(TenantContext.ATTRIBUTE);
         if (ctx == null || ctx.userId() == null) {
-            // The credential routes are the one case reaching here WITHOUT a context that must
-            // still be throttled: shouldNotFilter now lets POST /auth/signup and /auth/login
-            // through specifically because they have no session yet, so the ctx==null fall-through
-            // below (correct for every other path this filter sees) would otherwise silently
-            // un-throttle them again — removing the shouldNotFilter exemption alone does nothing
-            // without this arm.
+            // The credential routes are the one case reaching here without a context that must
+            // still be throttled: shouldNotFilter lets POST /auth/signup and /auth/login through
+            // specifically because they have no session yet, so the ctx==null fall-through below
+            // (correct for every other path this filter sees) would otherwise silently un-throttle
+            // them again; removing the shouldNotFilter exemption alone does nothing without this
+            // arm.
             String path = req.getServletPath();
             if (path == null) path = req.getRequestURI();
             if (isCredentialRoute(path, req.getMethod())) {
@@ -167,7 +164,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Key by user id when present (cookie-auth, MCP) — every MCP token
+        // Key by user id when present (cookie-auth, MCP): every MCP token
         // resolves to a user via ApiKey.principalId, so this keeps
         // automated callers tied to the human who issued the token.
         if (!rejectIfExhausted(
@@ -177,7 +174,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         chain.doFilter(req, res);
     }
 
-    /** POST /auth/signup or POST /auth/login — the two credential-checking routes #852 added. */
+    /** POST /auth/signup or POST /auth/login: the two credential-checking routes. */
     private static boolean isCredentialRoute(String path, String method) {
         return "POST".equalsIgnoreCase(method) && ("/auth/signup".equals(path) || "/auth/login".equals(path));
     }
@@ -193,7 +190,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             java.util.function.Supplier<Bucket> newBucket)
             throws IOException {
         // A new key is the only thing that can grow the pool, so the cap is checked here and nowhere
-        // else. The key is then admitted either way — reclaim() makes the room rather than deciding
+        // else. The key is then admitted either way: reclaim() makes the room rather than deciding
         // who goes without it.
         Bucket b = pool.get(key);
         if (b == null) {
@@ -219,18 +216,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     /**
      * Make room in a full pool, at most once per second per pool.
      *
-     * <p>First drops every bucket that has refilled to full — one whose owner has stopped spending,
-     * which is indistinguishable from a bucket that never existed, so nobody loses an allowance they
-     * had spent. That is the ordinary case and usually the whole job.
+     * <p>First drops every bucket that has refilled to full, one whose owner has stopped spending,
+     * which is indistinguishable from a bucket that never existed, so nobody loses an allowance
+     * they had spent. That is the ordinary case and usually the whole job.
      *
-     * <p>A pool still at the cap afterwards is one where every bucket is being actively spent, which
-     * is what a caller holding thousands of addresses and keeping each one warm produces: the idle
-     * sweep frees nothing and, if a full pool refused new keys, every legitimate sign-in from an
-     * address not already in the map would be turned away for as long as that caller cared to
-     * continue. So the pass then evicts by AGE instead. Age is the right axis precisely because
+     * <p>A pool still at the cap afterwards is one where every bucket is being actively spent,
+     * which is what a caller holding thousands of addresses and keeping each one warm produces:
+     * the idle sweep frees nothing and, if a full pool refused new keys, every legitimate sign-in
+     * from an address not already in the map would be turned away for as long as that caller cared
+     * to continue. So the pass then evicts by age instead. Age is the right axis precisely because
      * {@link Bucket#tryConsume} stamps the bucket on every call including a rejected one: a caller
      * currently being throttled has the freshest stamp of all and cannot be evicted out of its own
-     * limit, while the coldest tenth — the ones nobody is spending hardest — make way.
+     * limit, while the coldest tenth, the ones nobody is spending hardest, make way.
      */
     private static void reclaim(ConcurrentMap<String, Bucket> pool, AtomicLong sweepClock) {
         long now = System.nanoTime();
@@ -268,7 +265,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         /**
          * True when enough time has passed since this bucket was last touched for it to hold a full
-         * burst again — so dropping it and minting a fresh one for the same key are the same thing.
+         * burst again, so dropping it and minting a fresh one for the same key are the same thing.
          * Read without the lock on purpose: it decides eviction, not admission, and the worst a stale
          * read does is keep a bucket for one more sweep.
          */
@@ -281,7 +278,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return stateNanos.get();
         }
 
-        /** Whole seconds until one token is worth waiting for, at least 1 — what {@code Retry-After} carries. */
+        /** Whole seconds until one token is worth waiting for, at least 1: what {@code Retry-After} carries. */
         long retryAfterSeconds() {
             return Math.max(1L, (long) Math.ceil(1.0 / refillPerSec));
         }

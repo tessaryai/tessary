@@ -188,9 +188,9 @@ const HEADS = Object.fromEntries(
     return [head, { ...MODELS[head], score: SCORERS[head] }];
   }),
 );
-// The OTHER direction is not a build mistake any more (#1293). The scoring code above is
+// The OTHER direction is not a build mistake any more. The scoring code above is
 // open source; the manifest that binds each head to a pinned checkpoint is not, and the open
-// edition ships models.json as `{}` — the populated manifest lives in the paid overlay. So a
+// edition ships models.json as `{}` — the populated manifest lives elsewhere. So a
 // scorer with no manifest entry is a head this build knows BY NAME but cannot serve, and it
 // is registered here as UNBACKED rather than thrown on: throwing at module load would take
 // down the whole service (and warmup.js, which does nothing but `require` this file) for a
@@ -214,7 +214,7 @@ for (const head of Object.keys(SCORERS)) {
 // residentModelDir/checkpointResidency precedent exactly (same two marker files, same
 // localModelPath root) so "is this on disk?" has one definition across /classify and
 // /embed. A gated head (frustration, attribution — see models.json) that skipped
-// download.js's fetch (#877: no HF_TOKEN at build time) never has this directory; a
+// download.js's fetch (no HF_TOKEN at build time) never has this directory; a
 // non-gated head (groundedness) is always expected to have it, and if it somehow
 // doesn't, that's a real build defect — this is not a supported "unavailable" path for
 // it, so callers below only special-case `spec.gated`, never every missing head.
@@ -309,7 +309,7 @@ function pipelineFor(head) {
 
 /**
  * Load every head sequentially (used by server startup pre-warm). A gated head with no
- * baked weights (#877: keyless open-edition build) is skipped rather than loaded — the
+ * baked weights (keyless open-edition build) is skipped rather than loaded — the
  * whole point of gating is that server.js's unconditional boot-time warmAll() must not
  * crash-loop the container just because frustration/attribution weren't baked; it used
  * to, before this check existed, because pipelineFor's tf.pipeline() call throws hard on
@@ -426,7 +426,7 @@ async function classify(payload) {
   return PAIR_HEADS.has(head) ? classifyPairs(head, spec, payload) : classifyTexts(head, spec, payload);
 }
 
-// A gated head (frustration, attribution) with no baked weights (#877: keyless
+// A gated head (frustration, attribution) with no baked weights (keyless
 // open-edition build, no HF_TOKEN at build time) is a known, distinguishable
 // "unavailable" — not the transport/serving failure EncoderScorer's fail-loud contract
 // means to catch. Checked here, right before the only place that would otherwise reach
@@ -439,7 +439,7 @@ async function classify(payload) {
 // verbatim client-facing body, so this needs zero server.js changes, and every non-2xx
 // is treated identically by the Java caller today regardless of which one it is.
 function requireResident(head, spec) {
-  // #1293, and checked FIRST because it is the coarser condition: an unbacked head has no
+  // Checked FIRST because it is the coarser condition: an unbacked head has no
   // manifest entry, so `spec.gated` and `residentModelDir` below have nothing to read. This
   // is a third, distinct state — not "unknown head" (a caller bug) and not "gated, not
   // baked" (a build-input outcome) but an EDITION boundary, and the only one whose cause the
@@ -455,7 +455,7 @@ function requireResident(head, spec) {
   // below: the encoder sweep fails loudly and retries on the next heartbeat. That is a tolerable
   // shape (nothing crashes, nothing scores silently wrong), not a distinguishing one. Making the
   // backend tell "this edition cannot serve it" apart from "the service is broken" needs a read
-  // of the body there, and backend/** is out of scope for #1293.
+  // of the body there, and backend/** is out of scope for this change.
   //
   // statusCode 400 for the same reason the gated arm uses it — server.js already returns a
   // 400's message verbatim, so this needs no server.js change.

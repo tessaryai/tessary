@@ -21,10 +21,10 @@ import org.springframework.stereotype.Component;
 /**
  * Answers one operational question, on every boot and once a day: <b>can classify-service be turned off?</b>
  *
- * <p>Launch requirement J1 is "the encoder service stays running while any org still uses an encoder
- * classifier", and the hazard it names is specific rather than hypothetical. Decision D3 flags
- * {@code frustration} and {@code groundedness} off for every partner, so the classify-service task serves
- * nothing but our own orgs — an ECS task with no visible traffic, on a bill somebody will eventually read.
+ * <p>The encoder service must stay running while any org still uses an encoder classifier, and the
+ * hazard is specific rather than hypothetical. {@code frustration} and {@code groundedness} are off
+ * for every partner, so the classify-service task serves nothing but our own orgs — an ECS task with
+ * no visible traffic, on a bill somebody will eventually read.
  * The two encoder classifiers do not fail loudly when it goes: the sweep throws, retries, and the signal
  * simply stops producing, which reads like a quiet week.
  *

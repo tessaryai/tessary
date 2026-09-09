@@ -10,7 +10,7 @@
 #
 # 2. Every module in the reactor must also be enumerated in the three Docker files, which cannot
 #    glob. Maven refuses to read an aggregator whose declared <module> directory is missing, so an
-#    incomplete list fails the image build outright — and it fails at `docker build` time, which
+#    incomplete list fails the image build outright, and it fails at `docker build` time, which
 #    `task check` never runs. That is exactly how `Dockerfile.dev` stayed broken while this script
 #    passed: it was checking only two of the three files.
 set -euo pipefail
@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 fail=0
 
-# The paid overlay inherits from backend/pom.xml too (open-core decision D2), so a version
+# An optional module tree outside backend/ also inherits from backend/pom.xml, so a version
 # property redeclared there shadows the parent exactly the same way. Glob both trees.
 stray=$(grep -n '<[a-z][a-z0-9.-]*\.version>' backend/*/pom.xml tessary-paid/pom.xml tessary-paid/*/pom.xml 2>/dev/null || true)
 if [ -n "$stray" ]; then
@@ -30,10 +30,10 @@ fi
 
 modules=$(sed -n 's|.*<module>\(.*\)</module>.*|\1|p' backend/pom.xml)
 for m in $modules; do
-    # A module path that escapes backend/ is the paid overlay (`../tessary-paid`, added by the
-    # file-activated `paid` profile). It is deliberately NOT in the Docker files: per open-core
-    # decision D4 the published open image carries only open code, and the paid image layers on
-    # top of it. The dev stack still needs it, which is the separate rule below.
+    # A module path that escapes backend/ is the optional overlay reactor, added by a
+    # file-activated profile. It is deliberately not in the Docker files: the published image
+    # only needs what backend/ builds, and a separate image layers the rest on top. The dev stack
+    # still needs it, which is the separate rule below.
     case "$m" in ../*) continue ;; esac
     for f in backend/Dockerfile backend/Dockerfile.dev docker-compose.dev.yml; do
         grep -q "$m/pom.xml" "$f" || { echo "ERROR: module '$m' is in the reactor but not in $f" >&2; fail=1; }
@@ -45,7 +45,7 @@ done
 #     each name is still a module. So dropping <module>evaluation</module> from the aggregator left
 #     `COPY evaluation/pom.xml` in backend/Dockerfile and backend/Dockerfile.dev, which fails the
 #     image build outright with `"/evaluation/pom.xml": not found`, and left docker-compose.dev.yml
-#     bind-mounting ./backend/evaluation/{src,pom.xml} — where compose SHORT syntax does not error on
+#     bind-mounting ./backend/evaluation/{src,pom.xml}, where compose SHORT syntax does not error on
 #     a missing source but has dockerd manufacture a ghost host path, the same hazard rule 2b guards
 #     for the overlay. Neither failure is visible to `task check`, which never runs `docker build`.
 # `$modules` is newline-separated; flatten it to a space-delimited string so the membership
@@ -72,32 +72,33 @@ for f in backend/Dockerfile backend/Dockerfile.dev docker-compose.dev.yml; do
         esac
     done
 done
-# 2b. The overlay is absent from the IMAGES by design (D4), but the dev container must see the
-#     same reactor the host does. `/app` is the reactor root inside the container, so the `paid`
-#     profile looks for ../tessary-paid/pom.xml = /tessary-paid/pom.xml; without that mount the
-#     profile deactivates and an in-container `mvn` silently builds a DIFFERENT module set from the
-#     identical command on the host. That divergence is the bug this rule exists to prevent.
+# 2b. The overlay reactor is deliberately absent from the published images, but the dev container
+#     must see the same reactor the host does. `/app` is the reactor root inside the container, so
+#     the file-activated profile looks for the overlay's pom.xml at the equivalent in-container
+#     path; without that mount the profile deactivates and an in-container `mvn` silently builds a
+#     different module set from the identical command on the host. That divergence is the bug this
+#     rule exists to prevent.
 #
-#     What it deliberately does NOT claim: that the dev backend loads paid beans. It cannot today —
-#     the boot is `-pl app -am`, whose closure can never include a paid module, because the enforcer
-#     forbids `app` from declaring a dependency on one. Wiring paid code into a running app is the
-#     classifier extension registry's job (#847 designs it, #876 implements it), and whatever that
-#     lands will need this mount to already be right.
+#     What it deliberately does not claim: that the dev backend loads the overlay's beans. It
+#     cannot today: the boot is `-pl app -am`, whose closure can never include an overlay module,
+#     because the enforcer forbids `app` from declaring a dependency on one. Wiring that code into
+#     a running app is a separate extension-registry mechanism, and whatever lands there will need
+#     this mount to already be right.
 #
-#     Since #886 the mounts live in tessary-paid/docker-compose.dev.yml, not the base compose file:
-#     an OPEN checkout must name no `./tessary-paid/...` bind source at all, or compose's
-#     short-syntax create-host-path behaviour has dockerd manufacture a ghost overlay tree and the
-#     `paid` profile — whose `<file><exists>` probe is true for a DIRECTORY — turns back on in a
-#     tree with no paid code. So this rule reads the FRAGMENT. Rules 2 and 3 around it still read
-#     docker-compose.dev.yml, and must: they assert things about the OPEN modules and the open boot
-#     command. Do not substitute the filename wholesale.
+#     The overlay's compose mounts live in its own fragment file, not the base compose file: a
+#     checkout with no overlay tree must name no bind source under it at all, or compose's
+#     short-syntax create-host-path behaviour has dockerd manufacture a ghost directory tree, and
+#     the profile, whose `<file><exists>` probe is true for a directory, turns back on in a tree
+#     with no overlay code. So this rule reads that fragment file. Rules 2 and 3 around it still
+#     read docker-compose.dev.yml, and must: they assert things about the base modules and the
+#     base boot command. Do not substitute the filename wholesale.
 PAID_DEV_COMPOSE=tessary-paid/docker-compose.dev.yml
 if [ -f tessary-paid/pom.xml ]; then
-    # The overlay is present, so its compose fragment must be too. This is the seam the #886 fix
-    # creates and it fails closed: Maven probes tessary-paid/pom.xml while compose probes the
-    # fragment, so an overlay with no fragment means no mounts, a deactivated in-container profile,
-    # and exactly the host/container module-set divergence rule 2b exists to prevent — while every
-    # grep below would fail against a missing file with text blaming a missing mount instead.
+    # The overlay is present, so its compose fragment must be too. This fails closed: Maven probes
+    # the overlay's pom.xml while compose probes the fragment, so an overlay with no fragment means
+    # no mounts, a deactivated in-container profile, and exactly the host/container module-set
+    # divergence rule 2b exists to prevent, while every grep below would fail against a missing
+    # file with text blaming a missing mount instead.
     if [ ! -f "$PAID_DEV_COMPOSE" ]; then
         echo "ERROR: the paid overlay is present but $PAID_DEV_COMPOSE is missing." >&2
         echo "       That file is what merges the paid module mounts into the dev stack; without" >&2
@@ -112,14 +113,14 @@ if [ -f tessary-paid/pom.xml ]; then
             echo "       builds a different module set there than it does on the host." >&2
             fail=1
         }
-        # Same trap as rule 2 above, one directory over: a paid module in the overlay's reactor whose
+        # Same trap as rule 2 above, one directory over: an overlay module in that reactor whose
         # sources are not mounted installs a class-less jar in the container.
         #
-        # The trailing colon in "$path:" is load-bearing, and so is the grep above it: both match the
-        # SHORT bind syntax `- ./tessary-paid/plan/src:/tessary-paid/plan/src`. Converting those mounts
-        # to long syntax (`source: ./tessary-paid/plan/src`) drops the colon, both greps silently stop
-        # matching, and this pin passes VACUOUSLY — guarding nothing, while looking green. That is why
-        # the fragment's header says the binds stay short syntax on purpose. If you ever need long
+        # The trailing colon in "$path:" is load-bearing, and so is the grep above it: both match
+        # the short bind syntax `- ./<module>/src:/<module>/src`. Converting those mounts to long
+        # syntax (`source: ./<module>/src`) drops the colon, both greps silently stop matching, and
+        # this pin passes vacuously, guarding nothing while looking green. That is why the
+        # fragment's header says the binds stay short syntax on purpose. If you ever need long
         # syntax, change these patterns in the same commit.
         paid_modules=$(sed -n 's|.*<module>\(.*\)</module>.*|\1|p' tessary-paid/pom.xml)
         for m in $paid_modules; do
@@ -138,7 +139,7 @@ fi
 #    was correct when the reactor was three modules and `shared` was the only sibling; with twelve
 #    it installs a fraction of the chain and `spring-boot:run` then dies on the first unresolved
 #    sibling. The compose command OVERRIDES the Dockerfile CMD, so fixing the image alone is not
-#    enough — that is exactly how the dev stack broke.
+#    enough, which is exactly how the dev stack broke.
 for f in backend/Dockerfile.dev docker-compose.dev.yml; do
     if grep -q 'install' "$f" && ! grep -q 'pl app -am install' "$f"; then
         echo "ERROR: $f installs the dev dependency chain with something other than" >&2

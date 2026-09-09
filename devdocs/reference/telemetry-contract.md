@@ -1,16 +1,15 @@
 # The `home.tessary.ai` telemetry contract
 
-> **Status: the §1 heartbeat client is built (#858); the §2 license-check endpoint is not.**
+> **Status: the §1 heartbeat client is built; the §2 license-check endpoint is not.**
 > `backend/core/.../telemetry` (`TelemetryProperties`, `HomeTessaryClient`, `InstallIdRepository`) and
 > `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`, `TelemetryBuckets`) implement §1, §3 and
 > §5 of this contract. No service exists at `home.tessary.ai` today, so the client's POSTs fail —
 > harmlessly; see §1's error handling — until that service (owner: §6) is stood up. The
 > Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.analytics`,
 > `frontend/src/lib/mixpanel.ts`) is gone outright, not superseded gradually — deleted in the same
-> change that added this client. §2's license-check endpoint remains spec-only, consumed by epic 9,
-> not this issue.
+> change that added this client. §2's license-check endpoint remains spec-only.
 
-Decided by D6 (Telemetry): anonymous ping, opt-out, disclosed in the README.
+Anonymous ping, opt-out, disclosed in the README.
 
 ## 1. Ping payload
 
@@ -22,7 +21,7 @@ payload may carry (see §5, Versioning).
 |---|---|---|---|
 | `contract_version` | int | `1` | Schema version of this payload; see §5. |
 | `install_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Generated once at first boot, persisted locally. Identifies an install, never a person or org — never derived from org name, user email, or license key. |
-| `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live since epic 5 (#1133): the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
+| `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live: the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
 | `app_version` | string (semver) | `"2026.9.1"` | The running app's version. |
 | `os` | string | `"linux"` | Host OS family. |
 | `arch` | string | `"arm64"` | Host CPU architecture. |
@@ -61,8 +60,7 @@ the now-deleted Mixpanel doc's seven-row backend event inventory.
 
 ## 2. License-check endpoint
 
-Consumed by epic 9 (License enforcement and graceful lapse); not implemented by
-this issue. Shapes only:
+Not yet implemented. Shapes only:
 
 **Request**
 
@@ -81,8 +79,7 @@ this issue. Shapes only:
 | `entitlements` | string[] | `["paid-conformance", "paid-groundedness"]` | Which paid capabilities this license unlocks. |
 
 `unreachable` degrades to "never blocks" — a self-hosted instance that cannot
-reach `home.tessary.ai` keeps running exactly as it was, matching epic 9's gate
-language and the #991 divergence-log note on the same contract (price-book sync
+reach `home.tessary.ai` keeps running exactly as it was (price-book sync
 degrades the same way: falls back to the bundled data, a manual override always
 wins).
 
@@ -95,7 +92,7 @@ wins).
 When set `false`: zero outbound network calls — including DNS resolution to
 `home.tessary.ai` — from the backend process (§4), covering both the heartbeat
 ping (§1) and the license-check call (§2). This is written precisely enough for
-#1197's `check-zero-egress.sh` (epic 7 clause 9, shipped) to assert
+`check-zero-egress.sh` to assert
 mechanically: with the var off, no attempt to resolve or reach
 `home.tessary.ai` may occur anywhere in a boot-to-triage run — proven via a
 DNS-sink network, with `TESSARY_TELEMETRY_ENABLED=true` run as the positive
@@ -103,24 +100,23 @@ control that must log exactly `home.tessary.ai`.
 
 ## 4. Scope note: backend-only
 
-The replacement client is backend-only — one phone-home endpoint per the
-component ledger ("`core` \| open \| ... the Mixpanel `analytics` package is
-replaced by one phone-home endpoint, `home.tessary.ai`, for telemetry, license
-checks, and future needs, with no third-party SDK or token in open code",
-tessary-paid/OPEN-CORE.md) and #858's own text ("the replacement client points at
-`home.tessary.ai`", singular). Frontend Mixpanel calls are removed outright,
+The replacement client is backend-only — one phone-home endpoint ("the Mixpanel
+`analytics` package is replaced by one phone-home endpoint, `home.tessary.ai`,
+for telemetry, license checks, and future needs, with no third-party SDK or
+token in open code"), and the replacement client points at `home.tessary.ai`
+(singular). Frontend Mixpanel calls are removed outright,
 not replaced with their own `home.tessary.ai` path.
 
 This is this doc's reading of the existing decisions, not an unquestionable
-fact — if #858 turns out to need a frontend leg later, §5's additive-only
+fact — if a frontend leg turns out to be needed later, §5's additive-only
 versioning rule accommodates it without reopening this doc's core shape.
 
 ## 5. Versioning rules
 
 `contract_version` is additive-only for new optional fields — a downstream
 consumer on an older version simply doesn't see the new field, no doc change
-required to keep working. This is exactly the mechanism epic 13's future
-price-sync field (#991) would use to extend the ping payload.
+required to keep working. This is exactly the mechanism a future
+price-sync field would use to extend the ping payload.
 
 Any field removal or semantic change (a field's meaning or type changing under
 the same name) requires a documented major version bump, with a changelog entry
@@ -135,7 +131,7 @@ responsibility for building and hosting it.
 ## Changelog
 
 - 2026-09-01 — `contract_version` 1. Initial contract: ping payload, license-check
-  endpoint, opt-out env var, scope note, versioning rules, owner. (#859)
+  endpoint, opt-out env var, scope note, versioning rules, owner.
 - 2026-09-01 — The §1 heartbeat client lands: `analytics` (Mixpanel) is deleted outright — backend
   package and frontend `lib/mixpanel.ts` + all 13 call sites — and replaced by `core`/`surfaces`'s
-  `telemetry` package, built to this contract. §2 (license-check) stays spec-only. (#858)
+  `telemetry` package, built to this contract. §2 (license-check) stays spec-only.

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 /**
  * The split that keeps {@code error_type} a type. The column is a facet key everywhere it is read, and it
  * used to be written from the producer's status message — which is how one came to hold 3,271 characters
- * of agent markdown, and why no two failures of the same kind ever grouped (#762).
+ * of agent markdown, and why no two failures of the same kind ever grouped.
  */
 class SpanErrorsTest {
 

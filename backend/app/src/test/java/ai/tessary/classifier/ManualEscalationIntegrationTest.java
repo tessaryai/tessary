@@ -45,23 +45,21 @@ import org.springframework.test.context.DynamicPropertySource;
 /**
  * Layer-2 is a hand-pressed button, and this is the surface behind it.
  *
- * <p>The property under test is a NEGATIVE one first: nothing escalates on its own. Both drift
- * sweeps used to enqueue an E2B microVM per finding and the classifier sweep a grader run per
- * detection, and every one of those was money spent to discover whether a lead was worth anything.
- * A regression here is silent and expensive — it does not fail a request or corrupt a row, it just
- * quietly starts billing — so the guard is that {@code escalated_at} stays null until somebody asks.
+ * <p>The property under test is a negative one first: nothing escalates on its own. A regression
+ * here is silent and expensive: it does not fail a request or corrupt a row, it just quietly
+ * starts billing, so the guard is that {@code escalated_at} stays null until somebody asks.
  *
- * <p>Against Postgres because both halves are: the escalate-once marker is a conditional UPDATE, and
- * the detector filter is a SQL predicate that has to run BEFORE the row limit — a rail asking for one
- * classifier's leads must not have them pushed off the page by a noisy sibling.
+ * <p>Against Postgres because both halves are: the escalate-once marker is a conditional update,
+ * and the detector filter is a SQL predicate that has to run before the row limit, so a rail asking
+ * for one classifier's leads must not have them pushed off the page by a noisy sibling.
  */
 @SpringBootTest
 class ManualEscalationIntegrationTest {
 
     /**
-     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as ONE
-     * spell still running rather than as a recovery and a re-fire — the production behaviour these tests
-     * are about. A test that wants the other arm passes its own.
+     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as
+     * one spell still running rather than as a recovery and a re-fire, the production behaviour these
+     * tests are about. A test that wants the other arm passes its own.
      */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
 
@@ -148,16 +146,10 @@ class ManualEscalationIntegrationTest {
     }
 
     /**
-     * The regression that shipped, and the contract that replaced it.
-     *
-     * <p>Pressing Run triage on a tool-error finding used to 409 with "carries no exemplar trace, so
-     * there is nothing to analyze" — on a finding citing 688 members and 3 witnesses. The entry point
-     * resolved a job anchor through the {@code exemplar} role, which had just been dropped from tool
-     * error and both drift measures for being a biased entry point.
-     *
-     * <p>The fix is not a better anchor. <b>The job carries no trace at all.</b> Naming one decides which
-     * instance the agent investigates, and it cannot tell our pick from a draw it made itself — so the
-     * payload carries the finding id, and the population is paged through MCP.
+     * A finding with no exemplar, only members and witnesses, still escalates. The job carries no
+     * trace at all: naming one would decide which instance the agent investigates, and it cannot
+     * tell our pick from a draw it made itself, so the payload carries the finding id and the
+     * population is paged through MCP.
      */
     @Test
     @DisplayName("a finding citing witnesses and members escalates, and the job names no trace")
@@ -243,14 +235,9 @@ class ManualEscalationIntegrationTest {
     }
 
     /**
-     * <b>Launch requirement B2.</b> A project with no connected repository gets a triage, and it is the
-     * same triage every project gets.
-     *
-     * <p>This used to be a 409, then a weaker lane. The Layer-2 run ruled against a committed spec, so a
-     * repo-less project could not be triaged at all, its findings could never clear the Triage gate, and
-     * the Classifiers page carried a warning saying the list would stay empty whatever the detectors saw.
-     * Triage no longer reads a repository at all — it audits a claim about traffic, which no source file
-     * settles — so what is asserted here is that the press enqueues and names the one lane there is.
+     * A project with no connected repository gets a triage, and it is the same triage every project
+     * gets: triage reads no repository, it audits a claim about traffic, which no source file
+     * settles, so the press enqueues and names the one lane there is.
      */
     @Test
     @DisplayName("without a connected repo the button enqueues the same triage as everyone else")
@@ -281,15 +268,10 @@ class ManualEscalationIntegrationTest {
     }
 
     /**
-     * <b>Launch requirement B6.</b> Escalating a finding to Layer 2 never depends on anything outside the
-     * finding itself.
-     *
-     * <p>This asserted "a project with no graders can still escalate" until Track A removed graders, which
-     * settles the original question by construction: there is no `grader` table to be empty and no
-     * {@code NO_GRADERS_FOR_CALL_SITE} refusal left to acquire. The claim underneath it did not go away —
-     * Layer 2 asks whether a deviation is legitimate, and it must read the finding's own evidence and
-     * nothing else — so the test keeps its name and asserts the surviving half: a bare project, with no
-     * pipeline import and no call-site definition behind the bucket, still escalates.
+     * Escalating a finding to Layer 2 never depends on anything outside the finding itself: Layer 2
+     * asks whether a deviation is legitimate, and it must read the finding's own evidence and
+     * nothing else. A bare project, with no pipeline import and no call-site definition behind the
+     * bucket, still escalates.
      */
     @Test
     @DisplayName("a project with no pipeline at all can still escalate a finding")
@@ -331,25 +313,6 @@ class ManualEscalationIntegrationTest {
                 "behaviour drift's causes are its three kinds, none of which is a distribution shift");
     }
 
-    /**
-     * <b>Two conformance cases used to sit here and #841 deleted them.</b>
-     * {@code conformanceAnalyzeEscalatesOnceAndIsIdempotent} and
-     * {@code conformanceTriageRoundTripsAndSurvivesRefresh} drove the same {@code analyze} button
-     * against the seam's SECOND store, proving the id routed to its own {@code TriageSource}, enqueued
-     * once on the shared queue with the SOP payload, and stamped the same escalate-once marker.
-     *
-     * <p>Both seeded through {@code conformance_rule} and {@code conformance_finding}, which are
-     * {@code tessary-paid/conformance} now. They could not move with the code — the overlay has no
-     * Spring Boot integration harness, by the decision recorded in tessary-paid/OPEN-CORE.md's divergence log — and
-     * they could not be re-fixtured either, because their whole subject WAS the second store. #882
-     * carries the debt.
-     *
-     * <p>What stays here is every case that asserts on OPEN triage behaviour, which is most of the file:
-     * the shared queue's idempotence, the withheld-capability refusal, the detector filter, and the
-     * cause-key vocabulary. The seam itself is still covered without a database by
-     * {@code TriageSourceAbsenceTest} and {@code FindingServiceMergeTest}, both plain JUnit over
-     * hand-written stubs.
-     */
     // -----------------------------------------------------------------------------------------------
     // Fixture
     // -----------------------------------------------------------------------------------------------
@@ -360,7 +323,7 @@ class ManualEscalationIntegrationTest {
                 .collect(Collectors.toSet());
     }
 
-    /** Queued Layer-2 runs for this project — the thing an accidental automatic escalation would bill. */
+    /** Queued Layer-2 runs for this project: the thing an accidental automatic escalation would bill. */
     private long triageJobs(String projectId) {
         return jdbc.sql("SELECT count(*) FROM job WHERE project_id = :pid AND kind = 'triage'")
                 .param("pid", projectId)
@@ -428,10 +391,9 @@ class ManualEscalationIntegrationTest {
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
-        // What the metric sweep ACTUALLY writes: a span-grain `member`, and no exemplar — the role was
-        // dropped for both drift measures because a member of a shifted population is not an anomaly in
-        // it. The fixture used to record an exemplar, which made every test here pass on a shape the
-        // classifier had stopped producing and hid a 409 on the real one.
+        // What the metric sweep actually writes: a span-grain `member`, and no exemplar. The role was
+        // dropped for both drift measures because a member of a shifted population is not an anomaly
+        // in it.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -450,15 +412,14 @@ class ManualEscalationIntegrationTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has behaviour drift and SOP conformance switched ON <b>before its project is created</b>.
+     * Bootstrap a tenant whose org has behaviour drift and SOP conformance switched on before its
+     * project is created.
      *
-     * <p>Two things make this necessary. The open-edition default has behavior_drift and sop_conformance OFF
-     * (the paid classifiers {@code CapabilityService} reports as unavailable), so without a grant these cases
-     * would assert the capability default rather than the behaviour they name. And the grant has to precede the
-     * project, because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project does not
-     * have. The suite used to get all of this ambiently from {@code tessary.plan.default-key=enterprise} in
-     * surefire, which went away with plan tiers (open-core epic 1 issue 1).
+     * <p>Two things make this necessary. Both classifiers are off by default, so without a grant
+     * these cases would assert the capability default rather than the behaviour they name. And the
+     * grant has to precede the project, because project creation is what seeds the built-in
+     * classifiers: grant afterwards and the classifier row is never inserted, leaving the test
+     * hunting findings from a classifier the project does not have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

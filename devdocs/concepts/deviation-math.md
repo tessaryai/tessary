@@ -60,7 +60,7 @@ range look unchanged, and folding them into the end bin would hide that the rang
 ### Windows and buckets
 
 A **bucket** is what gets watched. Turn grain is the `call_site` alone — it was `(call_site,
-environment)` until Track A dropped `environment_id` off the substrate. Tool grain is an
+environment)` until `environment_id` was dropped off the substrate. Tool grain is an
 `ActionSymbol` `kind:name` and carries **no call site** — a tool's latency is a tool's latency
 whoever dispatched it, and scoping per call site would shatter one tool into five thin populations.
 

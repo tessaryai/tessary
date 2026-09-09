@@ -111,21 +111,20 @@ class QueryApiIntegrationTest {
                 .payload("q", "result")
                 .previews("q", "result")
                 .writeRef();
-        // The query API windows on created_at (arrival), which the repository will not let a payload set —
+        // The query API windows on created_at (arrival), which the repository will not let a payload set,
         // so the fixture writes it, exactly as the metering fixtures do.
         backdate(pid, llm, t0);
         backdate(pid, tool, t2);
 
-        // Two tool_calls under the tool span: one success, one error — different tool names.
+        // Two tool_calls under the tool span: one success, one error, different tool names.
         fx.toolCall(pid, tool, "web_search", null, t0);
         fx.toolCall(pid, tool, "db_lookup", "timeout", t2);
 
-        // One signal + two detections (different severities) over the spans. 'frustration' is one of the
-        // four paid classifiers and OFF by default in an open build (#887/#888), so the project's seeded
-        // catalog will not already own a 'frustration' row here — the DELETE below is a no-op in that
-        // case rather than replacing an existing row, and the raw INSERT that follows creates this test's
-        // own row directly, bypassing capability gating entirely (this test is about the query API, not
-        // about whether frustration is enabled).
+        // One signal + two detections (different severities) over the spans. 'frustration' is off
+        // by default, so the project's seeded catalog will not already own a 'frustration' row: the
+        // DELETE below is a no-op in that case rather than replacing an existing row, and the raw
+        // INSERT that follows creates this test's own row directly, bypassing capability gating
+        // entirely (this test is about the query API, not about whether frustration is enabled).
         String classifierId = Ids.ulid();
         jdbc.sql("DELETE FROM classifier WHERE project_id = :pid AND classifier_key = 'frustration'")
                 .param("pid", pid)
@@ -157,7 +156,7 @@ class QueryApiIntegrationTest {
     /**
      * Seed a classifier <em>detection</em>: a detection lives in its own classifier's table, and the
      * query API's {@code classifier_events} dataset reads it back through the DetectionTableRegistry-stitched union
-     * ({@code classifier_id} = the classifier KEY, which is the persisted wire token).
+     * ({@code classifier_id} = the classifier key, which is the persisted wire token).
      *
      * <p>Seeded here into the span-grain table so the dataset's subject-pair filters have both halves to
      * work on: a producer span id is half a key and {@code subject_trace_id} is the other half.
@@ -352,7 +351,7 @@ class QueryApiIntegrationTest {
         assertEquals(Long.valueOf(1), counts.get("router"));
         assertEquals(2, counts.size(), "only tagged spans name a call site");
 
-        // The untagged span is NOT absent — GROUP BY emits it as a null-valued bucket that is
+        // The untagged span is not absent: GROUP BY emits it as a null-valued bucket that is
         // ranked, and capped, like any other. Callers must drop it themselves, and must treat a full
         // top_n response as possibly having evicted a real call site to make room for it.
         var nullBucket =
@@ -400,8 +399,9 @@ class QueryApiIntegrationTest {
         String pid = seedProject("query-search");
         var ctx = token(pid);
 
-        // Keyword over the span's stored OUTPUT PREVIEW ("hello there" on the llm span only). The full
-        // payload is off-row and deliberately not searched here — this dataset stays a single-table read.
+        // Keyword over the span's stored output preview ("hello there" on the llm span only). The
+        // full payload is off-row and deliberately not searched here: this dataset stays a
+        // single-table read.
         var byKeyword = controller
                 .search(ctx, new SearchRequest("spans", "hello", null, null, null, null, null))
                 .data();
@@ -409,8 +409,8 @@ class QueryApiIntegrationTest {
         assertEquals("chat", byKeyword.rows().get(0).fields().get("name"));
         assertNull(byKeyword.nextCursor());
 
-        // A span row's id is the composite handle, and both halves also ride as their own fields — so a
-        // caller can hand them straight to get_span without parsing anything.
+        // A span row's id is the composite handle, and both halves also ride as their own fields, so
+        // a caller can hand them straight to get_span without parsing anything.
         var hit = byKeyword.rows().get(0);
         assertEquals(hit.fields().get("trace_id") + ":" + hit.fields().get("span_id"), hit.id());
 
@@ -422,8 +422,8 @@ class QueryApiIntegrationTest {
         assertEquals("db_lookup", byFilter.rows().get(0).fields().get("name"));
 
         // Pagination: limit=1 over 2 spans yields a next_cursor; the next page completes the set. The
-        // keyset tiebreak is (created_at, trace_id, id) — a span id alone does not break ties, because two
-        // traces may legitimately hold spans with the same producer id.
+        // keyset tiebreak is (created_at, trace_id, id): a span id alone does not break ties, because
+        // two traces may legitimately hold spans with the same producer id.
         var page1 = controller
                 .search(ctx, new SearchRequest("spans", null, null, null, null, 1, null))
                 .data();
@@ -446,9 +446,8 @@ class QueryApiIntegrationTest {
 
     @Test
     void searchRejectsSemanticModeAsUnknown() {
-        // The vector substrate (and the "semantic" search mode it backed) was removed with #1116; the
-        // API now rejects it outright — a 400 UNKNOWN_SEARCH_MODE, not a silent fallback to keyword and
-        // not the old 503 "vector index unavailable" degrade guard this test used to pin.
+        // The API rejects an unknown "semantic" search mode outright, a 400 UNKNOWN_SEARCH_MODE
+        // rather than a silent fallback to keyword.
         String pid = seedProject("query-search-semantic");
         var ctx = token(pid);
         TessaryException e = assertThrows(
@@ -462,7 +461,7 @@ class QueryApiIntegrationTest {
     @Test
     void rejectsNonTokenContext() {
         String pid = seedProject("query-auth");
-        // A user-session context (no MCP token) must be rejected — the surface is token-scoped.
+        // A user-session context (no MCP token) must be rejected: the surface is token-scoped.
         var userCtx = new TenantContext("user-1", null, "org-1", pid, "member", null);
         TessaryException e = assertThrows(
                 TessaryException.class, () -> controller.count(userCtx, new CountRequest("spans", null, null)));
@@ -486,7 +485,7 @@ class QueryApiIntegrationTest {
                         .count(token(pidB), new CountRequest("spans", null, null))
                         .data()
                         .count());
-        // Cross-checking the raw table confirms 4 total across both projects — the query API isolates them.
+        // Cross-checking the raw table confirms 4 total across both projects: the query API isolates them.
         Long all = jdbc.sql("SELECT COUNT(*) FROM span WHERE project_id IN (:a, :b)")
                 .param("a", pidA)
                 .param("b", pidB)
@@ -505,9 +504,8 @@ class QueryApiIntegrationTest {
     }
 
     /**
-     * {@code observations} is not a dataset. It was the pre-cutover spelling of {@code spans} and resolved
-     * through an alias for one release; the hard cutover took the alias with it, so the old name is now an
-     * unknown dataset like any other misspelling rather than a silently-working second name.
+     * {@code observations} is not a dataset: an unknown dataset like any other misspelling, not a
+     * silently-working second name for {@code spans}.
      */
     @Test
     void rejectsTheRetiredObservationsAlias() {

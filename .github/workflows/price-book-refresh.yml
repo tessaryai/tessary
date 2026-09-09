@@ -1,17 +1,16 @@
 name: Price book refresh
 
-# #990 (open-core epic 8, Track B): keep LiteLLM/BerriAI as the price source and automate the
-# refresh cadence — scripts/refresh-model-prices.sh already exists and does the fetch-and-vendor
-# work; this workflow is just the "run it on a schedule and open a PR with the result" wrapper
-# around it. See that script's own header for why the source stays vendored rather than fetched
-# at runtime, why the copy is verbatim, and where the no-token-rate guard now lives.
+# Keeps LiteLLM/BerriAI as the price source and automates the refresh cadence.
+# scripts/refresh-model-prices.sh does the fetch-and-vendor work; this workflow just runs it on a
+# schedule and opens a PR with the result. See that script's own header for why the source stays
+# vendored rather than fetched at runtime, why the copy is verbatim, and where the no-token-rate
+# guard lives.
 #
 # NO VERIFICATION GATE, DELIBERATELY. An earlier draft ran a drift check between the old and new
-# file and refused to open a PR on an implausible delta. Dropped on 2026-09-02: we take LiteLLM's
-# pricing at its word (their registry commits cite the provider's own pricing page, land 10-20x a
-# day, and some ship tests alongside), so a heuristic second-guessing them was buying a false
-# sense of review rather than review. The review that matters is a human reading the diff on the
-# PR this opens, which is the same review the script's header has always asked for.
+# file and refused to open a PR on an implausible delta. Dropped: we take LiteLLM's pricing at its
+# word (their registry commits cite the provider's own pricing page, land 10-20x a day, and some
+# ship tests alongside), so a heuristic second-guessing them was buying a false sense of review
+# rather than review. The review that matters is a human reading the diff on the PR this opens.
 #
 # THIS IS THE FIRST WORKFLOW IN THIS REPO THAT OPENS A PULL REQUEST. Every other workflow here is
 # read-only or deploy-only (grep `permissions:` across this directory: contents: read plus
@@ -31,9 +30,8 @@ name: Price book refresh
 # inactivity, not on cron frequency — and it does not make it worse either.
 # ALL AUTOMATIC TRIGGERS ARE DISABLED. Nothing in this repository starts a workflow run on its
 # own; every workflow here is `workflow_dispatch` only, so runs happen when a human presses Run.
-# Re-arming them is tracked as #1184 (epic 11, public repo cutover). The original trigger
-# block for this file is preserved commented-out immediately below — re-enabling is uncommenting
-# it, nothing else.
+# Re-arming them is tracked separately. The original trigger block for this file is preserved
+# commented-out immediately below — re-enabling is uncommenting it, nothing else.
 # on:
 #   schedule:
 #     # DAILY 05:00 UTC. Unlike every other cron in this repo (ci.yml 0 3 * * 1, codeql.yml 0 4 * * 1 — all Mondays-only), this one runs every day ON PURPOSE: a
@@ -97,11 +95,11 @@ jobs:
           else
             gh pr create --head automation/price-book-refresh --base main \
               --title "chore(pricing): refresh vendored LiteLLM price book" \
-              --body "Automated daily refresh of the vendored LiteLLM price book, opened by \`.github/workflows/price-book-refresh.yml\` (#990).
+              --body "Automated daily refresh of the vendored LiteLLM price book, opened by \`.github/workflows/price-book-refresh.yml\`.
 
           The file is a verbatim copy of [BerriAI/litellm's \`model_prices_and_context_window.json\`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json). Review the diff below: it is exactly what upstream published, with no transformation in between.
 
           Entries carrying neither an input nor an output token rate are vendored but read as unpriced rather than as \$0.00 — see \`TokenPriceBook.hasTokenRate\`.
 
-          There is no hand-maintained correction file layered over this one (#1032 retired \`manual-overrides.json\`) — a stale or wrong row is a bug to raise with LiteLLM upstream."
+          There is no hand-maintained correction file layered over this one (\`manual-overrides.json\` is retired) — a stale or wrong row is a bug to raise with LiteLLM upstream."
           fi

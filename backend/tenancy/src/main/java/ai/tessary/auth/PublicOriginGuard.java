@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Makes {@code SITE_DOMAIN} the one variable a self-hoster sets to put this instance on a real
- * hostname (#1225). Before this, the domain lived in three variables that had to agree
+ * hostname. Before this, the domain lived in three variables that had to agree
  * ({@code SITE_DOMAIN}, {@code TESSARY_AUTH_FRONTEND_URL}, {@code WORKOS_REDIRECT_URI}) and nothing
  * checked that they did: set only the first and the stack booted clean, served TLS, and bounced
  * every sign-in to {@code http://localhost/}.

@@ -20,7 +20,7 @@ import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRespons
 /**
  * Against a mocked {@link BedrockClient} (an interface, so Mockito mocks it directly — no fake HTTP
  * server or real AWS call). Injected through {@link BedrockModelLister}'s package-private {@code
- * ClientFactory} test seam, which is the seam the class did not have before #939 TASK 2's corrective
+ * ClientFactory} test seam, which is the seam the class did not have before this corrective
  * pass: {@link BedrockModelLister#list} used to build its own client inline via
  * {@code BedrockClient.builder()}, with no way for a test to substitute a fake.
  *

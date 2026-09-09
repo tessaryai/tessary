@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link ContentExtractor#partPlaceholder} for the three ContentBlock document kinds (#985/#987) — the
+ * {@link ContentExtractor#partPlaceholder} for the three ContentBlock document kinds — the
  * cross-language contract with Python's {@code render_part}/{@code _FILE_TYPES}
  * ({@code classifiers/framework/context.py}). {@code context_contract.json} carries zero
  * document_ref/document_b64/document_url fixture cases, so this is the only place a Java/Python

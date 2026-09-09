@@ -19,15 +19,11 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
- * Train/serve parity for the trajectory REDUCTION: {@link TrajectoryAssembler#reduce} must reproduce
- * every case in {@code tessary-paid/classifiers/behavior_drift/fixtures/reduction_contract.json} — the same shared
- * golden fixture the Python reference ({@code tessary-paid/classifiers/behavior_drift/sequence.py}) is pinned to by
- * {@code tests/test_behavior_drift_reduction.py}.
+ * Train/serve parity for the trajectory reduction: {@link TrajectoryAssembler#reduce} must reproduce
+ * every case in the shared golden fixture the Python reference is pinned to.
  *
- * <p>Sibling of {@link BehaviorDriftParityTest}, which pins what the detector FIRES on. This pins what
- * it is fired on. It exists separately because §2.4 turned the reduction from a per-action map into a
- * grammar with lookahead — more divergence surface, not less — and these two implementations have
- * already drifted apart once without a red test.
+ * <p>Sibling of {@link BehaviorDriftParityTest}, which pins what the detector fires on. This pins what
+ * it is fired on, since the two implementations have already drifted apart once without a red test.
  *
  * <p>If this fails, the two have drifted again. Do not "fix" it by regenerating the fixture.
  */
@@ -65,9 +61,8 @@ class TrajectoryAssemblerParityTest {
     }
 
     /**
-     * The fixture, resolved from THIS checkout's root only. {@code classifiers/} is a delete row on the
-     * export denylist, so in the public export it is absent by design: skip with that reason, never
-     * climb past the checkout into a parent that might hold a private copy.
+     * The fixture, resolved from this checkout's root only. Skips rather than fails when it is
+     * absent, never climbing past the checkout into a parent that might hold a copy.
      */
     private static Path fixture() {
         Path rel = Path.of("classifiers", "behavior_drift", "fixtures", "reduction_contract.json");

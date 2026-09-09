@@ -5,15 +5,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Tuning for the async alerting engine, bound from {@code tessary.alert.*}.
- * Alerts is a paid capability: the worker runs unconditionally (no enablement env gate) and skips
- * non-entitled orgs per-project ({@code Feature.ALERTS}). Defaults live here in code.
+ * Tuning for the async alerting engine, bound from {@code tessary.alert.*}. The worker runs
+ * unconditionally and skips orgs that lack the alerts entitlement, per project. Defaults live
+ * here in code.
  *
- * <p>As in {@link ObserverProperties}, the <em>business cadence</em> lives per-tenant — a per-signal
+ * <p>As in {@link ObserverProperties}, the business cadence lives per-tenant: a per-signal
  * threshold rule in {@code signal_alert} and a per-project digest/brief cron in
  * {@code project_alert_config}. The worker's poll cadence is bound directly by {@code @Scheduled}
- * from {@code tessary.alert.heartbeat-ms}; {@link #defaultDigestCron} /
- * {@link #cronZone} are fallback server defaults used when a per-row cron is absent.
+ * from {@code tessary.alert.heartbeat-ms}; {@link #defaultDigestCron} and {@link #cronZone} are
+ * fallback server defaults used when a per-row cron is absent.
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.alert")
@@ -30,9 +30,8 @@ public class AlertProperties {
 
     /**
      * Public origin of the SPA, used to put a link to the case in an alert message
-     * ({@code https://app.tessary.ai}). Empty by default and empty in local development, where there is no
-     * stable public origin — the message then carries no link rather than one that goes nowhere, which is
-     * the worse of the two: a reader spends the click finding out.
+     * ({@code https://app.tessary.ai}). Empty by default and in local development, where there is
+     * no stable public origin: better to omit the link than send one that goes nowhere.
      */
     private String appBaseUrl = "";
 

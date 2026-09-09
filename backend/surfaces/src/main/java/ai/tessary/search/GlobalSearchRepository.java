@@ -109,7 +109,7 @@ public class GlobalSearchRepository {
                 .param("thr", Double.toString(TRIGRAM_THRESHOLD))
                 .query()
                 .singleColumn();
-        // Two legs left with Track A: graders and datasets were both searched here, and both tables
+        // Only one leg remains: graders and datasets were both searched here once, and both tables
         // are gone. The span leg is the whole lexical fan-out now — which is also why the transaction
         // and the lowered trigram threshold above still earn their keep for exactly one caller.
         List<SearchHit> hits = new ArrayList<>();

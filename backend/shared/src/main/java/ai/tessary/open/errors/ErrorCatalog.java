@@ -16,17 +16,7 @@ import org.springframework.stereotype.Component;
  * impossible (enum constants can't share a name); this catches the rarer
  * case of two enum classes resolving to the same domain prefix.
  *
- * To register a new error enum, add it to {@link #REGISTERED}.
- *
- * <p><b>What this list does NOT cover, since the overlay exists.</b> {@link #REGISTERED} is a
- * hard-coded static in an OPEN module, and there is no registration SPI — deliberately: adding one is
- * runtime-classpath work that belongs with the paid-jar discovery mechanism (#881), not here. So an
- * error enum that lives in {@code tessary-paid/} can never appear in it, and the duplicate-code check
- * below silently stops covering paid domains. The overlay's own {@code PlanError} (in
- * {@code ai.tessary.paid.plan}) is the first such
- * type (#845). What replaces the guarantee for it is
- * {@code PaidErrorCodesDoNotCollideTest}, which asserts its codes against {@link #registered()} at build
- * time rather than at boot. Any future paid error enum owes the same test.
+ * <p>To register a new error enum, add it to {@link #REGISTERED}.
  */
 @Component
 public class ErrorCatalog {
@@ -54,9 +44,8 @@ public class ErrorCatalog {
             AuthError.class);
 
     /**
-     * The registered enums, for a test that has to check something against them from outside this
-     * module — specifically a PAID error enum, which can never be in the list itself. Returns the same
-     * immutable {@code List.of} the validator walks, so the two can never drift.
+     * The registered enums, for a caller outside this module that needs to check codes against them.
+     * Returns the same immutable {@code List.of} the validator walks, so the two can never drift.
      */
     public static List<Class<? extends ErrorCode>> registered() {
         return REGISTERED;

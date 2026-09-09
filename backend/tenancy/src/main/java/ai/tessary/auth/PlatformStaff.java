@@ -11,21 +11,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The platform-staff gate — a second authority alongside {@link ai.tessary.tenant.rbac.RolePermissions},
+ * The platform-staff gate: a second authority alongside {@link ai.tessary.tenant.rbac.RolePermissions},
  * for the handful of actions that belong to us rather than to the customer. Today that is exactly one thing:
  * moving an org's plan by hand, so a pilot can be put on a paid tier without a self-serve purchase.
  *
- * <p>It is deliberately NOT a {@link Role}. A role is something an org grants inside its own tenancy, and every
- * user is owner of their own org — so any role-shaped answer to "may I change my plan?" is yes for everyone,
- * which is the hole this replaces. Staff identity comes from deployment config instead, where a customer
- * cannot reach it.
+ * <p>It is deliberately not a {@link Role}. A role is something an org grants inside its own tenancy, and
+ * every user is owner of their own org, so any role-shaped answer to "may I change my plan?" is yes for
+ * everyone, which is the hole this replaces. Staff identity comes from deployment config instead, where a
+ * customer cannot reach it.
  *
  * <h2>Both halves are required</h2>
- * {@link #canAdminister} is staff identity AND owner/admin standing in the target org. The identity half is
+ * {@link #canAdminister} is staff identity and owner/admin standing in the target org. The identity half is
  * what makes it safe: the caller must actually be a staff member, proven by the sealed session cookie, so a
- * customer inviting staff into their org gains nothing. The standing half is consent and blast radius —
- * staff cannot move the plan of an org they were added to in passing, and the access is visible to the
- * customer in their own member list, revocable by removing the membership.
+ * customer inviting staff into their org gains nothing. The standing half is consent and blast radius: staff
+ * cannot move the plan of an org they were added to in passing, and the access is visible to the customer in
+ * their own member list, revocable by removing the membership.
  *
  * <p>Bearer/MCP key contexts never qualify. A key carries its creator's identity, so a staff-created key
  * scoped to a customer project would otherwise carry staff authority into that project.

@@ -30,16 +30,16 @@ import java.util.zip.Deflater;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Generates the sample project's "AI customer-support agent" showcase (#1230): ~500+ support-ticket
+ * Generates the sample project's "AI customer-support agent" showcase: ~500+ support-ticket
  * traces over a 14-day window, threaded through a 7-call-site pipeline, with six of them carrying a
  * real cost/duration/error-rate drift visible when the generated spans are aggregated by day and call
  * site. Pure and deterministic (seeded {@link Random}, no clock reads beyond one {@code now} anchor
- * passed in) — no LLM calls, no I/O; {@link SampleProjectSeedListener} does all the writing.
+ * passed in); no LLM calls, no I/O; {@link SampleProjectSeedListener} does all the writing.
  *
- * <p>Every trace is a flat, sequentially nested pipeline —
+ * <p>Every trace is a flat, sequentially nested pipeline:
  * {@code assemble_ticket_context -> classify_intent -> kb_search -> generate_response ->}
  * optionally {@code refund_api}/{@code ticket_escalation} {@code -> } optionally
- * {@code export_ticket} — chosen per scenario category, so a trace reads as one coherent ticket
+ * {@code export_ticket}, chosen per scenario category, so a trace reads as one coherent ticket
  * handled end to end rather than unrelated spans sharing a trace id.
  */
 final class SampleShowcase {
@@ -68,7 +68,7 @@ final class SampleShowcase {
      * <p>Templates used to share ONE flat pool of "products", which is how the sample project ended up
      * asking "How do I add teammates to Storage upgrade?" and "How to cancel API credits subscription".
      * A support ticket names a plan, an integration, a screen or a line item, and those four are not
-     * interchangeable in a sentence — so each template declares which one its wording needs.
+     * interchangeable in a sentence, so each template declares which one its wording needs.
      */
     private enum Noun {
         /** A subscription tier: "upgrade to …", "cancel …", "our workspace is on …". */
@@ -158,7 +158,7 @@ final class SampleShowcase {
                     + " {product} — they'll take it from here.");
 
     private static final List<Template> TEMPLATES = List.of(
-            // billing_refund — {product} is the line item that was billed
+            // billing_refund: {product} is the line item that was billed
             new Template(
                     "billing_refund",
                     "refund_request",
@@ -215,7 +215,7 @@ final class SampleShowcase {
                     "Accidental purchase on {date}",
                     "I accidentally purchased {product} on {date} for {amount}. Please refund order"
                             + " {orderId}. Thanks, {customer}"),
-            // login_access — {product} is the plan the locked-out workspace is on
+            // login_access: {product} is the plan the locked-out workspace is on
             new Template(
                     "login_access",
                     "account_access",
@@ -269,7 +269,7 @@ final class SampleShowcase {
                     "Account access revoked unexpectedly",
                     "My access was revoked without warning on {date}. {customer} here, on {product}, order"
                             + " {orderId}."),
-            // export_integration — {product} is the third-party system on the other end
+            // export_integration: {product} is the third-party system on the other end
             new Template(
                     "export_integration",
                     "export_failure",
@@ -320,7 +320,7 @@ final class SampleShowcase {
                     "PDF export is missing line items",
                     "The PDF export for order {orderId} is missing line items, so {product} is out of"
                             + " balance. — {customer}"),
-            // how_to — {product} is the plan the answer depends on
+            // how_to: {product} is the plan the answer depends on
             new Template(
                     "how_to",
                     "how_to_question",
@@ -369,7 +369,7 @@ final class SampleShowcase {
                     Noun.PLAN,
                     "How do I set up notifications?",
                     "Can you walk me through notification setup on {product}? — {customer}"),
-            // bug_report — {product} is the screen or feature that misbehaves
+            // bug_report: {product} is the screen or feature that misbehaves
             new Template(
                     "bug_report",
                     "bug_report",
@@ -419,7 +419,7 @@ final class SampleShowcase {
                     Noun.AREA,
                     "Error 500 when submitting the support form",
                     "{customer} — submitting the support form from {product} throws a 500, order" + " {orderId}."),
-            // escalation — {product} is the plan whose service level is being invoked
+            // escalation: {product} is the plan whose service level is being invoked
             new Template(
                     "escalation",
                     "escalation_request",
@@ -530,7 +530,7 @@ final class SampleShowcase {
     /**
      * Openers a customer's earlier messages on the same thread might have carried. Real thread history
      * is not one sentence repeated N times, and the point of this list is what {@code
-     * assemble_ticket_context} is shown to be forwarding once the drift starts — a reader who opens one
+     * assemble_ticket_context} is shown to be forwarding once the drift starts: a reader who opens one
      * of those spans has to see something that reads like a conversation.
      */
     private static final String[] PRIOR_MESSAGES = {
@@ -565,7 +565,7 @@ final class SampleShowcase {
     private static final long EXPORT_BASE_LATENCY_MS = 340;
 
     /**
-     * What {@code refund_api} and {@code ticket_escalation} fail at when nothing is wrong — the
+     * What {@code refund_api} and {@code ticket_escalation} fail at when nothing is wrong: the
      * reference the drift is measured against, so it has to be a rate the reference window can
      * actually EXHIBIT. At 1% it could not: 38 pre-onset refund calls drew zero failures, and the
      * finding then claimed a move "from 0.0%", which is not a rate a tool has, it is a window too
@@ -580,8 +580,8 @@ final class SampleShowcase {
 
     /**
      * Where {@code generate_response}'s smooth cost ramp is cut into a before and an after. Unlike the
-     * other five rows there is no step to find here — the ramp is continuous by design, one call site
-     * that is drifting rather than one that broke — so this is a reporting split, not an onset.
+     * other five rows there is no step to find here: the ramp is continuous by design, one call site
+     * that is drifting rather than one that broke, so this is a reporting split, not an onset.
      */
     private static final int GENERATE_SPLIT_DAY = 8;
 
@@ -618,7 +618,7 @@ final class SampleShowcase {
 
     record MediaAttach(String traceId, String spanId, String mediaId) {}
 
-    /** One drift row's real, generated-data statistics — in the design spec's array order. */
+    /** One drift row's real, generated-data statistics, in the design spec's array order. */
     record DriftStat(
             String classifierKey,
             String callSiteId,
@@ -639,7 +639,7 @@ final class SampleShowcase {
              * The finding's evidence, in the three roles {@code RcaAnalysisService.sides} splits on.
              * {@code baseline} is what the drift was measured against (the days before onset);
              * {@code member} is the population being complained about; {@code witness} is the failing
-             * subset of it, which only {@code tool_error} draws — a metric-drift finding leaves it
+             * subset of it, which only {@code tool_error} draws; a metric-drift finding leaves it
              * empty and its members ARE the flagged side.
              *
              * <p>Without these a seeded finding has no {@code finding_evidence} rows, and RCA on it
@@ -665,11 +665,11 @@ final class SampleShowcase {
 
     /**
      * @param exportPdfMediaId the already-stored media id every {@code export_ticket} span's
-     *     {@code document_ref} block points at — one real {@code media_object} row for the whole
+     *     {@code document_ref} block points at: one real {@code media_object} row for the whole
      *     dataset (content-addressed dedup makes this the correct outcome even if it were stored
      *     per-trace: every export carries the same placeholder PDF).
      * @param screenshotPngMediaId likewise for the {@code image_ref} block on every
-     *     {@code assemble_ticket_context} span — the screenshot a customer attached to their ticket.
+     *     {@code assemble_ticket_context} span: the screenshot a customer attached to their ticket.
      */
     static Dataset generate(
             String projectId, long seed, Instant now, String exportPdfMediaId, String screenshotPngMediaId) {
@@ -713,7 +713,7 @@ final class SampleShowcase {
                 Instant traceStart = dayStart.plusSeconds(offsetSeconds);
                 // The date a ticket REFERS to is always before the ticket itself. Formatting the trace's
                 // own start here made every ticket say "I was charged on <today>, and it still hasn't
-                // been refunded" — a complaint about something that had not happened yet.
+                // been refunded", a complaint about something that had not happened yet.
                 String date = dateFmt.format(traceStart.minus(2 + rnd.nextInt(9), ChronoUnit.DAYS));
 
                 String subject = fill(template.subject(), customer, orderId, product, amount, date);
@@ -770,14 +770,11 @@ final class SampleShowcase {
                             kind = KindNormalizer.TOOL;
                             latencyMs = jitter(rnd, ASSEMBLE_BASE_LATENCY_MS, 0.2);
                             int priorMessages = day < CLASSIFY_STEP_DAY ? 1 : 3 + rnd.nextInt(5);
-                            // #1276 removed the image entirely to stop the broken-image chip, because
-                            // the dead `https://cdn.tessary-sample.dev/...` URL bought nothing the
-                            // ticket text did not already say. Restored here as an image_ref against a
-                            // REAL stored media object instead: a support ticket usually does arrive
-                            // with a screenshot, and this is the only place the sample project
-                            // exercises the image viewer at all (export_ticket demonstrates
-                            // document_ref, and nothing else demonstrates the image path). Nothing is
-                            // fetched over the network, so there is no broken chip to render.
+                            // An image_ref against a real stored media object, not a dead URL: a support
+                            // ticket usually does arrive with a screenshot, and this is the only place
+                            // the sample project exercises the image viewer at all (export_ticket
+                            // demonstrates document_ref; nothing else demonstrates the image path).
+                            // Nothing is fetched over the network, so there is no broken chip to render.
                             input = toMessageJson(
                                     mapper,
                                     "user",
@@ -1061,7 +1058,7 @@ final class SampleShowcase {
                 // "previous", like every other row here, because it has to be TRUE: the reference this
                 // seeder actually computes is the call site's own earlier days, and the baseline row it
                 // writes is armed with nothing pinned. Claiming "pinned" put the words "versus its own
-                // recent window (pinned reference)" into the finding's basis — a sentence contradicting
+                // recent window (pinned reference)" into the finding's basis, a sentence contradicting
                 // itself, over a comparison the UI could not have shown.
                 generateCost.stat(
                         "cost_drift",
@@ -1162,7 +1159,7 @@ final class SampleShowcase {
 
     private static final int PREVIEW_CHARS = 240;
 
-    /** Trimmed on a word boundary and marked as trimmed — a hard cut at 240 left previews ending
+    /** Trimmed on a word boundary and marked as trimmed: a hard cut at 240 left previews ending
      *  mid-word, which reads as corrupted data rather than as a summary. */
     private static @Nullable String preview(@Nullable String text) {
         if (text == null) return null;
@@ -1184,7 +1181,7 @@ final class SampleShowcase {
     }
 
     /**
-     * A real, decodable PNG — the "screenshot" every ticket arrives with. Hand-encoded (one IHDR, one
+     * A real, decodable PNG: the "screenshot" every ticket arrives with. Hand-encoded (one IHDR, one
      * zlib-wrapped IDAT, one IEND, each with its own CRC) rather than pulled through ImageIO, which
      * this module does not otherwise depend on and which is headless-hostile in a container.
      *
@@ -1197,7 +1194,7 @@ final class SampleShowcase {
         byte[] raw = new byte[height * (1 + width * 3)];
         int p = 0;
         for (int y = 0; y < height; y++) {
-            raw[p++] = 0; // filter type 0 (None) — one per scanline, as the PNG spec requires
+            raw[p++] = 0; // filter type 0 (None), one per scanline, as the PNG spec requires
             boolean band = y < 28;
             for (int x = 0; x < width; x++) {
                 raw[p++] = (byte) (band ? 0x33 : 0x1B);
@@ -1246,7 +1243,7 @@ final class SampleShowcase {
         out.write(value);
     }
 
-    /** A minimal, correctly cross-referenced single-page PDF — real bytes for the {@code export_ticket}
+    /** A minimal, correctly cross-referenced single-page PDF: real bytes for the {@code export_ticket}
      *  document_ref demo, not a placeholder that would fail to open. */
     static byte[] minimalExportPdf() {
         String streamContent = "BT /F1 14 Tf 20 100 Td (Tessary Support -- Ticket Export) Tj ET";
@@ -1282,8 +1279,8 @@ final class SampleShowcase {
      *
      * <p>Production writes the whole population uncapped ({@code FindingEvidenceRepository}'s class
      * comment argues why: a claim about a population cannot be audited against somebody else's
-     * undisclosed sample). A seeder is not making an auditable claim — it is furnishing a sample
-     * project — so it takes a bounded slice, sized to what a real sweep on this dataset produced,
+     * undisclosed sample). A seeder is not making an auditable claim; it is furnishing a sample
+     * project, so it takes a bounded slice, sized to what a real sweep on this dataset produced,
      * and keeps the seed insert a predictable size.
      */
     private static final int EVIDENCE_PER_ROLE = 100;
@@ -1328,7 +1325,7 @@ final class SampleShowcase {
             double meanPost = postN == 0 ? meanPre : postSum / postN;
             Instant onset = todayMidnight.minus(WINDOW_DAYS - triggerDay, ChronoUnit.DAYS);
             // The same boundary the means were split on, so the evidence and the numbers describe
-            // the same two windows — a baseline trace the agent reads must be one the "before" mean
+            // the same two windows: a baseline trace the agent reads must be one the "before" mean
             // was actually computed from.
             List<String> baseline = sliceTraces(traceIdsByDay, 1, triggerDay - 1);
             List<String> members = sliceTraces(traceIdsByDay, triggerDay, WINDOW_DAYS);
@@ -1385,7 +1382,7 @@ final class SampleShowcase {
     private static final class DayErrorAccumulator {
         private final long[] calls = new long[WINDOW_DAYS + 1];
         private final long[] failures = new long[WINDOW_DAYS + 1];
-        /** Every call, and the failing subset — the two halves of the fraction this detector claims. */
+        /** Every call, and the failing subset: the two halves of the fraction this detector claims. */
         private final Map<Integer, List<String>> traceIdsByDay = new LinkedHashMap<>();
 
         private final Map<Integer, List<String>> failedTraceIdsByDay = new LinkedHashMap<>();

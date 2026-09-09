@@ -11,24 +11,17 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Reads classifier detections out of the runtime-stitched union {@link DetectionTableRegistry}
- * builds over every registered per-classifier detection table — the same twelve-column shape the
- * old baseline's stitching view (migration {@code 0089}) used to project, now assembled at query
- * time so a table simply not being registered on this classpath (e.g. the open edition without a
- * paid classifier jar) removes its arm instead of the query naming a relation that was never
- * created. The view itself is left physically in the baseline changelog, unread, until the
- * partition commit deletes it.
+ * builds over every registered per-classifier detection table. A table not registered on this
+ * classpath removes its arm instead of the query naming a relation that never existed.
  *
- * <p>The union's {@code classifier_id} column holds the classifier KEY — persisted wire vocabulary inherited
- * verbatim from {@code signal_event_v}, which held {@code verdict.key} there — so the definition's own
- * id and version still come from a JOIN on {@code classifier_key = d.classifier_id}, exactly as they did when
- * detections were verdicts.
+ * <p>The union's {@code classifier_id} column holds the classifier key, so the definition's id
+ * and version come from a JOIN on {@code classifier_key = d.classifier_id}.
  *
- * <p><b>Detection ids changed id-space at the cutover.</b> They are no longer verdict ids, and the rows
- * that carried the old ones were deleted rather than copied (start fresh, plan §1). A stored link to a
- * pre-cutover detection id resolves to nothing, by design.
+ * <p>Detection ids are their own id space: a stored link to an old verdict id resolves to
+ * nothing.
  *
- * <p>The raw {@link JdbcClient} lives here (not in {@link ClassifierService}) so the architecture rule
- * "JDBC only in repositories" holds.
+ * <p>The raw {@link JdbcClient} lives here, not in {@link ClassifierService}, so the
+ * architecture rule "JDBC only in repositories" holds.
  */
 @Repository
 public class ClassifierDetectionRepository {
@@ -73,8 +66,8 @@ public class ClassifierDetectionRepository {
     }
 
     /**
-     * Detections for one signal (by its {@code classifierKey} = verdict.key), newest-first. When
-     * {@code trackingOnly}, restrict to the precise HIGH-confidence band (unbanded NULL reads as high).
+     * Detections for one classifier key, newest-first. When {@code trackingOnly}, restrict to
+     * the high-confidence band (unbanded NULL reads as high).
      */
     public List<ClassifierDtos.ClassifierEventView> listByClassifierKey(
             String projectId, String classifierKey, boolean trackingOnly, int limit) {
@@ -88,7 +81,7 @@ public class ClassifierDetectionRepository {
                 .list();
     }
 
-    /** High/low confidence-band counts for one classifier's detections — the discovery-vs-tracking breakdown. */
+    /** High/low confidence-band counts for one classifier's detections: the discovery-vs-tracking breakdown. */
     public ModeCounts modeCounts(String projectId, String classifierKey) {
         return jdbc.sql(modeCountsSql)
                 .param("pid", projectId)
@@ -101,10 +94,10 @@ public class ClassifierDetectionRepository {
     public record ModeCounts(long high, long low) {}
 
     /**
-     * Per-classifier, per-UTC-day distinct-trace detection counts since {@code from}, oldest day first.
-     * Buckets on {@code (created_at AT TIME ZONE 'UTC')::date} rather than {@code date_trunc('day', …)} —
-     * date_trunc on a timestamptz follows the session timezone, which would shift day boundaries.
-     * Every detection carries a trace: both grains the view projects are inside one.
+     * Per-classifier, per-UTC-day distinct-trace detection counts since {@code from}, oldest day
+     * first. Buckets on {@code (created_at AT TIME ZONE 'UTC')::date} rather than
+     * {@code date_trunc('day', ...)}: date_trunc on a timestamptz follows the session timezone,
+     * which would shift day boundaries.
      */
     public List<DailyClassifierCount> dailyDetectionCounts(String projectId, java.time.Instant from) {
         return jdbc.sql(dailyCountsSql)
@@ -121,9 +114,8 @@ public class ClassifierDetectionRepository {
     public record DailyClassifierCount(String classifierId, java.time.LocalDate day, long traces) {}
 
     private static ClassifierDtos.ClassifierEventView map(ResultSet rs) throws SQLException {
-        // The grain is a LITERAL per view arm now, not a stored guess: each detection table declares the
-        // one grain its classifier judges at, so 'span' and 'trace' are the only two answers and each is
-        // read off the column that actually holds that grain's id.
+        // Each detection table declares the one grain its classifier judges at, so 'span' and
+        // 'trace' are the only two answers, read off the column that holds that grain's id.
         String subjectKind = rs.getString("subject_kind");
         String subjectId = "trace".equals(subjectKind) ? rs.getString("trace_id") : rs.getString("span_id");
         return new ClassifierDtos.ClassifierEventView(
@@ -134,7 +126,7 @@ public class ClassifierDetectionRepository {
                 java.util.Objects.requireNonNull(subjectId, "signal detection subject id is present"),
                 rs.getString("trace_id"),
                 rs.getString("project_version_id"),
-                rs.getString("severity"), // v.label — the detection's coarse severity
+                rs.getString("severity"), // the detection's coarse severity
                 rs.getString("evidence"),
                 rs.getString("confidence"),
                 java.util.Objects.requireNonNull(Timestamps.iso(rs, "created_at"), "detection created_at is NOT NULL"));

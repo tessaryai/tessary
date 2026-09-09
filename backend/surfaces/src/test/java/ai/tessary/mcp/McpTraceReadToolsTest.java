@@ -423,7 +423,7 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * C (#994): skeleton by default. No {@code input}/{@code output}/{@code attributes}/
+     * Skeleton by default. No {@code input}/{@code output}/{@code attributes}/
      * {@code provided_usage} key at all (not merely null — an absent key is what tells a caller "not
      * asked for" apart from "asked for and empty"), but every typed column, the previews, and
      * {@code payload_available} are exactly as they are in the full-payload mode above. Checks all
@@ -571,7 +571,7 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * The skeleton-mode existence probe (C, #994) is ALSO keyed to the rendered page, not the whole
+     * The skeleton-mode existence probe is ALSO keyed to the rendered page, not the whole
      * trace — the same reasoning as the full-payload read above, for the cheaper query.
      */
     @Test

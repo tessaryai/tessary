@@ -38,26 +38,21 @@ export { Toggle } from "./Toggle";
 export { VolumeBars } from "./charts/VolumeBars";
 export type { VolumeBucket } from "./charts/VolumeBars";
 /*
- * The recharts-backed charts are deliberately NOT re-exported here.
+ * The recharts-backed charts are deliberately not re-exported here.
  *
- * Everything in the app imports something from this barrel, so a static re-export of these two put
- * recharts — `vendor-charts`, 374 kB raw / 108 kB gzipped — into the eager path of every surface,
- * including Traces and Settings pages that draw nothing. Exactly one file in the whole product
- * actually renders one of them, the Usage screen, and it imports from the module directly, so the
- * chunk is pulled only where a chart is on screen.
+ * Everything in the app imports from this barrel, so a static re-export would put recharts
+ * (`vendor-charts`, 374 kB raw / 108 kB gzipped) into the eager path of every surface, including
+ * pages that draw no charts at all. Import the module directly where you need one:
  *
  *   import { StackedBarChart } from "../../ui/charts/StackedBarChart";
  *
  * `VolumeBars` stays exported: it is hand-drawn and pulls no charting library.
  *
- * <h2>Both files are UNUSED in this edition, and stay</h2>
- * Since #846 the Usage screen is a paid surface and lives in the overlay, so nothing in this tree
- * renders either chart and the open build emits no `vendor-charts` at all — `scripts/check-frontend.sh`
- * asserts exactly that. `TrendChart` already had no consumer before the move. They stay here rather
- * than moving WITH their one caller, and rather than being deleted, for three reasons: they are
- * generic UI with no paid concept in them, moving them would duplicate the `recharts` dependency and
- * the load-bearing `es-toolkit: 1.46.0` pin into a second package, and `tsc` still type-checks them
- * here so they cannot rot silently. Deleting an unused component is spring-cleaning, not this split.
+ * Nothing in this tree currently renders either chart, and `scripts/check-frontend.sh` asserts
+ * that `vendor-charts` stays out of the build. They stay here, unused, rather than moving or
+ * being deleted: they are generic UI, moving them would duplicate the `recharts` dependency and
+ * the load-bearing `es-toolkit: 1.46.0` pin into a second package, and `tsc` still type-checks
+ * them here so they cannot rot silently.
  */
 export { SegmentedControl } from "./SegmentedControl";
 export type { Segment } from "./SegmentedControl";

@@ -204,14 +204,13 @@ class CaseServiceTest {
     }
 
     /**
-     * <b>A finished RCA report is the case page's answer to "why is this open", so it arrives inline.</b>
-     * Reaching it used to mean a second call to a capability-gated RCA tool, which is how a written
-     * investigation goes unread.
+     * A finished RCA report is the case page's answer to "why is this open," so it arrives inline.
      *
-     * <p>The pending half of this test is the load-bearing half. A report's shell is inserted at trigger time
-     * and carries nothing — no verdict, no hypotheses, no write-up — so inlining it would render an object
-     * whose every interesting field is null, and a reader cannot tell that from an analysis that concluded
-     * nothing. While it runs, the id is the whole answer: it is what a poll is for.
+     * <p>The pending half of this test is the load-bearing half. A report's shell is inserted at
+     * trigger time and carries nothing (no verdict, no hypotheses, no write-up), so inlining it
+     * would render an object whose every interesting field is null, indistinguishable from an
+     * analysis that concluded nothing. While it runs, the id is the whole answer: it is what a poll
+     * is for.
      */
     @Test
     void aFinishedRcaReportIsInlinedAndAPendingOneIsOnlyNamed() {
@@ -287,9 +286,9 @@ class CaseServiceTest {
                 new CaseKey(detector, subjectKind, "subject-" + detector, "pass_rate"),
                 "subject label",
                 null,
-                // Every case points at a finding, and the forward CHECK on eval_case says so. The two
-                // detectors that open one WITHOUT a finding are exempt by name until M3 deletes them —
-                // seeding a real finding for the rest is the invariant, not test scaffolding.
+                // Every case points at a finding; the forward CHECK on eval_case enforces it. The two
+                // detectors that open one without a finding are exempt by name, so seeding a real
+                // finding for the rest is the invariant, not test scaffolding.
                 findingBehind(p, detector),
                 "something happened",
                 "because the detector said so",
@@ -326,15 +325,13 @@ class CaseServiceTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has behaviour drift switched ON <b>before its project is created</b>.
+     * Bootstrap a tenant whose org has behavior drift switched on before its project is created.
      *
-     * <p>Two things make this necessary. The open-edition default has behavior_drift OFF
-     * (the paid classifiers {@code CapabilityService} reports as unavailable), so without a grant these cases
-     * would assert the capability default rather than the behaviour they name. And the grant has to precede the
-     * project, because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project does not
-     * have. The suite used to get all of this ambiently from {@code tessary.plan.default-key=enterprise} in
-     * surefire, which went away with plan tiers (open-core epic 1 issue 1).
+     * <p>Behavior drift defaults off, so without a grant these cases would assert the capability
+     * default rather than the behaviour they name. The grant must precede the project because
+     * project creation is what seeds the built-in classifiers: grant afterwards and the classifier
+     * row is never inserted, leaving the test hunting findings from a classifier the project does
+     * not have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

@@ -14,13 +14,13 @@ import org.springframework.stereotype.Component;
 /**
  * Runs {@link CaseReconciler} over every live project on a heartbeat.
  *
- * <p>This is where the detectors' cost is paid. CUSUM replays four weeks of hourly buckets for every
- * grader in the project; doing that on a page load put the platform's most expensive computation on
- * its first screen, for every visitor, whether or not anything had changed. Running it here once per
- * cadence and persisting the outcome makes Triage an indexed table read.
+ * <p>This is where the detectors' cost is paid. CUSUM replays four weeks of hourly buckets for
+ * every detector in the project; doing that on a page load would put the platform's most
+ * expensive computation on its first screen for every visitor. Running it here once per cadence
+ * and persisting the outcome makes Triage an indexed table read.
  *
- * <p>The cadence is the detection latency. Five minutes is well inside the hourly grain the detectors
- * bucket on — a spell cannot be missed by polling faster than the data changes.
+ * <p>The cadence is the detection latency: five minutes is well inside the hourly grain the
+ * detectors bucket on, so a spell cannot be missed by polling faster than the data changes.
  */
 @Component
 public class CaseWorker {
@@ -46,8 +46,8 @@ public class CaseWorker {
                     reconciler.reconcile(project.id());
                     projectCount++;
                 } catch (RuntimeException e) {
-                    // One project's detectors failing must not stop every other project's cases from
-                    // being reconciled — a stalled sweep is silent, and silence is this product's
+                    // One project's detectors failing must not stop every other project's cases
+                    // from being reconciled: a stalled sweep is silent, and silence here reads as
                     // "everything is fine".
                     log.warn(Markers.OPS, "case reconcile failed project={}", project.id(), e);
                 }

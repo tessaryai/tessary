@@ -4,7 +4,7 @@
  * src/routeManifest.smoke.test.tsx covered this view, and only for "renders something without
  * throwing" under mocked-empty data; see that file's own header).
  *
- * The real bug this pins (issue #861, AC1 inverted): the component gated its error branch on
+ * The real bug this pins (AC1 inverted): the component gated its error branch on
  * `catalog.isError` alone. When the credentials query failed and the catalog query succeeded,
  * `credByProvider` silently built an empty map and every platform rendered "Not configured" — a
  * false empty state indistinguishable from a genuinely fresh, keyless install. Fixed to
@@ -19,8 +19,8 @@ import { ToastProvider } from "../../ui/Toast";
 import { Providers } from "./Providers";
 
 // ---- collaborator mocks ------------------------------------------------------------------
-// Providers.tsx reads its API surface via useOrgApi() (TenantContext) — #939 D1 moved provider
-// credentials off the project-scoped API. Not exercised by these tests (the credential modal is
+// Providers.tsx reads its API surface via useOrgApi() (TenantContext) — provider
+// credentials moved off the project-scoped API. Not exercised by these tests (the credential modal is
 // never opened), so it is stubbed just enough to satisfy the module's imports.
 
 const listProviderCatalog = vi.fn<() => Promise<ProviderCatalogResponse>>();
@@ -45,7 +45,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
 });
 
 // ---- fixtures ------------------------------------------------------------------------------
-// #939 D6: Ollama (the platform's one AUTH_NONE, platform-funded provider) was dropped by the
+// Ollama (the platform's one AUTH_NONE, platform-funded provider) was dropped by the
 // maker filter — every provider now requires a key, so ANTHROPIC stands in as the second fixture
 // instead, and `platform_funded` is gone from PlatformDescriptor entirely.
 
@@ -98,7 +98,7 @@ describe("Providers", () => {
     const openAiRow = screen.getByText("OpenAI").closest("div")!.parentElement!;
     within(openAiRow).getByText("Not configured");
 
-    // #939 D6: no provider is platform-funded any more (Ollama was the one exception) — every
+    // No provider is platform-funded any more (Ollama was the one exception) — every
     // unconfigured platform reads "Not configured", never "No key needed".
     const anthropicRow = screen.getByText("Anthropic").closest("div")!.parentElement!;
     within(anthropicRow).getByText("Not configured");

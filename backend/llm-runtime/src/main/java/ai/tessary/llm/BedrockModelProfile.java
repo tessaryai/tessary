@@ -20,50 +20,41 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.bedrockruntime.model.CacheTTL;
 
 /**
- * What each platform-funded Bedrock model can actually do — the capability matrix the settings UI
- * renders from and {@link ChatModelFactory} clamps against. <b>Adding a Bedrock model is one entry
- * here</b>; nothing else needs a per-model branch. Rates are not here and never were — they live in
- * the versioned {@code price_book}, resolved by {@code pricing/ModelResolver}.
+ * What each platform-funded Bedrock model can actually do: the capability matrix the settings UI
+ * renders from and {@link ChatModelFactory} clamps against. Adding a Bedrock model is one entry
+ * here; nothing else needs a per-model branch. Rates are not here: they live in the versioned
+ * {@code price_book}, resolved by {@code pricing/ModelResolver}.
  *
- * <p><b>Why a matrix and not a set of constants:</b> the capabilities genuinely differ per model and
- * getting them wrong is a hard Bedrock error, not a degradation. The bullets below still cite Amazon
- * Nova 2 Lite as the illustration, even though #939 D6 removed it from {@link #PROFILES} (Amazon is
- * not one of D6's six supported makers — OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) — the
- * statements about IT are still true, they are just no longer reachable through this class. Flex and
- * Priority are the direct casualty: Nova was the only model here that ever offered them, so both
- * tiers are currently unoffered by anything in {@link #PROFILES} rather than gone as concepts (see
- * {@code ServiceTier}'s own note on this).
+ * <p>A matrix rather than a set of constants because the capabilities genuinely differ per model,
+ * and getting them wrong is a hard Bedrock error, not a degradation.
  *
  * <ul>
- *   <li><b>Service tiers.</b> Claude Haiku 4.5 on Bedrock supports Standard (and Reserved) only —
- *       sending {@code serviceTier: flex} against it is a 400. Amazon Nova 2 Lite supports Standard,
- *       Priority and Flex. So Flex is only reachable by choosing Nova, and the settings validator
- *       must refuse the Haiku+Flex pair rather than let Bedrock reject it mid-grade.
+ *   <li><b>Service tiers.</b> A model may support only a subset of {@link ServiceTier}; the
+ *       settings validator must refuse an unsupported tier rather than let Bedrock reject it
+ *       mid-grade.
  *   <li><b>Explicit cache TTL.</b> Every model here caches, but only Anthropic models accept an
- *       explicit {@code ttl} on the cache point. On Bedrock the <b>presence</b> of that field IS the
- *       "extended TTL prompt caching" feature, so sending it to Nova is a 400 <i>whatever the
- *       value</i> — even {@code 5m}, Nova's own window. See {@link #explicitCacheTtls} and
- *       {@link #clampTtl}.
- *   <li><b>Structured output.</b> Anthropic models accept Converse {@code outputConfig}; Nova
- *       rejects it ("This model doesn't support the outputConfig field") and must be asked for a
- *       shaped answer via a forced tool call instead. See {@link StructuredOutput.Mode}.
+ *       explicit {@code ttl} on the cache point. On Bedrock the presence of that field is the
+ *       "extended TTL prompt caching" feature, so sending it to a model that doesn't support it is
+ *       a 400 whatever the value. See {@link #explicitCacheTtls} and {@link #clampTtl}.
+ *   <li><b>Structured output.</b> Anthropic models accept Converse {@code outputConfig}; some
+ *       models reject it and must be asked for a shaped answer via a forced tool call instead. See
+ *       {@link StructuredOutput.Mode}.
  *   <li><b>Agentic.</b> An {@link LaneGroup#AGENT_VM} lane hands its inference profile id to the
  *       coding agent inside an E2B microVM, which asks the model to sustain a long tool-use loop
  *       over a repo. That is a capability judgement, not a vendor one: a non-agentic model is a
  *       valid grading model and a broken sandbox, so the lane matters.
  *   <li><b>Offered per lane group.</b> Separately from what a model <i>can</i> do,
  *       {@link #offeredFor} says which models each {@link LaneGroup} may be pointed at. Capability
- *       and offer are not the same list, and reading the first as the second is what let a small
- *       agentic model be saved onto a microVM lane — see {@link #OFFERED_BY_GROUP}.
+ *       and offer are not the same list; see {@link #OFFERED_BY_GROUP}.
  *   <li><b>Cache floor.</b> A prompt below the model's minimum checkpoint size caches nothing and
- *       silently pays full input rate every call. The floor is 4,096 tokens on Haiku but only 1,000
- *       on Nova, so the same prompt can be uncacheable on one and cacheable on the other. Driving
- *       {@code ChatJudgeRunner}'s cache-inactive warning off this field keeps that honest.
+ *       silently pays full input rate every call. The floor differs by model, so the same prompt
+ *       can be uncacheable on one and cacheable on another. Driving {@code ChatJudgeRunner}'s
+ *       cache-inactive warning off this field keeps that honest.
  * </ul>
  *
- * <p>These profiles describe the models the PLATFORM funds on its own ambient AWS identity. A user's
- * own pinned Bedrock selection goes through {@link ModelCatalog} + their {@link ProviderCredential}
- * and is unaffected.
+ * <p>These profiles describe the models the platform funds on its own ambient AWS identity. A
+ * user's own pinned Bedrock selection goes through {@link ModelCatalog} + their
+ * {@link ProviderCredential} and is unaffected.
  */
 public final class BedrockModelProfile {
 
@@ -72,28 +63,28 @@ public final class BedrockModelProfile {
     /**
      * One platform-funded Bedrock model.
      *
-     * @param modelKey the logical, version-free key — what {@link #normalizeKey} produces from a full
+     * @param modelKey the logical, version-free key: what {@link #normalizeKey} produces from a full
      *     inference-profile id
      * @param inferenceProfileId the id this model is priced and reported under, cross-region
      *     {@code global.} by default on {@link Endpoint#RUNTIME} so throughput isn't pinned to one
-     *     region. On {@link Endpoint#MANTLE} this is <b>not</b> the wire id — mantle is always called
-     *     with the bare {@code modelKey} (see {@link ChatModelFactory#resolvePlatformMantle}) — it is
+     *     region. On {@link Endpoint#MANTLE} this is not the wire id: mantle is always called with
+     *     the bare {@code modelKey} (see {@link ChatModelFactory#resolvePlatformMantle}); it is
      *     LiteLLM's route-prefixed spelling ({@link #MANTLE_ROUTE_PREFIX}), because mantle is its own
      *     priced route in the vendored snapshot, distinct from both OpenAI-direct and Bedrock Converse
      * @param supportedTiers which {@link ServiceTier}s this model accepts; anything outside this set
      *     is rejected at the settings boundary
      * @param minCacheCheckpointTokens smallest prompt Bedrock will create a cache checkpoint for
-     * @param explicitCacheTtls the prompt-cache TTLs this model accepts as an <b>explicit</b>
-     *     {@code cachePoint.ttl}, as their Bedrock wire values ({@code 5m}, {@code 1h}) — kept as
-     *     strings so the AWS SDK enum doesn't leak onto our HTTP contract. <b>Empty means the model
-     *     still caches but the field must be omitted entirely</b>, not that it cannot cache; that
+     * @param explicitCacheTtls the prompt-cache TTLs this model accepts as an explicit
+     *     {@code cachePoint.ttl}, as their Bedrock wire values ({@code 5m}, {@code 1h}), kept as
+     *     strings so the AWS SDK enum doesn't leak onto our HTTP contract. Empty means the model
+     *     still caches but the field must be omitted entirely, not that it cannot cache; that
      *     distinction is the whole reason this is not a boolean.
      * @param structuredOutput how to ask this model for a strictly-shaped JSON answer
      * @param forcedToolChoice in {@link StructuredOutput.Mode#TOOL_CALL}, whether the model accepts
      *     being <i>forced</i> to call the tool (Bedrock {@code toolChoice: {any:{}}}) rather than
      *     merely offered it. Meaningless under {@link StructuredOutput.Mode#NATIVE}. False falls back
      *     to {@code auto}, which relies on the tool description to prompt the call.
-     * @param agentic whether this model can drive the sandbox agent's tool loop — a capability, not a
+     * @param agentic whether this model can drive the sandbox agent's tool loop: a capability, not a
      *     permission; {@link #offeredFor} decides which lanes actually get to pick it
      */
     public record ModelDescriptor(
@@ -113,7 +104,7 @@ public final class BedrockModelProfile {
             @JsonProperty("effort_levels") Set<String> effortLevels) {
 
         /**
-         * A {@link Endpoint#RUNTIME} model with no reasoning control — the shape every model here had
+         * A {@link Endpoint#RUNTIME} model with no reasoning control: the shape every model here had
          * before mantle existed, kept so those entries read unchanged and only the mantle ones carry
          * the extra three fields.
          */
@@ -152,32 +143,33 @@ public final class BedrockModelProfile {
      *
      * <p>Not cosmetic: the two endpoints differ in host, SigV4 service name, wire protocol, model-id
      * shape and region. A model is reachable on one or the other (occasionally both, but never
-     * identically), so this is the field the build path branches on rather than the provider enum —
+     * identically), so this is the field the build path branches on rather than the provider enum,
      * which keeps "which endpoint is this model on" answerable from the same table that answers
      * "which tiers does it support".
      */
     public enum Endpoint {
-        /** {@code bedrock-runtime} — Converse, cross-region inference profiles, explicit cache points. */
+        /** {@code bedrock-runtime}: Converse, cross-region inference profiles, explicit cache points. */
         RUNTIME,
-        /** {@code bedrock-mantle} — OpenAI Responses, bare model ids on the wire, implicit caching. */
+        /** {@code bedrock-mantle}: OpenAI Responses, bare model ids on the wire, implicit caching. */
         MANTLE
     }
 
     /**
-     * LiteLLM's own route prefix for models served over {@code bedrock-mantle} — its own priced route,
+     * LiteLLM's own route prefix for models served over {@code bedrock-mantle}: its own priced route,
      * distinct from OpenAI-direct ({@code openai.gpt-5.6-luna}, a different product at a different
      * price) and from Bedrock Converse's cross-region spellings ({@code us./global.openai.gpt-5.6-luna},
      * a different Bedrock endpoint entirely). A call reported under the bare id has no scope prefix for
      * {@code pricing/ModelResolver} to strip, so without this prefix it falls through to OpenAI-direct
-     * pricing — see #1032. Stripped back off by {@link #normalizeKey}.
+     * pricing. Stripped back off by {@link #normalizeKey}.
      */
     static final String MANTLE_ROUTE_PREFIX = "bedrock_mantle/";
 
     /**
      * The platform's Bedrock line-up. Capabilities are transcribed from each model's AWS Bedrock
      * model card (service-tier table, prompt-caching table); re-check the card when adding a model or
-     * when AWS enables a tier on an existing one. Rates live in the {@code price_book} tables, not here
-     * — this file is capabilities only, so a price change never touches a capability and vice versa.
+     * when AWS enables a tier on an existing one. Rates live in the {@code price_book} tables, not
+     * here: this file is capabilities only, so a price change never touches a capability and vice
+     * versa.
      */
     /**
      * The reasoning-effort levels the GPT-5.6 line accepts on mantle, in ascending order so a UI can
@@ -190,7 +182,7 @@ public final class BedrockModelProfile {
      *
      * <p>No Anthropic model here carries an effort set, and that is a deliberate absence rather than
      * an omission: Claude's effort rides in {@code additionalModelRequestFields.output_config}, which
-     * is the same object Converse's native {@code outputConfig} — our structured-output path — writes
+     * is the same object Converse's native {@code outputConfig} (our structured-output path) writes
      * to. The pair is rejected ("output_config.format: Extra inputs are not permitted"), and the judge
      * always sends structured output, so effort is unreachable there. The probe asserts that constraint
      * still holds.
@@ -199,8 +191,8 @@ public final class BedrockModelProfile {
             new LinkedHashSet<>(List.of("none", "low", "medium", "high", "xhigh", "max"));
 
     private static final List<ModelDescriptor> PROFILES = List.of(
-            // Claude Haiku 4.5 — the incumbent default. Standard + Reserved ONLY: no Flex, no
-            // Priority. Caches at 5m or 1h, floor 4,096 tokens.
+            // Claude Haiku 4.5, the default model. Standard tier only: no Flex, no Priority. Caches
+            // at 5m or 1h, floor 4,096 tokens.
             new ModelDescriptor(
                     "anthropic.claude-haiku-4-5",
                     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -213,10 +205,10 @@ public final class BedrockModelProfile {
                     StructuredOutput.Mode.NATIVE,
                     true,
                     true),
-            // Claude Sonnet 5 — the frontier option, and the default the SYNTHESIS lane inherits
-            // (tessary.synth.agentic-model). Standard only, like the rest of the Claude line on
-            // Bedrock. Sonnet's cache checkpoint floor is 1,024 tokens — a quarter of Haiku's — so
-            // prompts that cache nothing on Haiku do cache here.
+            // Claude Sonnet 5, the default the SYNTHESIS lane inherits (tessary.synth.agentic-model).
+            // Standard tier only, like the rest of the Claude line on Bedrock. Sonnet's cache
+            // checkpoint floor is 1,024 tokens, a quarter of Haiku's, so prompts that cache nothing
+            // on Haiku do cache here.
             new ModelDescriptor(
                     "anthropic.claude-sonnet-5",
                     "global.anthropic.claude-sonnet-5",
@@ -229,33 +221,21 @@ public final class BedrockModelProfile {
                     StructuredOutput.Mode.NATIVE,
                     true,
                     true),
-            // Amazon Nova 2 Lite lived here until #939 D6 dropped it — Amazon is not one of D6's six
-            // supported makers (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI). It was the only
-            // platform model that ever offered Flex/Priority (Set.of(STANDARD, FLEX, PRIORITY)) and
-            // the only one with a sub-4,096-token cache floor (1,000) — see the class javadoc's note
-            // on what that leaves unoffered.
+            // GPT-5.6 Luna, bedrock-mantle only and the cheapest model here ($0.22/$1.32 per 1M).
+            // OpenAI builds it for classification, summarization and routing, which is what a
+            // grader does.
             //
-            // GPT-5.6 Luna — bedrock-mantle only, and by a distance the cheapest model here
-            // ($0.22/$1.32 per 1M). OpenAI builds it for classification,
-            // summarization and routing, which is what a grader does.
+            // Everything below the vendor differs from the Converse models above, confirmed by
+            // scripts/probe_mantle_capabilities.py rather than read off a doc page: caching is
+            // implicit (a repeated 2,413-token prompt reported 2,411 cached with no request
+            // parameters at all), which is why the explicit-ttl set is empty and cacheParams stays
+            // null on this path. Structured output is native (`text.format: json_schema`). Standard
+            // tier only.
             //
-            // Everything below the vendor is different from the Converse models above, and all of it
-            // is confirmed by scripts/probe_mantle_capabilities.py rather than read off a doc page:
-            // caching is IMPLICIT (a repeated 2,413-token prompt reported 2,411 cached with no request
-            // parameters at all), which is why the explicit-ttl set is empty AND why cacheParams stays
-            // null on this path — the empty set here means the same thing it means for Nova, that the
-            // model caches on its own terms. Structured output is native (`text.format: json_schema`).
-            // Standard tier only.
-            //
-            // Agentic: TRUE, as of A (#994) — a PRODUCT decision, not a measured one. This flag is a
-            // classification of what we choose to offer, not a claim that Luna has been shown to hold
-            // a long tool loop over a repo as well as Sonnet 5 does; that is unmeasured. It is
-            // architecturally sound regardless: GPT-5.6 Terra below is already agentic=true on this
-            // same bedrock-mantle endpoint and already offered for AGENT_VM, so a mantle-routed model
-            // driving a sandbox agent is proven wiring, not new ground. Luna is offered because triage
-            // is a cost-dominated lane (launch decision) — whether Luna SPECIFICALLY performs there as
-            // well as Sonnet 5 is what #994's A.5 A/B verdict-agreement validation is for. If that
-            // validation goes the other way, this flag (and TRIAGE's order in llm/LanePriority) is what reverts.
+            // Agentic is a product choice here, not a measured claim that Luna holds a long tool loop
+            // over a repo as well as Sonnet 5 does. Terra below is already agentic on the same
+            // bedrock-mantle endpoint and offered for AGENT_VM, so a mantle-routed agent is proven
+            // wiring. Luna is offered because triage is a cost-dominated lane.
             new ModelDescriptor(
                     "openai.gpt-5.6-luna",
                     MANTLE_ROUTE_PREFIX + "openai.gpt-5.6-luna",
@@ -271,10 +251,10 @@ public final class BedrockModelProfile {
                     Endpoint.MANTLE,
                     MantleProperties.OPENAI_API_PATH,
                     MANTLE_GPT_EFFORTS),
-            // GPT-5.6 Terra — the balanced sibling, Sonnet-class in price ($2.20/$13.20 per 1M).
-            // Same capability shape as Luna, except this one IS agentic: it is the non-Anthropic model
-            // the sandbox reaches over the bedrock-mantle provider. Whether it holds a long tool loop
-            // as well as Sonnet is unsettled — the flag says reachable and permitted, not better.
+            // GPT-5.6 Terra, the balanced sibling, Sonnet-class in price ($2.20/$13.20 per 1M). Same
+            // capability shape as Luna and also agentic: it is the non-Anthropic model the sandbox
+            // reaches over the bedrock-mantle provider. Whether it holds a long tool loop as well as
+            // Sonnet is unsettled; the flag says reachable and permitted, not better.
             new ModelDescriptor(
                     "openai.gpt-5.6-terra",
                     MANTLE_ROUTE_PREFIX + "openai.gpt-5.6-terra",
@@ -295,24 +275,19 @@ public final class BedrockModelProfile {
      * Which of the profiles above each {@link LaneGroup} may actually be pointed at, in the order a
      * dropdown should list them.
      *
-     * <p><b>Narrower than "what the model can do" on purpose.</b> {@link #isAgentic} answers whether a
-     * model <i>could</i> drive a sandbox agent; this answers whether we <i>offer</i> it for that kind of
-     * work. In the other direction Sonnet 5 grades perfectly well and is not offered for
-     * {@link LaneGroup#LLM_CALLS}, because those lanes run per trace and per keystroke and a frontier
-     * model there is a bill, not a feature.
+     * <p>Narrower than "what the model can do" on purpose: {@link #isAgentic} answers whether a model
+     * could drive a sandbox agent, this answers whether we offer it for that kind of work. Sonnet 5
+     * grades perfectly well but is not offered for {@link LaneGroup#LLM_CALLS}, because those lanes
+     * run per trace and per keystroke and a frontier model there is a bill, not a feature.
      *
-     * <p><b>{@link LaneGroup#AGENT_VM} was, before A (#994), deliberately narrow — Sonnet 5 and Terra
-     * only — with Claude Haiku 4.5 as the motivating exclusion: agentic by capability, but a small
-     * model driving a microVM run over a repository was not work this list wanted to do.</b> A (#994)
-     * adds BOTH Luna and Haiku 4.5 to this list as deliberate, considered exceptions to that narrowness
-     * — not a return to "any agentic model may go here". Luna, because triage is a cost-dominated lane
-     * where the product default is now the cheapest agentic option (see its {@code ModelDescriptor}
-     * comment for what is and is not measured about that choice). Haiku 4.5, so the settings page can
-     * demonstrate NOT warning on it for the triage lane (the price-gated warning only fires above a
-     * threshold Haiku sits at or under). RCA, the other AGENT_VM lane, keeps its Sonnet 5 default.
+     * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside Sonnet 5 and Terra as
+     * deliberate exceptions, not a rule that any agentic model may go here: Luna because triage is a
+     * cost-dominated lane and the cheapest agentic option is the product default there, and Haiku 4.5
+     * so the settings page does not warn on it for the triage lane. RCA, the other AGENT_VM lane,
+     * keeps its Sonnet 5 default.
      *
-     * <p>It lives here rather than on {@link LaneGroup} so that every per-model question — tiers,
-     * caching, structured output, effort, and now offerability — is answered by the same table. A model
+     * <p>It lives here rather than on {@link LaneGroup} so that every per-model question (tiers,
+     * caching, structured output, effort, offerability) is answered by the same table. A model
      * removed from {@link #PROFILES} must also leave this list; {@link #verifyGroupsAreServiceable}
      * refuses to load the class otherwise.
      */
@@ -320,10 +295,9 @@ public final class BedrockModelProfile {
 
     private static Map<LaneGroup, List<String>> offeredByGroup() {
         Map<LaneGroup, List<String>> m = new EnumMap<>(LaneGroup.class);
-        // "amazon.nova-2-lite" was offered here until #939 D6 removed it from PROFILES (see that
-        // entry's own removal note) — LaneGroup.LLM_CALLS has had zero ModelLane members since #1117,
-        // so this list is unreachable today regardless; verifyGroupsAreServiceable still requires
-        // every name here to resolve, so the dropped model must leave this list too.
+        // LaneGroup.LLM_CALLS has zero ModelLane members today, so this list is currently
+        // unreachable; verifyGroupsAreServiceable still requires every name here to resolve to a
+        // profile.
         m.put(LaneGroup.LLM_CALLS, List.of("openai.gpt-5.6-luna", "anthropic.claude-haiku-4-5"));
         m.put(
                 LaneGroup.AGENT_VM,
@@ -346,7 +320,7 @@ public final class BedrockModelProfile {
      * {@link LaneGroup#AGENT_VM} list pins a sandbox to something that never starts.
      *
      * <p>The third file that has to agree, {@code llm/LanePriority}, is checked from
-     * {@code ModelCatalog} instead — a lane's options span both tables, and a lane check here would
+     * {@code ModelCatalog} instead: a lane's options span both tables, and a lane check here would
      * have this class read the catalog while the catalog is still reading this one. See
      * {@code ModelCatalog#verifyLanePriorities}.
      */
@@ -368,17 +342,17 @@ public final class BedrockModelProfile {
     private BedrockModelProfile() {}
 
     /**
-     * Bedrock cross-region inference-profile prefix — see {@link #normalizeKey}. The geo set is
+     * Bedrock cross-region inference-profile prefix, see {@link #normalizeKey}. The geo set is
      * {@code global.}, {@code us.}, {@code eu.}, {@code jp.}, {@code au.} and the older {@code apac.}
-     * (still carried by pre-2025 Claude profiles). {@code jp.} and {@code au.} matter concretely: Nova 2
-     * Lite ships a {@code jp.} profile and Haiku 4.5 ships both {@code jp.} and {@code au.}, so omitting
-     * them would leave those regions' calls resolving to no profile at all.
+     * (still carried by pre-2025 Claude profiles). {@code jp.} and {@code au.} matter concretely:
+     * Haiku 4.5 ships both, so omitting them would leave those regions' calls resolving to no profile
+     * at all.
      */
     private static final Pattern PROFILE_PREFIX = Pattern.compile("^(global|us|eu|jp|au|apac)\\.");
 
     /**
      * Bedrock model-id version suffix: an optional {@code -YYYYMMDD} snapshot date followed by the
-     * {@code -v<n>:<n>} revision (e.g. {@code -20251001-v1:0}, {@code -v1:0}) — see {@link #normalizeKey}.
+     * {@code -v<n>:<n>} revision (e.g. {@code -20251001-v1:0}, {@code -v1:0}), see {@link #normalizeKey}.
      */
     private static final Pattern VERSION_SUFFIX = Pattern.compile("(-\\d{8})?-v\\d+:\\d+$");
 
@@ -386,22 +360,21 @@ public final class BedrockModelProfile {
      * Reduce a provider-specific model id to the logical {@link ModelDescriptor#modelKey} this table is
      * keyed on.
      *
-     * <p>Bedrock is invoked with a full inference-profile id — {@code
-     * global.anthropic.claude-haiku-4-5-20251001-v1:0} — which is what {@code ChatModelFactory} stamps as
-     * {@code Resolved.modelName()} and therefore what lands on the span and in {@code verdict.model}. This
-     * table is keyed on the logical {@code anthropic.claude-haiku-4-5}, so an exact lookup misses every
-     * Bedrock call and the model reads as "not one of ours" — no capability clamp, no structured-output
-     * mode. Stripping the region-routing prefix and the version suffix maps the id back onto its logical
-     * name. A mantle model reports its {@link #MANTLE_ROUTE_PREFIX}-prefixed pricing id the same way, so
-     * that is stripped first. Names that need no normalization (OpenAI's {@code gpt-5.5}, a mantle bare
-     * id, an already logical Bedrock name) pass through unchanged.
+     * <p>Bedrock is invoked with a full inference-profile id ({@code
+     * global.anthropic.claude-haiku-4-5-20251001-v1:0}), which is what {@code ChatModelFactory} stamps
+     * as {@code Resolved.modelName()} and therefore what lands on the span and in {@code verdict.model}.
+     * This table is keyed on the logical {@code anthropic.claude-haiku-4-5}, so an exact lookup misses
+     * every Bedrock call and the model reads as "not one of ours": no capability clamp, no
+     * structured-output mode. Stripping the region-routing prefix and the version suffix maps the id
+     * back onto its logical name. A mantle model reports its {@link #MANTLE_ROUTE_PREFIX}-prefixed
+     * pricing id the same way, so that is stripped first. Names that need no normalization (OpenAI's
+     * {@code gpt-5.5}, a mantle bare id, an already logical Bedrock name) pass through unchanged.
      *
-     * <p><b>This is identity, not pricing.</b> It used to live on the hand-maintained rate catalog because
-     * that catalog was keyed the same way; rates now come from {@code price_book}, whose own
-     * {@code ModelResolver} does its resolution against what the book actually carries. The two must not be
-     * conflated again — the book prices a REGIONAL profile at its regional premium, so collapsing
-     * {@code us.} into the bare name there would under-report that spend by 10%. Here, where the question
-     * is "which of our models is this", collapsing it is exactly right.
+     * <p>This is identity, not pricing: rates come from {@code price_book}, whose own
+     * {@code ModelResolver} resolves against what the book actually carries. The two must not be
+     * conflated: the book prices a regional profile at its regional premium, so collapsing
+     * {@code us.} into the bare name there would under-report that spend by 10%. Here, where the
+     * question is "which of our models is this", collapsing it is exactly right.
      */
     public static String normalizeKey(@Nullable String modelName) {
         if (modelName == null) return null;
@@ -420,7 +393,7 @@ public final class BedrockModelProfile {
     /**
      * The model keys {@code group}'s lanes may be pointed at, in dropdown order. Returned as keys
      * rather than descriptors because that is what the settings payload carries alongside the full
-     * model list — the client already has every descriptor and needs only to know which to offer.
+     * model list: the client already has every descriptor and needs only to know which to offer.
      */
     public static List<String> offeredFor(LaneGroup group) {
         return OFFERED_BY_GROUP.getOrDefault(group, List.of());
@@ -450,15 +423,15 @@ public final class BedrockModelProfile {
     }
 
     /**
-     * The prompt-cache TTL to actually send for {@code modelKey}, or <b>{@code null} to send no
-     * {@code ttl} field at all</b>.
+     * The prompt-cache TTL to actually send for {@code modelKey}, or null to send no {@code ttl}
+     * field at all.
      *
      * <p>Null is a first-class result, not an error path. On Bedrock the presence of
      * {@code cachePoint.ttl} is the Anthropic-only "extended TTL" feature, and langchain4j's
-     * {@code AbstractBedrockChatModel.buildCachePoint} branches solely on null — any non-null
+     * {@code AbstractBedrockChatModel.buildCachePoint} branches solely on null: any non-null
      * {@link CacheTTL} puts the field on the wire. So for a model with no explicit TTLs, null is the
-     * ONLY way to ask for its default cache window; returning its "shortest supported" value instead
-     * is what made every Nova call 400.
+     * only way to ask for its default cache window; sending its "shortest supported" value instead
+     * would 400 the call.
      *
      * <p>For a model that does accept the field, {@code requested} passes through when supported and
      * is otherwise clamped down to the model's shortest, so a single global
@@ -469,7 +442,7 @@ public final class BedrockModelProfile {
         ModelDescriptor p = find(modelKey).orElse(null);
         if (p == null || requested == null) return requested;
         if (p.explicitCacheTtls().isEmpty()) {
-            // Not a downgrade — this model caches on its own default window and simply cannot be
+            // Not a downgrade: this model caches on its own default window and simply cannot be
             // told a duration. Debug, not warn: it is the correct steady state for such a model.
             log.debug(
                     "{} takes no explicit prompt-cache ttl; omitting the field (requested {})",
@@ -513,7 +486,7 @@ public final class BedrockModelProfile {
 
     /**
      * The reasoning-effort levels a UI should offer for a model, in ascending order. Empty means the
-     * model takes no effort parameter at all — the control is hidden rather than shown inert, exactly
+     * model takes no effort parameter at all: the control is hidden rather than shown inert, exactly
      * as {@link #selectableTiers} handles a model with one tier.
      */
     public static Set<String> selectableEfforts(String modelKey) {
@@ -534,7 +507,7 @@ public final class BedrockModelProfile {
     }
 
     /**
-     * The model's shortest explicit TTL — the safe clamp target, since a shorter cache window can
+     * The model's shortest explicit TTL: the safe clamp target, since a shorter cache window can
      * only cost a re-write, whereas an unsupported one fails the call outright. Only ever called with
      * a non-empty set ({@link #clampTtl} handles empty as "omit the field"), so the 5m default here
      * covers a profile listing values the SDK cannot parse, never the no-explicit-ttl case.
@@ -571,7 +544,7 @@ public final class BedrockModelProfile {
      * The tiers a UI should offer for a model, ordered as {@link ServiceTier} declares them so the
      * list reads Standard-first. Returns an empty set for an unknown model.
      *
-     * <p>Only ONLINE tiers are offered: {@link ServiceTier#BATCH} exists for pricing and has no wire
+     * <p>Only online tiers are offered: {@link ServiceTier#BATCH} exists for pricing and has no wire
      * form, so it must never appear as a selectable option (see {@link ServiceTier}).
      */
     public static Set<ServiceTier> selectableTiers(String modelKey) {

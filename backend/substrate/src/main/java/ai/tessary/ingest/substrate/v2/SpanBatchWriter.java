@@ -50,28 +50,22 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <h2>The only substrate writer</h2>
  *
- * <p>The v1 {@code StructuralEnricher} is gone, and everything it owned that outlives the v1 substrate
- * transferred here in the same change: the {@code tool_call} and {@code retrieved_doc} extraction (see
- * {@link SpanSideTables}, now keyed on the producer's own pair rather than a minted observation id) and
- * the call-site materialization that lets call sites emerge from plain-OTLP traffic. Ownership moved
- * exactly once — there is no window in which two writers mint the same rows, which is how a transitional
- * period turns into duplicate data nobody can tell apart afterwards. (The durable embedding enqueue that
- * used to transfer here alongside these was removed with the rest of the vector substrate.)
- *
- * <p>{@code message}/{@code message_block} extraction did not transfer: those tables are removed by the
- * teardown, their only live read having moved onto the {@code trace} preview columns.
+ * <p>This is the sole writer of {@code tool_call} and {@code retrieved_doc} extraction (see
+ * {@link SpanSideTables}, keyed on the producer's own pair rather than a minted observation id) and the
+ * call-site materialization that lets call sites emerge from plain-OTLP traffic. No other writer mints
+ * these rows; two writers touching the same rows is how duplicate data nobody can tell apart happens.
  *
  * <h2>The order, and why it is the order (§6.1)</h2>
  *
  * <ol>
  *   <li>Validate. Rows that cannot be written at all are dropped HERE, before the transaction, with a
- *       counter and one aggregated log line — never inside it. §6.1 forbids per-row catches in the batch
+ *       counter and one aggregated log line, never inside it. §6.1 forbids per-row catches in the batch
  *       transaction, because a catch there leaves the transaction marked rollback-only anyway and turns a
  *       clean failure into a partial write nobody can reason about.
  *   <li>Get-or-create sessions, then traces, identity fields only, as the first statements of the
  *       transaction below (see {@code commitBatch} for why they moved inside it). Both are
  *       {@code ON CONFLICT DO NOTHING}, so a redelivery is a no-op and every FK is satisfiable regardless
- *       of arrival order. Timing and rollup columns are never written here — they belong to §7 alone.
+ *       of arrival order. Timing and rollup columns are never written here, they belong to §7 alone.
  *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the session activity fold, then
  *       the span upserts and their payload rows under the same {@code event_ts} guard.
  * </ol>
@@ -86,8 +80,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <h2>Deadlock freedom</h2>
  *
- * <p>Everything this batch locks, it locks in sorted key order — trace rows, then session rows, then spans
- * by {@code (trace_id, id)} — so two concurrent batches over overlapping sets always contend in the same
+ * <p>Everything this batch locks, it locks in sorted key order, trace rows, then session rows, then spans
+ * by {@code (trace_id, id)}, so two concurrent batches over overlapping sets always contend in the same
  * direction: one waits, neither cycles. Sorting alone is not sufficient here, and the transaction's
  * statement order is the other half of the guarantee; {@link #commitBatch} says why.
  */
@@ -100,8 +94,8 @@ public class SpanBatchWriter {
     private static final int MAX_ID_CHARS = 512;
 
     /**
-     * Poison-row backstop for payload size. Not a truncation policy — telemetry is bound by count, never
-     * clipped — but a single absurd row must not be able to fail a whole batch, and the capped FTS
+     * Poison-row backstop for payload size. Not a truncation policy, telemetry is bound by count, never
+     * clipped, but a single absurd row must not be able to fail a whole batch, and the capped FTS
      * expression on {@code span_payload} is the other half of that guard.
      */
     private static final int MAX_PAYLOAD_CHARS = 8_000_000;
@@ -112,7 +106,7 @@ public class SpanBatchWriter {
     /** Payload size past which {@link #inputPreview} takes the head cut rather than parsing. */
     private static final int MAX_PREVIEW_PARSE_CHARS = 1_000_000;
 
-    /** The role whose last turn the input preview is taken from — see {@link #inputPreview}. */
+    /** The role whose last turn the input preview is taken from, see {@link #inputPreview}. */
     private static final String USER_ROLE = "user";
 
     private static final Set<String> USER_ROLES = Set.of(USER_ROLE);
@@ -124,13 +118,13 @@ public class SpanBatchWriter {
      * <p>Serialising them into the attribute bag as well stored every prompt and completion TWICE: 1.5 GB
      * of a 1.9 GB {@code span_payload} was byte-for-byte duplicate, and the two message keys alone were
      * 95% of all attribute bytes. Nothing listed here overlaps {@code gen_ai.usage.*} /
-     * {@code llm.token_count.*} / {@code llm.cost.*} — the pricing receipt's keys are never stripped —
+     * {@code llm.token_count.*} / {@code llm.cost.*}, the pricing receipt's keys are never stripped,
      * nor {@code error.type} / {@code exception.type}, which the tool-error definition reads out of this
      * column.
      *
      * <p>The bare {@code input} / {@code output} names are here because agent-kind spans in practice carry
      * their content under them rather than under any semconv key, and the four-key set left 5,095 payloads
-     * in one corpus holding a verbatim second copy — ~17 MB. Adding them is safe for the same reason the
+     * in one corpus holding a verbatim second copy, ~17 MB. Adding them is safe for the same reason the
      * rest of this set is: the strip below requires byte-for-byte value identity with the promoted column,
      * so a key that merely shares a name and not a value is never touched.
      */
@@ -224,7 +218,7 @@ public class SpanBatchWriter {
 
         // Known call-site ids, loaded once per batch and mutated in place as new ones are seen. A resolved
         // id the project does not have is materialized as a minimal call_site row, so plain-OTLP telemetry
-        // carrying an explicit tessary.call_site.id (no plugin-published pipeline) is not orphaned — call
+        // carrying an explicit tessary.call_site.id (no plugin-published pipeline) is not orphaned, call
         // sites emerge from traffic.
         Set<String> knownCallSites = callSites.callSiteIds(projectId);
         List<Prepared> prepared = validate(projectId, entries, knownCallSites);
@@ -255,7 +249,7 @@ public class SpanBatchWriter {
         //
         // These two used to run before the transaction opened, on their own autocommit. That is how a
         // rolled-back batch left a trace row with no spans: the identity row committed by itself, and the
-        // spans it was folded from — the only reason it exists — did not. The shell is unreachable by any
+        // spans it was folded from, the only reason it exists, did not. The shell is unreachable by any
         // repair. It can never gain a span, so it can never settle, and the §7.4 reaper re-arms it every
         // grace period for the life of the database. §6.1's atomicity invariant is what forbids this, and
         // it reads on the rollup update alone only because identity was never the half that moved.
@@ -265,7 +259,7 @@ public class SpanBatchWriter {
         // momentary wait; inside one, holding locks either side of it, it is a deadlock.
         //
         // Safe ahead of the timer update below because getOrCreate is ON CONFLICT DO NOTHING, which takes
-        // no lock on a row that already exists — so it cannot start the KEY SHARE the FOR UPDATE would then
+        // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
         // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
         newSessions.sort(Map.Entry.comparingByKey());
@@ -306,11 +300,11 @@ public class SpanBatchWriter {
         // THE TRACE TIMERS GO NEXT, AND THE ORDER IS LOAD-BEARING.
         //
         // fk_span_trace makes every span insert take a KEY SHARE lock on its trace row. Two concurrent
-        // batches over the same traces can both hold that — it is a shared mode — and then both ask for the
+        // batches over the same traces can both hold that, it is a shared mode, and then both ask for the
         // FOR UPDATE the timer update opens with, which conflicts with it. That is a lock UPGRADE on a row
         // each transaction already holds, and no amount of sorted key ordering can make it safe: A waits for
         // B's KEY SHARE on the first trace while B waits for A's, and Postgres kills one of them. Taking the
-        // exclusive lock before any span touches the row means each batch upgrades nothing — it already
+        // exclusive lock before any span touches the row means each batch upgrades nothing, it already
         // holds the strongest lock it will need, and the sorted order then does its job of serializing the
         // two batches instead of crossing them.
         //
@@ -329,8 +323,7 @@ public class SpanBatchWriter {
                 sessionId, fold.startedAt().toString(), fold.lastActivityAt().toString())));
         sessions.touchAll(projectId, touches);
 
-        // ONE STATEMENT PER TABLE, NOT ONE PER SPAN (#984 M2). A 1,000-span batch used to be ~2,500
-        // serial round trips inside this transaction; each table is now one JDBC batch, in the same
+        // One statement per table, not one per span: each table is a single JDBC batch, in the same
         // order the per-span loop wrote them, so the locks are taken in the same sorted order and the
         // FK from payload to span, and from media_ref to payload, is satisfied table by table.
         List<SpanRow> spanRows = new ArrayList<>(prepared.size());
@@ -343,16 +336,16 @@ public class SpanBatchWriter {
             payloadRows.add(p.payload());
             // Every image this span's payload was rewritten to reference, made visible to the database.
             // The reference itself is a string inside that JSON, so without these rows the bytes are
-            // unreachable by any FK and uncollectable by retention (#761). After the payload upsert, not
+            // unreachable by any FK and uncollectable by retention. After the payload upsert, not
             // before: the FK is to the payload row, and it is what makes media age out with the text that
-            // names it. Deleting the payload takes them with it — the cascade is the whole design.
+            // names it. Deleting the payload takes them with it, the cascade is the whole design.
             if (!p.mediaIds().isEmpty()) {
                 media.add(new MediaRefRepository.SpanMedia(
                         p.span().traceId(), p.span().id(), p.mediaIds()));
             }
             // The side tables ride the same transaction as the span they were read off. They are keyed on
             // the same producer pair and derived from the same already-validated attributes, so there is no
-            // failure mode here that the span write does not already have — and a tool call visible without
+            // failure mode here that the span write does not already have, and a tool call visible without
             // its span would be a row the trace-scoped detail read cannot place.
             SpanSideTables.Extracted extracted = p.sideTables();
             ToolCallRow toolCall = extracted.toolCall();
@@ -371,7 +364,7 @@ public class SpanBatchWriter {
 
     /**
      * How far behind its trace's last rollup this span arrived (§7.6). A trace that has never rolled up has
-     * nothing to be late relative to and contributes no sample — otherwise the histogram's first bucket
+     * nothing to be late relative to and contributes no sample, otherwise the histogram's first bucket
      * would just be a count of first-arrivals.
      */
     private void recordLateness(Prepared p, @Nullable String rolledUpThrough) {
@@ -508,9 +501,9 @@ public class SpanBatchWriter {
                 raw.parentId() == null || KindNormalizer.AGENT.equals(kind),
                 isError ? "error" : null,
                 level,
-                // The CLASS in error_type, the PROSE in error_message (#762). This column used to take
-                // the status message whole, so a facet key was routinely kilobytes of agent markdown and
-                // no two failures of the same kind ever grouped.
+                // The class in error_type, the prose in error_message: a facet key that took the status
+                // message whole was routinely kilobytes of agent markdown, and no two failures of the
+                // same kind ever grouped.
                 isError ? SpanErrors.errorClass(errorTypeAttr, statusMessage) : null,
                 isError ? SpanErrors.cappedMessage(statusMessage) : null,
                 startedAt.toString(),
@@ -594,12 +587,12 @@ public class SpanBatchWriter {
      * <p>A head cut is worthless on real prompts. Every prompt in one corpus opened with the same
      * authored preamble, longer than {@link #PREVIEW_CHARS}, so the cut always landed inside boilerplate:
      * 4,770 traces carried exactly ONE distinct {@code input_preview} between them, while the output side
-     * — which has no such preamble — had 3,820. The last user message is what the call actually asked.
+     *, which has no such preamble, had 3,820. The last user message is what the call actually asked.
      *
      * <p>{@link ContentExtractor#columnMessages} is the one parser for the role-tagged envelope, and it
      * tags a payload that is NOT one with whatever fallback role it was handed. Handing it an empty role
-     * is therefore how a single parse answers both questions at once — is this an envelope, and what are
-     * its user turns — and anything that is not one falls through to the plain head cut, unchanged.
+     * is therefore how a single parse answers both questions at once, is this an envelope, and what are
+     * its user turns, and anything that is not one falls through to the plain head cut, unchanged.
      *
      * <p>The parse is skipped past {@link #MAX_PREVIEW_PARSE_CHARS}. This runs on the drain thread for
      * every span, and materializing the whole message tree of a payload allowed up to
@@ -628,7 +621,7 @@ public class SpanBatchWriter {
      * {@code finish_reason} siblings behind, and {@code OpenInferenceNormalizer} folds tool calls into
      * text on the output side ONLY, drops every non-text {@code message.contents} part, and does not read
      * the indexed {@code llm.input_messages.N.*} form at all. Stripping by prefix on a populated column
-     * therefore deleted the last copy of a tool call or an image reference — permanently, since the
+     * therefore deleted the last copy of a tool call or an image reference, permanently, since the
      * payload is rewritten at write time and never on read. A carrier whose bytes are not in the column
      * stays in the bag.
      */
@@ -653,7 +646,7 @@ public class SpanBatchWriter {
     /**
      * Whether the typed column was filled from this attribute value and nothing was lost doing it. Read
      * against {@link RawEntry#input()} rather than the externalized string the row stores, because media
-     * externalization replaces inline bytes with a {@code MediaStore} handle — the content survives, so
+     * externalization replaces inline bytes with a {@code MediaStore} handle, the content survives, so
      * the attribute copy is still redundant.
      */
     private static boolean promotedVerbatim(@Nullable Object attributeValue, @Nullable String promoted) {
@@ -739,7 +732,7 @@ public class SpanBatchWriter {
      * the fold never has to reach back into the raw attribute bag.
      *
      * @param threadId the provider's conversation id, which is a column on {@code trace} rather than a
-     *     second tree level — sessions never nest (§2).
+     *     second tree level, sessions never nest (§2).
      */
     private record Prepared(
             SpanRow span,

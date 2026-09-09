@@ -20,11 +20,10 @@ import { effortLabel } from "../../lib/effort";
 import { Button, cn, Modal, PageBody, PageHeader, Select, Skeleton, useToast } from "../../ui";
 
 /**
- * A.3 (#994): the price-gated warning threshold for the TRIAGE lane only — a project must be told,
- * twice, before it points the lane that runs once per distinct CAUSE (routinely dozens of times a
- * day) at a frontier-priced model. Strict `>`, not `>=`: Haiku 4.5's $1/$5 rate must NOT warn — the
- * whole point of A.4's acceptance bullet is that Haiku is priced low enough to be a reasonable
- * TRIAGE choice and the warning must stay silent on it. Luna and Haiku both clear this bar; Sonnet 5
+ * The price-gated warning threshold for the triage lane only: a project must be told, twice, before
+ * it points the lane that runs once per distinct cause (routinely dozens of times a day) at a
+ * frontier-priced model. Strict `>`, not `>=`: Haiku 4.5's $1/$5 rate must not warn, since Haiku is
+ * priced low enough to be a reasonable triage choice. Luna and Haiku both clear this bar; Sonnet 5
  * and Terra do not.
  */
 const TRIAGE_WARN_INPUT_PER_MILLION = 1;
@@ -33,19 +32,19 @@ const TRIAGE_WARN_OUTPUT_PER_MILLION = 5;
 /**
  * Settings, Models: which model each job runs on.
  *
- * Sibling of Providers, and deliberately distinct from it — Providers is "which keys this org has
- * stored", this is "which model each of our jobs spends them on". Since #939 D4 there is no third
- * answer: no lane runs on a platform credential any more, so every model here bills the org.
+ * Sibling of Providers, and deliberately distinct from it: Providers is "which keys this org has
+ * stored", this is "which model each of our jobs spends them on". No lane runs on a platform
+ * credential; every model here bills the org.
  *
  * That is also why the order between the two pages is the product: a key is what makes any model
  * reachable, so this page has nothing to offer until Providers has something in it. With no key it
- * says so and picks nothing. With one key each job takes the first provider in its own order that the
- * key satisfies, and that provider's default model — and keeps taking it, so adding a
+ * says so and picks nothing. With one key each job takes the first provider in its own order that
+ * the key satisfies, and that provider's default model, and keeps taking it, so adding a
  * higher-priority provider later moves every job nobody has pinned by hand.
  *
  * The page holds no knowledge of its own about lanes or models. Sections, the copy under each
- * heading, which controls a section shows, each lane's options and their ORDER all arrive in the
- * payload, because every one of them is a product decision the server also has to enforce on write —
+ * heading, which controls a section shows, each lane's options and their order all arrive in the
+ * payload, because every one of them is a product decision the server also has to enforce on write:
  * a copy of any of them here would be a second answer that drifts and cannot be validated.
  *
  * The one split worth understanding while reading this file is the section split: an "LLM calls" lane
@@ -56,7 +55,7 @@ const TRIAGE_WARN_OUTPUT_PER_MILLION = 5;
 
 /**
  * Human copy for a tier. The wire values are lowercase; these are what a person reads. Kept to a
- * short qualifier rather than a full sentence — the trade still reads at the point of choice, but
+ * short qualifier rather than a full sentence: the trade still reads at the point of choice, but
  * the option fits its select, and the note under the list carries the detail.
  */
 const TIER_LABEL: Record<ServiceTier, string> = {
@@ -64,7 +63,7 @@ const TIER_LABEL: Record<ServiceTier, string> = {
   flex: "Flex · half price",
   priority: "Priority · faster",
   // Never rendered: batch has no online form, so the server never lists it as supported. Present
-  // only so this map stays total over the type — if a tier is ever added, tsc points here.
+  // only so this map stays total over the type: if a tier is ever added, tsc points here.
   batch: "Batch",
 };
 
@@ -78,7 +77,7 @@ const NO_PROVIDER = "__no_provider__";
 
 /**
  * Control widths, shared by the selects and by the placeholder that stands in for a row with no tier
- * or no effort — as one constant each, because the whole point is that they line up down a section.
+ * or no effort: as one constant each, because the whole point is that they line up down a section.
  * Wide enough for the longest option text ("Custom (OpenAI-compatible)", "GPT-5.6 Luna (OpenAI)",
  * "Priority · faster") with room for a longer name later: a native select truncates silently, so a
  * too-narrow one hides exactly the thing being chosen.
@@ -91,17 +90,17 @@ const TIER_W = "sm:w-[168px]";
 const EFFORT_W = "sm:w-[132px]";
 
 /**
- * What a row and the footnote actually read off a model, regardless of which half of #939's union
- * it came from. A {@link BedrockModelDescriptor} satisfies this structurally as-is; a
- * {@link CatalogEntry} (GEMINI/GLM/GROK/CUSTOM) is mapped into it below — see `models` in
+ * What a row and the footnote actually read off a model, regardless of which of the two source
+ * types it came from. A {@link BedrockModelDescriptor} satisfies this structurally as-is; a
+ * {@link CatalogEntry} (GEMINI/GLM/GROK/CUSTOM) is mapped into it below, see `models` in
  * {@link Models}. Narrower than either source type on purpose: `supported_tiers` is the one field a
  * catalog entry has no equivalent for, and it is always empty on a mapped one, which is safe because
  * every lane a catalog key can appear on is non-tiered (`group.tiered` is false for
  * {@link ModelLaneGroupView} `AGENT_VM`), so `tiers` in {@link LaneRow} is never read off it.
  *
  * `provider` is what {@link LaneRow} checks against `configured_providers` to decide whether an
- * option is reachable at all. A {@link BedrockModelDescriptor} carries no `provider` field of its own
- * — only `endpoint` (`"RUNTIME" | "MANTLE"`) — so it is derived below in {@link Models}'s `models`
+ * option is reachable at all. A {@link BedrockModelDescriptor} carries no `provider` field of its
+ * own, only `endpoint` (`"RUNTIME" | "MANTLE"`), so it is derived below in {@link Models}'s `models`
  * memo.
  */
 type ModelOption = Pick<BedrockModelDescriptor, "model_key" | "display_name" | "supported_tiers" | "effort_levels"> & {
@@ -110,7 +109,7 @@ type ModelOption = Pick<BedrockModelDescriptor, "model_key" | "display_name" | "
 
 /**
  * A {@link CatalogEntry}'s wire key, as {@code ModelCatalog#key} on the server encodes it and
- * {@code ProjectModelSettings}'s {@code model_key} union decodes it —
+ * {@code ProjectModelSettings}'s {@code model_key} union decodes it:
  * {@code "<PROVIDER>:<model_name>"}. Kept as one function so the client and server never spell the
  * encoding two different ways.
  */
@@ -150,7 +149,7 @@ export function Models() {
     mutationFn: (lane: ModelLane) => api.resetLaneModel(lane),
     // Going back to automatic reads as "chose a model" like any other option, because it is one: the
     // lane immediately runs whatever the priority order resolves to. Seed the cache from the response
-    // for the same reason the save does — the model it lands on may not be the one it just left.
+    // for the same reason the save does: the model it lands on may not be the one it just left.
     onSuccess: (data) => {
       qc.setQueryData(key, data);
       toast.success("Model updated");
@@ -164,7 +163,7 @@ export function Models() {
     return m;
   }, [q.data]);
 
-  // #939: the settings page's model list is the union BedrockModelProfile ∪ ModelCatalog — a
+  // The settings page's model list is the union BedrockModelProfile ∪ ModelCatalog: a
   // GEMINI/GLM/GROK/CUSTOM entry mapped into the same shape a Bedrock one already renders as, keyed
   // the way an AGENT_VM lane's own `model_keys` names it (see catalogModelKey).
   const models: ModelOption[] = useMemo(() => {
@@ -186,7 +185,7 @@ export function Models() {
   const rates = q.data?.rates ?? [];
   // The providers this org has a credential for. A model whose provider is absent is not offered at
   // all: an option nobody can pick is noise, and naming the key it would need turns a settings page
-  // into a shopping list — one that is wrong as often as not, since the same model is reachable
+  // into a shopping list: one that is wrong as often as not, since the same model is reachable
   // through more than one provider.
   const configuredProviders = useMemo(
     () => new Set<ModelProvider>(q.data?.configured_providers ?? []),
@@ -194,7 +193,7 @@ export function Models() {
   );
 
   // Sections in the server's order, each holding its own lanes in the server's order. A group with no
-  // lanes is dropped rather than drawn as an empty heading — it cannot happen today, but a heading
+  // lanes is dropped rather than drawn as an empty heading: it cannot happen today, but a heading
   // over nothing is a worse failure than a missing section.
   const sections = useMemo(() => {
     const lanes = q.data?.lanes ?? [];
@@ -291,8 +290,8 @@ function NoProviderNotice() {
  * Which models offer Flex is read off the catalogue rather than written here, because that is exactly
  * what the payload knows and a hand-written model name would go stale the moment the line-up changed.
  * The region sentence is prose because the payload carries no region: it is a fact about where the
- * two Bedrock endpoints are deployed, and it is the one thing on this page a reader cannot undo later
- * — trace content that left the region has left it.
+ * two Bedrock endpoints are deployed, and it is the one thing on this page a reader cannot undo
+ * later, since trace content that left the region has left it.
  */
 function Footnote({ models }: { models: ModelOption[] }) {
   const flex = models.filter((m) => m.supported_tiers.includes("flex")).map((m) => m.display_name);
@@ -316,14 +315,14 @@ function Footnote({ models }: { models: ModelOption[] }) {
 }
 
 /**
- * One job's row: a provider, a model on it, and — for a lane whose request we build — the tier and
+ * One job's row: a provider, a model on it, and, for a lane whose request we build, the tier and
  * effort to run it at.
  *
  * <p>Provider first, model second, because that is the order the choice actually has: a key is the
  * thing an org either holds or does not, and which model to run is a question inside it. The provider
  * select offers Automatic plus every provider this org has a key for; the model select offers that
- * provider's own models for this lane. Both lists, and their order, come from the server — see
- * `LanePriority` — and this component never re-sorts them, because the order IS the rule that decides
+ * provider's own models for this lane. Both lists, and their order, come from the server (see
+ * `LanePriority`), and this component never re-sorts them, because the order is the rule that decides
  * what Automatic picks.
  *
  * <p>Two decisions are the server's and only rendered here: which models a lane may use (a small
@@ -334,8 +333,8 @@ function Footnote({ models }: { models: ModelOption[] }) {
  * hours later on the next run.
  *
  * <p>Both the tier and the effort control are omitted rather than shown inert when there is nothing
- * to choose — the group does not take them, or the selected model offers a single tier / no effort
- * levels. A disabled select still reads as a setting, and every one of those cases used to render one.
+ * to choose: the group does not take them, or the selected model offers a single tier / no effort
+ * levels. A disabled select still reads as a setting.
  */
 function LaneRow({
   lane,
@@ -352,14 +351,14 @@ function LaneRow({
   group: ModelLaneGroupView;
   models: ModelOption[];
   rates: ModelRateView[];
-  /** Providers the org has a credential for — gates which options exist at all. */
+  /** Providers the org has a credential for: gates which options exist at all. */
   configuredProviders: Set<ModelProvider>;
   setting: ProjectModelSetting | undefined;
   busy: boolean;
   onChange: (model: string, tier: ServiceTier, effort: string | null) => void;
   onReset: () => void;
 }) {
-  // The selects show what the lane RUNS, which is not always what the project stored. `automatic`
+  // The selects show what the lane runs, which is not always what the project stored. `automatic`
   // says which of the two it is: the project's own row, or the priority order resolved against the
   // org's keys. Automatic is the empty value on the provider select, so the two never collide.
   const effectiveKey = lane.effective_model_key ?? null;
@@ -382,7 +381,7 @@ function LaneRow({
   const selectedProvider = lane.automatic ? "" : (effectiveProvider ?? "");
   const modelsForProvider = providers.find((o) => o.provider === effectiveProvider)?.model_keys ?? [];
 
-  // A stored choice the org can no longer run — its provider's key was removed, or the model left
+  // A stored choice the org can no longer run: its provider's key was removed, or the model left
   // this lane's offer list (which triage's price ceiling can do on its own). The lane falls back to
   // automatic rather than breaking, and says so: silently ignoring a choice someone made is how a
   // settings page starts lying about itself.
@@ -394,12 +393,11 @@ function LaneRow({
   const tiers = group.tiered ? (effectiveModel?.supported_tiers ?? []) : [];
   const efforts = group.effort_tunable ? (effectiveModel?.effort_levels ?? []) : [];
 
-  // A.3 (#994): TRIAGE only, and only above the threshold (see TRIAGE_WARN_*). The lane's offer list
-  // is now curated under that same threshold, so this cannot fire on a fresh checkout — it is the
-  // backstop for the price book moving under a static list, which is exactly why it reads live rates
-  // instead of hardcoding them. `pending` holds the (model, tier, effort) the two-step dialog is
-  // confirming; the selects stay bound to what the lane RUNS throughout, so a cancel at either step
-  // needs no explicit revert.
+  // Triage only, and only above the threshold (see TRIAGE_WARN_*). The lane's offer list is curated
+  // under that same threshold, so this cannot fire on a fresh checkout: it is the backstop for the
+  // price book moving under a static list, which is why it reads live rates instead of hardcoding
+  // them. `pending` holds the (model, tier, effort) the two-step dialog is confirming; the selects
+  // stay bound to what the lane runs throughout, so a cancel at either step needs no explicit revert.
   const [pending, setPending] = useState<{
     key: string;
     tier: ServiceTier;
@@ -436,7 +434,7 @@ function LaneRow({
   };
 
   // Choosing a provider pins that provider's own default model. Choosing Automatic drops the pin
-  // entirely, which is a DELETE rather than a write — there is no default row to put back.
+  // entirely, which is a delete rather than a write: there is no default row to put back.
   const handleProvider = (nextProvider: string) => {
     if (nextProvider === NO_PROVIDER) return;
     if (!nextProvider) {
@@ -451,12 +449,12 @@ function LaneRow({
     ? (models.find((m) => m.model_key === pending.key)?.display_name ?? pending.key)
     : "";
 
-  // Two different states, and they used to share one wrong sentence. "No provider configured" is
-  // true only when the org holds no key at all; when it holds keys that this lane cannot run, saying
-  // the same thing tells someone looking straight at their own configured providers that they have
-  // none. Since every provider now reaches every lane (see LanePriority's coverage rule) the second
-  // state is unreachable — this keeps it honest for whenever an eleventh provider lands ahead of its
-  // launcher mode, which is exactly how the first one got here.
+  // Two different states, and each needs its own sentence. "No provider configured" is true only
+  // when the org holds no key at all; when it holds keys that this lane cannot run, saying the same
+  // thing tells someone looking straight at their own configured providers that they have none.
+  // Every provider currently reaches every lane (see LanePriority's coverage rule), so the second
+  // state is unreachable today, but the distinction stays ready for whenever a future provider
+  // doesn't.
   const noProvider = providers.length === 0;
   const noKeysAtAll = configuredProviders.size === 0;
 
@@ -555,7 +553,7 @@ function LaneRow({
               value={effort}
               onChange={(e) => onChange(effectiveKey ?? "", tier, e.target.value || null)}
             >
-              {/* The model's own default — distinct from every named level. */}
+              {/* The model's own default: distinct from every named level. */}
               <option value="">Default effort</option>
               {efforts.map((level) => (
                 <option key={level} value={level}>
@@ -566,10 +564,10 @@ function LaneRow({
           ))}
       </div>
 
-      {/* A.3 (#994): the price-gated warning, two confirmations deep. Step 1 states the trade in
-          plain terms; step 2 makes the click cost something rather than doubling as an accidental
-          double-click on step 1's own button — a second, differently-worded dialog reads as a real
-          pause rather than the same confirm answered twice. */}
+      {/* The price-gated warning, two confirmations deep. Step 1 states the trade in plain terms;
+          step 2 makes the click cost something rather than doubling as an accidental double-click
+          on step 1's own button: a second, differently-worded dialog reads as a real pause rather
+          than the same confirm answered twice. */}
       <Modal
         open={pending?.step === 1}
         onClose={() => setPending(null)}

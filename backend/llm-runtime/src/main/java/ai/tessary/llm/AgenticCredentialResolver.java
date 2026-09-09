@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * #939 D4: the org's own {@link ProviderCredential}, decrypted and shaped for the sandbox
+ * The org's own {@link ProviderCredential}, decrypted and shaped for the sandbox
  * launcher's {@code POST /rca} / {@code POST /triage} — the FULL REMOVAL of the launcher's
  * deployment-env-var credential path (AGENT_PROVIDER and every per-provider key/secret it read)
  * means an agentic run now carries its own credential on the wire, not something the launcher's
@@ -35,7 +35,7 @@ public class AgenticCredentialResolver {
     private final ProviderCredentialRepository repo;
     private final SecretBox secretBox;
 
-    /** The shared, cached {@code projectId → orgId} lookup (#939 D1) — see its own javadoc. */
+    /** The shared, cached {@code projectId → orgId} lookup — see its own javadoc. */
     private final ProjectOrgResolver orgResolver;
 
     public AgenticCredentialResolver(
@@ -67,7 +67,7 @@ public class AgenticCredentialResolver {
      * agentic (RCA/TRIAGE) sandbox run for {@code projectId} should carry. Throws
      * {@link ModelConfigError#MISSING_CREDENTIALS} when the org has none, and
      * {@link ModelConfigError#AGENTIC_IAM_ROLE_UNSUPPORTED} when the org's Bedrock/mantle credential
-     * is {@code auth_mode=iam_role} — settled by design (D4): an E2B microVM cannot assume the
+     * is {@code auth_mode=iam_role}: an E2B microVM cannot assume the
      * operator's own ambient AWS identity, and there is no {@code roleArn}/STS-relay path for it to
      * use instead. IAM-role auth stays usable for the backend's own direct judge calls
      * ({@link ChatModelFactory}); a credential meant to drive a sandbox agent must be

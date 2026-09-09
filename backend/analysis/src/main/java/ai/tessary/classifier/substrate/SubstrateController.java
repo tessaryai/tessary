@@ -48,7 +48,7 @@ public class SubstrateController {
      * render. The liveness read short-circuits on the first matching span; the untagged count is
      * capped at {@link SubstrateReadRepository#UNTAGGED_CAP} (the UI renders "1000+" beyond it).
      *
-     * <p>Five fields added additively for the connect gate (#1227): {@code has_tagged_span} is the
+     * <p>Five fields added additively for the connect gate: {@code has_tagged_span} is the
      * gate's own redirect signal, and {@code spans_received}/{@code tagged_spans}/{@code last_span_at}/
      * {@code service_name} feed the untagged wait state's four-stat row. All are read only once traffic
      * has landed at all, same as {@code untagged}, so a project at {@code not_connected} pays for one
@@ -75,7 +75,7 @@ public class SubstrateController {
 
     /**
      * Substrate liveness for the onboarding flow: a {@code has_live} flag plus the capped
-     * {@code untagged_spans} count (spans with no {@code tessary.call_site.id} tag), plus (#1227) the
+     * {@code untagged_spans} count (spans with no {@code tessary.call_site.id} tag), plus the
      * connect gate's own {@code has_tagged_span} redirect signal and the untagged wait state's stat row.
      *
      * <p>The field was {@code untagged_observations}; v2 calls the row a span everywhere the wire is

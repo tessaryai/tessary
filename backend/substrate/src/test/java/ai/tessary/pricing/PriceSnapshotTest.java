@@ -54,7 +54,7 @@ class PriceSnapshotTest {
     @Test
     @DisplayName("the vendored snapshot carries mantle's own route-prefixed spelling for the GPT-5.6 line")
     void load_coversMantlesRoutePrefixedIds() {
-        // What BedrockModelProfile.MANTLE_ROUTE_PREFIX depends on existing upstream — see #1032. Without
+        // What BedrockModelProfile.MANTLE_ROUTE_PREFIX depends on existing upstream. Without
         // this row, ModelResolver has nothing to resolve the producer's reported id to.
         Map<String, ModelRates> rates = byId(litellm());
         assertNotNull(rates.get("bedrock_mantle/openai.gpt-5.6-luna"), "mantle's own priced route for luna");

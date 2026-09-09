@@ -21,7 +21,7 @@ import org.springframework.stereotype.Repository;
  * <em>Legitimate — absorb</em> re-pins the reference.
  *
  * <p>{@code ux_metric_baseline_scope} keeps at most one baseline per scope. It carried a sixth column,
- * {@code COALESCE(environment_id, '')}, until Track A removed the Environment concept; changeset 0016
+ * {@code COALESCE(environment_id, '')}, until the Environment concept was removed; that migration
  * deletes the rows that would collide under the collapsed key and recreates the index without it. The
  * COALESCE was load-bearing while the column existed — NULL is distinct from itself in a unique index —
  * and the shape is worth remembering if a scope column is ever added back.
@@ -231,8 +231,8 @@ public class MetricBaselineRepository {
     /**
      * Close the current window: it is folded into {@code control_json}, the rolling reference the next
      * close compares against for sudden breaks, and a fresh window opens. The caller does the folding
-     * and hands the new ring in — nothing is rotated into a prev slot, which has not existed since 0056
-     * replaced it with the control ring.
+     * and hands the new ring in — nothing is rotated into a prev slot, which no longer exists: it was
+     * replaced by the control ring.
      *
      * <p>{@code counted_through_*} is untouched. It is per ROW, not per window: it answers "which
      * ingested samples has this baseline already seen", and resetting it on close would re-admit the

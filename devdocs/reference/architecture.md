@@ -13,7 +13,7 @@ everything else:
 - **`backend/app`** — assembly only: `TessaryApplication`, `application.yaml`, and every
   `@SpringBootTest` integration test (they need the `@SpringBootConfiguration` only this
   module has). Feature slices live in the modules *below* it, not here.
-- **`backend/shared`** — the open-core cross-cutting primitives with no
+- **`backend/shared`** — the cross-cutting primitives with no
   app dependencies, under `ai.tessary.open.*`: `open/errors` (the error catalog + every
   domain enum), `open/obs` (log/MDC plumbing), `open/jobqueue` (the generic `LeasedJobQueue`
   seam), `open/media` (the `MediaStore` SPI).
@@ -54,10 +54,10 @@ interface with implementations selected by `@ConditionalOnProperty`:
   `true`), enforced in `PriorsService` itself.
 
 `storage/` — the streaming trace substrate — used to carry two SPI seams beside its plain
-Postgres write path: a `TraceStore` SPI (Track A removed that interface's last method with the
+Postgres write path: a `TraceStore` SPI (its last method was removed with the
 `verdict` table) and a `VectorIndex` SPI over pgvector similarity search (`embedding_space` +
 `embedding`, the `vector` extension, the durable embed-on-ingest lane). `VectorIndex` and the
-vector substrate it fronted were removed entirely (#1116) — no surface in the open edition read
+vector substrate it fronted were removed entirely — no surface in the open edition read
 them — so `storage/` is plain Postgres code with no seam left in it at all.
 
 A slice owns its controller, services, repositories, row mappers, request/response DTOs, and
@@ -103,9 +103,9 @@ Flat package; files read top-to-bottom by role via their suffix:
 `classifier/` is the reference example of a large-but-coherent slice — large enough that it splits
 into subpackages internally without becoming a Maven module; see [`../modules.md`](../modules.md) § *`classifier`
 splits internally*. Every classifier files into ONE `finding` table, and its own raw detections
-live in per-classifier `*_detection` tables stitched at query time by `DetectionTableRegistry` (Epic 3, #1070/#1071). (Detections used
+live in per-classifier `*_detection` tables stitched at query time by `DetectionTableRegistry`. (Detections used
 to land in a shared judgment table with grader verdicts; that table was dropped along with the rest
-of grading before the migration history was squashed into the current `0000-baseline.sql` (#759).)
+of grading before the migration history was squashed into the current `0000-baseline.sql`.)
 
 ## Hard rules
 
@@ -123,7 +123,7 @@ of grading before the migration history was squashed into the current `0000-base
   `LlmCaller`, `LlmPacer`; the vendor-neutral half — `ModelLane`,
   `ServiceTier` — sits one layer down in `core`'s `llmspi/`, and rates sit in
   `substrate`'s `pricing/`; `EmbeddingModelFactory` and `TextEmbedder` were removed with the rest
-  of the vector substrate, #1116). `model/` is the bundle graph. The two share a word and nothing else —
+  of the vector substrate). `model/` is the bundle graph. The two share a word and nothing else —
   never conflate them.
 - **Jackson-bound records need no reflection registration.** The backend runs on the
   standard JVM (no GraalVM native image), so Jackson reflects over records at runtime with
@@ -157,7 +157,7 @@ of grading before the migration history was squashed into the current `0000-base
 - **`git/` is an integration layer with no closed loop above it.** It owns the `GitProvider`
   SPI, token/app plumbing, and the webhook *signature* adapter (HMAC verify, push parsing). The
   `observer/` slice that consumed it — the push-triggered drift worker, the `DriftAnalyzer` SPI, the
-  change-request writeback — was deleted with grading in Track A, along with `GitWebhookController`.
+  change-request writeback — was deleted along with `GitWebhookController` when grading was removed.
   What still reads `git/` is the repo checkout the two agentic lanes get. Cross-feature reads
   (pipeline state) go through that feature's **service facade**, not its repositories — see the
   `jdbc_client_only_in_repositories` rule and the per-feature ArchUnit layer checks.
@@ -169,7 +169,7 @@ of grading before the migration history was squashed into the current `0000-base
   attempt cap, dead-lettering). `classifier/` is a **continuous cursor sweep over the trace
   substrate** — on a heartbeat it reads `span` rows strictly past each classifier's `cursor_at`
   high-water mark, runs a built-in `BuiltInDetector`, and records detections in **its own table** —
-  one per classifier, stitched for cross-classifier reads by `DetectionTableRegistry` (Epic 3, #1070/#1071).
+  one per classifier, stitched for cross-classifier reads by `DetectionTableRegistry`.
   When enough of them accumulate inside its arming window it files a `finding` with the flagged
   spans as evidence, which is the only way a classifier reaches a human. It is **strictly off the
   ingest hot path**: it consumes what the substrate write path produced and is never hooked into
@@ -177,10 +177,8 @@ of grading before the migration history was squashed into the current `0000-base
   (`span`/`span_payload`/`trace`/`session`/`tool_call`) it owns a raw-SQL
   `SubstrateReadRepository`, which the `jdbc_client_only_in_repositories` rule allows.
 - **`classifier/` extension seam is *multi-impl and open to code this repo does not build*** —
-  `ClassifierSweep` (in `classifier/worker/`) plus three of the four read-side ports #839 carved out
-  (`TriageSource`, `CauseResolver`, `ClassifierDebugContributor` — `ProfileSource`, the fourth, moved
-  into `tessary-paid/behavior-drift` with #919 and is now that module's own internal wiring, not an
-  open port) are what a
+  `ClassifierSweep` (in `classifier/worker/`) plus three read-side ports (`TriageSource`,
+  `CauseResolver`, `ClassifierDebugContributor`) are what a
   classifier attaches through, and `ClassifierSweepRegistry` indexes every sweep on the classpath by
   the detector kinds it claims. Unlike every other seam in this file, an implementation may ship from
   a jar outside this reactor: discovery is a Spring Boot `AutoConfiguration.imports` read off the
@@ -230,8 +228,8 @@ triage ruling, summary, citations, or the fact that a triage pass happened. This
 structurally, not by convention, and it takes **three** enforcement points rather than two, because
 the lane can read through any of them. The dossier holds: the RCA dossier builder has no triage
 repository dependency to read one from, and a test greps the materialized dossier for triage
-vocabulary. The prompt holds, pinned by `AgenticRcaPromptTest`. **The tool surface did not, until
-`#830`**: the RCA agent runs with a project-scoped admin key, so `get_finding`, `list_findings` and
+vocabulary. The prompt holds, pinned by `AgenticRcaPromptTest`. **The tool surface was the exception**:
+the RCA agent runs with a project-scoped admin key, so `get_finding`, `list_findings` and
 `get_case` handed the ruling straight back inline and one call defeated the other two.
 `BehaviorFindingView.withoutTriage()` is the redaction, applied by `McpToolRegistry` to all three and
 pinned by `McpFindingToolsTest`; `triageStatus` survives on purpose, since it says only whether a
@@ -256,8 +254,8 @@ release that changes the output, re-vendor and absorb it following
 [upgrade-contract.md](../guides/upgrade-contract.md) — the order is contract → backend records →
 frontend types → views.
 
-**The platform reads the pipeline half only.** Track A deleted the in-stack `synth/` slice, the
-judge runtime and everything that could execute a grader, so `BundleAssembler` routes the bundle's
+**The platform reads the pipeline half only.** The in-stack `synth/` slice, the
+judge runtime and everything that could execute a grader were deleted, so `BundleAssembler` routes the bundle's
 grader and quality-dimension shards to `Shard.IGNORE` rather than rejecting the bundle. That is
 deliberate: the plugin is public and still emits them, and a hard reject would make every current
 bundle un-importable to buy nothing.
@@ -314,9 +312,9 @@ holds. A package appears in exactly one module.
 | `alert/` | `analysis` | alerting engine: WHEN to fire + WHERE it lands (channel registry). Four rule types — a threshold over classifier detections, digest/brief roll-ups, and `case_opened`, which is the only one that covers the launch detectors (they write no detections to count). | [alerting.md](../concepts/alerting.md) |
 | `apidoc/` | `core` | code-first OpenAPI config: `OpenApiConfig` (stable operationIds), `JSpecifyNullabilityConverter`, `OpenApiSpecDriftTest` (in tests)… | — |
 | `auth/` | `tenancy` | WorkOS AuthKit login, request filters, tenancy enforcement. | [auth-and-mcp.md](./auth-and-mcp.md) |
-| `billing/` | `surfaces` | the org usage rollup behind `BILLING_MANAGE` — cross-project metered totals, no charging integration (#883 deleted self-serve billing outright). | `GET /api/orgs/{orgSlug}/billing` |
+| `billing/` | `surfaces` | the org usage rollup behind `BILLING_MANAGE` — cross-project metered totals, no charging integration (self-serve billing was deleted outright). | `GET /api/orgs/{orgSlug}/billing` |
 | `cases/` | `analysis` | incident cases: grouping related findings into one investigable unit with a lifecycle, plus the case page's assembly — the ruling read off the finding, before/after exemplars, and the absorb verb that moves the detector's reference. | — |
-| `ci/` | `surfaces` | the pre-deploy check surface (`PreDeployCheckController` → the open `product/gate` slice). The eval-delta / risk-forecast / merge-gate / PR-comment half went with grading in Track A. | `/predeploy-checks` |
+| `ci/` | `surfaces` | the pre-deploy check surface (`PreDeployCheckController` → the open `product/gate` slice). The eval-delta / risk-forecast / merge-gate / PR-comment half was removed along with grading. | `/predeploy-checks` |
 | `classifier/` | `analysis` | async classifier-detection engine (Layer 1), plus the Layer-2 triage lane that rules on what it files. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `config/` | `core` | cross-cutting `@ConfigurationProperties` (~25 per-feature classes) + `AsyncConfig` (bounded virtual-thread executors),… | [config-keys.md](./config-keys.md) |
 | `crypto/` | `core` | `SecretBox` (AES-GCM seal/open for at-rest secrets), `CryptoConstants`. | — |
@@ -327,32 +325,32 @@ holds. A package appears in exactly one module.
 | `git/` | `substrate` | Git provider SPI (GitHub first). | — |
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |
 | `llm/` | `llm-runtime` | LLM provider/model configuration (see *Hard rules*): `ProviderCredential{,Controller,Repository}`, `ChatModelFactory`,… | — |
-| `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup`, `ServiceTier` (`TextEmbedder` sat here too, until #1116 removed it with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
+| `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup`, `ServiceTier` (`TextEmbedder` sat here too, until it was removed with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
 | `mcp/` | `surfaces` | Model Context Protocol server (Streamable HTTP). | [auth-and-mcp.md](./auth-and-mcp.md) |
 | `metering/` | `surfaces` | usage metering: rollup worker + validated read API, plus the per-call `llm_call` ledger (token buckets + cost per lane) the org LLM-usage read aggregates. | `/v1/usage` |
 | `model/` | `core` | the pure record graph mirroring the plugin's bundle schema (`Pipeline`, `CallSite`, `Chain`, `FailureMode`, `TaxonomyNode`,… | — |
 | `onboarding/` | `analysis` | the ladder from no ingest key to first case, as an ordered `OnboardingStage` (not_connected → listening → fitting → watching → finding → case) rather than independent booleans, so the surface says one thing at a time and never walks backwards. | `/api/orgs/{orgSlug}/projects/{projectSlug}/onboarding` |
 | `ops/` | `core` | repository-only persistence for operational entities (no controller/service):… | — |
 | `pipeline/` | `product` | the imported `.tessary/` bundle, DB-backed per project. | — |
-| `sop/` | `product` (seam) + `tessary-paid/sop` | verbatim intake of plugin-authored SOP policy files (`.tessary/sops/*.yaml`): digest-idempotent `sop_document` store + the `sop_compile` job enqueue and its worker, all paid since #842. What stays open is the `SopIntake` port both import paths call through `SopIntakeDispatch`, and `SopCompileException`, which the open `SopCompiler` port declares. | — |
-| `sopcompile/` | `product` | the `SopCompiler` SPI alone, in a package of its own. It sits here rather than in `sop/` because #842 took `sop/`'s queue half paid while the interface has to stay open. Both ends are now paid and in DIFFERENT overlay modules (`tessary-paid/sop`'s worker calls it, `tessary-paid/conformance` implements it), so this package is the neutral ground that keeps them from needing an edge to each other. | — |
-| `plan/` | `product` | capabilities (the single gating axis). Plan tiers and quotas moved to `tessary-paid/plan`; the open edition is uncapped. | — |
+| `sop/` | `product` (seam only) | intake of plugin-authored SOP policy files (`.tessary/sops/*.yaml`). What this tree holds is the `SopIntake` port, called through `SopIntakeDispatch`, and `SopCompileException`, which the open `SopCompiler` port declares. The digest-idempotent `sop_document` store and the `sop_compile` job enqueue/worker are not part of this tree. | — |
+| `sopcompile/` | `product` | the `SopCompiler` SPI alone, in a package of its own. It sits here rather than in `sop/` because the interface has to stay open even though `sop/`'s queue half is not part of this tree. This package is the neutral ground between the two implementations that call and implement it, keeping them from needing an edge to each other. | — |
+| `plan/` | `product` | capabilities (the single gating axis). Plan tiers and quotas are not part of this tree; the open edition is uncapped. | — |
 | `priors/` | `llm-runtime` | cross-customer aggregated/anonymized priors, governed by `tessary.intelligence-mode.single-tenant`. | — |
 | `query/` | `surfaces` | aggregation-first query API over the substrate with allow-list validation. | `/v1/query` |
 | `rca/` | `analysis` | root-cause analysis: pressed on a case, reads the finding's CLAIM (never any triage ruling — the context firewall) and its evidence over MCP → grounded hypotheses + ruled-out checks. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `redaction/` | `substrate` | PII redaction: rule authoring/testing + write-path guard (`RedactionService.redactBatch` called by the `SubstrateWriter` drainer, immediately before the write). | [pii-redaction.md](../concepts/pii-redaction.md) |
-| `retention/` | `substrate` | Retention enforcement: `RetentionResolver` (platform default TTL, overridden by a `retention_policy` row), `RetentionSweeper` (the bounded hourly delete), and `RetentionController` (Settings → Data retention: reads the resolver, writes the override rows; `RETENTION_MANAGE` to write, #1205). One resolver, so the sweep and the customer-facing answer cannot differ. | [ingest-runbook.md](../guides/ingest-runbook.md) |
+| `retention/` | `substrate` | Retention enforcement: `RetentionResolver` (platform default TTL, overridden by a `retention_policy` row), `RetentionSweeper` (the bounded hourly delete), and `RetentionController` (Settings → Data retention: reads the resolver, writes the override rows; `RETENTION_MANAGE` to write). One resolver, so the sweep and the customer-facing answer cannot differ. | [ingest-runbook.md](../guides/ingest-runbook.md) |
 | `pricing/` | `substrate` | Model identity + versioned rates: `PriceBookImporter` (idempotent boot + daily import of the checked-in snapshots into `price_book`/`model_price`), `ModelResolver` (reported model name → `model.id`, exact → region-strip → vendor-strip), `PriceBookRepository`. The manual override book layers over the vendored LiteLLM one. | — |
 | `prompt/` | `evaluation` | prompt prose read from `prompt-craft/<purpose>/` on the classpath; the resource-owning module ships its own. Only prose lives there, never composition logic. | [prompt-craft.md](./prompt-craft.md) |
-| `sandbox/` | `llm-runtime` | `AgentSpanTelemetry` and nothing else: the Langfuse-shaped generation stamping every agentic lane emits through. The out-of-process grader-JS runner SPI (`SandboxRunner` + its E2B/Lambda implementations) went with grading in Track A. | — |
+| `sandbox/` | `llm-runtime` | `AgentSpanTelemetry` and nothing else: the Langfuse-shaped generation stamping every agentic lane emits through. The out-of-process grader-JS runner SPI (`SandboxRunner` + its E2B/Lambda implementations) was removed along with grading. | — |
 | `search/` | `surfaces` | global ⌘K search: one tenant-scoped full-text read over a project's content entities, feeding the command palette. | `/api/orgs/{orgSlug}/projects/{projectSlug}/search` |
-| `slack/` | `tessary-paid/slack` | The PLATFORM half of Slack: workspace→project routing (`slack_install`), the `Capability.SLACK` gate, what to reply to an `@mention`, and the channel post — all paid since #842, joined by the route itself in #920 once the per-edition spec decision (#917) retired the reason it had to stay open. With no implementation on the classpath, the endpoint does not exist and `AuthFilter` does not bypass its path either — "not bypassed and not served." The open seam that remains is `auth/SelfAuthenticatingPath` (`tenancy`), the port `AuthFilter` consults instead of a hard-coded literal; `tessary-paid/slack/SlackAuthBypass` is its one implementation. The Slack protocol itself lives out of process in `tessary-paid/slack-service/` (private) — nothing here can reach Slack. | `POST /internal/slack/mention` (adapter callback, paid) |
+| `slack/` | *(not in this tree)* | The PLATFORM half of Slack — workspace→project routing (`slack_install`), the `Capability.SLACK` gate, what to reply to an `@mention`, and the channel post — is not part of this tree. With no implementation on the classpath, the endpoint does not exist and `AuthFilter` does not bypass its path either — "not bypassed and not served." The open seam that remains is `auth/SelfAuthenticatingPath` (`tenancy`), the port `AuthFilter` consults instead of a hard-coded literal. | `POST /internal/slack/mention` (adapter callback, not in this tree) |
 | `sources/` | `substrate` | persistence + REST for `IngestionSource`. | — |
 | `storage/` | `substrate` | the streaming trace substrate (see *SPI-seam slices* above). | — |
-| `tenant/` | `tenancy` | orgs/projects/users, membership, API keys / MCP tokens (one `api_key` store via `ApiKeyService`), RBAC. Environments were removed in Track A: a project is the only scope below an org. | [auth-and-mcp.md](./auth-and-mcp.md) |
-| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics` (#858): `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstallIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat`/`TelemetryBuckets` (the `@Scheduled` orchestrator, next to `MeteringWorker`, which needs both). | [telemetry-contract.md](./telemetry-contract.md) |
+| `tenant/` | `tenancy` | orgs/projects/users, membership, API keys / MCP tokens (one `api_key` store via `ApiKeyService`), RBAC. Environments were removed: a project is the only scope below an org. | [auth-and-mcp.md](./auth-and-mcp.md) |
+| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics`: `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstallIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat`/`TelemetryBuckets` (the `@Scheduled` orchestrator, next to `MeteringWorker`, which needs both). | [telemetry-contract.md](./telemetry-contract.md) |
 | `traces/` | `substrate` | read-side trace explorer over the substrate. | — |
-| `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker went with grading in Track A; nothing here caps anything now. | — |
+| `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker were removed along with grading; nothing here caps anything now. | — |
 | `version/` | `tenancy` | project-version timeline (one row per commit SHA). | — |
 | `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage`, `TokenPriceBook` and the pricing catalogue behind them. | — |
 | `web/` | `core` | shared HTTP plumbing ONLY: `ApiResponse` envelope, `ResponseMeta`, `ErrorBody`, `GlobalExceptionHandler`. | — |

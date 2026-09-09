@@ -67,7 +67,7 @@ schema_version="$(grep -E '^[[:space:]]*version:' "$dest/output_format.md" 2>/de
 schema_version="${schema_version:-unknown}"
 today="$(date +%Y-%m-%d)"
 
-# The vendored LICENSE's own provenance line (#1293, C3). contract/LICENSE is on
+# The vendored LICENSE's own provenance line. contract/LICENSE is on
 # VENDORED_PLUGIN_FILES, so the loop above already copied it byte-for-byte; this records WHICH
 # licence it is and where it came from, in the same file that records every other vendored fact.
 # It is regenerated here rather than hand-edited into VERSION because this heredoc rewrites the

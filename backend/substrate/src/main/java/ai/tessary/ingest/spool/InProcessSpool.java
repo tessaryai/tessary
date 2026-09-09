@@ -16,7 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The default spool: an in-memory queue bounded by payload bytes (#984). Accepted means queued; a
+ * The default spool: an in-memory queue bounded by payload bytes. Accepted means queued; a
  * full queue sheds, and the edge answers the producer with a retryable status so a stock exporter
  * re-sends into the idempotent write path. A restart loses what is queued, which is the contract the
  * runbook publishes for this mode; the Kafka-API spool is the opt-in for "accepted means persisted".

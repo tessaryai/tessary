@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 /**
- * Pins the #996 fix: {@code tessary.auth.disabled} alone decides which posture this announces,
+ * {@code tessary.auth.disabled} alone decides which posture this announces,
  * regardless of {@link AuthProvider#isEnabled()} -- crew review caught this class still branching
  * on the retired "configured provider always wins" precedence, so it kept announcing "enforced"
  * even while {@link AuthFilter} was actually bypassing every request. No test existed for this
@@ -48,7 +48,7 @@ class AuthPostureAnnouncerTest {
 
     @Test
     void disabledFlagWarnsEvenWithAnEnabledProviderConfigured() {
-        // The exact scenario the flag now applies to (#852/#996): a real, "enabled" provider is
+        // The exact scenario the flag applies to: a real, "enabled" provider is
         // present, but the operator's own flag says bypass everything. Before the fix, this cell
         // logged "enforced" -- the opposite of what AuthFilter actually did.
         AuthProvider enabledProvider = mock(AuthProvider.class);

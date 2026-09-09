@@ -8,12 +8,12 @@ import org.springframework.stereotype.Component;
  * The agentic-sandbox and encoder configuration, bound from {@code tessary.observer.*}.
  *
  * <p><b>The prefix is a historical name and is kept deliberately.</b> This class configured the git
- * observer, which Track A removed. What survives are its two sub-blocks, and they never belonged to the
+ * observer, which has since been removed. What survives are its two sub-blocks, and they never belonged to the
  * observer alone: {@link Agentic} is the sandbox launcher every agentic run goes through — Layer-2
  * triage and agentic RCA both bind it — and {@link Encoder} is the classify-service endpoint the
  * conformance encoder and the metric detectors call. Renaming {@code tessary.observer.*} would mean
  * moving every deployment's env vars in lockstep with a release, for a rename that buys a reader one
- * word; the honest fix is the epic-7 config pass, not this one. Note {@code docker-compose.yml} already
+ * word; the honest fix is a broader config pass, not this one. Note {@code docker-compose.yml} already
  * falls {@code TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY} back to the observer-named key for the same reason.
  *
  * <p>The observer-only knobs are gone: the batch cron and its zone, the claim-batch and attempt bounds,
@@ -115,7 +115,7 @@ public class ObserverProperties {
         // ObserverProperties.leaseSeconds (else the job is reclaimed mid-run).
         private long timeoutMs = 1_200_000;
 
-        // B (#994): the turn budget for the TRIAGE lane only — E2bAnalysisSandbox (drift analysis /
+        // The turn budget for the TRIAGE lane only — E2bAnalysisSandbox (drift analysis /
         // remediation, driven by analyze.js) reads this same Agentic block for launcherUrl/timeoutMs
         // but deliberately does NOT read this field, so the "no turn cap" comment above still holds
         // for it. E2bTriageSandbox threads it into the launcher POST body as `max_turns`, which
@@ -127,16 +127,16 @@ public class ObserverProperties {
         // see that change's PR description for what was and was not empirically confirmed.
         private int maxTurns = 40;
 
-        // F4 (#994): the per-run spend cap on TRIAGE — ModelLane.TRIAGE's javadoc used to say
-        // "deliberately uncapped at launch (launch decision D6)"; this is D6 landing, on the meter
-        // F1-F3 made honest first. POST-HOC, not preventive: E2bTriageSandbox checks the run's ACTUAL
+        // The per-run spend cap on TRIAGE — ModelLane.TRIAGE's javadoc used to say
+        // "deliberately uncapped at launch"; this cap is what makes that honest. POST-HOC, not
+        // preventive: E2bTriageSandbox checks the run's ACTUAL
         // priced cost against this AFTER the run completes and its usage is already booked (there is
-        // no live per-turn cost signal to intervene on mid-run — see B's maxTurns note on the seam this
+        // no live per-turn cost signal to intervene on mid-run — see the maxTurns comment above on the seam this
         // shares). A run over the cap is FLAGGED (a structured OPS log line + a span attribute an
         // operator can alert on), not rejected: the money is already spent either way, and discarding
         // an otherwise-valid ruling after paying for it protects nothing — it only throws away the
-        // ruling on top of the spend. $3.00 is a starting product default (roughly the pre-#994
-        // unoptimized single-run cost the issue measured), not a value anyone has tuned against real
+        // ruling on top of the spend. $3.00 is a starting product default (roughly the
+        // unoptimized single-run cost measured before this cap existed), not a value anyone has tuned against real
         // TRIAGE traffic yet; adjust it once real numbers exist.
         private java.math.BigDecimal maxCostUsd = new java.math.BigDecimal("3.00");
 

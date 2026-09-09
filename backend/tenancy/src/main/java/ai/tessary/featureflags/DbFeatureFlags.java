@@ -8,21 +8,18 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * {@link FeatureFlags} over {@code org_feature_flag} — the OPEN edition's flag adapter, and the one the
- * build ships with. LaunchDarkly is the hosted adapter behind the same interface; the resolution layer above
- * cannot tell them apart, which is the whole point of the seam.
+ * {@link FeatureFlags} over {@code org_feature_flag}, this build's flag adapter. A build may wire a
+ * different adapter behind the same interface; the resolution layer above cannot tell them apart.
  *
- * <p>It holds no defaults, exactly like the LaunchDarkly adapter it replaces. A capability with no row for
- * this org returns empty — "nobody has an opinion" — and {@code CapabilityService} supplies the open-edition
- * default. An empty table therefore serves the same configuration as a table nobody has touched, which is what
- * makes a fresh self-hosted install a coherent product rather than a dark one.
+ * <p>It holds no defaults. A capability with no row for this org returns empty, "nobody has an opinion",
+ * and {@code CapabilityService} supplies the default. An empty table therefore serves the same
+ * configuration as a table nobody has touched, which is what makes a fresh self-hosted install a
+ * coherent product rather than a dark one.
  *
- * <p><b>Why this caches.</b> Resolving one capability payload asks about all 21 capabilities, and the
- * capability interceptor asks again on every gated request. Without the cache that is 21 SELECTs per payload
- * and one per request; with it, one whole-org read per {@link #TTL}. The window is short because the thing it
- * delays is an operator flipping a switch in Settings and expecting the product to change — and
- * {@link #invalidate} makes that immediate on this node anyway, so the TTL only bounds how long a
- * <em>different</em> node serves the old answer. Same 10-second shape as {@code CapabilityIngestQuotaGate}.
+ * <p>Resolving one capability payload asks about all 21 capabilities, and the capability interceptor
+ * asks again on every gated request, so this caches: one whole-org read per {@link #TTL} rather than a
+ * SELECT per request. {@link #invalidate} makes an operator's toggle immediate on this node, so the TTL
+ * only bounds how long a different node serves the old answer.
  */
 public class DbFeatureFlags implements FeatureFlags {
 
@@ -32,7 +29,7 @@ public class DbFeatureFlags implements FeatureFlags {
     private final OrgFeatureFlagRepository overrides;
 
     /**
-     * Keyed by org id. Nothing evicts, so this is unbounded in principle — but it is bounded in practice by
+     * Keyed by org id. Nothing evicts, so this is unbounded in principle, but it is bounded in practice by
      * the org count, which is one on a self-hosted install and small on ours. No caching library is in use
      * anywhere else in this codebase, so this is a plain map on purpose rather than a Caffeine cache.
      */
@@ -47,9 +44,8 @@ public class DbFeatureFlags implements FeatureFlags {
         String orgId = context.orgId();
         if (orgId == null || orgId.isBlank()) {
             // FlagContext.global(). There is no global row and deliberately no global table: an override is
-            // something an ORGANIZATION states about itself. A global evaluation therefore has no opinion,
-            // which lands the caller on the open-edition default — the same answer LaunchDarkly's global
-            // scope gave when no rule matched.
+            // something an organization states about itself, so a global evaluation has no opinion and
+            // lands the caller on the default.
             return Optional.empty();
         }
         return Optional.ofNullable(forOrg(orgId).get(key));

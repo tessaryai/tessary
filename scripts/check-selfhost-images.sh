@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Manifest-resolution assertion for the four published Tessary images (D10, epic 7 clause 1,
-# #941/#1114). Everything else this repo gates checks CODE. This checks the REGISTRY — the one
+# Manifest-resolution assertion for the four published Tessary images.
+# Everything else this repo gates checks CODE. This checks the REGISTRY — the one
 # thing no unit test, no compile step and no boundary script can see: whether the tag a self-hoster
 # is about to pull actually resolves, was stamped with the version it's tagged as, and covers the
 # architectures the docs claim.
 #
-# WHY THIS EXISTS, CONCRETELY: #1114 is a self-host boot that failed with `manifest unknown`
+# WHY THIS EXISTS, CONCRETELY: a self-host boot failed with `manifest unknown`
 # because `docker-compose.yml`'s SANDBOX_RUNNER_IMAGE default named a tag nothing had ever
 # published. `docker compose config` cannot catch that — it renders the string, it does not ask a
 # registry whether the string means anything. Nothing before this script did either.
@@ -17,7 +17,7 @@
 #
 # NEVER RUN AGENT-SIDE, EVER — needs Docker and the network. Not part of `task check` (see its
 # EXCLUDED manifest row in scripts/check.sh, same shape as open-boot-selfhost's). Run by a human
-# (`task check:selfhost:images`), by clause 2's rehearsal (#1191) before its first timed command —
+# (`task check:selfhost:images`), by the release rehearsal before its first timed command —
 # "before the clock starts", so a broken pull fails as a broken pull, not a slow boot — and by
 # `.github/workflows/open-edition-boot.yml`.
 #
@@ -26,14 +26,14 @@
 #   (b) the manifest's `org.opencontainers.image.version` label equals the tag's own version
 #       suffix — an image tagged `backend-0.1.0` that reads `version=dev` is a failed publish
 #       wearing a passing tag.
-#   (c) the manifest lists an entry for every architecture EXPECTED (amd64 + arm64, D4) — a
+#   (c) the manifest lists an entry for every architecture EXPECTED (amd64 + arm64) — a
 #       single-arch manifest under a tag the docs claim is multi-arch is silent breakage for
 #       exactly the half of self-hosters running the other architecture.
 #
 # WHICH REFERENCES: every image `docker compose config` resolves for docker-compose.yml's default
 # profile (backend, frontend, sandbox-runner), PLUS AGENT_IMAGE — an env value, not a compose
 # `image:` key, so `docker compose pull` never fetches it, but it is still a documented pull
-# instruction (D10 explicitly requires covering it for exactly that reason: an env-var image
+# instruction (covering it is required for exactly that reason: an env-var image
 # reference "must resolve" is a claim just like a compose `image:` line is, and the difference in
 # mechanism is not a difference in whether it needs checking).
 #
@@ -49,7 +49,7 @@
 # server.js that actually consume the version, so it was never anything but a hand-copied second
 # source of truth. Before the first release is tagged this script has nothing to check and says so.
 #
-# MUST GO RED ON A MISTYPED TAG — proven, not asserted (D10's own "prove that"): run with
+# MUST GO RED ON A MISTYPED TAG — proven, not asserted: run with
 #   SELFHOST_IMAGES_SELFTEST=1 bash scripts/check-selfhost-images.sh
 # which substitutes one deliberately wrong tag (a real repo, a tag that cannot exist) for the
 # backend reference and asserts THIS SCRIPT reports failure and exits non-zero. See the PR body for
@@ -72,7 +72,7 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-EXPECTED_ARCHES="amd64 arm64" # D4: every published image is amd64+arm64.
+EXPECTED_ARCHES="amd64 arm64" # every published image is amd64+arm64.
 fail=0
 
 # `docker buildx imagetools inspect --raw` on a manifest LIST returns the list's own JSON, which
@@ -146,7 +146,7 @@ fi
 echo "check-selfhost-images: checking version $VERSION (from ${1:-the newest v<semver> git tag})"
 DOCKER_REPO="tessaryai/tessary"
 
-# Mirrors the exact defaults docker-compose.yml resolves (D9) — kept literal here rather than
+# Mirrors the exact defaults docker-compose.yml resolves — kept literal here rather than
 # shelling out to `docker compose config`, so this script has no dependency on a rendered .env; if
 # these two ever drift, check-open-boundary.sh's own docker-compose.yml assertions are a faster
 # place to catch it than a registry probe.

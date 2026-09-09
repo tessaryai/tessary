@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Publish docker-compose.yml as the OCI artifact behind epic 7's one-command install:
+# Publish docker-compose.yml as the OCI artifact behind the one-command install:
 #
 #   docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 #

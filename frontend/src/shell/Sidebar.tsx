@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The global navigation sidebar — 2026-07 redesign shell (sheets/shell.md).
+ * The global navigation sidebar.
  *
- * Fixed 240px, dark only. Top → bottom: brand row (the Space Grotesk wordmark,
- * DESIGN_SYSTEM.md § Typography) · Search (⌘K, same index as the palette) · Triage
- * with the app's ONLY nav badge (open cases, red) · the
- * Monitor / Calibrate groups · project switcher + Settings · account row
- * (no theme toggle — dark only).
+ * Fixed 240px, dark only. Top → bottom: brand row (the Space Grotesk wordmark) · Search (⌘K,
+ * same index as the palette) · Triage with the app's only nav badge (open cases, red) · the
+ * Monitor / Calibrate groups · project switcher + Settings · account row (no theme toggle, dark
+ * only).
  *
- * The IA is derived from nav.tsx (single source of truth), filtered by the org's
- * capability object through useNavigation: a surface the org doesn't have is
- * ABSENT, and a group emptied by that filtering disappears with its heading
- * (segment F1). A partner therefore sees Triage + Monitor and no Calibrate band
- * at all, rather than three padlocked rows advertising something unbuyable.
+ * The IA is derived from nav.tsx (single source of truth), filtered by the org's capability
+ * object through useNavigation: a surface the org doesn't have is absent, and a group emptied by
+ * that filtering disappears with its heading. A partner therefore sees Triage + Monitor and no
+ * Calibrate band at all, rather than three padlocked rows advertising something unbuyable.
  */
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -80,7 +78,7 @@ export function Sidebar() {
   );
 }
 
-/** The always-visible edge handle that flips `collapsed` — anchored to the sidebar's own border, not squeezed into the 64px icon column. */
+/** The always-visible edge handle that flips `collapsed`, anchored to the sidebar's own border, not squeezed into the 64px icon column. */
 function CollapseHandle({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
   return (
     <button
@@ -112,8 +110,8 @@ function BrandRow({ collapsed }: { collapsed: boolean }) {
         <img src="/tessary-logo.png" alt="Tessary" className="size-7 shrink-0 rounded-control" />
         {!collapsed && (
           // The wordmark is the one place in the app that is not token-driven: Space Grotesk 700
-          // and a literal #FFFFFF are a fixed brand spec (DESIGN_SYSTEM.md), deliberately outside
-          // the type scale and the grey ramp. Do not "fix" these to tokens.
+          // and a literal #FFFFFF are a fixed brand spec, deliberately outside the type scale and
+          // the grey ramp. Do not "fix" these to tokens.
           <span
             className="shrink-0"
             style={{
@@ -167,8 +165,8 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
     registerProjectSwitcher(() => setOpen(true));
   }, [registerProjectSwitcher, setOpen]);
 
-  // #862: GET /api/me/orgs moved to the paid overlay -- the org list for the switcher's display name
-  // comes off GET /auth/me (already fetched by AuthProvider) instead of a second query.
+  // The org list for the switcher's display name comes off GET /auth/me (already fetched by
+  // AuthProvider) instead of a second query.
   const { user } = useAuth();
   const orgs = user?.orgs ?? [];
   const projects = useQuery({
@@ -181,12 +179,11 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const currentProject = projects.data?.find((p) => p.slug === projectSlug);
 
   /*
-    #862: the multi-org section of this dropdown -- the "Organizations" header, one row per org, and
-    "+ New organization" -- is a paid surface. The open stub renders null, so this switcher shows
-    only Projects: no dead action pointing at a route the open build doesn't build (the R1 risk this
-    issue's grounding flagged -- the switcher, not NewOrg.tsx alone, is the actual multi-org UI).
-    Held in a variable rather than called inline because the section divider below has to know
-    whether there is a section above it at all.
+    orgSwitcherRows renders the multi-org section of this dropdown (an "Organizations" header, one
+    row per org, and "+ New organization"). This build's default renders null, so the switcher
+    shows only Projects, with no dead action pointing at a route this build doesn't ship. Held in a
+    variable rather than called inline because the section divider below has to know whether there
+    is a section above it at all.
   */
   const orgRows = paid.orgSwitcherRows(orgs, orgSlug);
 
@@ -247,7 +244,7 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
         >
           {orgRows}
 
-          {/* Separates the two sections, so it only exists when there ARE two: the open build's
+          {/* Separates the two sections, so it only exists when there are two: this build's
               `orgSwitcherRows` returns null, and an unconditional rule left a divider hanging above
               the Projects header with nothing above it to divide. */}
           {orgRows != null && <div className="my-1 border-t border-border" />}
@@ -270,7 +267,7 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/** Exported for the paid `orgSwitcherRows` seam (#862), which reuses this row exactly. */
+/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
 export function SwitcherRow({
   name,
   selected,
@@ -296,7 +293,7 @@ export function SwitcherRow({
   );
 }
 
-/** Exported for the paid `orgSwitcherRows` seam (#862), which reuses this row exactly. */
+/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
 export function SwitcherAction({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -320,7 +317,7 @@ function NavLinkRow({
   collapsed,
 }: {
   item: NavItem;
-  /** Triage only: the open-case count. The app's ONLY nav count. */
+  /** Triage only: the open-case count. The app's only nav count. */
   badge?: number;
   collapsed?: boolean;
 }) {
@@ -410,7 +407,7 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
         )}
       </button>
       {open && (
-        // Fixed width, anchored at the left edge — `right-2` would pin it to the
+        // Fixed width, anchored at the left edge: `right-2` would pin it to the
         // trigger's own width, which breaks once that trigger is a 64px icon column.
         <div
           className="absolute bottom-full left-2 w-48 mb-1 rounded-card bg-overlay border border-border-strong py-1 z-50"

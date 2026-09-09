@@ -29,7 +29,7 @@ public enum Permission {
      */
     CAPABILITIES_MANAGE,
     /**
-     * Change how long a project keeps its data (#1205). Its own permission for the same reason as
+     * Change how long a project keeps its data. Its own permission for the same reason as
      * {@link #CAPABILITIES_MANAGE}: {@code ORG_MANAGE} would let any member schedule the irreversible
      * deletion of months of traces within the hour.
      */

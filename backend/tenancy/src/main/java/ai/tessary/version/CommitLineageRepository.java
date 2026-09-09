@@ -10,8 +10,8 @@ import org.springframework.stereotype.Repository;
  * {@code project_version.id} it carries. All queries are project-scoped; a cross-tenant id never
  * resolves.
  *
- * <p><b>Only the substrate spine is left, and that is the finished state.</b> Track A removed the
- * four non-substrate node kinds this file used to serve — {@code verdict}, {@code risk_stat},
+ * <p><b>Only the substrate spine is left, and that is the finished state.</b> This file no longer
+ * serves the four non-substrate node kinds it used to — {@code verdict}, {@code risk_stat},
  * {@code diff_classification} and {@code observer_alert} — along with the raw-SHA provenance shape,
  * which only {@code observer_alert.project_version_sha} ever used. What remains is the direct-FK
  * shape on {@code trace} and {@code span}, plus the session's derived MAX.

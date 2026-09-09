@@ -22,14 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * The findings read + correction surface every classifier serves through.
  *
- * <p>It was {@code BehaviorDriftService} until #839, and the rename is the point: seven of its eight
+ * <p>It was renamed from {@code BehaviorDriftService} because seven of its eight
  * public methods never had anything to do with behaviour drift. The findings store is shared — rows
  * carry a {@code classifier_key} — and metric drift, tool error and SOP conformance all list, page,
  * escalate and resolve through here.
  *
  * <p><b>The merged surface knows no table.</b> Listing, detail, resolution and the dossier all route
  * through {@link TriageSource}, in {@code @Order}, and the first source that claims an id ends the
- * iteration — that is the seam #840 and #841 lift a classifier out through, and it holds with no
+ * iteration — that is the seam a classifier is lifted out through, and it holds with no
  * exceptions.
  *
  * <p>It is not the whole class, and pretending otherwise would mislead the extraction that reads this
@@ -42,7 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
  * exportable, and explainable to a compliance reviewer. That property is worth more than any accuracy a
  * learned correction model would buy, which is why the loop rides the existing {@code annotation}
  * channel ({@code of_finding_id}, {@code agrees}) rather than mutating in place the thing it corrects.
- * Until Track A the anchor was {@code of_verdict_id} and the thing left unmutated was the verdict; that
+ * The anchor used to be {@code of_verdict_id}, and the thing left unmutated was the verdict; that
  * column and that table are gone, the property they bought is not.
  */
 @Service
@@ -218,7 +218,7 @@ public class FindingService {
      * default and bounded when on.
      *
      * <p><b>{@code requestedLane} no longer routes anywhere.</b> It used to choose between the triage
-     * agent and a grader run over the finding's cited traces; Track A removed grading, so every press
+     * agent and a grader run over the finding's cited traces; grading was removed, so every press
      * takes the triage agent — the one lane there is. The parameter is kept because it is on the wire
      * and a stale tab may still send {@code grader}: accepting and ignoring it gives that press the
      * only ruling the platform can make, rather than a 400 the reader cannot act on.

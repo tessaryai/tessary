@@ -43,24 +43,24 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * Automatic Layer-2 escalation — off by default, bounded when on (launch requirements B4 and B5).
+ * Automatic Layer-2 escalation, off by default and bounded when on.
  *
- * <p>Both halves fail silently and expensively if they regress. Automatic mode turning itself on does not
- * break a request or corrupt a row; it starts spending platform-paid LLM budget on every finding of every
- * project, and the first anyone hears of it is the bill. An unbounded automatic mode does the same thing
- * faster the moment a detector is mis-calibrated. So the assertions here are counts of jobs, which is the
- * only unit either failure is measured in.
+ * <p>Both halves fail silently and expensively if they regress. Automatic mode turning itself on
+ * does not break a request or corrupt a row; it starts spending LLM budget on every finding of
+ * every project, and the first anyone hears of it is the bill. An unbounded automatic mode does
+ * the same thing faster the moment a detector is mis-calibrated. So the assertions here are
+ * counts of jobs, which is the only unit either failure is measured in.
  *
- * <p>Against Postgres because the bound is a query: the budget counts rows in {@code job} within a rolling
- * window, and the eligible set is a predicate that has to exclude escalated, human-ruled and exemplar-less
- * findings before the limit rather than after.
+ * <p>Against Postgres because the bound is a query: the budget counts rows in {@code job} within
+ * a rolling window, and the eligible set is a predicate that has to exclude escalated,
+ * human-ruled and exemplar-less findings before the limit rather than after.
  */
 @SpringBootTest
 class TriageAutoEscalationIntegrationTest {
 
     /**
      * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as ONE
-     * spell still running rather than as a recovery and a re-fire — the production behaviour these tests
+     * spell still running rather than as a recovery and a re-fire: the production behaviour these tests
      * are about. A test that wants the other arm passes its own.
      */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
@@ -71,13 +71,14 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * The flag ADAPTER, stubbed — and only the adapter.
+     * The flag adapter, stubbed, and only the adapter.
      *
-     * <p>The obvious seam is {@code CapabilityService}, and it is the wrong one: stubbing the resolver would
-     * skip the edition default that is the actual subject of the first test. {@link FeatureFlags} is the layer
-     * that holds no defaults at all, so stubbing it leaves the real override-then-default resolution in place
-     * and makes "no override" mean what it means in production — nobody had an opinion, and the open
-     * edition's default of false for {@code triage_automatic} stood.
+     * <p>The obvious seam is {@code CapabilityService}, and it is the wrong one: stubbing the
+     * resolver would skip the default that is the actual subject of the first test. {@link
+     * FeatureFlags} is the layer that holds no defaults at all, so stubbing it leaves the real
+     * override-then-default resolution in place and makes "no override" mean what it means in
+     * production: nobody had an opinion, and the default of false for {@code triage_automatic}
+     * stood.
      */
     @MockitoBean
     FeatureFlags flags;
@@ -85,7 +86,7 @@ class TriageAutoEscalationIntegrationTest {
     @Autowired
     TriageAutoEscalator escalator;
 
-    /** The <em>Run analysis</em> button's own service — the manual arm both guards must leave alone. */
+    /** The <em>Run analysis</em> button's own service: the manual arm both guards must leave alone. */
     @Autowired
     FindingService drift;
 
@@ -118,9 +119,9 @@ class TriageAutoEscalationIntegrationTest {
             + "\"quantiles\":{\"p50\":[2100,2940],\"p95\":[9000,21400]}}";
 
     /**
-     * The default, and the one that matters most. {@code triage_automatic_enabled} is off by default in
-     * every edition, so an org gets manual escalation unless it turns automatic on for itself — and an
-     * empty or unreachable flag store supplies no opinion and leaves that default standing, which means the
+     * The default, and the one that matters most. {@code triage_automatic_enabled} is off by
+     * default, so an org gets manual escalation unless it turns automatic on for itself, and an
+     * empty or unreachable flag store supplies no opinion and leaves that default standing. The
      * capability layer's failure mode is "nothing happens", never "everything escalates".
      */
     @Test
@@ -137,9 +138,9 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * The opt-in, and the whole of it: every eligible finding is scheduled, with nothing withheld. This
-     * asserted a per-tick cap of two out of four until the caps were removed — the queue and the
-     * launcher pool are what bound the work, and a finding refused by a counter is one nobody ever sees.
+     * The opt-in, and the whole of it: every eligible finding is scheduled, with nothing
+     * withheld. The queue and the launcher pool are what bound the work; a finding refused by a
+     * counter is one nobody ever sees.
      */
     @Test
     @DisplayName("with the flag on, a tick escalates every eligible finding")
@@ -157,9 +158,9 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * Repeated ticks are idempotent. With the rolling budget gone, this is what stops a scheduler running
-     * every fifteen minutes from re-spending on findings it has already ruled on: the once-per-look
-     * guarantee inside {@code FindingService#analyze}, not a counter above it.
+     * Repeated ticks are idempotent: this is what stops a scheduler running every fifteen
+     * minutes from re-spending on findings it has already ruled on, the once-per-look guarantee
+     * inside {@code FindingService#analyze}, not a counter above it.
      */
     @Test
     @DisplayName("further ticks do not re-schedule findings already escalated")
@@ -181,8 +182,8 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * The recurrence bar. A cause observed once is a coincidence, and spending a ruling on it is the cost
-     * that got automatic escalation removed in the first place.
+     * The recurrence bar: a cause observed once is a coincidence, and spending a ruling on it is
+     * exactly the cost automatic escalation must not incur.
      */
     @Test
     @DisplayName("a finding under the recurrence bar is not escalated automatically")
@@ -234,33 +235,17 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * <b>Six conformance cases used to sit here and #841 deleted them.</b> They were the reason this
-     * class exists in the shape it does: the escalator serves TWO stores through one
-     * {@link ai.tessary.classifier.finding.TriageSource} seam, and these proved the second one —
-     * that a conformance finding over the recurrence bar rides the same tick with the SOP payload on the
-     * job ({@code aConformanceFindingIsEscalatedWithTheSopPayload}), that neither store starves the
-     * other under one budget ({@code conformanceIsScheduledAlongsideBehaviour}), that a thin window is
-     * not worth a ruling, that the confirmation bar needs a finding to persist across sweeps, that a
-     * quiet sweep resets that streak, and that shadow mode withholds automatic escalation while leaving
-     * the manual button alone.
-     *
-     * <p>All six seeded through {@code conformance_rule} and {@code conformance_finding}, which are
-     * {@code tessary-paid/conformance} now, and the confirmation bar they test is conformance's own
-     * rather than the escalator's. Re-fixturing them onto an open classifier would have changed what
-     * they assert into something already covered above, so they run as
-     * {@code ConformanceTriageAutoEscalationIntegrationTest} in {@code tessary-paid/assembly}, the
-     * overlay's harness (#882).
-     *
-     * <p>What stays is every case about the escalator ITSELF, which is what this class is named for: the
-     * flag gate, per-tick idempotence, the recurrence bar, human-verdict suppression, per-org scoping,
-     * and the behaviour arm below. The seam's two-store dispatch is still covered without a database by
+     * The escalator serves two stores through one {@link ai.tessary.classifier.finding.TriageSource}
+     * seam. What this class covers is every case about the escalator itself: the flag gate,
+     * per-tick idempotence, the recurrence bar, human-verdict suppression, per-org scoping, and
+     * the behaviour arm below. The seam's two-store dispatch is covered without a database by
      * {@code FindingServiceMergeTest} and {@code TriageSourceAbsenceTest}.
      */
 
     /**
-     * Behaviour drift must be BIT-IDENTICAL through all of this. Its eligibility is asked through
-     * the same seam and bounded by the same budget, but the confirmation bar is conformance's own —
-     * so a behaviour finding that was escalatable before this guard existed still escalates on the
+     * Behaviour drift must be bit-identical through all of this. Its eligibility is asked
+     * through the same seam and bounded by the same budget, but the confirmation bar is
+     * conformance's own, so a behaviour finding that is escalatable still escalates on the
      * first tick that sees it.
      */
     @Test
@@ -281,7 +266,7 @@ class TriageAutoEscalationIntegrationTest {
 
     // -----------------------------------------------------------------------------------------------
 
-    /** Nothing holds an opinion — an empty flag store, which is also what an outage produces. */
+    /** Nothing holds an opinion: an empty flag store, which is also what an outage produces. */
     private void flagsSilent() {
         when(flags.override(anyString(), any())).thenReturn(Optional.empty());
     }
@@ -296,14 +281,13 @@ class TriageAutoEscalationIntegrationTest {
 
     private Project project(String slug) {
         TenantFixture.Setup setup = TenantFixture.bootstrap(tenants, slug);
-        // Behaviour drift and SOP conformance — the two (of four) paid classifiers this class schedules
-        // escalations for — are OFF in the open-edition default, so the org has to state that it has them or
-        // there are no drift/conformance findings for the escalator to act on and every case here would pass
-        // or fail on the wrong flag. Frustration and groundedness are the other two paid classifiers
-        // (#887/#888) and are irrelevant here: this escalator never schedules them. `triage_automatic` is
-        // deliberately NOT granted here: it is this class's actual subject and stays at the edition default
-        // until `automaticOn` says otherwise. Stubbed after `flagsSilent()` by every caller, so these specific
-        // stubs win.
+        // Behaviour drift and SOP conformance are off by default, so the org has to state that
+        // it has them or there are no drift/conformance findings for the escalator to act on and
+        // every case here would pass or fail on the wrong flag. Frustration and groundedness are
+        // irrelevant here: this escalator never schedules them. `triage_automatic` is
+        // deliberately not granted here: it is this class's actual subject and stays at its
+        // default until `automaticOn` says otherwise. Stubbed after `flagsSilent()` by every
+        // caller, so these specific stubs win.
         when(flags.override(
                         Capability.BEHAVIOR_DRIFT.wire(),
                         FlagContext.forOrg(setup.org().id())))
@@ -364,11 +348,12 @@ class TriageAutoEscalationIntegrationTest {
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
-        // A span-grain `member`, which is what the metric sweep writes — no exemplar, that role was
-        // dropped from both drift measures. The escalatable predicate reads any trace-grain ref, and
-        // recording an exemplar here would test the automatic path against evidence the classifier
-        // has stopped producing, on a lane whose failure mode is SILENT: an ineligible finding is
-        // skipped, not refused, so nothing would have surfaced but an empty queue.
+        // A span-grain `member`, which is what the metric sweep writes: no exemplar, since that
+        // role is not used by either drift measure. The escalatable predicate reads any
+        // trace-grain ref, and recording an exemplar here would test the automatic path against
+        // evidence the classifier does not produce, on a lane whose failure mode is silent: an
+        // ineligible finding is skipped, not refused, so nothing would have surfaced but an empty
+        // queue.
         findingEvidence.record(
                 p.projectId(),
                 id,

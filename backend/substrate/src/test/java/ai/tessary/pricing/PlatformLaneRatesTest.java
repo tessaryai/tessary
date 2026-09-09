@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  * <p><b>Why a pinned table and not a property.</b> Before the platform lane moved onto the price book its
  * rates came from a hand-maintained catalog compiled into the jar, and comparing the two at the flip found
  * seven disagreements on ten models. A hand-maintained {@code manual-overrides.json} carried those
- * corrections forward until #1032, which retired it: five were stale carryovers upstream had since
+ * corrections forward until it was retired: five were stale carryovers upstream had since
  * corrected, the mantle GPT-5.6 rows are now resolved by {@code BedrockModelProfile.MANTLE_ROUTE_PREFIX}
  * reporting the id LiteLLM actually prices (see {@link #mantleIdsResolveToTheirOwnRoute}), and Nova's
  * cache-write bucket — which the snapshot has never carried, for any generation — is now unpriced rather
@@ -92,7 +92,7 @@ class PlatformLaneRatesTest {
     @Test
     @DisplayName("BedrockModelProfile's route prefix is what makes the mantle ids resolve to mantle rates")
     void mantleIdsResolveToTheirOwnRoute() {
-        // What #1032 fixed: BedrockModelProfile.MANTLE_ROUTE_PREFIX makes the platform report
+        // BedrockModelProfile.MANTLE_ROUTE_PREFIX makes the platform report
         // bedrock_mantle/openai.gpt-5.6-luna, which the vendored snapshot carries verbatim as mantle's own
         // priced route — no override needed. ModelResolver's exact-match leg is untouched.
         Books books = Books.load(mapper);

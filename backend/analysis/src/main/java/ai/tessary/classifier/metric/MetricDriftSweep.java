@@ -54,73 +54,56 @@ import org.springframework.transaction.annotation.Transactional;
  * The WINDOW-grain sweep of the classifier worker, alongside the trace-grain and observation-grain ones.
  * Design contract: {@code classifiers/metric_drift/PROGRAM.md}, execution plan {@code PLAN.md} §4.
  *
- * <p><b>No new scheduler, no new job table.</b> Exactly as {@code BehaviorDriftSweep} does it: a
- * metric-drift signal is an ordinary {@code classifier} job whose cursor happens to walk {@code trace} rows,
- * and this class reuses that job's cursor, lease, attempt budget and dead-letter path verbatim.
- * {@link ClassifierWorker} already claims the job; this is one more dispatch branch on {@link Grain}.
+ * <p>No new scheduler or job table: exactly as {@code BehaviorDriftSweep} does it, a metric-drift
+ * signal is an ordinary {@code classifier} job whose cursor walks {@code trace} rows, reusing that
+ * job's cursor, lease, attempt budget and dead-letter path. {@link ClassifierWorker} already claims
+ * the job; this is one more dispatch branch on {@link Grain}.
  *
- * <p><b>The scored unit is a window of a bucket</b> — not a span, not a turn, not a trace. Individual
- * traces are folded into a running sketch and are never labelled: slow is not bad and expensive is not
- * bad, so there is no per-trace verdict to write, and a detector that wrote one would produce a firing
- * whose every instance needed a human to explain it away (PROGRAM.md §0). What this sweep produces is a
- * closed window compared against the same bucket's own earlier windows.
+ * <p>The scored unit is a window of a bucket, not a span, a turn, or a trace: individual traces fold
+ * into a running sketch and are never labelled, since slow is not bad and expensive is not bad
+ * (PROGRAM.md §0). What this sweep produces is a closed window compared against the same bucket's
+ * own earlier windows.
  *
- * <h2>The two clocks</h2>
- *
- * <p>They are different clocks doing different jobs and collapsing them breaks one or the other.
+ * <h2>Two clocks</h2>
  *
  * <ul>
- *   <li><b>Windows are cut on EVENT time</b>, {@code COALESCE(started_at, created_at)}, which
- *       {@link TraceHead#eventAt()} carries. A backfill lands a whole corpus in one ingest burst, so by
- *       ingest time "the last hour of traffic" is an artefact of the writer's chunking: one time-cut
- *       window would swallow a month of traffic and compare it against nothing.
- *   <li><b>The keyset cursor stays on INGEST time</b>, {@code trace.created_at}, because that is the
- *       clock that is monotonic and gap-free. A cursor on event time would skip every trace a backfill
- *       delivered out of order, permanently.
+ *   <li><b>Windows are cut on event time</b>, {@code COALESCE(started_at, created_at)}
+ *       ({@link TraceHead#eventAt()}). A backfill lands a whole corpus in one ingest burst, so by
+ *       ingest time "the last hour of traffic" is an artefact of the writer's chunking.
+ *   <li><b>The keyset cursor stays on ingest time</b>, {@code trace.created_at}, the clock that is
+ *       monotonic and gap-free. A cursor on event time would skip every trace a backfill delivered
+ *       out of order, permanently.
  * </ul>
  *
- * <p>Each site below says which clock it is on and why. The per-baseline watermark
- * ({@code counted_through_*}) is on the ingest clock for the same reason the cursor is, and it exists
- * because the cursor lives on the JOB row while the counters live on the baseline: clearing a stuck
- * queue restarts the sweep from a null cursor and would otherwise re-fold samples the sketch already
- * holds. Behaviour drift paid for that lesson in production, reporting {@code trace_count} 565 for a
- * project holding 443 distinct traces.
+ * <p>The per-baseline watermark ({@code counted_through_*}) is on the ingest clock for the same
+ * reason: the cursor lives on the job row while the counters live on the baseline, so clearing a
+ * stuck queue restarts the sweep from a null cursor and would otherwise re-fold samples the sketch
+ * already holds.
  *
  * <h2>Settle is not uniform</h2>
  *
- * <p>Cost and the token buckets SUM over a trace's spans and so must wait for every span to arrive;
- * duration is read off a single span that carries its own start and end, so that span's arrival IS the
- * completion signal and a settle horizon buys nothing while delaying every duration finding by its
- * length. {@link MetricDriftConfig#settleSecondsFor} resolves the horizon from the classifier's own measures
- * — one signal, one cursor, so the maximum over them.
+ * <p>Cost and the token buckets sum over a trace's spans and must wait for every span to arrive;
+ * duration is read off a single span carrying its own start and end, so that span's arrival is the
+ * completion signal, and a settle horizon would delay every duration finding for nothing.
+ * {@link MetricDriftConfig#settleSecondsFor} resolves the horizon per classifier as the maximum
+ * over its own measures.
  *
  * <h2>Findings, not firings</h2>
  *
- * <p>A closed window that has moved past the floor writes ONE {@code behavior_finding} row per cause, and
- * a shift persisting across twenty windows keeps that one row with a climbing count. No trace is ever
- * labelled: slow is not bad and expensive is not bad, so there is no per-trace claim to make (PROGRAM.md
- * §0). Findings are written <b>unbudgeted</b> by decision (§9) — thresholds get tuned against real
- * firings rather than a guessed number, and the valve goes on escalation, which is the expensive step,
- * rather than on the row.
+ * <p>A closed window past the floor writes one {@code behavior_finding} row per cause; a shift
+ * persisting across twenty windows keeps that one row with a climbing count. Findings are written
+ * unbudgeted by decision (§9): thresholds get tuned against real firings rather than a guessed
+ * number, and the valve goes on escalation, the expensive step, rather than on the row.
  *
  * <h2>One pass, one transaction</h2>
  *
- * <p>{@link #sweep} is the transactional unit, for the reason {@code BehaviorSweepCommit} spells out on
- * behaviour drift's equivalent: the counters, the summaries they describe and the cursor that decides
- * what has been counted MUST land together. Here it is not two writes but five — the window rotation,
- * the current sketch, the counter-plus-watermark, the finding row and the job cursor — reaching the
- * database through {@link org.springframework.jdbc.core.simple.JdbcClient}, which autocommits each
- * statement on its own.
- *
- * <p>Without the transaction the gaps between them are all double-counts, because every one of them
- * commits BEFORE the watermark that guards it. A failure after {@code updateCurrentSketch} and before
- * {@code advanceWindow} leaves a sketch holding samples the watermark does not cover, and the retry —
- * reading the same unmoved watermark — folds that whole block in a second time: 160 samples in the
- * sketch against a count of 100, the window closing late, and the doubled block rotating into
- * {@code prev} and, on a fresh bucket, into the pinned reference every later window is judged against.
- * A failure after a mid-page close re-closes the same window and bumps its finding's {@code trace_count}
- * twice. That is behaviour drift's {@code trace_count} 565-against-443 in a new place, and the same
- * answer applies.
+ * <p>{@link #sweep} is the transactional unit: the counters, the summaries they describe, and the
+ * cursor that decides what has been counted must land together. Five writes — window rotation,
+ * current sketch, counter-plus-watermark, finding row, job cursor — reach the database through
+ * {@link org.springframework.jdbc.core.simple.JdbcClient}, which autocommits each statement on its
+ * own, so without the wrapping transaction the gaps between them become double-counts: a failure
+ * between {@code updateCurrentSketch} and {@code advanceWindow} leaves a sketch holding samples the
+ * watermark does not cover, and a retry folds that block a second time.
  */
 @Component
 public class MetricDriftSweep implements ClassifierSweep {
@@ -138,8 +121,8 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /**
      * The two classifiers that file into {@code finding} from here. Named rather than derived, because
-     * {@code classifier_key} is the column every shared reader routes on and the mapping from measure to
-     * key has to be spelled the same way here and in migration {@code 0086}'s backfill.
+     * {@code classifier_key} is the column every shared reader routes on, and the mapping from measure
+     * to key must stay consistent with what was backfilled into existing rows.
      */
     private static final List<String> METRIC_CLASSIFIERS =
             List.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
@@ -177,16 +160,14 @@ public class MetricDriftSweep implements ClassifierSweep {
     /**
      * What one metric sweep did, including the one number only this classifier has.
      *
-     * <p>Richer than the seam's {@link SweepOutcome} on purpose. {@code windowsClosed} is what
-     * describes progress HERE — a pass can scan four hundred traces, fire nothing, and still have done
-     * its whole job by rotating two windows — and it means nothing for a trace-grain drift sweep or for
-     * tool errors. So it stays on this type, {@link #sweep(SweepContext)} narrows at the seam, and the
-     * shared record does not grow a field per classifier. The integration suite asserts on it directly
-     * through {@link #sweepMetrics}.
+     * <p>Richer than the seam's {@link SweepOutcome} on purpose: {@code windowsClosed} describes
+     * progress here (a pass can scan four hundred traces, fire nothing, and still rotate two windows)
+     * but means nothing for a trace-grain drift sweep or tool errors. {@link #sweep(SweepContext)}
+     * narrows at the seam so the shared record does not grow a field per classifier.
      *
-     * @param fired findings written or bumped this pass — one per closed window that moved past the
-     *     floor, never one per trace.
-     * @param windowsClosed windows rotated this pass, the number that actually describes progress here.
+     * @param fired findings written or bumped this pass, one per closed window past the floor, never
+     *     one per trace.
+     * @param windowsClosed windows rotated this pass.
      */
     public record MetricSweepOutcome(int scanned, int fired, int windowsClosed) {
 
@@ -200,13 +181,11 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /**
      * Both windowed metric classifiers, from one bean. They share a baseline store, a config record and
-     * a fold, and differ only in which measures they read — splitting them into two beans to satisfy a
+     * a fold, differing only in which measures they read; splitting them into two beans to satisfy a
      * one-kind-per-sweep port would have bought nothing and doubled the fold.
      *
-     * <p>Declaring both kinds EXPLICITLY is also what let the worker's old {@code else} arm go. That arm
-     * routed every unrecognised WINDOW kind here, so a classifier with no dispatch of its own silently
-     * ran metric drift instead — which is exactly what {@code tool_error} did once, keeping a second copy
-     * of every duration and cost baseline behind a green build.
+     * <p>Declaring both kinds explicitly, rather than falling through a default branch, means a
+     * classifier with no dispatch of its own fails loudly instead of silently running metric drift.
      */
     @Override
     public Set<String> kinds() {
@@ -216,13 +195,11 @@ public class MetricDriftSweep implements ClassifierSweep {
     /**
      * The seam entry point: run one pass and report the two numbers every sweep can answer.
      *
-     * <p>{@code @Transactional} is on BOTH this method and {@link #sweepMetrics}, deliberately. This one
-     * needs it because the call arriving from the worker lands here, and Spring's proxy only wraps the
-     * method it is invoked THROUGH — the self-invocation below bypasses the proxy entirely, so an
-     * annotation on {@code sweepMetrics} alone would leave every worker-driven pass running with no
-     * transaction at all and re-open every double-count the class comment lists. {@code sweepMetrics}
-     * keeps its own because the integration suite calls it directly and needs the same guarantee. Two
-     * annotations, one transaction: the inner call joins the outer.
+     * <p>{@code @Transactional} is on both this method and {@link #sweepMetrics}, deliberately: Spring's
+     * proxy only wraps the method it is invoked through, and the self-invocation below bypasses the
+     * proxy, so the annotation alone on {@code sweepMetrics} would leave every worker-driven pass
+     * running with no transaction at all. {@code sweepMetrics} keeps its own because the integration
+     * suite calls it directly and needs the same guarantee; the inner call joins the outer transaction.
      */
     @Transactional
     @Override
@@ -400,45 +377,31 @@ public class MetricDriftSweep implements ClassifierSweep {
     // -----------------------------------------------------------------------------------------------
 
     /**
-     * How much of the page may be swept now: everything up to the first trace whose ROOT SPAN has not
+     * How much of the page may be swept now: everything up to the first trace whose root span has not
      * arrived and is still young enough that it plausibly will. The rest is left for the next tick.
      *
-     * <p><b>This is not the settle window, and it must not become one.</b> PROGRAM.md §5 is right that
-     * duration needs no settle horizon — the root span carries its own start and end, so its arrival IS
-     * the completion signal and delaying every reading by a fixed horizon would buy nothing. What §5
-     * assumes, and what nothing else here provides, is that the sweep waits for that arrival. The
-     * {@code trace} row is created by the FIRST span to land, and a batch exporter flushes on span END,
-     * so the root — which outlives every child — routinely ships in a later request than the children
-     * that created the row (the §7.1 trace timer says the same: it folds a later batch's earlier start
-     * into {@code started_at} but never moves {@code created_at}, so the keyset position does not move). A trace read in that gap has no root, abstains with {@code NO_END_TIME}, and — because the
-     * cursor is forward-only — is never offered again.
+     * <p>This is not a settle window. Duration needs no settle horizon: the root span carries its own
+     * start and end, so its arrival is the completion signal, provided the sweep actually waits for
+     * that arrival. The {@code trace} row is created by the first span to land, and a batch exporter
+     * flushes on span end, so the root (which outlives every child) routinely ships in a later request
+     * than the children that created the row. A trace read in that gap has no root, abstains with
+     * {@code NO_END_TIME}, and, because the cursor is forward-only, is never offered again.
      *
-     * <p>Reading "no root" honestly in that gap is half the fix and lives one layer down. Ingest inserts
-     * a child whose parent has not landed with a NULL {@code parent_observation_id} and the producer's
-     * stated parent kept verbatim in {@code parent_external_span_id}, so without the clause
-     * {@code MetricSourceRepository.turnFacts} now carries, the earliest such child passes for the root
-     * and a 30-second turn reports the 1-second child that happened to flush first — a reading, not an
-     * abstention, and one this gate would never have seen.
+     * <p>The dropout would be length-biased, which makes it corrosive rather than lossy: the gap
+     * between the trace row and its root is the turn's own duration, so the probability of losing a
+     * turn rises with how long it took. A regression that lengthens turns would push more of the
+     * affected traffic out of the population instead of into its tail, the detector going quieter as
+     * the regression got worse. Tool spans are unaffected (children arrive early), so the two grains
+     * would also sample different populations, silently skewing the §6.1 comparison.
      *
-     * <p><b>The dropout would be length-biased, which is what makes it corrosive rather than lossy.</b>
-     * The gap between the trace row and its root is the turn's own duration, so the probability of
-     * losing a turn rises monotonically with how long it took. The sketch would be fitted on a
-     * fast-biased sample, and a regression that lengthens turns would push more of the affected traffic
-     * OUT of the population instead of into its tail — the detector going quieter as the regression got
-     * worse. Tool spans are unaffected (children arrive early), so the two grains of one classifier
-     * would also be sampling different populations, silently skewing the §6.1 comparison.
+     * <p>So the wait is conditional: a trace whose root is already there is swept on the pass it
+     * appears in. Only a rootless one waits, and only up to {@link MetricDriftConfig#settleSeconds},
+     * the backstop that keeps a trace whose root will never arrive from stalling the cursor for good.
+     * Past it the trace is admitted and abstains, which is the honest reading.
      *
-     * <p>So the wait is conditional, not blanket: a trace whose root is already there is swept on the
-     * pass it appears in, exactly as §5 wants. Only a rootless one waits, and only up to
-     * {@link MetricDriftConfig#settleSeconds} — the backstop that keeps a trace whose root will NEVER
-     * arrive (a producer that emits no parentless span, a root lost in transit) from stalling the cursor
-     * for good. Past it the trace is admitted and abstains, which is the honest reading.
-     *
-     * <p>The age is measured on the EVENT clock, {@code COALESCE(started_at, created_at)}: for a
-     * rootless trace that is its earliest child's start, i.e. roughly when the turn began, which is the
-     * quantity the backstop is actually about. A stamp that cannot be read, or one in the future, does
-     * not hold the page — an unbounded hold on an unreadable clock is the one outcome worse than the
-     * abstention.
+     * <p>The age is measured on the event clock, {@code COALESCE(started_at, created_at)}: for a
+     * rootless trace that is its earliest child's start, roughly when the turn began. A stamp that
+     * cannot be read, or one in the future, does not hold the page.
      *
      * @return the number of leading heads that may be folded; {@code heads.size()} when nothing is held
      */
@@ -569,28 +532,26 @@ public class MetricDriftSweep implements ClassifierSweep {
     /**
      * Group one page's dispatchable spans into their tool buckets — the {@code tool_duration} candidates.
      *
-     * <p><b>Walked in HEAD order, not in query order.</b> The per-baseline watermark is a keyset on
-     * {@code (trace.created_at, trace.id)}, so samples have to be folded in that order or a later fold
-     * would set a watermark that excludes an earlier trace's spans forever. {@code toolSpanFacts} orders
-     * by {@code trace_id}, which correlates with ingest time (ULIDs) but is not the same ordering, so the
-     * heads — which came out of the keyset query itself — are what the walk follows.
+     * <p>Walked in head order, not query order: the per-baseline watermark is a keyset on
+     * {@code (trace.created_at, trace.id)}, so samples must fold in that order or a later fold would
+     * set a watermark that excludes an earlier trace's spans forever. {@code toolSpanFacts} orders by
+     * {@code trace_id}, which correlates with but is not the same as ingest time, so the heads (which
+     * came out of the keyset query itself) are what the walk follows.
      *
-     * <p><b>The bucket is the tool, not the tool-within-a-call-site.</b> A tool's latency is a tool's
-     * latency whichever entry point dispatched it, and scoping the bucket per call site would shatter a
-     * shared tool into as many populations as it has callers, none of them thick enough to arm. Which
-     * call site a finding is FILED under is decided per closed window, from the traffic that filled it.
+     * <p>The bucket is the tool, not the tool-within-a-call-site: a tool's latency is a tool's latency
+     * whichever entry point dispatched it, and scoping per call site would shatter a shared tool into
+     * populations too thin to arm. Which call site a finding is filed under is decided per closed
+     * window, from the traffic that filled it.
      *
-     * <p><b>Unattributed traces contribute here</b>, unlike at turn grain. §2.4's objection is that the
-     * {@code __unattributed__} pile is a MIXTURE whose distribution moves whenever the mix does — true of
-     * a call-site bucket assembled from it, and not true of {@code tool:search_docs}, which is one tool
-     * however the trace that called it was tagged. Dropping those spans would thin exactly the buckets
-     * least likely to arm.
+     * <p>Unattributed traces contribute here, unlike at turn grain: the {@code __unattributed__} pile
+     * is a mixture whose distribution moves whenever the mix does, true of a call-site bucket
+     * assembled from it but not of {@code tool:search_docs}, one tool however the trace that called it
+     * was tagged.
      *
-     * <p><b>No workload is folded.</b> {@link MetricSource.Workload#NONE} throughout, deliberately: a
-     * tool call has no prompt of its own, and folding the enclosing turn's workload once per tool call
-     * would weight it by how often the agent chose to call that tool — conditioning on the answer, which
-     * is the one thing PROGRAM.md §3.2 forbids. A tool finding's evidence therefore prints its workload
-     * pairs as nulls, which reads as "no such quantity" rather than as a workload of zero.
+     * <p>No workload is folded ({@link MetricSource.Workload#NONE} throughout): a tool call has no
+     * prompt of its own, and folding the enclosing turn's workload per tool call would condition on
+     * the answer, which PROGRAM.md §3.2 forbids. A tool finding's workload pairs print as nulls, "no
+     * such quantity" rather than a workload of zero.
      */
     private static Map<Bucket, List<Sample>> toolSamples(List<TraceHead> heads, List<MetricSource.ToolMetrics> tools) {
         Map<String, List<MetricSource.ToolMetrics>> byTrace = new LinkedHashMap<>();
@@ -927,29 +888,22 @@ public class MetricDriftSweep implements ClassifierSweep {
      * reference as it now stands.
      *
      * <p>Both references run on every close because each is blind in one direction alone: the rolling
-     * control catches sudden breaks and never notices a slow boil, the pinned window catches cumulative
+     * control catches sudden breaks and never notices a slow boil; the pinned window catches cumulative
      * creep and then screams forever once something legitimately changed (PROGRAM.md §4.3).
      *
-     * <p><b>One window, at most one finding, and the pinned view wins.</b> Two references are two views
-     * of one bucket's one window, not two events, and reporting both would say the same thing twice in a
-     * stream that has no alert budget to absorb it (§6.1: one event, one finding). The pinned comparison
-     * is preferred because it is the one a human can act on — <em>Legitimate — absorb</em> moves the
-     * pinned reference — and because it is the one a human can settle. The control comparison still opens
-     * a finding on its own when the pinned one is silent, which is the recovery case (a bucket that broke
-     * and came back to its pinned level) and the case where nothing has been pinned yet.
+     * <p>At most one finding per window: two references are two views of one window, not two events,
+     * and reporting both would say the same thing twice (§6.1: one event, one finding). The pinned
+     * comparison is preferred, since it is the one a human can act on ("Legitimate — absorb" moves the
+     * pinned reference) and settle. The control comparison still opens a finding on its own when the
+     * pinned one is silent: the recovery case (a bucket that broke and came back to its pinned level),
+     * and the case where nothing has been pinned yet.
      *
-     * <p>A step change no longer fires against the short-horizon reference exactly once. That WAS true
-     * when the reference was the previous window, because the next window's previous is the new level;
-     * the rolling control fades a change out over a fortnight instead, and holds a CONFIRMED regression
-     * out of itself indefinitely, so the finding persists for as long as the regression does.
-     *
-     * <p><b>Pinning here is a bootstrap, never an absorb.</b> A bucket with no pinned reference has
-     * nothing to compare against, so its first armed close establishes one; likewise a pinned reference
-     * stranded on a dead grid can never answer again and is replaced. Neither is the
-     * <em>Legitimate — absorb</em> write, which moves a LIVE reference and is reachable only from a human
-     * pressing the verb — {@code BehaviorTriageVerdict} states that Layer-2's confidence is read
-     * "never as authority to mutate the baseline", because an automatic re-pin would let the very next
-     * window silently normalize a real regression.
+     * <p>Pinning here is a bootstrap, never an absorb. A bucket with no pinned reference has nothing to
+     * compare against, so its first armed close establishes one; a pinned reference stranded on a dead
+     * grid is replaced the same way. Neither is the "Legitimate — absorb" write, which moves a live
+     * reference and is reachable only from a human pressing the verb: {@code BehaviorTriageVerdict}
+     * reads Layer-2's confidence "never as authority to mutate the baseline," since an automatic re-pin
+     * would let the very next window silently normalize a real regression.
      */
     private Compared compareAndPin(
             String projectId,
@@ -1072,27 +1026,21 @@ public class MetricDriftSweep implements ClassifierSweep {
      * Write the findings a page earned, after the §6.1 suppression rule has decided which of them are the
      * same event seen twice.
      *
-     * <p><b>Tool first, then the turns nothing explained.</b> A turn that is slow because one tool is slow
-     * is ONE cause: the tool row names the fix ("34 of the 38 seconds were one {@code search_docs} call"),
-     * the turn row only restates the symptom, and the symptom rides on the tool row as evidence so
-     * suppressing it loses nothing. An unexplained turn shift still fires on its own — that is <em>eleven
-     * tool calls where three used to do</em>, where every call is as fast as it always was and only the
-     * COUNT moved, which is invisible at tool grain and is the entire reason turn duration is measured.
+     * <p>Tool first, then the turns nothing explained. A turn that is slow because one tool is slow is
+     * one cause: the tool row names the fix, the turn row only restates the symptom, and the symptom
+     * rides on the tool row as evidence so suppressing it loses nothing. An unexplained turn shift still
+     * fires on its own — every call as fast as it always was and only the count moved, which is
+     * invisible at tool grain and is the entire reason turn duration is measured.
      *
-     * <p>Anything that is neither measure is written unconditionally. That set is {@code cost}, whose own
-     * §6.1 rule — the four token buckets are evidence, never findings — is enforced by the measure
-     * registry rather than here: a bucket that cannot open a finding has no {@code Measured} spec, so it
-     * is never folded as a measure and never reaches this method. Its decomposition rides the cost
-     * finding's evidence instead. Cost is deliberately NOT drawn into the suppression pairing above
-     * either: a turn that got more expensive and a tool that got slower are two causes even when they arrive
-     * together, and only one of them is a claim about time.
+     * <p>Cost is written unconditionally: its own §6.1 rule (the four token buckets are evidence, never
+     * findings) is enforced by the measure registry, so a bucket that cannot open a finding never
+     * reaches this method. Cost is also kept out of the suppression pairing above — a turn that got
+     * more expensive and a tool that got slower are two causes even when they arrive together.
      *
-     * <p><b>Suppression is a within-pass judgement</b>, over the windows that closed together. That is not
-     * a shortcut but it is a limitation worth naming: turn and tool windows fill at different rates, so a
-     * shift is only paired when both grains happened to rotate in the same sweep. In practice they do —
-     * a page is a window's worth of turns and rather more than a window's worth of tool calls, and a
-     * persisting shift re-fires on every close — and the failure mode when they do not is one extra
-     * finding, not a missing one.
+     * <p>Suppression is a within-pass judgement, over the windows that closed together: turn and tool
+     * windows fill at different rates, so a shift is only paired when both grains rotate in the same
+     * sweep. In practice they usually do, and a persisting shift re-fires on every close, so the
+     * failure mode when they do not is one extra finding, not a missing one.
      */
     private int emit(String projectId, ClassifierRow signal, MetricDriftConfig config, List<Pending> pending) {
         List<Pending> tools = new ArrayList<>();
@@ -1273,22 +1221,15 @@ public class MetricDriftSweep implements ClassifierSweep {
                 // event time in one pass and would otherwise read every window as its own spell.
                 at.minus(Duration.ofHours(config.windowMaxHours())).toString(),
                 at.toString());
-        // Both windows, enumerated, re-pointed at the window that just fired for as long as nothing has
-        // ruled on this finding.
-        //
-        // It used to be written on the OPENING pass alone, reasoning that the claim a case is opened on
-        // is the window that opened it. The payload does not agree: `recordShift` REPLACES it on every
-        // close, so the finding's stated quantiles track the newest window while its evidence stayed on
-        // the first. A shift that persisted for two months therefore claimed August and enumerated June,
-        // and Layer 2 — which is told to audit the claim by reading the evidence — reported the gap
-        // between two different windows as the detector contradicting itself, and closed a sound finding
-        // on it. Whichever half moves, both must.
+        // Both windows are re-pointed at the window that just fired, for as long as nothing has ruled
+        // on this finding: `recordShift` replaces the stated quantiles on every close, so leaving the
+        // evidence on an old window would let a persisting shift claim one window's numbers while
+        // enumerating another's — which Layer 2 (auditing the claim by reading the evidence) would
+        // read as the detector contradicting itself. Whichever half moves, both must.
         //
         // `ruled()` is the whole of the freeze, and it is enough because `reopenForTriage` NULLs
         // `triage_action`: a finding sent back for a second look becomes re-pointable again, so the
-        // second look audits the window it is actually about. Freezing permanently at the first ruling
-        // would reintroduce the same divergence on exactly the findings stubborn enough to outlive a
-        // verdict.
+        // second look audits the window it is actually about.
         if (!recorded.ruled()) {
             evidenceRefs.replace(
                     projectId,

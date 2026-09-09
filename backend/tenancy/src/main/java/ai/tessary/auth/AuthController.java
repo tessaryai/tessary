@@ -54,16 +54,16 @@ import org.springframework.web.servlet.view.RedirectView;
  *   GET  /auth/callback?code=...   → exchange code, seal session cookie, 302 to returnTo
  *   GET  /auth/logout              → expire cookie, 302 to frontend home
  *   GET  /auth/me                  → current user + memberships, or 401 ApiResponse envelope
- *   POST /auth/signup {email,password} → create + sign in a local account, 200 (#852)
- *   POST /auth/login  {email,password} → sign in a local account, 200 (#852)
+ *   POST /auth/signup {email,password} → create + sign in a local account, 200
+ *   POST /auth/login  {email,password} → sign in a local account, 200
  *   GET  /auth/mode                → {redirectFlow, firstRun} which flow the active provider
- *                                    drives (#853) and whether any account exists yet (#1227)
+ *                                    drives and whether any account exists yet
  * </pre>
  *
  * <p>The two POST routes above only do anything when the active {@link AuthProvider} supports
  * them ({@link PasswordAuthProvider} today); {@link AuthProvider#signupWithCredentials} and
  * {@link AuthProvider#authenticateWithCredentials} default-throw {@link AuthProvider.AuthException}
- * for a provider that doesn't (WorkOS), which this class turns into a 400/401 — not a 502, unlike
+ * for a provider that doesn't (WorkOS), which this class turns into a 400/401, not a 502, unlike
  * the WorkOS-specific failures below, since a stray credential POST against a WorkOS-configured
  * instance is a client mistake, not an upstream failure. The two GET routes above are guarded by
  * {@link AuthProvider#supportsRedirectFlow()} so they degrade to the existing dev-shortcut redirect
@@ -130,9 +130,9 @@ public class AuthController {
             @NotBlank @Email String email, @NotBlank String password) {}
 
     /**
-     * {@code GET /auth/mode} response body: which flow the active provider drives (#853), whether
-     * this deployment has no account yet (#1227), and the sign-up policy in force (#1226) so the
-     * sign-up screen can say "invitation required" instead of offering a form the server will refuse.
+     * {@code GET /auth/mode} response body: which flow the active provider drives, whether this
+     * deployment has no account yet, and the sign-up policy in force, so the sign-up screen can say
+     * "invitation required" instead of offering a form the server will refuse.
      */
     public record AuthModeView(boolean redirectFlow, boolean firstRun, String signupPolicy) {}
 
@@ -141,7 +141,7 @@ public class AuthController {
      * without requiring a rebuild when a deployment switches providers (e.g. a self-hoster adds
      * WorkOS credentials): {@code redirectFlow=true} means those screens should immediately bounce
      * to {@link AuthController#login} instead of rendering an email/password form. Unauthenticated
-     * like {@code /auth/me} — no {@link AuthFilter} bypass-list entry needed for the same reason
+     * like {@code /auth/me}: no {@link AuthFilter} bypass-list entry needed for the same reason
      * that route has none.
      *
      * <p>{@code firstRun=true} tells {@code /login} to hand the visitor straight to {@code /signup}:
@@ -172,12 +172,11 @@ public class AuthController {
     public RedirectView login(
             @RequestParam(value = "returnTo", required = false) String returnTo, HttpServletResponse res) {
         // Dev shortcut: when WorkOS isn't configured, bounce to the frontend's own /login screen
-        // rather than the app root — the app root is itself behind ProtectedRoute, which sends an
-        // unauthenticated visitor right back to this same GET, so landing here previously meant an
-        // infinite redirect loop (#853). supportsRedirectFlow() covers the other reason this GET
-        // route can't proceed: the active provider is enabled but has no OAuth dance to run
-        // (PasswordAuthProvider, #852) — calling authorizationUrl() on it would throw
-        // UnsupportedOperationException instead of a clean redirect, so the same bounce applies.
+        // rather than the app root, since the app root is itself behind ProtectedRoute, which sends
+        // an unauthenticated visitor right back to this same GET (an infinite redirect loop).
+        // supportsRedirectFlow() covers the other reason this GET route can't proceed: the active
+        // provider is enabled but has no OAuth dance to run (PasswordAuthProvider), where calling
+        // authorizationUrl() on it would throw UnsupportedOperationException, so the same bounce applies.
         if (!provider.isEnabled() || !provider.supportsRedirectFlow()) {
             return new RedirectView(entryPageUrl(returnTo));
         }
@@ -202,11 +201,11 @@ public class AuthController {
             HttpServletRequest req,
             HttpServletResponse res) {
         // Same supportsRedirectFlow() reasoning as /login: a provider that has no OAuth dance
-        // (PasswordAuthProvider, #852) cannot answer authenticateWithCode(), so bounce to the
-        // frontend's own entry screen (same reasoning as /login's degrade branch, #853) rather
-        // than call a method that provider has no way to implement. Only reached directly (not via
-        // /login's own redirect) when something hits this URL by hand — there's no returnTo query
-        // param on a bare /callback hit, so this always lands on a bare screen with no query.
+        // (PasswordAuthProvider) cannot answer authenticateWithCode(), so bounce to the frontend's
+        // own entry screen rather than call a method that provider has no way to implement. Only
+        // reached directly (not via /login's own redirect) when something hits this URL by hand:
+        // there's no returnTo query param on a bare /callback hit, so this always lands on a bare
+        // screen with no query.
         if (provider.isEnabled() && !provider.supportsRedirectFlow()) {
             return ResponseEntity.status(HttpStatus.FOUND)
                     .location(URI.create(entryPageUrl(null)))
@@ -214,9 +213,9 @@ public class AuthController {
         }
         // CSRF: the code is only honored if it carries back the state we minted at /login
         // (popCookie consumes the state cookie so it can't be replayed). Skipped when WorkOS is
-        // disabled (dev), where /login never mints state. On a miss — expired (>10min), a
-        // replay, a stale tab, or a forged callback — restart sign-in rather than render a raw
-        // 400 JSON body to this top-level browser navigation; a fresh /login mints a new state.
+        // disabled (dev), where /login never mints state. On a miss (expired, a replay, a stale
+        // tab, or a forged callback) restart sign-in rather than render a raw 400 JSON body to this
+        // top-level browser navigation; a fresh /login mints a new state.
         if (provider.isEnabled()) {
             String expectedState = popCookie(req, res, STATE_COOKIE);
             if (expectedState == null || state == null || !constantTimeEquals(expectedState, state)) {
@@ -236,8 +235,8 @@ public class AuthController {
                             HttpStatus.BAD_GATEWAY.value(), new ErrorBody("auth.workos_failed", e.getMessage(), null)));
         }
 
-        // The policy gate sits between authentication and account creation (#1226). This is a
-        // top-level navigation, so a refusal lands on the sign-in screen with a reason, not raw JSON.
+        // The policy gate sits between authentication and account creation. This is a top-level
+        // navigation, so a refusal lands on the sign-in screen with a reason, not raw JSON.
         try {
             signupPolicy.admit(r.email(), r.workosUserId());
         } catch (TessaryException e) {
@@ -334,7 +333,7 @@ public class AuthController {
      * calls, not top-level navigations, unlike {@code /callback}'s 302). Since
      * {@code authenticateWithCredentials}'s result already carries the row's current
      * {@code displayName}/{@code avatarUrl}, the {@code upsertUserFromWorkos} call below is a
-     * same-value no-op on login, not a clobber — see {@code TenantService.upsertUserFromWorkos}.
+     * same-value no-op on login, not a clobber, see {@code TenantService.upsertUserFromWorkos}.
      */
     private ResponseEntity<?> establishSession(AuthProvider.AuthResult r) {
         try {
@@ -348,7 +347,7 @@ public class AuthController {
         Organization defaultOrg = tenants.ensureDefaultOrg(user, r.organizationId());
 
         // Same "malformed 2xx" defensiveness as /callback's accessToken null-check, even though
-        // PasswordAuthProvider always sets a placeholder token today — a future AuthProvider
+        // PasswordAuthProvider always sets a placeholder token today: a future AuthProvider
         // implementing signupWithCredentials/authenticateWithCredentials might not, and this is the
         // one seam SealedSession's non-null accessToken flows through for both credential routes.
         String accessToken = r.accessToken();
@@ -411,7 +410,7 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<?> logout() {
-        // POST-only — a GET logout endpoint could be triggered by <img src> or
+        // POST-only: a GET logout endpoint could be triggered by <img src> or
         // any cross-site navigation. Max-Age=0 same name/path tells the
         // browser to drop the cookie. We return a small JSON body and let the
         // frontend navigate; sending a 302 in a fetch() response would chase
@@ -481,7 +480,7 @@ public class AuthController {
         return null;
     }
 
-    /** Expire a cookie via the same {@link #buildCookie} path as every other write in this class —
+    /** Expire a cookie via the same {@link #buildCookie} path as every other write in this class:
      *  raw {@code res.addCookie} drops attributes inconsistently under Tomcat 11 + ResponseEntity. */
     private void killCookie(HttpServletResponse res, String name) {
         res.addHeader(
@@ -499,16 +498,14 @@ public class AuthController {
     }
 
     /**
-     * The frontend screen an unauthenticated visitor belongs on (#853), carrying {@code returnTo}
-     * through as a query param when it's present and passes {@link #isSafeReturnTo}. This is the
-     * shared bounce target for both GET-route degrade branches above — replacing the old
-     * {@code authProps.getFrontendUrl()} bounce to the app root, which sat behind
-     * {@code ProtectedRoute} and sent an unauthenticated visitor straight back to this same GET,
-     * i.e. an infinite redirect loop.
+     * The frontend screen an unauthenticated visitor belongs on, carrying {@code returnTo} through
+     * as a query param when it's present and passes {@link #isSafeReturnTo}. This is the shared
+     * bounce target for both GET-route degrade branches above, since bouncing to the app root sends
+     * an unauthenticated visitor straight back to this same GET, an infinite redirect loop.
      *
-     * <p>On a deployment with no account yet that screen is {@code /signup}, not {@code /login}
-     * (#1227): the visitor's only move is to create the first account, and deciding it here means
-     * the browser makes one redirect instead of landing on a sign-in form and being bounced again.
+     * <p>On a deployment with no account yet that screen is {@code /signup}, not {@code /login}: the
+     * visitor's only move is to create the first account, and deciding it here means the browser
+     * makes one redirect instead of landing on a sign-in form and being bounced again.
      */
     private String entryPageUrl(@Nullable String returnTo) {
         // Both callers are degrade branches, i.e. reached only when the provider drives no redirect
@@ -523,7 +520,7 @@ public class AuthController {
     private static boolean isSafeReturnTo(String returnTo) {
         // Same-origin relative paths only. We require: starts with '/' AND the
         // second char is not '/' or '\' (Chromium normalises a leading "/\"
-        // into "//host" — same open-redirect class as "//evil").
+        // into "//host", the same open-redirect class as "//evil").
         if (returnTo == null || returnTo.length() < 1) return false;
         if (returnTo.charAt(0) != '/') return false;
         if (returnTo.length() >= 2) {

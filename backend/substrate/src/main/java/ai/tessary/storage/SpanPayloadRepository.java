@@ -69,7 +69,7 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * One JDBC batch for a whole batch of payloads, the same statement and guard as {@link #upsert} per row (#984 M2).
+     * One JDBC batch for a whole batch of payloads, the same statement and guard as {@link #upsert} per row.
      */
     public void upsertAll(List<SpanPayloadRow> rows) {
         if (rows.isEmpty()) return;

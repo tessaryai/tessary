@@ -30,11 +30,11 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>Why a seam at all, rather than reading the rollup columns.</b> {@code trace.latency_ms},
  * {@code trace.total_cost} and {@code trace.total_tokens} are the intended source and are NULL on every
- * production row today — the v1 write path passed literal null for all three at the write
+ * production row today, the v1 write path passed literal null for all three at the write
  * site, which {@link ai.tessary.vitals.VitalsRepository} documents against production. A detector
  * that reads them bare abstains on 100% of traffic while looking correct in every unit test, because
  * fixtures populate what ingestion does not. So the derivation is not a hedge against an unlikely case,
- * it is the live path — and it stays the live path for two reasons that outlast the backfill: a
+ * it is the live path, and it stays the live path for two reasons that outlast the backfill: a
  * backfill will not reach historical rows, and the pull/upload ingest path supplies no span end time at
  * all.
  *
@@ -42,11 +42,11 @@ import org.springframework.stereotype.Component;
  * {@link Absence} rather than a null or a zero. Zero is the dangerous one: an unpriced model read as $0
  * turns a price-book gap into a cost improvement, the single failure that makes the number worse than
  * not having it. Reasons are counted into a {@link Tally} the sweep logs once per pass, so a measure
- * abstaining on all of its traffic costs one glance rather than one investigation — the failure
+ * abstaining on all of its traffic costs one glance rather than one investigation, the failure
  * PROGRAM.md §13 opens with.
  *
  * <p><b>The bucket key is not resolved here.</b> It arrives on the {@link TraceHead} this is called
- * with, resolved once by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}'s lateral —
+ * with, resolved once by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}'s lateral,
  * root-span-first with the {@code seq → started_at → created_at} fallback chain. Taking the head rather
  * than a bare trace id is deliberate: it makes re-deriving the entry point impossible at this seam, and
  * re-deriving is the one place the two classifiers could silently disagree about which bucket a trace
@@ -59,7 +59,7 @@ import org.springframework.stereotype.Component;
  * precisely the traffic a duration detector most wants to see, and a rising number of stuck turns would
  * then read as improving latency.
  *
- * <p>Reads are batched per sweep page — one round trip per query per page, never one per trace.
+ * <p>Reads are batched per sweep page, one round trip per query per page, never one per trace.
  */
 @Component
 public class MetricSource {
@@ -78,7 +78,7 @@ public class MetricSource {
 
     /**
      * Where a present value came from. Counted alongside the abstentions because it answers the one
-     * operational question the rollup backfill will raise — "did it land, and for which measures" —
+     * operational question the rollup backfill will raise, "did it land, and for which measures",
      * without anyone having to go and query the table.
      */
     public enum Provenance {
@@ -94,7 +94,7 @@ public class MetricSource {
      */
     public enum Absence {
         /**
-         * The interval this measure is the length of has no end — a root span that never ended, a tool
+         * The interval this measure is the length of has no end, a root span that never ended, a tool
          * span still running, or (rarer) a span a producer shipped without a start. The fix is
          * instrumentation, or nothing at all: an abandoned turn is a real thing that happened.
          */
@@ -103,14 +103,14 @@ public class MetricSource {
         /**
          * The span has both endpoints and they run BACKWARDS: {@code ended_at} before {@code started_at},
          * so the derived interval is negative. Clock skew between the host that stamped the start and the
-         * host that stamped the end, or a re-exported span whose {@code started_at} was rewritten — both
+         * host that stamped the end, or a re-exported span whose {@code started_at} was rewritten, both
          * routine in distributed tracing and neither a measurement.
          *
          * <p>This abstention is load-bearing rather than tidy. {@code log(-3)} is {@code NaN}, and
          * {@link MetricSketch#add} throws on NaN by contract, so a single skewed span folded into a window
          * would propagate out of the sweep uncaught, the job would fail before its cursor advanced, and
-         * every retry would re-read the same page and hit the same span until the signal dead-lettered —
-         * one bad span silencing every metric measure for the project. The counterpart guard on the ROLLUP
+         * every retry would re-read the same page and hit the same span until the signal dead-lettered,
+         * one bad span silencing every metric measure for the project. The counterpart guard on the rollup
          * column is already there ({@code column >= 0}); production is 100% the derivation path today
          * (PROGRAM.md §3.0), so this is the one that fires.
          */
@@ -118,12 +118,12 @@ public class MetricSource {
 
         /**
          * At least one of the trace's generations carries no recorded cost, so the turn's cost is
-         * unknown. It leaves the distribution rather than joining it at $0 — the posture vitals already
+         * unknown. It leaves the distribution rather than joining it at $0, the posture vitals already
          * takes, counting unpriced calls rather than reading them as free.
          *
          * <p>Two things produce it, and an operator does the same thing about both. Either the
-         * generation ran on a model {@link TokenPriceBook} carried no rate for when it arrived — fix the
-         * book, and traffic from the next deploy onward is priced — or it predates
+         * generation ran on a model {@link TokenPriceBook} carried no rate for when it arrived, fix the
+         * book, and traffic from the next deploy onward is priced, or it predates
          * ingest-time pricing at all, in which case it abstains until it ages
          * out of the windows. Neither is repaired retroactively, and deliberately: dollars are recorded
          * at write time precisely so that nothing later rewrites what a call cost.
@@ -131,11 +131,11 @@ public class MetricSource {
         UNPRICED_MODEL,
 
         /**
-         * The provider never reported the quantity this measure sums over, so there is no number — which
+         * The provider never reported the quantity this measure sums over, so there is no number, which
          * is not the same fact as a number that happens to be zero.
          *
          * <p>The case this exists for is {@code tok_cache_write}. Whether writing to a prompt cache is a
-         * counted quantity at all is a per-model fact, and the model's rate is what settles it —
+         * counted quantity at all is a per-model fact, and the model's rate is what settles it:
          * {@link TokenPriceBook#billsCacheCreation}, not a provider-family list, because the convention
          * now differs inside a single vendor ({@code gpt-5.6} bills cache creation, {@code gpt-4o}'s
          * automatic caching does not) and Gemini bills storage per hour rather than per written token.
@@ -152,7 +152,7 @@ public class MetricSource {
      * <p>{@link #UNTERMINATED} and {@link #NO_ROOT_SPAN} both abstain on duration with
      * {@link Absence#NO_END_TIME}; they are told apart here because they mean different things about the
      * pipeline. The first is a turn that genuinely never completed. The second is a trace still
-     * ARRIVING — a {@code trace} row exists as soon as its FIRST span does, and a batch exporter flushes
+     * ARRIVING, a {@code trace} row exists as soon as its FIRST span does, and a batch exporter flushes
      * on span end, so the root (which outlives every child) ships last.
      *
      * <p>{@code NO_ROOT_SPAN} is load-bearing rather than a curiosity, and it is only truthful because
@@ -171,13 +171,13 @@ public class MetricSource {
     /**
      * One measure's reading for one subject: a value with its provenance, or an abstention with its
      * reason. Sealed and pattern-matched rather than a nullable double, so a caller cannot quietly
-     * forget the absent case — which is the entire point of not returning null.
+     * forget the absent case, which is the entire point of not returning null.
      */
     public sealed interface Measurement {
 
         /**
          * A real measurement, in the measure's own units: milliseconds for the durations, USD for cost,
-         * tokens for the four buckets. Raw, never logged — the sketch takes the logarithm, and the
+         * tokens for the four buckets. Raw, never logged, the sketch takes the logarithm, and the
          * evidence blob reports quantiles in the units a human reads.
          */
         record Present(double value, Provenance provenance) implements Measurement {
@@ -203,7 +203,7 @@ public class MetricSource {
             return new Absent(reason);
         }
 
-        /** Whether a value exists — for callers that only branch rather than destructure. */
+        /** Whether a value exists, for callers that only branch rather than destructure. */
         default boolean isPresent() {
             return this instanceof Present;
         }
@@ -212,13 +212,13 @@ public class MetricSource {
     /**
      * Everything the turn-grain measures produce for one trace, plus the key they are filed under.
      *
-     * @param callSiteId the ENTRY POINT's call site, straight off the head — the bucket key of
+     * @param callSiteId the ENTRY POINT's call site, straight off the head, the bucket key of
      *     PROGRAM.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
      *     child would model "traces that happened to contain this tool" rather than "traffic that
      *     entered here".
-     * @param eventAt the trace's own start, falling back to ingest time — the clock windows are CUT on.
+     * @param eventAt the trace's own start, falling back to ingest time, the clock windows are CUT on.
      *     The sweep's keyset cursor stays on {@code created_at}; two clocks, two jobs.
-     * @param projectVersionId the deploy this turn ran under. Not part of the key — it is what the
+     * @param projectVersionId the deploy this turn ran under. Not part of the key, it is what the
      *     pinned reference hangs on, so a deploy re-pins the reference instead of resetting the window.
      * @param tokens the four (disjoint) buckets summed over the trace's generations, or null when none
      *     reported usage. Carried so a caller can take a ratio without re-summing and arriving at a subtly
@@ -226,7 +226,7 @@ public class MetricSource {
      * @param measurements keyed by the PERSISTED measure name ({@link Measure}). Every measure this
      *     grain owns is present as a key, with an absent reading rather than a missing entry.
      * @param workload what the USER asked for on this turn, carried beside what the agent did with it.
-     *     Never a measure and never a covariate — see {@link MetricWorkload}.
+     *     Never a measure and never a covariate, see {@link MetricWorkload}.
      */
     public record TurnMetrics(
             String traceId,
@@ -244,7 +244,7 @@ public class MetricSource {
         }
 
         /**
-         * Cache-read share of the prompt, {@code cache_read / (cache_read + input)} — the form
+         * Cache-read share of the prompt, {@code cache_read / (cache_read + input)}, the form
          * PROGRAM.md §3.3 asks for cache to be watched in.
          *
          * <p>The most common silent cost regression is a prompt-prefix edit that stops the cache
@@ -252,20 +252,20 @@ public class MetricSource {
          * count it is indistinguishable from a quiet week, because the count moves with traffic volume
          * and the ratio does not.
          *
-         * <p>A turn that reported no prompt at all has no ratio — not a ratio of zero — so it abstains
+         * <p>A turn that reported no prompt at all has no ratio, not a ratio of zero, so it abstains
          * with {@link Absence#BUCKET_NOT_REPORTED}, which is the same statement the buckets it is built
          * from are already making.
          */
         /**
          * The four token buckets and the cache-read share as plain numbers, each null where this turn
-         * abstained — the form {@link MetricTokens} folds and the {@code cost} finding's evidence prints.
+         * abstained, the form {@link MetricTokens} folds and the {@code cost} finding's evidence prints.
          *
          * <p>Null is <b>not measured</b>, and it is load-bearing rather than tidy: {@code tok_cache_write}
          * abstains wherever cache creation is not a billed quantity, and folding that in as a zero would
          * say "no writes" about a population nobody counts writes for.
          *
          * <p>The share is carried in PERCENT, because that is the unit its sketch's geometric bins resolve
-         * well — see {@link MetricTokens#CACHE_READ_PCT}. {@link #cacheReadRatio()} stays the fraction, so
+         * well, see {@link MetricTokens#CACHE_READ_PCT}. {@link #cacheReadRatio()} stays the fraction, so
          * anything reading the ratio as a ratio is unaffected.
          */
         public TokenReadings tokenReadings() {
@@ -299,7 +299,7 @@ public class MetricSource {
     }
 
     /**
-     * One turn's cost decomposition, in raw units — tokens, and the cache-read share in percent — each
+     * One turn's cost decomposition, in raw units, tokens, and the cache-read share in percent, each
      * null where the turn abstained. What {@link MetricTokens} folds; see {@link TurnMetrics#tokenReadings}.
      */
     public record TokenReadings(
@@ -314,7 +314,7 @@ public class MetricSource {
      *
      * <p>Null is <b>unknown</b>, never zero. A producer that ships no input text has an unknown message
      * length rather than an empty message, and folding the unknown in as zero would manufacture a
-     * workload collapse out of an instrumentation gap — which is precisely the false "the traffic
+     * workload collapse out of an instrumentation gap, which is precisely the false "the traffic
      * changed" story this block exists to rule out.
      *
      * <p>{@code inputTokens} is read off the same {@link TokenUsage} sum the {@code tok_input} measure
@@ -328,7 +328,7 @@ public class MetricSource {
 
         /**
          * Nothing reported. The reading for a subject that HAS no workload of its own rather than one
-         * whose workload was not captured — a tool span, whose window deliberately folds none (see
+         * whose workload was not captured, a tool span, whose window deliberately folds none (see
          * {@code MetricDriftSweep.toolSamples}).
          */
         public static final Workload NONE = new Workload(null, null, null);
@@ -337,12 +337,12 @@ public class MetricSource {
     /**
      * One dispatchable span's duration, filed under its tool bucket.
      *
-     * @param callSiteId the entry point of the TURN this span belongs to — not this bucket's key.
+     * @param callSiteId the entry point of the TURN this span belongs to, not this bucket's key.
      *     Carried so the §6.1 suppression rule can ask whether a tool shift accounts for the turn shift
      *     on the same call site, which needs both grains in hand at once.
      * @param bucketKey an {@link ActionSymbol} {@code kind:normalized-name}, so latency buckets and
      *     drift's alphabet name the same tool the same way.
-     * @param eventAt the SPAN's own start, falling back to ingest time — not the trace's.
+     * @param eventAt the SPAN's own start, falling back to ingest time, not the trace's.
      */
     public record ToolMetrics(
             String traceId,
@@ -357,8 +357,8 @@ public class MetricSource {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Every turn-grain measure for one sweep page — {@code turn_duration}, {@code cost} and the four
-     * token buckets — one {@link TurnMetrics} per head, in the order the heads were given.
+     * Every turn-grain measure for one sweep page, {@code turn_duration}, {@code cost} and the four
+     * token buckets, one {@link TurnMetrics} per head, in the order the heads were given.
      *
      * <p>Two queries for the whole page, never two per trace. A head whose trace row has since been
      * deleted still comes back, with {@link Completion#NO_ROOT_SPAN} and every measure absent, because a
@@ -367,8 +367,8 @@ public class MetricSource {
      * <p><b>The settle window is the caller's business, and it is not uniform.</b> Cost and the token
      * buckets SUM over a trace's spans, so they need every span to have arrived and the sweep windows
      * them on {@code trace_settle_seconds}; measuring early reads as cheap, which surfaces as a
-     * permanent drift toward cheaper whenever ingest lags. Duration needs no settle horizon at all — it
-     * is read off the root span, whose arrival IS the completion signal — and applying one there delays
+     * permanent drift toward cheaper whenever ingest lags. Duration needs no settle horizon at all, it
+     * is read off the root span, whose arrival IS the completion signal, and applying one there delays
      * every duration finding for nothing (PROGRAM.md §5).
      *
      * @param tally accumulates provenance and abstention counts. The sweep owns one per pass and hands
@@ -414,7 +414,7 @@ public class MetricSource {
     }
 
     /**
-     * The turn's workload readings, assembled from the facts already in hand — no extra round trip, and
+     * The turn's workload readings, assembled from the facts already in hand, no extra round trip, and
      * no second derivation of a number a measure has already computed.
      */
     private static Workload workloadOf(@Nullable TurnFacts f, Map<String, Measurement> measurements) {
@@ -446,11 +446,9 @@ public class MetricSource {
      * Every other measure on this row prefers the rollup column, because for a sum or a count the
      * worker's replacement recompute IS the answer. Duration is the exception: {@code trace.ended_at} is
      * folded as a {@code max} over the trace's spans and {@code latency_ms} is generated from it, so that
-     * column is exactly the envelope this method exists to reject. Preferring it was harmless in v1 only
-     * because nothing ever wrote it — the preference was dead code that read as a rule — and promoting
-     * the rollups to real numbers would have turned it into a silent ~10% p95 inflation on every turn
-     * carrying an async child. The trace's timers stay the right source for spend and for settle; they
-     * are the wrong source for how long the user waited.
+     * column is exactly the envelope this method exists to reject: preferring it would be a silent ~10%
+     * p95 inflation on every turn carrying an async child. The trace's timers stay the right source for
+     * spend and for settle; they are the wrong source for how long the user waited.
      *
      * <p>The backwards-interval guard therefore lives on the derivation, which is where it always
      * mattered: a root whose end precedes its start is routine clock skew across hosts, and laundering
@@ -476,13 +474,13 @@ public class MetricSource {
      * The turn's cost in USD: {@code trace.total_cost} when the worker has written a total that means
      * anything, otherwise the sum over the trace's generations.
      *
-     * <p>Unlike duration, the rollup IS the right shape here — cost is a sum over the trace's spans and
+     * <p>Unlike duration, the rollup is the right shape here: cost is a sum over the trace's spans and
      * that is precisely what §7.2 recomputes. Two things disqualify it, and neither is a matter of
      * taste. A NEGATIVE total is not a cost. And a total computed over a trace holding
      * {@code unpriced_spans > 0} is a sum with a hole in it: {@code SUM} skips the nulls, so a turn where
      * one generation ran on a model the book has no rate for reports the price of the OTHER generations
      * and reads as cheaper than the same turn last week. That is the one failure that makes this measure
-     * worse than not having it — a price-book gap arriving as a cost improvement — and it is exactly
+     * worse than not having it, a price-book gap arriving as a cost improvement, and it is exactly
      * what {@code trace.unpriced_spans} is carried for. Falling through hands the decision to
      * {@link #spendOf}, which abstains rather than reporting a partial sum.
      */
@@ -513,17 +511,13 @@ public class MetricSource {
     /**
      * Sum a trace's generations into a cost and the four token buckets.
      *
-     * <p><b>Off typed columns, not a parsed blob.</b> This used to normalize every leaf through
-     * {@link TokenUsage} because the v1 write path rewrote every provider onto one
-     * {@code gen_ai.usage.*} vocabulary while leaving OpenAI's cache-INCLUSIVE input count in place —
-     * so an OpenAI generation arrived wearing Anthropic key names and trusting the spelling billed its
-     * cache reads twice. v2 applies that correction ONCE, at write time in {@code IngestPricer}, so the
-     * stored buckets are already disjoint and this is a plain addition.
+     * <p><b>Off typed columns, not a parsed blob.</b> {@code IngestPricer} already made each leaf's
+     * buckets disjoint at write time, so summing them here is a plain addition with no risk of
+     * double-counting a cache read against the input count.
      *
-     * <p><b>NULL is how a producer says "I do not report this".</b> The old code could not use the
-     * normalized values for that question — the blob parser collapsed an absent key to 0, making
-     * "reported zero cache writes" and "reports no cache writes at all" identical — so it read raw key
-     * spellings out of the blob alongside the normalized sum. The typed columns answer it directly: null
+     * <p><b>Null is how a producer says "I do not report this".</b> A normalized sum could not answer
+     * that question: the blob parser collapsed an absent key to 0, making "reported zero cache writes"
+     * and "reports no cache writes at all" identical. The typed columns answer it directly: null
      * means unreported, and a stored 0 is a real measurement, which is the whole point, because a
      * cache-read count FALLING to zero is the prompt-prefix regression this program exists to catch.
      *
@@ -537,7 +531,7 @@ public class MetricSource {
      *
      * <p><b>One unpriced leaf abstains the whole turn.</b> Pricing the rest and reporting the partial
      * sum would understate that turn's spend by an unknown amount and put a plausible number into the
-     * distribution — worse than the honest gap, and the same reason vitals counts unpriced spans rather
+     * distribution, worse than the honest gap, and the same reason vitals counts unpriced spans rather
      * than reading them as free.
      */
     private Spend spendOf(List<LeafUsage> leaves) {
@@ -556,7 +550,7 @@ public class MetricSource {
         for (LeafUsage leaf : leaves) {
             anyReported = true;
             // Each bucket is read ONCE into a local. The accessors are @Nullable, so a null check on one
-            // call and an unbox on the next are two reads as far as any analyser is concerned — and the
+            // call and an unbox on the next are two reads as far as any analyser is concerned, and the
             // unboxing is what would NPE.
             Long in = leaf.inputTokens();
             Long out = leaf.outputTokens();
@@ -586,8 +580,8 @@ public class MetricSource {
             // that moves with the deploy: the pinned reference held dollars from an older book, so a
             // rate refresh shifted every bucket against its own reference at once and read as a
             // fleet-wide regression nothing had caused. Reading only what was recorded makes a stored
-            // cost a fact about what that call was billed at — which is also the only form of it worth
-            // reconciling an invoice against — and it makes a later price change a real change in
+            // cost a fact about what that call was billed at, which is also the only form of it worth
+            // reconciling an invoice against, and it makes a later price change a real change in
             // spend rather than a retroactive edit to history.
             //
             // The cost of that: a generation on a model the book could not price is unscoreable and
@@ -621,7 +615,7 @@ public class MetricSource {
     }
 
     /**
-     * A token bucket reads as a value when the provider reported it — <b>including when it reported
+     * A token bucket reads as a value when the provider reported it, <b>including when it reported
      * zero</b>, which is a measurement and the most valuable one this program has: a cache-read count
      * falling to zero IS the prompt-prefix regression. Absent means the family emits no such count at
      * all, which is a different sentence entirely.
@@ -637,7 +631,7 @@ public class MetricSource {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Every dispatchable span of one sweep page, with its own duration — the {@code tool_duration}
+     * Every dispatchable span of one sweep page, with its own duration: the {@code tool_duration}
      * subjects. One query for the page.
      *
      * <p>The bucket key is minted with {@code isError = false}, so a tool's failures stay in the same
@@ -646,7 +640,7 @@ public class MetricSource {
      * as a shift in the one distribution rather than as traffic quietly migrating to a second one.
      *
      * <p>Spans still running abstain with {@link Absence#NO_END_TIME} rather than being filtered out,
-     * for the same reason unfinished turns are — a tool that increasingly hangs must not read as a
+     * for the same reason unfinished turns are: a tool that increasingly hangs must not read as a
      * shrinking sample of fast calls.
      */
     public List<ToolMetrics> toolMetrics(String projectId, List<TraceHead> heads, Tally tally) {
@@ -677,7 +671,7 @@ public class MetricSource {
     }
 
     /**
-     * The span's own {@code ended_at - started_at}, column-preferred exactly as the turn grain is —
+     * The span's own {@code ended_at - started_at}, column-preferred exactly as the turn grain is,
      * including the backwards-interval guard, which a tool span needs at least as much as a root does:
      * a tool call is the span most likely to have been stamped by a different host than the one that
      * recorded its return. See {@link Absence#NEGATIVE_INTERVAL}.
@@ -701,7 +695,7 @@ public class MetricSource {
      *
      * <p><b>This is an instrument, not bookkeeping.</b> The failure PROGRAM.md §13 opens with is a
      * measure that abstains on 100% of traffic and therefore never fires, while looking correct in every
-     * unit test. Nothing about the findings distinguishes that from a quiet week — only these counters
+     * unit test. Nothing about the findings distinguishes that from a quiet week; only these counters
      * do, which is why the sweep logs {@link #summary()} once per pass whether or not anything fired.
      *
      * <p>Mutable and not thread-safe: one Tally belongs to one sweep pass, which already runs under the
@@ -734,12 +728,12 @@ public class MetricSource {
             return Collections.unmodifiableSet(new LinkedHashSet<>(byMeasure.keySet()));
         }
 
-        /** Values read straight off the rollup column — non-zero means the backfill has reached here. */
+        /** Values read straight off the rollup column; non-zero means the backfill has reached here. */
         public long fromColumn(String measure) {
             return counts(measure).fromColumn;
         }
 
-        /** Values computed from leaf facts — the live path today, for every measure. */
+        /** Values computed from leaf facts, the live path today, for every measure. */
         public long derived(String measure) {
             return counts(measure).derived;
         }

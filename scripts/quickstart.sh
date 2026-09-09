@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The FROM-A-CLONE install path (#1227): pull the published images, bring the stack up from this
+# The FROM-A-CLONE install path: pull the published images, bring the stack up from this
 # repository's own docker-compose.yml, and wait until it is actually reachable before printing the
 # URL. Someone with nothing cloned does not need this script or this repository at all — their
 # install is one command against the published compose artifact (setup.md):
@@ -10,7 +10,7 @@
 # Usage:
 #   bash scripts/quickstart.sh
 #
-# No .env required (#1230). This script still does not GENERATE secrets, and the reason it never
+# No .env required. This script still does not GENERATE secrets, and the reason it never
 # should is unchanged: the two sealing keys are what every session cookie and every stored provider
 # credential are sealed with, and a script that invents a different value on each run (or on every
 # `docker compose down && up`, having written nothing durable) locks the operator out of their own
@@ -54,7 +54,7 @@ until curl -fsS -o /dev/null "$url" 2>/dev/null; do
 done
 echo ""
 
-# Every default service carries its own healthcheck now (#1189), so `ps` is the general instrument
+# Every default service carries its own healthcheck now, so `ps` is the general instrument
 # and the HTTP poll above is the specific one; both are printed because they answer different
 # questions -- "is the whole stack up" versus "does the port a browser opens actually answer".
 docker compose ps

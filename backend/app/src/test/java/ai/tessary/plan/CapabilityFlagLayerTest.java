@@ -20,23 +20,15 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * The open edition's resolution contract, against real {@code org_feature_flag} rows:
+ * This build's resolution contract, against real {@code org_feature_flag} rows:
  *
  * <ol>
- *   <li>with no rows at all, every capability is ON except the four paid classifiers ({@code
- *       behavior_drift}, {@code sop_conformance}, {@code frustration}, {@code groundedness} — #887/#888
- *       added the last two 2026-08-31) and {@code triage_automatic} — the open-edition default, which
- *       is deliberately NOT {@code Capability.defaultEnabled()} (that is the hosted free tier, 11 of 17
- *       off);
- *   <li>an org's row overrides that default in BOTH directions;
+ *   <li>with no rows at all, every capability is on except the set in {@link #OFF_BY_DEFAULT},
+ *       which is deliberately not {@code Capability.defaultEnabled()};
+ *   <li>an org's row overrides that default in both directions;
  *   <li>clearing the row returns the capability to the default rather than leaving it off;
  *   <li>one org's row does not touch another's.
  * </ol>
- *
- * <p>Was a LaunchDarkly {@code TestData} test. Open-core epic 1 issue 2 took the SDK off the open tree, and
- * the resolution layer it was testing now reads rows instead of targeting rules — so this is the same four
- * questions asked of the adapter that actually ships. The LaunchDarkly adapter keeps its own test, over in
- * {@code tessary-paid/plan}.
  */
 @SpringBootTest
 class CapabilityFlagLayerTest {
@@ -116,7 +108,7 @@ class CapabilityFlagLayerTest {
 
         overrides.delete(orgId, Capability.API_ACCESS.wire());
         flags.invalidate(orgId);
-        // Not "off, because false was the last thing written" — "on, because nobody has an opinion".
+        // Not "off, because false was the last thing written": "on, because nobody has an opinion".
         assertTrue(capabilities.isEnabled(orgId, Capability.API_ACCESS), "back to the open-edition default");
     }
 

@@ -35,7 +35,7 @@ package under `ai.tessary`) or the literal `frontend`.
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE (epic 4 gate clause 5). Gates whose subject the export deletes skip with a named reason: classifier-quality-doc (manifest `SKIP`), slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: classifier-quality-doc (manifest `SKIP`), slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
@@ -64,7 +64,7 @@ loop; use the full gate before merging.
 **Your local run is the only per-change gate.** There is no pre-commit hook, and CI
 (`.github/workflows/ci.yml`) runs the same checks, but currently only on manual
 `workflow_dispatch` — all automatic triggers (including the weekly Monday 03:00 UTC cron) are
-disabled pending #1184 (epic 11, public repo cutover); the commented-out schedule block is
+disabled pending the public repo cutover; the commented-out schedule block is
 preserved in the file for re-enabling later. That is a deliberate free-tier cost trade: CI calls
 the same `scripts/check-*.sh` these tasks do, so local green ⇒ CI green by construction, and the
 one thing CI adds is the vendored-plugin freshness diff, which hard-fails there (`$CI` set)
@@ -149,7 +149,7 @@ inner-loop speed is not.
 
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
 (`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build) — a handful of
-unit tests plus a route-render smoke test (#890) that mounts every view in the route manifest
+unit tests plus a route-render smoke test that mounts every view in the route manifest
 and fails on a render error or un-allowlisted console.error. Coverage is thin (7 test files); the
 gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
@@ -157,13 +157,13 @@ classes; treat deeper auth coverage as product work, not a docs-audit obligation
 near-zero tests are thin wrappers or UI-facing glue —
 do not add tests unless explicitly asked (root `AGENTS.md`).
 
-### JaCoCo baseline (#930)
+### JaCoCo baseline
 
 `jacoco-maven-plugin` is wired into exactly the **10 open backend modules** — `shared`,
 `contract`, `core`, `tenancy`, `substrate`, `product`, `llm-runtime`, `analysis`,
-`surfaces`, `app` — as a `mvn verify` side effect. (It was 11 until Track A deleted `evaluation`.) It is a **baseline, not a gate**: no threshold
+`surfaces`, `app` — as a `mvn verify` side effect. (It was 11 until `evaluation` was deleted.) It is a **baseline, not a gate**: no threshold
 is enforced anywhere, and nothing fails the build on a coverage number. The point is to have a
-number before the epic 1 extractions continue, so a module being pulled out of the reactor can be
+number before further module extractions continue, so a module being pulled out of the reactor can be
 checked against what it actually exercised rather than what its tests merely claim to.
 
 Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Refresh them locally
@@ -171,35 +171,16 @@ with `task backend:coverage` (equivalent to `task backend:check:open` — same r
 profile — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
 CI's dispatch-only cadence below). CI additionally uploads the reports as a build artifact
 (`backend-jacoco-coverage`) from the `backend` job, currently reachable only via manual
-`workflow_dispatch` (the weekly cron is disabled pending #1184) — see
+`workflow_dispatch` (the weekly cron is disabled pending the public repo cutover) — see
 [Running it](#running-it) above for why that job isn't per-PR.
 
 `backend/test-support` carries no `<build><plugins>` block and no `*Test.java` files, so it isn't
-instrumented — there's nothing to measure. **`tessary-paid/` is deliberately excluded**, not
-missing: `tessary-paid/pom.xml` inherits `backend/pom.xml`'s `pluginManagement` wholesale, so
-JaCoCo is *available* to every paid module the same way surefire and SpotBugs are, but no paid
-module bare-activates it — the same opt-in mechanism every other quality plugin in this reactor
-uses (see the pluginManagement header comment in `backend/pom.xml`). That omission is the whole
-open/paid scoping for this baseline (open-core decision D2); paid coverage tooling is still epic 5's
-concern. The paid Spring Boot integration-test harness itself exists since #943/#882:
-`tessary-paid/assembly` is a test-only overlay module that depends on `app` and every paid module,
-and `PaidOpenApiSpecTest` is its first `@SpringBootTest` against test-support's Testcontainers
-Postgres.
-
-That last point matters for how to read a near-zero number on `tessary-paid/sop` or
-`tessary-paid/slack` if paid coverage is ever measured ad hoc: both modules ship **zero**
-Testcontainers integration coverage today by design, not by accident — `SopIntakeServiceTest` and
-`SlackInstallRepositoryTest` were deleted, not relocated, when those modules were extracted,
-because the paid overlay had no Spring Boot integration-test harness at the time (see each module's
-own `pom.xml` for the note); those cases now run in `tessary-paid/assembly` (#882), which is
-where every paid `@SpringBootTest` lives. Don't mistake the per-module zero for a gap this
-baseline discovered.
+instrumented — there's nothing to measure.
 
 ## The schema-column generator
 
 `backend/core/tools/schemagen/SchemaColumnGenerator.java` runs at `generate-sources` on every Maven
-invocation and emits 61 interfaces of column constants for the open reactor (76 combined with the
-15 the `tessary-paid/db` module emits from its own changelog, when the overlay is present). It
+invocation and emits 61 interfaces of column constants for the open reactor. It
 writes a file **only when the content
 changed**. Writing unconditionally reset every generated file's mtime, which invalidated the
 compiler's staleness check and forced a full recompile every time. Measured A/B on a

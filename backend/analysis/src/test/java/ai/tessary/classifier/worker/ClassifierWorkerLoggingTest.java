@@ -46,10 +46,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
- * Covers the severity policy (gh#532) as it composes with the dead-letter budget (gh#531): a
- * persistent sweep failure must surface at ERROR — via the budget-exhausted dead-letter
- * transition — so an error-rate query keyed on {@code level="ERROR"} actually sees it, while
- * below-cap failures stay WARN and dedup to one stacktrace per streak.
+ * Covers the severity policy as it composes with the dead-letter budget: a persistent sweep
+ * failure must surface at ERROR, via the budget-exhausted dead-letter transition, so an
+ * error-rate query keyed on {@code level="ERROR"} actually sees it, while below-cap failures stay
+ * WARN and dedup to one stacktrace per streak.
  */
 @ExtendWith(MockitoExtension.class)
 class ClassifierWorkerLoggingTest {
@@ -79,13 +79,9 @@ class ClassifierWorkerLoggingTest {
     ClassifierArming arming;
 
     /**
-     * The four sweeps as the worker now sees them: one port, four beans, no concrete type named.
-     *
-     * <p>This is not cosmetic. The enforcer bans an open module from declaring a dependency on a paid
-     * jar at {@code validate}, test scope included, so mocking the CONCRETE {@code BehaviorDriftSweep}
-     * and {@code ConformanceSweep} — which is what this test used to do — is a coupling that cannot be
-     * re-pointed when those classes move behind the boundary, only deleted. Mocking the port keeps every
-     * assertion below.
+     * The four sweeps as the worker sees them: one port, four beans, no concrete type named. Mocking
+     * the port rather than a concrete sweep class keeps every assertion below independent of which
+     * concrete implementations this build carries.
      */
     @Mock
     ClassifierSweep behaviorSweep;
@@ -200,9 +196,8 @@ class ClassifierWorkerLoggingTest {
     }
 
     /**
-     * Covers the trace-correlation gap (gh#532 item 2): {@code tick()} must bind the scheduler
-     * thread's current span into MDC before dispatching any sweep, so a background log line has a
-     * trace_id to pivot from in Grafana.
+     * {@code tick()} must bind the scheduler thread's current span into MDC before dispatching any
+     * sweep, so a background log line has a trace_id to pivot from in Grafana.
      */
     @Test
     void tickBindsTheCurrentTraceBeforeDispatchingWork() {
@@ -232,14 +227,10 @@ class ClassifierWorkerLoggingTest {
 
     /**
      * The WINDOW grain is shared by three families and split on the detector kind, with
-     * {@link MetricDriftSweep} as the fallthrough — so a classifier that reaches this branch without a
-     * case of its own runs the metric sweep instead of its own.
-     *
-     * <p>That is not hypothetical for {@code tool_error}: it was declared WINDOW once before, fell
-     * through, and — because its config blob names no {@code measures}, so {@code MetricDriftConfig}
-     * fell back to the full default set — maintained a second copy of every duration and cost baseline
-     * and emitted a duplicate finding per drift under its own signal id. Nothing failed loudly. This
-     * pins the fork itself rather than the comment describing it.
+     * {@link MetricDriftSweep} as the fallthrough, so a classifier that reaches this branch without a
+     * case of its own runs the metric sweep instead of its own. {@code tool_error} must never take
+     * that fallthrough: it did once, and silently maintained a duplicate copy of every duration and
+     * cost baseline under its own signal id.
      */
     @Test
     void aToolErrorJobRunsItsOwnSweepAndNeverTheMetricFallthrough() {
@@ -287,20 +278,13 @@ class ClassifierWorkerLoggingTest {
     }
 
     /**
-     * The contract the registry replaced the fallthrough with: a fitting-tier kind nothing is registered
-     * for is INERT. One WARN, the job completes, and — the part that matters — no other sweep runs in
-     * its place.
-     *
-     * <p>This is the open edition's normal state for the two paid classifiers dispatched through {@code
-     * ClassifierSweep} (behaviour drift and SOP conformance — frustration and groundedness are the other
-     * two paid classifiers, #887/#888, but neither is trace/window-grain and neither ever reaches this
-     * registry), so "inert" has to be a
-     * first-class ending rather than an error path. Three endings are ruled out at once. It must not
-     * THROW, because the job is re-pended by every heartbeat and would burn the dead-letter budget of a
-     * project whose only fault is its edition. It must not RETIRE the classifier: absence of a sweep says
-     * nothing about catalog membership, and leaving the catalog is permanent
-     * ({@code ClassifierService#retireDroppedBuiltIns}). And it must not fall through to another sweep,
-     * which is the bug the arm this replaced actually had.
+     * The contract the registry gives a fitting-tier kind nothing is registered for: it is inert. One
+     * WARN, the job completes, and no other sweep runs in its place. This build ships no sweep for
+     * behaviour drift or SOP conformance, so this is that state's normal path here, and three other
+     * endings are ruled out: it must not throw, since the job is re-pended by every heartbeat and would
+     * burn the dead-letter budget of a project whose only fault is which sweeps this build carries; it
+     * must not retire the classifier, since absence of a sweep says nothing about catalog membership and
+     * leaving the catalog is permanent; and it must not fall through to another sweep.
      */
     @Test
     void aWindowKindWithNoRegisteredSweepIsInertAndSaysSo() {
@@ -313,8 +297,7 @@ class ClassifierWorkerLoggingTest {
                 substrate,
                 catalog,
                 preDeployChecks,
-                // The open edition: the two ClassifierSweep-dispatched paid classifiers (behaviour
-                // drift, SOP conformance) are absent from the classpath entirely.
+                // This build carries no sweep for behaviour drift or SOP conformance.
                 registryOf(metricSweep, toolErrorSweep),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
@@ -366,10 +349,10 @@ class ClassifierWorkerLoggingTest {
     }
 
     /**
-     * The observation-grain twin of the test above (#1071): a kind whose detector exists but whose
-     * {@code DetectionTable} is not on the classpath has nowhere to write a fired row, so the worker must
-     * not score at all. One WARN, the job completes, nothing throws, and neither the detector nor the
-     * substrate is ever touched.
+     * The observation-grain twin of the test above: a kind whose detector exists but whose
+     * {@code DetectionTable} is not on the classpath has nowhere to write a fired row, so the worker
+     * must not score at all. One WARN, the job completes, nothing throws, and neither the detector nor
+     * the substrate is ever touched.
      */
     @Test
     void anObservationKindWithNoRegisteredTableIsInertAndSaysSo() {

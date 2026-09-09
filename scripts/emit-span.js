@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// One OpenTelemetry span, sent to a running Tessary with nothing installed (epic 7 clause 5, #1193).
+// One OpenTelemetry span, sent to a running Tessary with nothing installed.
 //
 // Runs on the Node the sandbox-runner image already carries, so a reader with only Docker and the
 // running stack can emit their first span without an SDK, a collector or a package manager:

@@ -23,7 +23,7 @@ import org.jspecify.annotations.Nullable;
  * ({@code RedactionService} → {@code SubstrateWriter}) to strip PII <em>before</em> persistence, and by the
  * playground test endpoint to preview a rule against sample text.
  *
- * <p><b>Redaction is a deliberate, declared transform — never a silent truncation.</b> The project rule
+ * <p><b>Redaction is a deliberate, declared transform, never a silent truncation.</b> The project rule
  * forbids silently clipping telemetry content; redaction is the opposite of clipping: it is an explicit,
  * project-configured substitution that the operator authors and tests in the playground. A rule whose
  * regex fails to compile is skipped at compile time (never applied, never throws on the hot path), so one
@@ -65,40 +65,28 @@ public final class RedactionEngine {
 
     /**
      * Apply every rule, in order, to {@code text}. Returns {@code text} unchanged (same reference) when it
-     * is null/blank or no rule matches — the hot-path common case allocates nothing. Each rule's
+     * is null/blank or no rule matches; the hot-path common case allocates nothing. Each rule's
      * replacement is substituted literally.
      */
     public static @Nullable String apply(@Nullable String text, List<CompiledRule> rules) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
         String out = text;
         for (CompiledRule rule : rules) {
-            // replaceAll() alone, with no find() pre-check. The old form ran the regex TWICE on
-            // every matching rule: find() scans, then replaceAll() resets the matcher and scans
-            // again from the start. replaceAll() already returns the input unchanged when there is
-            // no match, so the pre-check bought nothing and doubled the cost of the one thing on
-            // this path that is expensive. It returns the same reference when nothing matched, so
-            // the allocate-nothing property the javadoc promises still holds.
+            // replaceAll() alone, with no find() pre-check: a pre-check would scan the regex twice
+            // on every matching rule. replaceAll() already returns the input unchanged when there is
+            // no match, so the allocate-nothing property the javadoc promises still holds.
             out = rule.pattern().matcher(out).replaceAll(Matcher.quoteReplacement(rule.replacement()));
         }
         return out;
     }
 
-    /**
-     * A run of inline binary payload — standard base64, as carried by a {@code data:} URI or a
-     * provider content block. {@link RawEntry} stores media INLINE, so a single ingested entry
-     * routinely carries hundreds of KB to megabytes of this.
-     */
     /** Minimum contiguous payload characters before a run is treated as binary. */
     private static final int MIN_RUN = 512;
 
     /**
-     * Payload alphabet, tested by index rather than by regex. {@code Pattern("[...]{512,}")} looked
-     * equivalent and was not: {@code {512,}} re-scans up to run-length at EVERY start position, so on
-     * any payload that never forms a 512-contiguous run the matcher does O(n x 512) work and then the
-     * ordinary redaction runs anyway. Measured at 1 MB, that made this method SLOWER than no
-     * optimisation at all on the shapes that matter — MIME-wrapped base64 (line breaks every 76
-     * chars, the default of most encoders) 264 -> 486 ms, base64url 556 -> 687 ms, 500-char opaque
-     * tokens 508 -> 1473 ms — on the exact path this exists to de-saturate. A single left-to-right
+     * Payload alphabet, tested by index rather than by regex: a quantified character class re-scans
+     * up to run-length at every start position, so on a payload that never forms a long run the
+     * matcher does quadratic work and the ordinary redaction runs anyway. A single left-to-right
      * pass is O(n) unconditionally and cannot regress any input.
      *
      * <p>Base64url's {@code -}/{@code _} are deliberately absent: a long run of digits and dashes
@@ -115,12 +103,11 @@ public final class RedactionEngine {
 
     /**
      * Characters re-examined at each end of a skipped run. A greedy run swallows any adjacent
-     * alphabet characters, including the tail of real text — {@code jane@example.com} followed by a
-     * blob puts {@code com} INSIDE the run, leaving {@code jane@example.} as the text segment, which
+     * alphabet characters, including the tail of real text: {@code jane@example.com} followed by a
+     * blob puts {@code com} inside the run, leaving {@code jane@example.} as the text segment, which
      * no longer matches the email rule. Redacting a margin back into the text side closes that: no
-     * built-in pattern can match more than ~320 characters (RFC 5321 caps local-part at 64 and domain
-     * at 255), so 512 covers every one of them with room to spare, while still skipping the interior
-     * of a megabyte payload. Cost is ~1 KB scanned per blob instead of ~1 MB.
+     * built-in pattern can match more than ~320 characters, so 512 covers every one of them with room
+     * to spare while still skipping the interior of a megabyte payload.
      */
     private static final int EDGE_MARGIN = 512;
 
@@ -128,29 +115,22 @@ public final class RedactionEngine {
      * Apply every rule to the human-readable parts of {@code text}, leaving inline binary payload
      * untouched.
      *
-     * <p><b>Why this exists.</b> Redaction over base64 was the dominant cost on the ingest path and it
-     * bought nothing. Measured on one ~1 MB inline image: 314 ms for the five built-ins, 281 ms of it
-     * the email rule alone — because base64's alphabet is {@code [A-Za-z0-9+/=]}, exactly what
-     * {@code [A-Za-z0-9._%+-]{1,64}} walks character by character. A batch of twenty such entries cost
-     * 6.3 s of CPU, synchronously, and that is what saturated production on 2026-07-31.
+     * <p>Redaction over base64 was the dominant cost on the ingest path and bought nothing: standard
+     * base64's alphabet is {@code [A-Za-z0-9+/=]}, so an email (needs {@code @}) or an IPv4 (needs
+     * {@code .}) cannot match inside a run. The card rule is the one exception, since its separator
+     * class is optional: a chance run of 13-16 digits inside an image matches, so unoptimised
+     * redaction could silently corrupt media bytes by substituting {@code [REDACTED_CARD]} into
+     * them. Skipping binary fixes that too.
      *
-     * <p>It bought little: standard base64's alphabet is {@code [A-Za-z0-9+/=]}, so an email (needs
-     * {@code @}) or an IPv4 (needs {@code .}) cannot match inside a run. SSN/phone/card are not
-     * excluded by the alphabet — digits are in it — but their {@code \b} anchors and separator
-     * requirements make a match inside a contiguous 512-char alphanumeric run vanishingly unlikely.
-     * The card rule is the one that CAN match, because its separator class is optional: a chance run
-     * of 13-16 digits inside an image matches, so the old behaviour could silently corrupt media
-     * bytes by substituting {@code [REDACTED_CARD]} into them. Skipping binary fixes that too.
+     * <p>The alphabet deliberately excludes base64url's {@code -} and {@code _}: including them would
+     * let a long run of digits-and-dashes qualify as "binary" and skip an embedded SSN. A base64url
+     * payload therefore still takes the slow path, correct but unoptimised, which is the right way
+     * round for a security control.
      *
-     * <p>Note the alphabet deliberately EXCLUDES base64url's {@code -} and {@code _}. Including them
-     * would let a long run of digits-and-dashes qualify as "binary" and skip an embedded SSN. A
-     * base64url payload therefore still takes the slow path — correct but unoptimised, which is the
-     * right way round for a security control.
-     *
-     * <p><b>Segment, don't skip wholesale.</b> A multimodal message interleaves text and media in one
-     * field, so skipping the whole field on sight of a blob would let real PII in the text ride through.
-     * Instead the binary runs are excised, the text between them is redacted normally, and the runs are
-     * re-joined byte-identical.
+     * <p>Segment, don't skip wholesale: a multimodal message interleaves text and media in one field,
+     * so skipping the whole field on sight of a blob would let real PII in the text ride through.
+     * Instead the binary runs are excised, the text between them is redacted normally, and the runs
+     * are re-joined byte-identical.
      */
     public static @Nullable String applyToTextParts(@Nullable String text, List<CompiledRule> rules) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
@@ -169,7 +149,7 @@ public final class RedactionEngine {
             while (i < n && isPayloadChar(text.charAt(i))) i++; // single pass, never re-scans
             int skipFrom = runStart + EDGE_MARGIN;
             int skipTo = i - EDGE_MARGIN;
-            if (skipTo - skipFrom < MIN_RUN) continue; // too short to be worth skipping — redact it as text
+            if (skipTo - skipFrom < MIN_RUN) continue; // too short to be worth skipping: redact it as text
             if (out == null) out = new StringBuilder(n);
             String segment = text.substring(cursor, skipFrom);
             // apply() is null-in/null-out and `segment` is a substring, so this is never null.
@@ -210,7 +190,7 @@ public final class RedactionEngine {
     /**
      * Above this length the payload is redacted as text without attempting a parse. This runs on the
      * drain thread for every entry, and materializing the whole tree of a multi-megabyte inline-media
-     * payload to find its string leaves costs more than the leaves are worth — {@link #applyToTextParts}
+     * payload to find its string leaves costs more than the leaves are worth; {@link #applyToTextParts}
      * already handles that shape well, by skipping the binary interior entirely.
      */
     private static final int MAX_JSON_PARSE_CHARS = 2_000_000;
@@ -220,37 +200,23 @@ public final class RedactionEngine {
      * values untouched. Falls back to {@link #applyToTextParts} for anything that is not a JSON object or
      * array, so a payload of prose is still redacted exactly as before.
      *
-     * <p><b>Why this exists — regex over serialized JSON is not safe and cannot be made safe.</b> A rule
-     * substitutes a bare token, and JSON's grammar says whether a bare token is legal where it lands. In a
-     * string it is fine; in a number position it is not. A Chrome {@code tabId} is a ten-digit integer and
-     * the built-in phone rule matches ten digits, so {@code "tabId": 1234567890} became
-     * {@code "tabId": [REDACTED_PHONE]} — not JSON — on <b>48.9% of MCP tool calls</b> in one corpus, and
-     * the typed {@code tool_call.arguments} column went null for every one of them. The content survived
-     * in {@code arguments_raw}; what was lost was the ability to query it.
+     * <p>Regex over serialized JSON is not safe: a rule substitutes a bare token, and JSON's grammar
+     * says whether a bare token is legal where it lands. In a string it is fine; in a number position
+     * it is not. A ten-digit numeric id can match the phone rule and turn valid JSON into a string
+     * that fails to parse, silently corrupting the typed columns downstream. Walking the parsed tree
+     * ends that category of bug: a number is unreachable by a text rule because it is never handed to
+     * one.
      *
-     * <p><b>This is the third patch of one root cause, and the first structural one.</b> The card rule
-     * once ate {@code 0.7799999999999999} and was fixed with lookarounds;
-     * {@code RedactionService.redactMetadata} exempts usage and cost keys by name because a cost "matches
-     * a phone-number rule on digit count alone". Each of those bought one pattern against one numeric
-     * shape. Walking the parsed tree ends the category instead: a number is unreachable by a text rule
-     * because it is never handed to one.
+     * <p>In the OpenAI-native tool shape, {@code arguments} is a JSON string containing JSON
+     * ({@code {"arguments": "{\"tabId\": 1234567890}"}}). A walk that treated that leaf as ordinary
+     * text would regex the nested document and reproduce the same bug one level down, so a string leaf
+     * that itself parses as an object or array is recursed into and re-serialized, bounded by
+     * {@link #MAX_JSON_DEPTH}.
      *
-     * <p><b>Prior art is unanimous.</b> Langfuse's SDK masks the Python object and only then serializes,
-     * so its own phone pattern never sees an {@code int}. The OpenTelemetry Collector's redaction
-     * processor does not scan non-string attribute values at all by default, and OTTL's masking functions
-     * skip them. Presidio dispatches per field rather than over a whole serialized document.
-     *
-     * <p><b>The trap this method exists to survive.</b> In the OpenAI-native tool shape, {@code arguments}
-     * is a JSON <em>string containing JSON</em> — {@code {"arguments": "{\"tabId\": 1234567890}"}} — and
-     * {@code SpanSideTables.toolPartField} reads it out with {@code isValueNode() ? asText() : toString()}.
-     * A walk that treated that leaf as ordinary text would regex the nested document and reproduce this
-     * bug exactly. So a string leaf that itself parses as an object or array is recursed into and
-     * re-serialized, bounded by {@link #MAX_JSON_DEPTH}.
-     *
-     * <p>Unchanged input returns the <em>same reference</em>, never a re-serialized equivalent. That is
-     * load-bearing beyond allocation: {@code SpanBatchWriter} strips an attribute only when its value is
-     * byte-for-byte identical to the promoted column, and a reformat on one side of that comparison and
-     * not the other would silently stop the strip working.
+     * <p>Unchanged input returns the same reference, never a re-serialized equivalent: {@code
+     * SpanBatchWriter} strips an attribute only when its value is byte-for-byte identical to the
+     * promoted column, and a reformat on one side of that comparison would silently stop the strip
+     * working.
      */
     public static @Nullable String applyToJson(@Nullable String json, List<CompiledRule> rules) {
         if (json == null || json.isEmpty() || rules.isEmpty()) return json;
@@ -263,7 +229,7 @@ public final class RedactionEngine {
             return JSON.writeValueAsString(redacted);
         } catch (JsonProcessingException e) {
             // It parsed, so it serializes; this is unreachable in practice. Falling back to the text path
-            // keeps the guarantee that matters — nothing unredacted is ever returned from here.
+            // keeps the guarantee that matters: nothing unredacted is ever returned from here.
             return applyToTextParts(json, rules);
         }
     }

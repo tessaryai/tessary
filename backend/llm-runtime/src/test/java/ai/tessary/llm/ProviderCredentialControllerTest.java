@@ -29,11 +29,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * First test coverage for {@link ProviderCredentialController} (issue #861 — confirmed absent
+ * First test coverage for {@link ProviderCredentialController} (confirmed absent
  * before this file: {@code ls backend/llm-runtime/src/test/java/ai/tessary/llm/} had no
  * {@code ProviderCredentialControllerTest.java}).
  *
- * <p>#939 D1 moved credentials off {@code (project, provider)} to {@code (org, provider)} — the
+ * <p>Credentials moved off {@code (project, provider)} to {@code (org, provider)} — the
  * route dropped {@code {projectSlug}} and every collaborator call here is keyed by {@code ORG_ID},
  * not {@code PROJECT_ID}.
  *
@@ -63,7 +63,7 @@ class ProviderCredentialControllerTest {
     @Mock
     private CapabilityService capabilities;
 
-    /** #939 TASK 2: unstubbed here means every provider's {@code refreshingRead} returns empty,
+    /** Unstubbed here means every provider's {@code refreshingRead} returns empty,
      *  which {@code catalog()} falls back to the static entries for — the same catalog shape every
      *  test in this file that touches {@code CatalogView} already expects. */
     @Mock
@@ -117,7 +117,7 @@ class ProviderCredentialControllerTest {
         assertThrows(TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.OPENAI));
     }
 
-    // ---- "never echoed back in full" — issue #861's already-verified-true criterion, pinned here ----
+    // ---- "never echoed back in full", pinned here ----
 
     @Test
     void upsertResponseNeverCarriesTheRawSecretOnlyBooleans() {
@@ -200,7 +200,7 @@ class ProviderCredentialControllerTest {
         verify(repo).update(any());
     }
 
-    // ---- delete invalidates the factory's cached client (org-wide, #939 D1) so the next call rebuilds ----
+    // ---- delete invalidates the factory's cached client (org-wide) so the next call rebuilds ----
 
     @Test
     void deleteInvokesFactoryInvalidate() {

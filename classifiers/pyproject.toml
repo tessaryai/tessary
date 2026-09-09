@@ -50,10 +50,10 @@ package = false
 [tool.pytest.ini_options]
 # The project is unpackaged (modules resolve from this directory as cwd) — mirror that for tests.
 #
-# THE OVERLAY ENTRY IS LOAD-BEARING — DO NOT PRUNE IT. #1293 relocated every classifier that is
+# THE OVERLAY ENTRY IS LOAD-BEARING — DO NOT PRUNE IT. This relocated every classifier that is
 # not open (`frustration`, `groundedness`, `behavior_drift`, `refusal`, `experiments`, `out`) plus
 # `sop_compiler` and the 17 tests that exercise them into the overlay, so this entry is now what
-# resolves ALL of them, not just top-level `sop_compiler` as it was under #843. The open packages
+# resolves ALL of them, not just top-level `sop_compiler` as it once did. The open packages
 # (`framework`, `tool_error`, `metric_drift`) keep resolving from `"."`, so a relocated test can
 # still import both halves.
 #
@@ -63,12 +63,12 @@ package = false
 #         ../tessary-paid/classifiers/tests/
 # `-c pyproject.toml` is REQUIRED, not decoration: with an argument outside this directory pytest
 # picks the repo root as rootdir, reads no config there, and applies neither entry below — every
-# relocated test then fails to import. Measured, #1293.
+# relocated test then fails to import. Measured directly.
 #
 # `"."` MUST stay first: pytest inserts these in declared order, and the overlay ahead of it would
 # shadow the open packages. It cannot collapse to a bare `["."]` either — `metric_drift/
 # export_corpus.py` spells its own import absolutely (`from metric_drift.corpus import ...`).
-# With `tessary-paid/` deleted (the public export, D2) the overlay entry is a non-existent
+# With `tessary-paid/` deleted (the public export) the overlay entry is a non-existent
 # directory, which pytest ignores, and only the six open tests under `tests/` remain — the truth.
 pythonpath = [".", "../tessary-paid/classifiers"]
 testpaths = ["tests"]

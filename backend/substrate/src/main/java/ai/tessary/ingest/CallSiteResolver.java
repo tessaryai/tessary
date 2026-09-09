@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
  * by hand. Trusted as-is — the call site is named explicitly at the source, so it survives refactors and
  * never mis-attributes. An untagged span resolves to {@code null} (unassigned); the resolver never guesses:
  * there is no fuzzy file matching and no structural fallback (see
- * docs/reference/ingestion-contract/README.md).
+ * devdocs/reference/ingestion-contract/README.md).
  */
 public final class CallSiteResolver {
 

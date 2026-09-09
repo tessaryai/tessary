@@ -34,7 +34,7 @@ import org.springframework.stereotype.Component;
  * actually serving the flagged traces?). The checklist is a starting point for the investigation, not a
  * gate in front of it.
  *
- * <p><b>Three checks left with Track A, and the gap is real.</b> {@code grader_definition},
+ * <p><b>Three checks are gone, and the gap is real.</b> {@code grader_definition},
  * {@code grading_health} and {@code traffic_mix} all read a store that no longer exists —
  * {@code verdict} for the first two, {@code span.environment_id} for the third. "Did the instrument
  * change?" and "did the instrument break?" are genuine RCA questions with no substitute here yet;

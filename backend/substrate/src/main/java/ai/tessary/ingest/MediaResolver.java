@@ -30,8 +30,7 @@ import org.springframework.stereotype.Component;
  * first live import that carries media.
  *
  * <p>Stores resolved bytes inline as a {@code data:} URI in the existing TEXT column at this boundary
- * (consistent with the inline-storage decision) for images and PDF documents (#985, Epic 8 Track B,
- * Decision 2). Large-binary externalization OUT of that TEXT column and into the {@code MediaStore}
+ * (consistent with the inline-storage decision) for images and PDF documents. Large-binary externalization OUT of that TEXT column and into the {@code MediaStore}
  * happens downstream, at the persistence chokepoint — see {@code MediaExternalizer}, which is fully
  * implemented (this resolver's job stops at inlining; it never touches {@code MediaStore} directly).
  *
@@ -71,7 +70,7 @@ public class MediaResolver {
     private final ObjectMapper mapper;
     private final HttpClient client;
 
-    // CORRECTED 2026-09-02 (#985): this comment used to say the MediaStore SPI was deferred and
+    // CORRECTED 2026-09-02: this comment used to say the MediaStore SPI was deferred and
     // unbuilt ("build NOTHING yet ... No no-op interface now") — that was true when it was written and
     // is false today. `MediaStore` (backend/shared/.../open/media/MediaStore.java), its shipping
     // Postgres `bytea` implementation (`PostgresMediaStore`), and the externalization seam
@@ -80,7 +79,7 @@ public class MediaResolver {
     // out-of-band provider media (Langfuse tokens today) as a `data:` URI in the TEXT column, and
     // `MediaExternalizer` is what externalizes inline base64 OUT of that column into `MediaStore`
     // afterward, at the batch-write chokepoint downstream of this class. The `media_ref` table
-    // (0001) records which payload references which media_object, which is what makes the bytes
+    // records which payload references which media_object, which is what makes the bytes
     // collectable — nothing about that changed.
 
     // @Autowired disambiguates the injection constructor from the package-private test ctor below
@@ -168,7 +167,7 @@ public class MediaResolver {
             String url = meta.path("url").asText(null);
             String contentType = meta.path("contentType").asText(mimeHint == null ? "image/png" : mimeHint);
             if (url == null || url.isBlank()) return null;
-            // Only inline images and PDF documents (#985, Decision 2 — no audio/video). Anything else
+            // Only inline images and PDF documents (no audio/video). Anything else
             // is left as a token rather than inlined — it would only reach the judge as an unsupported
             // block.
             if (contentType == null || !(contentType.startsWith("image/") || "application/pdf".equals(contentType))) {

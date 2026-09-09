@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # docker-compose.yml stays publishable as an OCI artifact, and stays runnable by someone who has
-# cloned nothing (epic 7's one-command install).
+# cloned nothing (the one-command install).
 #
 # THE COMMAND THIS DEFENDS, published verbatim on tessary.ai's hero, its closing block and
 # /llms.txt:
@@ -191,7 +191,7 @@ echo "$P: --- (4) the release stamp pins every image and changes nothing else"
 # only source of truth, so docker-compose.yml's image defaults float to `${TESSARY_VERSION:-latest}`
 # and scripts/publish-compose-artifact.sh stamps the release's own version in on the way out
 # (scripts/lib/pin-compose-version.py). That stamp is the whole reason a floating repository file
-# can still publish a PINNED artifact, which is epic 7 clause 1's requirement, so it is checked here
+# can still publish a PINNED artifact, which the one-command install requires, so it is checked here
 # rather than trusted: run it with a probe version and require the rendered config to differ from
 # the unpinned one in exactly the image references and nowhere else. A stamp that silently missed a
 # service would otherwise publish a config with one floating image in it, and the ordering guarantee

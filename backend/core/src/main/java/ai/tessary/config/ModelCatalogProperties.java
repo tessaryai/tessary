@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Tuning for the live per-provider model catalog fetch (#939 TASK 2), bound from
+ * Tuning for the live per-provider model catalog fetch, bound from
  * {@code tessary.model-catalog.*}. Each provider's model list is fetched from that provider's own
  * API, cached by {@code (provider, region)}, and refreshed on this TTL — see {@code
  * ModelCatalogFetchService}, the sole reader.
@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * cache-only, the hot judge-call path), while a shorter fetch timeout means a slow or hanging vendor
  * degrades the picker faster rather than blocking a settings-page load for its full network timeout.
  * Defaults are conservative rather than tuned against production traffic, since there is none yet —
- * revisit once #939 ships and the fetch pattern is observable.
+ * revisit once the fetch pattern is observable.
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.model-catalog")

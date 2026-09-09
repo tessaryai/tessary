@@ -25,17 +25,17 @@ import org.springframework.stereotype.Component;
  * against a hand-maintained catalog that priced only the handful of models the PLATFORM calls — a third of
  * production calls were on models that catalog did not list, and the gap was Opus, the expensive one. Both
  * of those jobs are gone: ingested spans are priced on arrival against the versioned {@code price_book}
- * (migration 0075) and never repriced, and the platform lane moved onto the same book (migration 0084).
+ * and never repriced, and the platform lane moved onto the same book.
  * The ONE reader left is {@code classifier/metric/MetricSource}'s {@link #billsCacheCreation}, which asks
  * a question about billing CONVENTION rather than about dollars and asks it once per leaf span inside a
  * sweep — an in-memory map read, where the book's repository would be three queries. Retiring this class
  * means giving {@code PriceBookRepository} a cached convention lookup; until then it reads the same file,
  * so the two cannot disagree about which models carry a cache-creation rate.
  *
- * <p><b>Until #1032, a second hand-maintained file layered corrections on top of this one</b>, including a
+ * <p><b>A second hand-maintained file used to layer corrections on top of this one</b>, including a
  * {@code global.amazon.nova-2-lite-v1:0} cache-creation rate the vendored snapshot has never carried — no
- * Nova generation, at any scope, has ever published one upstream. That override was an unverified guess
- * (see the issue), not a sourced correction, so #1032 retired it rather than reconcile it: Nova cache
+ * Nova generation, at any scope, has ever published one upstream. That override was an unverified guess,
+ * not a sourced correction, so it was retired rather than reconciled: Nova cache
  * writes now read as unpriced here and in {@code pricing/ModelResolver#billsCacheCreation}, which agree
  * because both now read this same single file.
  *

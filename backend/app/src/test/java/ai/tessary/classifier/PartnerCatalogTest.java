@@ -26,37 +26,31 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * The partner-facing catalog (launch segment D), against real {@code org_feature_flag} rows.
+ * The partner-facing classifier catalog, against real {@code org_feature_flag} rows.
  *
- * <p>The claim under test is that two orgs' classifier lists differ by <b>configuration only</b>: every module
- * stays defined for everyone, and which of them an org sees is one row. Concretely:
+ * <p>The claim under test is that two orgs' classifier lists differ by <b>configuration only</b>:
+ * every module stays defined for everyone, and which of them an org sees is one row.
  *
- * <ol>
- *   <li><b>D1/D3</b> — the non-launch classifiers stay defined and are hidden by flag; one org targeted on
- *       sees all of them while an org that has withheld them sees the launch catalog, with no code branch
- *       between them.
- *   <li><b>D2</b> — turning a capability off reaches <b>already-seeded</b> projects, not just newly created ones:
- *       the classifier leaves the list, 404s by id, and stops being swept.
- *   <li><b>risk 7</b> — switched off is not withdrawn. Withholding writes nothing, so the project's own
- *       {@code enabled} switch survives the flag going off <em>and</em> a full resync (which runs the
- *       retirement path), and flipping the flag back on restores exactly what the project had rather than
- *       the catalog's seed default.
- * </ol>
+ * <ul>
+ *   <li>The non-launch classifiers stay defined and are hidden by flag; an org targeted on sees
+ *       all of them, an org that has withheld them sees the launch catalog, with no code branch
+ *       between the two.
+ *   <li>Turning a capability off reaches <b>already-seeded</b> projects, not just newly created
+ *       ones: the classifier leaves the list, 404s by id, and stops being swept.
+ *   <li>Switched off is not withdrawn. Withholding writes nothing, so the project's own
+ *       {@code enabled} switch survives the flag going off <em>and</em> a full resync (which
+ *       runs the retirement path), and flipping the flag back on restores exactly what the
+ *       project had.
+ * </ul>
  *
- * <p><b>THE BASELINE INVERTED WITH THE OPEN EDITION.</b> This used to run behind the {@code enterprise} tier
- * with every classifier flagged off globally and targeted on per org, so "a partner does not see it" was the
- * ambient state. The open edition defaults every capability ON except the four paid classifiers, so withholding
- * is now the thing a case has to say out loud: an org that must not see a classifier gets an explicit
- * {@code false} row. That is a truer test of the same claim — the withholding is now visible in the test rather
- * than inherited from a deployment property.
- *
- * <p><b>Most cases seed while their capabilities are ON and narrow afterwards</b>, so each starts from a fully-seeded
- * project — the only starting state in which "takes effect on existing projects" means anything. The ordering
- * is also the asymmetry itself: a capability going <em>off</em> takes effect on the next read, because
- * withholding is a filter, whereas one going <em>on</em> takes effect on the next re-seed, because the row has
- * to be inserted before anything can list it. In production {@link ClassifierCatalogWorker} is that re-seed; in most
- * cases here it is an explicit {@code seedBuiltIns}, and in {@link #flagOnReachesAProjectWithNoTracesAtAll()}
- * it is the worker itself, because <em>which projects that worker scans</em> is the thing under test.
+ * <p>Most cases seed while their capabilities are ON and narrow afterwards, so each starts from a
+ * fully-seeded project, the only starting state in which "takes effect on existing projects"
+ * means anything. A capability going <em>off</em> takes effect on the next read, because
+ * withholding is a filter; one going <em>on</em> takes effect on the next re-seed, because the
+ * row has to be inserted before anything can list it. In production {@link
+ * ClassifierCatalogWorker} is that re-seed; here it is usually an explicit {@code seedBuiltIns},
+ * and in {@link #flagOnReachesAProjectWithNoTracesAtAll()} it is the worker itself, because
+ * <em>which projects that worker scans</em> is the thing under test.
  */
 @SpringBootTest
 class PartnerCatalogTest {
@@ -67,8 +61,9 @@ class PartnerCatalogTest {
     }
 
     /**
-     * The classifiers a launch partner must not see (decision D3). {@code tool_error} is absent because it is
-     * a launch classifier, and the other two launch keys are absent because they are launch classifiers too.
+     * The classifiers a launch partner must not see. The three launch classifiers
+     * ({@code tool_error}, {@code duration_drift}, {@code cost_drift}) are absent from this list
+     * on purpose.
      */
     private static final List<Capability> NON_LAUNCH = List.of(
             Capability.FRUSTRATION,
@@ -108,8 +103,8 @@ class PartnerCatalogTest {
     }
 
     /**
-     * Pin one capability OFF for one org — an explicit row, not the absence of one. In the open edition the
-     * absence of a row means ON for everything under test here, so withholding has to be stated.
+     * Pin one capability OFF for one org: an explicit row, not the absence of one. The absence of
+     * a row means ON for everything under test here, so withholding has to be stated.
      */
     private void withhold(String orgId, Capability capability) {
         overrides.upsert(orgId, capability.wire(), false);
@@ -139,9 +134,10 @@ class PartnerCatalogTest {
         var us = TenantFixture.bootstrap(tenants, "catalog-us");
         var partner = TenantFixture.bootstrap(tenants, "catalog-partner");
 
-        // Both orgs run the same code on the same edition. The ONLY difference below is one row per org.
-        // Seed BOTH projects with the whole catalog first, so the partner's rows below are ones that already
-        // exist — the point of D2 is that a capability change reaches a project running for months.
+        // Both orgs run the same code. The only difference below is one row per org. Seed both
+        // projects with the whole catalog first, so the partner's rows below are ones that
+        // already exist: a capability change has to reach a project that has been running for
+        // months.
         for (Capability capability : NON_LAUNCH) {
             grant(us.org().id(), capability);
             grant(partner.org().id(), capability);
@@ -171,8 +167,9 @@ class PartnerCatalogTest {
                 "a partner's catalog is the launch classifiers and nothing else — the original two, "
                         + "tool_error having joined them with its own detector");
 
-        // D1: hidden, not withdrawn. Every module the partner cannot see is still defined and still seeded
-        // as a row in their project — one row away from appearing, with no migration and no re-seed.
+        // Hidden, not withdrawn: every module the partner cannot see is still defined and still
+        // seeded as a row in their project, one row away from appearing, with no migration and no
+        // re-seed.
         for (String hidden :
                 List.of("frustration", "groundedness", "secret_leak", "malformed_output", "behavior_drift")) {
             assertTrue(
@@ -185,8 +182,8 @@ class PartnerCatalogTest {
     void flaggingOffReachesAnAlreadySeededProjectAndStopsItSweeping() {
         var fix = TenantFixture.bootstrap(tenants, "catalog-withdraw");
         String projectId = fix.project().id();
-        // Seeded and visible while the capability is on — the state a project is in before anyone flips
-        // anything.
+        // Seeded and visible while the capability is on: the state a project is in before anyone
+        // flips anything.
         grant(fix.org().id(), Capability.SECRET_LEAK);
         classifiers.seedBuiltIns(projectId);
         assertTrue(visibleKeys(projectId).contains("secret_leak"), "on, the classifier is in the list");
@@ -214,17 +211,16 @@ class PartnerCatalogTest {
      *
      * <p>Hiding the row alone would be a half-measure: its findings sit in the Findings list on the same
      * page, and an alert rule on it can still page someone about a detector their org no longer has. Both
-     * are gated. What stays is history — past detections and any case already open — because a case is a
+     * are gated. What stays is history: past detections and any case already open, because a case is a
      * record of something that happened, and withdrawing the detector does not un-happen it.
      */
     @Test
     void flagOffAlsoGatesFindingsAndAlertsButNotHistory() {
         var fix = TenantFixture.bootstrap(tenants, "catalog-downstream");
         String projectId = fix.project().id();
-        // behavior_drift is a PAID classifier and off by default in an open build, so this grant is what
-        // gives the case something to withdraw. An explicit override still wins for an unavailable
-        // capability — see CapabilityService.resolveOne — which is what makes this test possible while the
-        // drift code is still physically in the open tree (epic 1 issue 4 moves it).
+        // behavior_drift is off by default, so this grant is what gives the case something to
+        // withdraw. An explicit override still wins for an unavailable capability; see
+        // CapabilityService.resolveOne.
         grant(fix.org().id(), Capability.BEHAVIOR_DRIFT);
         classifiers.seedBuiltIns(projectId);
 
@@ -253,32 +249,25 @@ class PartnerCatalogTest {
     }
 
     /**
-     * A flag going ON reaches a project that has <b>never sent a single trace</b>.
+     * A flag going ON must reach a project that has <b>never sent a single trace</b>: catalog
+     * provisioning must not be a function of trace ingestion, or a capability flip on a quiet
+     * project would silently wait for its first production span before taking effect.
      *
-     * <p>This is the regression the whole case exists for. Catalog provisioning used to run inside the sweep
-     * heartbeat's loop over {@code projectsWithObservations()} — {@code SELECT DISTINCT project_id FROM span}
-     * — which quietly made "which classifiers does this org have" a function of trace ingestion. A project
-     * with zero spans was not in that scan at all, so turning a capability on for it did nothing whatsoever:
-     * the org sat on the platform-default catalog until its first production span landed, at which point the
-     * missing classifiers appeared within a heartbeat with nobody having touched anything. That is
-     * indistinguishable, from outside, from a feature flag that takes a day to propagate.
-     *
-     * <p>So the test drives {@link ClassifierCatalogWorker#tick()} rather than {@code resyncBuiltIns}: the bug
-     * was never in what a resync does to one project, it was in which projects were handed to it. Asserting
-     * mid-test that the project is absent from {@code projectsWithObservations()} pins that — the old scope
-     * would skip this project, and the new one reaches it because it asks the project table instead.
+     * <p>The test drives {@link ClassifierCatalogWorker#tick()} rather than {@code
+     * resyncBuiltIns}, because which projects get scanned is what is under test. Asserting
+     * mid-test that the project is absent from {@code projectsWithObservations()} pins that a
+     * project with zero spans is reached anyway.
      */
     @Test
     void flagOnReachesAProjectWithNoTracesAtAll() {
-        // behavior_drift is off by DEFAULT in an open build, which is what keeps this premise reachable: the
-        // creation-time ClassifierSeedListener cannot seed it, so the only thing that can make the row appear
-        // later is the periodic reconcile. (This case used to pre-set a flag OFF before bootstrapping the org.
-        // It cannot any more — an override is a row keyed by an org id, and the org does not exist yet.)
+        // behavior_drift is off by default, which is what keeps this premise reachable: the
+        // creation-time ClassifierSeedListener cannot seed it, so the only thing that can make the
+        // row appear later is the periodic reconcile.
         var fix = TenantFixture.bootstrap(tenants, "catalog-no-traces");
         String projectId = fix.project().id();
         assertFalse(visibleKeys(projectId).contains("behavior_drift"), "off at creation, never seeded");
 
-        grant(fix.org().id(), Capability.BEHAVIOR_DRIFT); // the org buys it — nothing else changes
+        grant(fix.org().id(), Capability.BEHAVIOR_DRIFT); // the org gains the capability, nothing else changes
         assertFalse(
                 substrate.projectsWithObservations().contains(projectId),
                 "the project has never ingested a span, which used to make it invisible to provisioning");
@@ -294,11 +283,10 @@ class PartnerCatalogTest {
     }
 
     /**
-     * The risk-7 discriminator, and the reason it is written as a test rather than only as a comment: if a
-     * future edit ever expresses "flagged off" by disabling the row — the one-line change that merges this
-     * path into {@code retireDroppedBuiltIns} — this assertion is what fails. It asserts the row is still
-     * {@code enabled} after the flag went off AND after a resync ran the retirement path over it, which is
-     * exactly what a withdrawal would have destroyed.
+     * Guards against a future edit that expresses "flagged off" by disabling the row instead of
+     * withholding it: it asserts the row is still {@code enabled} after the flag went off and
+     * after a resync has run the retirement path over it, which is exactly what a withdrawal
+     * would have destroyed.
      */
     @Test
     void flagOffNeverWritesToTheRow() {
@@ -335,8 +323,9 @@ class PartnerCatalogTest {
         grant(fix.org().id(), Capability.MALFORMED_OUTPUT);
         classifiers.seedBuiltIns(projectId);
 
-        // The project makes its OWN decision — malformed_output seeds enabled, and this project turns it off.
-        // That is the second of the two stacked questions; the capability layer only ever answers the first.
+        // The project makes its own decision: malformed_output seeds enabled, and this project
+        // turns it off. That is the second of the two stacked questions; the capability layer
+        // only ever answers the first.
         String id = storedRow(projectId, "malformed_output").id();
         classifiers.setEnabled(projectId, id, false);
 

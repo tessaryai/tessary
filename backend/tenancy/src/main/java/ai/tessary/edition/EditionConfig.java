@@ -6,11 +6,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the OPEN edition's {@link Edition}, in the one shape that lets the paid overlay displace it. Same
- * trap and same fix as {@code OrgCreationLimitConfig} and {@code FeatureFlagsConfig}: the condition has to
- * sit on a {@code @Bean} METHOD so the overlay's component-scanned {@code PaidEdition}, registered during
- * the parse phase, is already present when this condition is evaluated. See those two classes for the
- * commit that shipped the component-scanned variant failing in both editions.
+ * Wires this build's default {@link Edition} bean. The {@code @ConditionalOnMissingBean} sits on the
+ * {@code @Bean} method rather than the class, so a bean registered elsewhere during the parse phase
+ * can override it.
  */
 @Configuration(proxyBeanMethods = false)
 public class EditionConfig {

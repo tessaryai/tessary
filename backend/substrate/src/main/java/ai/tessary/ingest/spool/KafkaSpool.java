@@ -51,7 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The opt-in spool (#984): a Kafka-API broker (Kafka, Redpanda, or any compatible) holds every
+ * The opt-in spool: a Kafka-API broker (Kafka, Redpanda, or any compatible) holds every
  * accepted batch. {@link #append} publishes with {@code acks=all} and waits for the broker's
  * acknowledgement before answering, so a 200 means the batch is on the broker's log (and on its
  * disk: write caching is turned off on the topics where the broker accepts it); a publish that fails

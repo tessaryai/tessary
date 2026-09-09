@@ -135,9 +135,8 @@ class TraceSpanMapperTest {
 
     @Test
     void imageInput_realHttpUrl_neverFetched_emitsLabeledPlaceholderPart() throws Exception {
-        // An OpenAI image_url part with a REAL http(s) URL must NOT vanish in the text flatten, and
-        // must NOT be fetched at export time (same no-fetch posture as ingest/the judge boundary) — it
-        // stays a labeled placeholder carrying the URL, and flags the message has_media.
+        // A real http(s) image_url is never fetched at export time (same no-fetch posture as
+        // ingest); it becomes a labeled placeholder carrying the URL and flags has_media.
         ObjectNode span = TraceSpanMapper.toSpan(
                 raw(
                         "[{\"role\":\"user\",\"content\":["
@@ -150,7 +149,7 @@ class TraceSpanMapperTest {
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals(1, in.size());
         assertTrue(in.get(0).get("has_media").asBoolean(), "the message must be flagged has_media");
-        // Concatenate the parts' content; the image must appear as a labeled placeholder, not dropped.
+        // The image must appear as a labeled placeholder, not dropped.
         StringBuilder all = new StringBuilder();
         for (JsonNode part : in.get(0).get("parts"))
             all.append(part.get("content").asText()).append("|");
@@ -160,9 +159,8 @@ class TraceSpanMapperTest {
 
     @Test
     void anthropicBase64Image_inlinedAsDataUri_realPreservation() throws Exception {
-        // #986: a base64 image's bytes are already inline (no MediaStore round trip needed) — the
-        // export now inlines them verbatim as a data: URI in the plain-string content field, rather
-        // than always collapsing to the pre-#986 "[image omitted: <mediaType>]" label.
+        // A base64 image's bytes are already inline, so export writes them verbatim as a
+        // data: URI in the content field instead of an "[image omitted]" label.
         String b64 = java.util.Base64.getEncoder().encodeToString(new byte[] {1, 2, 3, 4});
         ObjectNode span = TraceSpanMapper.toSpan(
                 raw(
@@ -214,8 +212,8 @@ class TraceSpanMapperTest {
 
     @Test
     void documentB64_inlinedAsDataUri() throws Exception {
-        // The real Anthropic wire shape (as TraceSpanMapper actually receives it from a payload) — see
-        // anthropicBase64Image_inlinedAsDataUri_realPreservation's image counterpart.
+        // The real Anthropic wire shape TraceSpanMapper receives from a payload; see
+        // anthropicBase64Image_inlinedAsDataUri_realPreservation for the image counterpart.
         String b64 =
                 Base64.getEncoder().encodeToString("PDF bytes here".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         ObjectNode span = TraceSpanMapper.toSpan(
@@ -250,7 +248,7 @@ class TraceSpanMapperTest {
         assertEquals(
                 "data:application/pdf;base64," + Base64.getEncoder().encodeToString(pdf),
                 in.get(0).get("parts").get(0).get("content").asText(),
-                "export preserves the real bytes, not the extracted text — #986 is byte preservation");
+                "export preserves the real bytes, not the extracted text");
     }
 
     @Test
@@ -287,7 +285,7 @@ class TraceSpanMapperTest {
         assertEquals(
                 "[document: application/pdf]\nextracted at ingest",
                 in.get(0).get("parts").get(0).get("content").asText(),
-                "a media-store miss must not discard text already extracted at ingest (#986/#987)");
+                "a media-store miss must not discard text already extracted at ingest");
     }
 
     @Test
@@ -334,7 +332,7 @@ class TraceSpanMapperTest {
         assertFalse(in.get(0).has("has_media"), "a text-only message carries no has_media flag");
     }
 
-    /** In-memory MediaStore keyed by ref id, mirroring ContentBlocksMediaRefTest's fake. */
+    /** In-memory MediaStore keyed by ref id. */
     private static MediaStore fakeStore(Map<String, StoredMedia> byId) {
         return new MediaStore() {
             @Override

@@ -29,7 +29,7 @@ public class ClassifierProperties {
     private int maxAttempts = 5;
 
     /**
-     * Floor between automatic revival attempts for a {@code dead}-lettered sweep job — one that fast-failed
+     * Floor between automatic revival attempts for a {@code dead}-lettered sweep job: one that fast-failed
      * {@link #maxAttempts} times in a row ({@code ClassifierJobRepository#markFailed}) or whose lease expired
      * that many times because the worker hung/crashed ({@code ClassifierJobRepository#failExhausted}). The
      * per-heartbeat enqueue call won't resurrect a {@code dead} job until this many seconds have passed
@@ -40,7 +40,7 @@ public class ClassifierProperties {
 
     /**
      * Classifier signals. Cold-start training labels a bounded sample of recent observations with a
-     * platform-funded LLM (the whole point is to keep the LLM off the per-trace hot path — bound by COUNT,
+     * platform-funded LLM (the whole point is to keep the LLM off the per-trace hot path, bound by COUNT,
      * never by truncating trace text), embeds them, and trains a per-project centroid model.
      */
     private int classifierSampleLimit = 100;
@@ -54,7 +54,7 @@ public class ClassifierProperties {
      * how much history rides through {@link
      * ai.tessary.classifier.substrate.ConversationThreadRenderer#reduceThread}: over budget it keeps the
      * baseline head (earliest turn + earliest failure marker) and the most-recent {@link
-     * #threadRecentTurns} turns, thins the middle, and marks the drop. ~8000 chars ≈ ~2k tokens — the
+     * #threadRecentTurns} turns, thins the middle, and marks the drop. ~8000 chars is ~2k tokens; the
      * encoder is not finally pinned, so this stays a config knob.
      */
     private int threadCharBudget = 8000;
@@ -74,37 +74,23 @@ public class ClassifierProperties {
     private int threadMaxObservations = 40;
 
     /**
-     * How stale an idle behaviour profile may get before the periodic fit re-runs it anyway.
+     * How stale an idle behaviour profile may get before the periodic fit re-runs it anyway. A trace
+     * delta is the fast path, but it cannot be the only one: graduation and quarantine expiry are
+     * driven by wall clock, not by arrivals, so an epoch that stops receiving traces must still be
+     * fitted occasionally or a gram that earned normality would never be promoted.
      *
-     * <p>The fit's enqueue scope used to be every open epoch, every tick. Almost all of that work was
-     * provably redundant: with no traces folded in since the last fit, the alphabet, discovery units,
-     * mean support and reservoir quantile all recompute to the same values, so the fit rewrote the row
-     * with what it already held. On the deployed single-instance box ~58 open profiles were re-fitted
-     * every 15 minutes and pegged both vCPUs for 5-15 of them — the fit is CPU-bound in the JVM
-     * (trajectory re-assembly for the rare-symbol refit), not in Postgres, so nothing about it was
-     * cheap.
-     *
-     * <p>A trace delta is therefore the fast path, but it cannot be the only one: graduation (§4.2) and
-     * quarantine expiry are driven by <em>wall clock</em>, not by arrivals, so an epoch that stops
-     * receiving traces must still be fitted occasionally or a gram that earned normality would never
-     * be promoted. Both bars are measured in days, so a slow lane in hours costs nothing. Idleness is
-     * not staleness (migration 0031) — this schedules the idle profile, it does not park it.
-     *
-     * <p>This is a <b>ceiling, not a period</b>: the worker jitters each profile's slot by a stable
-     * hash of its id over {@code (interval/2, interval]}, so idle profiles that came due together do
-     * not re-form one wide burst at a longer period. Raising it spreads the herd wider as well as
-     * later.
+     * <p>This is a ceiling, not a period: the worker jitters each profile's slot by a stable hash of
+     * its id over {@code (interval/2, interval]}, so idle profiles that came due together do not
+     * re-form one wide burst at a longer period. Raising it spreads the herd wider as well as later.
      */
     private long behaviorFitIdleIntervalMs = 21_600_000; // 6h
 
     /**
      * How soon after a LEARNING profile's corpus stops growing its next fit is due, until it has taken
-     * the sustained quiet fits arming needs (#1248). Saturation on a corpus that arrived and then
-     * stopped (a backfill, a test corpus, a project between bursts, a scheduled agent) is measured by
-     * exactly those quiet fits, and on the idle lane alone they land 3 to 12 hours out; this lane
-     * makes each due one delay after the last, so they land on the next fit ticks
-     * ({@code behavior-fit-ms}, 15 minutes by default) rather than hours later, then hands the profile
-     * back to the idle interval. The delay is a floor; the tick is the period.
+     * the sustained quiet fits arming needs. Saturation on a corpus that arrived and then stopped is
+     * measured by exactly those quiet fits, and on the idle lane alone they land 3 to 12 hours out;
+     * this lane makes each due fit land on the next tick instead, then hands the profile back to the
+     * idle interval. The delay is a floor; the tick is the period.
      */
     private long behaviorFitSettleDelayMs = 60_000;
 
@@ -128,8 +114,8 @@ public class ClassifierProperties {
      * Consecutive launcher-level failures before the triage drain parks itself.
      *
      * <p>Not one: a single connect failure is a blip and re-claiming is the right response. Three in a
-     * row is the launcher, not the network. Counted as a RUN — any run that reaches the launcher
-     * resets it — so an intermittent sidecar never accumulates its way to a trip.
+     * row is the launcher, not the network. Counted as a RUN: any run that reaches the launcher
+     * resets it, so an intermittent sidecar never accumulates its way to a trip.
      */
     private int triageBreakerFailures = 3;
 
@@ -141,15 +127,11 @@ public class ClassifierProperties {
     private long triageBreakerCooldownSeconds = 300;
 
     /**
-     * How long a triage job waits before re-checking a missing or unusable org credential.
-     *
-     * <p>A credential gap is not a failure of the finding and not a failure of the launcher, so it
-     * neither spends an attempt nor trips {@link #triageBreakerFailures} — one org with no key must not
-     * park every other org's drain. What is left is a job that will keep failing identically until a
-     * human visits Settings → Providers, and this is how often it is worth asking again. Long enough
-     * that a parked backlog cannot crowd real work out of the claim batch, short enough that adding
-     * the credential is the whole fix: the next window picks the job up on its own, with its full
-     * attempt budget intact.
+     * How long a triage job waits before re-checking a missing or unusable org credential. A
+     * credential gap is not a failure of the finding and not a failure of the launcher, so it neither
+     * spends an attempt nor trips {@link #triageBreakerFailures}: one org with no key must not park
+     * every other org's drain. The job will keep failing identically until a human adds a credential,
+     * so this is how often it is worth asking again.
      */
     private long triageConfigRetrySeconds = 1800;
 
@@ -157,7 +139,7 @@ public class ClassifierProperties {
      * How many times a CLOSED finding's cause must fire again before it goes back through triage.
      *
      * <p>Recurrence is the recovery, and this is its threshold. Triage closes on {@code negative} and on
-     * {@code unclear}, so a wrongly-closed finding is not a lost one — its cause keeps firing, the
+     * {@code unclear}, so a wrongly-closed finding is not a lost one: its cause keeps firing, the
      * counter climbs, and at this many firings within {@link #triageReopenWindowHours} the ruling is
      * cleared and a second look is scheduled. A finding that has already had its two looks and closed
      * again opens a case directly instead: the agent has said its piece twice, and the third time a
@@ -177,7 +159,7 @@ public class ClassifierProperties {
      * https://app.tessary.ai), the same value {@code tessary.rca.agentic.mcp-base-url} carries for RCA.
      *
      * <p><b>Blank is a broken deployment, not a degraded mode.</b> The dossier is the detector's own
-     * numbers and nothing else — no hydrated traces — so an agent with no MCP door cannot open a single
+     * numbers and nothing else, no hydrated traces, so an agent with no MCP door cannot open a single
      * piece of the evidence it is auditing, and the only ruling it could reach is a restatement of the
      * claim. The engine refuses to run rather than produce one, which surfaces as retries and then a
      * dead letter (see {@code BehaviorTriageEngine}).
@@ -198,52 +180,36 @@ public class ClassifierProperties {
     /**
      * Where the SOP-conformance sweep's sentence encoder comes from. The conformance artifact bundle
      * names a frozen checkpoint (e.g. {@code Alibaba-NLP/gte-large-en-v1.5}) and deliberately does
-     * not bundle its weights; {@link #encoderMode} picks who runs the forward pass:
-     *
-     * <ul>
-     *   <li>{@code http} (the default, and the production posture) — the classify-service's
-     *       {@code POST /embed} endpoint via {@code HttpConformanceEncoder}, reusing the service
-     *       endpoint the encoder classifiers already call ({@code tessary.observer.encoder.url} /
-     *       {@code .api-key}). CPU inference stays in the process that can only ever kill its own
-     *       task (the 2026-07-12 incident's lesson); the checkpoint must be present in the
-     *       service's {@code embedders.json} or the sweep fails loudly.
-     *   <li>{@code in-jvm} — an in-process ONNX Runtime pass via {@code OnnxConformanceEncoder},
-     *       kept as the parity/smoke harness and local fallback, pointed at a local model
-     *       directory by {@link #encoderModelDir}/{@link #encoderCheckpoint}. <b>Paid only.</b> #841
-     *       took that implementation and its two native dependencies into the paid conformance
-     *       module, so the OPEN edition ships no in-JVM encoder and this value selects nothing
-     *       there — see {@link #encoderMode}.
-     * </ul>
+     * not bundle its weights; {@link #encoderMode} picks who runs the forward pass. {@code http} (the
+     * default, and the production posture) calls the classify-service's {@code POST /embed} endpoint
+     * via {@code HttpConformanceEncoder}, reusing the endpoint the encoder classifiers already call;
+     * the checkpoint must be present in the service's {@code embedders.json} or the sweep fails
+     * loudly. {@code in-jvm} runs an in-process ONNX Runtime pass instead; see {@link #encoderMode}
+     * for what this build does with that mode.
      *
      * <p>Everything is unset by default beyond the mode: the classifier seeds disabled behind
      * {@code sop_conformance_enabled}, and an enabled deterministic bundle (no heads) never touches
-     * the encoder, so nothing needs a model or an endpoint until a head-carrying bundle is deployed
-     * — at which point an unconfigured encoder fails the sweep loudly rather than scoring on
-     * garbage.
+     * the encoder, so nothing needs a model or an endpoint until a head-carrying bundle is deployed,
+     * at which point an unconfigured encoder fails the sweep loudly rather than scoring on garbage.
      */
     public static class Conformance {
 
         /**
          * Which {@code ConformanceEncoder} serves the sweep
-         * ({@code tessary.classifier.conformance.encoder-mode}): {@code http} (default — the
-         * classify-service {@code /embed} endpoint) or {@code in-jvm} (the in-process ONNX pass,
-         * kept for parity/smoke and as a fallback). Any other value leaves no encoder bean — a typo
-         * must never silently pick an implementation.
+         * ({@code tessary.classifier.conformance.encoder-mode}): {@code http} (default: the
+         * classify-service {@code /embed} endpoint) or {@code in-jvm} (an in-process ONNX pass). Any
+         * other value leaves no encoder bean, since a typo must never silently pick an implementation.
          *
-         * <p><b>{@code in-jvm} needs the paid conformance module.</b> The open edition's only
-         * implementation of the port is {@code HttpConformanceEncoder}, conditional on {@code http};
-         * {@code OnnxConformanceEncoder} left for {@code tessary-paid/conformance} with the ONNX and
-         * tokenizer dependencies in #841. So on an open deployment {@code in-jvm} is indistinguishable
-         * from a typo, and it is treated as one: no encoder bean is registered, and the first caller
-         * that needs one fails naming this property. It is NOT a startup failure — no open bean takes
-         * this port at all any more: conversation-grain intent resolution, the one caller that held it
-         * through an {@code ObjectProvider} for exactly this reason, moved with the rest of the
-         * conformance classifier to the paid module in #1072.
+         * <p>This build's only implementation of the encoder port is {@code HttpConformanceEncoder},
+         * conditional on {@code http}, so {@code in-jvm} is indistinguishable from a typo here and is
+         * treated as one: no encoder bean is registered, and the first caller that needs one fails
+         * naming this property. It is not a startup failure by itself, since no caller in this build
+         * holds the port unconditionally.
          */
         private String encoderMode = "http";
 
         /**
-         * {@code in-jvm} mode only: directory holding the ONNX export of the checkpoint —
+         * {@code in-jvm} mode only: directory holding the ONNX export of the checkpoint:
          * {@code tokenizer.json} plus {@code model.onnx} (or {@code onnx/model.onnx}, the HF hub
          * layout). Ignored in {@code http} mode, where the classify-service's baked
          * {@code embedders.json} registry owns model resolution.
@@ -251,7 +217,7 @@ public class ClassifierProperties {
         private String encoderModelDir = "";
 
         /**
-         * {@code in-jvm} mode only: the checkpoint NAME {@link #encoderModelDir} serves — must
+         * {@code in-jvm} mode only: the checkpoint NAME {@link #encoderModelDir} serves, must
          * equal the bundle manifest's {@code encoder.checkpoint}, or the encoder refuses to embed
          * (a bundle fitted against one encoder scored with another is exactly the silent
          * divergence the parity fixture exists to prevent). In {@code http} mode the same refusal
@@ -261,66 +227,47 @@ public class ClassifierProperties {
         private String encoderCheckpoint = "";
 
         /**
-         * {@code in-jvm} mode only: how many encoder forward passes may run concurrently in this
-         * JVM ({@code tessary.classifier.conformance.encoder-concurrency}). Historical context: the
-         * in-process pass was the interim posture after the 2026-07-12 classify-service OOM
-         * incident, and this semaphore was its containment — a transformer forward pass allocates
-         * per-call native buffers proportional to sequence length, and an unbounded number of
-         * concurrent sweeps sharing the backend heap is exactly the failure shape that incident
-         * taught. The accepted plan has since landed: {@code http} mode serves embeddings from the
-         * classify-service {@code /embed} endpoint, whose bounded in-flight/queue gate is the
-         * production backpressure. This knob still bounds the {@code in-jvm} fallback (default 2).
+         * {@code in-jvm} mode only: how many encoder forward passes may run concurrently in this JVM
+         * ({@code tessary.classifier.conformance.encoder-concurrency}). A transformer forward pass
+         * allocates per-call native buffers proportional to sequence length, so an unbounded number
+         * of concurrent sweeps sharing the process heap risks an OOM. {@code http} mode gets its
+         * backpressure from the classify-service's own in-flight/queue gate instead; this knob bounds
+         * only the {@code in-jvm} fallback (default 2).
          */
         private int encoderConcurrency = 2;
 
         /**
-         * Ceiling on how many TURNS one conformance sweep tick may load and score
-         * ({@code tessary.classifier.conformance.max-turns-per-sweep}) — the bound on embedding
-         * volume, which {@link ClassifierProperties#batchSize} does not provide.
+         * Ceiling on how many turns one conformance sweep tick may load and score
+         * ({@code tessary.classifier.conformance.max-turns-per-sweep}), the bound on embedding
+         * volume that {@link ClassifierProperties#batchSize} does not provide: {@code batch-size}
+         * bounds the fresh turns a tick reads past its cursor, but the sweep then re-loads each
+         * named conversation whole, so 200 fresh turns spread across 200 long conversations is
+         * thousands of turns to embed against a classify-service queue shared with {@code /classify}.
          *
-         * <p>Why a second bound is needed: {@code batch-size} bounds the FRESH turns a tick reads
-         * past its cursor, but the sweep then re-loads each named conversation WHOLE (the
-         * cumulative tool view is undefined over half a conversation), so 200 fresh turns spread
-         * across 200 long conversations is thousands of turns to embed. Those texts go to the
-         * classify-service, whose in-flight gate and queue are SHARED with {@code /classify}: an
-         * unbounded conformance tick starves the frustration and groundedness detectors serving
-         * every other project on the deployment.
-         *
-         * <p>500 as the default: comfortably above the 200-turn fresh batch, so ordinary growth
-         * (short conversations, one or two fresh turns each) is never deferred and the guard is
-         * invisible in the common case; and low enough that one tick's embedding is ~16 sequential
-         * {@code /embed} requests at the encoder's 32-texts-per-request chunking, which the shared
-         * queue absorbs between heartbeats.
-         *
-         * <p>The bound is applied at a CONVERSATION boundary and is therefore soft in exactly one
-         * direction: a single conversation longer than the cap is admitted whole rather than split,
-         * because splitting it would manufacture violations, and refusing it would stall the cursor
-         * forever. Deferred conversations are not skipped — the cursor stops before the first fresh
-         * turn of the first deferred conversation, so the next tick picks them up. Zero or negative
-         * disables the cap.
+         * <p>The bound applies at a conversation boundary and is soft in one direction: a single
+         * conversation longer than the cap is admitted whole rather than split, since splitting it
+         * would manufacture violations. Deferred conversations are not skipped; the cursor stops
+         * before the first fresh turn of the first deferred conversation, so the next tick picks
+         * them up. Zero or negative disables the cap.
          */
         private int maxTurnsPerSweep = 500;
 
         /**
-         * How many CONSECUTIVE sweeps must fire a conformance finding before automatic Layer-2
+         * How many consecutive sweeps must fire a conformance finding before automatic Layer-2
          * escalation may spend a triage on it
          * ({@code tessary.classifier.conformance.min-confirmations}).
          *
-         * <p>Escalation is paid E2B/LLM work, and this detector's measured false alarms are
-         * dominated by transient composition wobble — one window whose traffic mix happens to push
-         * a rule past its own reference, gone by the next sweep. A recurrence bar counted in
-         * ACTIVATIONS ({@code triageMinTraceCount}) does not catch that: a wobble can be
-         * wide and still be a wobble. This bar is counted in TIME, which is the axis the false
-         * alarm actually lives on.
+         * <p>Escalation is costly agentic work, and this detector's measured false alarms are
+         * dominated by transient composition wobble: one window whose traffic mix happens to push a
+         * rule past its own reference, gone by the next sweep. A recurrence bar counted in
+         * activations ({@code triageMinTraceCount}) does not catch that, since a wobble can be wide
+         * and still be a wobble; this bar is counted in time instead.
          *
-         * <p>2 as the default: the smallest value that is a persistence claim at all — the deficit
-         * survived a sweep it could have stopped firing on — costing one heartbeat of delay rather
-         * than hours, so a real regression is still escalated the same working minute. Higher
-         * values trade recall of short spells for spend. 1 restores the pre-guard behaviour;
-         * {@code conformance_finding.consecutive_confirmations} is the counter.
-         *
-         * <p>Deliberately scoped to conformance rather than to the shared escalator: behaviour
-         * drift's eligibility must stay bit-identical.
+         * <p>2 as the default: the smallest value that is a persistence claim at all, costing one
+         * heartbeat of delay rather than hours. 1 restores the pre-guard behaviour;
+         * {@code conformance_finding.consecutive_confirmations} is the counter. Scoped to
+         * conformance rather than to the shared escalator, since behaviour drift's eligibility must
+         * stay bit-identical.
          */
         private int minConfirmations = 2;
 

@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * {@code POST /auth/signup} and {@code POST /auth/login} (#852) driven through the real
+ * {@code POST /auth/signup} and {@code POST /auth/login} driven through the real
  * {@link PasswordAuthProvider} bean (no WorkOS configured -- the open-edition default posture),
  * plus the {@code GET /auth/login} degrade-to-redirect guard. Container-free on the
  * {@code OpenApiSpecDriftTest} precedent for the property setup; the isolated Postgres database
@@ -109,11 +109,11 @@ class AuthControllerTest {
         // With PasswordAuthProvider active (isEnabled()=true, supportsRedirectFlow()=false), the
         // OAuth GET must degrade to the dev-shortcut redirect, not call authorizationUrl() on a
         // provider that has no OAuth dance -- verifies the AuthController guard added in step 5.
-        // #853 strengthens this: the bounce target is now the frontend's own /login screen, not
-        // the app root -- the app root sits behind ProtectedRoute, which would have sent an
-        // unauthenticated visitor straight back to this same GET, i.e. the redirect loop #853 fixes.
-        // The signup below pins which screen that is: #1227 sends a deployment with no account at
-        // all to /signup instead, and this class shares one database across its methods, so the
+        // The bounce target is the frontend's own /login screen, not the app root -- the app root
+        // sits behind ProtectedRoute, which would send an unauthenticated visitor straight back to
+        // this same GET, i.e. a redirect loop.
+        // The signup below pins which screen that is: a deployment with no account at all goes to
+        // /signup instead, and this class shares one database across its methods, so the
         // target would otherwise depend on method order.
         mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -132,9 +132,9 @@ class AuthControllerTest {
     @Test
     void getAuthModeReportsPasswordPosture() throws Exception {
         // PasswordAuthProvider (this file's whole posture, per the class javadoc) is enabled but
-        // has no OAuth dance, so /auth/mode must report redirectFlow=false -- the signal the new
-        // Login/Signup views (#853) poll to decide whether to render a form or bounce to WorkOS.
-        // firstRun (#1227) is the second half of that answer: an account exists by the time this
+        // has no OAuth dance, so /auth/mode must report redirectFlow=false -- the signal the
+        // Login/Signup views poll to decide whether to render a form or bounce to WorkOS.
+        // firstRun is the second half of that answer: an account exists by the time this
         // asserts, so /login is a real destination and the view must not hand the visitor to
         // /signup. Same method-order reasoning as the degrade test above.
         mvc.perform(post("/auth/signup")

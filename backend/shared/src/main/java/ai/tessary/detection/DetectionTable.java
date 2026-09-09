@@ -5,19 +5,15 @@ import java.util.regex.Pattern;
 
 /**
  * One classifier's detection table, registered as a Spring bean by whichever module owns the
- * classifier — the open {@code OpenDetectionTables} configuration for the four open kinds, and one
- * {@code @Bean} per paid classifier module (groundedness, behaviour-drift, frustration) for the
- * rest. {@link DetectionTableRegistry} folds every bean on the classpath into one lookup, so the
- * writer, the retention sweep and the four query-side readers stop naming any of the six tables by
- * literal string.
+ * classifier. {@link DetectionTableRegistry} folds every bean on the classpath into one lookup, so
+ * the writer, the retention sweep and the query-side readers stop naming any table by literal
+ * string.
  *
- * <p><b>{@link Grain} here is deliberately NOT {@code ClassifierModelModule.Grain}</b> (in
- * {@code backend/analysis}, {@code OBSERVATION}/{@code TURN}/{@code TRACE}/{@code WINDOW}) — that
- * enum answers "what does the sweep dispatch on", a scoring-time question invisible from
- * {@code backend/shared}. This one answers "what does {@code subject_kind} say in the stitched
- * union" — a storage-shape question the two open-per-span/paid-per-trace grains the six tables
- * actually use answer completely. Conflating the two would drag analysis's scoring vocabulary into
- * a module with no dependency on analysis at all.
+ * <p>{@link Grain} here is deliberately not {@code ClassifierModelModule.Grain} (in
+ * {@code backend/analysis}): that enum answers "what does the sweep dispatch on", a scoring-time
+ * question invisible from {@code backend/shared}. This one answers "what does {@code subject_kind}
+ * say in the stitched union", a storage-shape question. Conflating the two would drag analysis's
+ * scoring vocabulary into a module with no dependency on analysis at all.
  *
  * @param detectorKind one of {@code BuiltInDetector.Kind}'s constants (a plain {@code String} here
  *     because {@code backend/shared} has no dependency on {@code backend/analysis}, where that enum

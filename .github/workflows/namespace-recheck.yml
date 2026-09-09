@@ -1,12 +1,11 @@
-# Namespace ownership recheck (epic 6 clause 7, #1152): every registry, hub and source-control
+# Namespace ownership recheck: every registry, hub and source-control
 # coordinate the tree's own install instructions and release pipeline reference still resolves,
 # through the platform's own ownership signal, to tessaryai, and every coordinate the tree
-# references is in scripts/lib/namespace-inventory.txt. Quarterly, because the namespace-reuse
-# precedents this clause cites ran on multi-year gaps between abandonment and exploitation, plus
+# references is in scripts/lib/namespace-inventory.txt. Quarterly, because namespace-reuse
+# attacks typically rely on multi-year gaps between abandonment and exploitation, plus
 # on dispatch. release.yml runs the same check before any manifest merges. A red run opens an issue for the security rota, the same routing
 # scrub-gate.yml uses and for the same reason: no mail credentials, and an issue is what the rota
-# can act on. The confusable-name scan the clause originally carried is cut for this launch
-# (ruled 2026-09-07); this job is the ownership half.
+# can act on. This job covers namespace ownership only, not confusable-name scanning.
 name: namespace-recheck
 
 on:

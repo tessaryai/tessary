@@ -38,7 +38,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.redpanda.RedpandaContainer;
 
 /**
- * The opt-in Kafka-API spool end to end against a real broker (#984, criteria 1 to 3): an accepted
+ * The opt-in Kafka-API spool end to end against a real broker: an accepted
  * batch is on the broker before the edge answers and reaches the substrate through the same drain;
  * a consumer that dies before its ack is handed the same record again and a redelivered batch is a
  * no-op on the idempotent write; a broker that cannot be reached sheds rather than acknowledges; an

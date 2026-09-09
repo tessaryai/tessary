@@ -29,7 +29,7 @@ class ContextLoadsTest {
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        // workos.* deliberately blank. Since #924 that alone no longer makes AuthFilter no-op --
+        // workos.* deliberately blank. That alone no longer makes AuthFilter no-op --
         // TestAuthDisabledInitializer supplies tessary.auth.disabled=true for every test context, and
         // the filter needs both. See that initializer for why the suite states it once rather than
         // in 115 files.

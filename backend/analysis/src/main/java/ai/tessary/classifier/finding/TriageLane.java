@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
  * production traffic, and no source file settles whether such a claim is true; what the run actually
  * lacked was the traffic, which it now reads through MCP. The repository went to RCA, which asks the
  * question it answers. {@code grader} ran the call site's graders against the finding's cited traces;
- * Track A removed grading from the platform, so there are no rubrics left to run.
+ * grading was removed from the platform, so there are no rubrics left to run.
  *
  * <p>The enum is kept at one constant rather than folded into a literal: {@link #wire()} is on the
  * wire, {@link #subject()} / {@link #against()} / {@link #label()} are the product copy every surface

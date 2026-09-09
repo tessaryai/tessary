@@ -43,21 +43,18 @@ import org.springframework.stereotype.Component;
 
 /**
  * The async signal-detection worker. On an operational heartbeat it dead-letters poison jobs,
- * enqueues a sweep job per enabled signal for every project that has substrate observations, then claims
- * due jobs ({@code FOR UPDATE SKIP LOCKED}) and dispatches each to the bounded {@code signalTaskExecutor}.
- * Each sweep reads observations past the classifier's cursor, runs the built-in detector, writes signal
- * detections as verdicts idempotently, and advances the cursor.
+ * enqueues a sweep job per enabled signal for every project that has substrate observations, then
+ * claims due jobs ({@code FOR UPDATE SKIP LOCKED}) and dispatches each to the bounded {@code
+ * signalTaskExecutor}. Each sweep reads observations past the classifier's cursor, runs the
+ * built-in detector, writes signal detections as verdicts idempotently, and advances the cursor.
  *
- * <p><b>This worker no longer provisions the catalog.</b> Which built-ins a project HAS is
- * {@code ClassifierCatalogWorker}'s job, on its own {@code tessary.classifier.catalog-resync-ms}
- * heartbeat over every ACTIVE project; which of them SWEEP is this one's, and that scope is
- * legitimately "projects with observations" because a job on a project with no spans would be claimed
- * and dispatched to sweep an empty window every tick forever. Running the provisioning pass here made
- * the two scopes one, so a capability flag could not reach a project until that project's first span
- * landed — see {@code ClassifierCatalogWorker}'s javadoc for the failure it caused.
+ * <p>This worker doesn't provision the catalog: which built-ins a project has is {@code
+ * ClassifierCatalogWorker}'s job, over every active project. Which of them this worker sweeps is
+ * scoped to "projects with observations," since a job on a project with no spans would be claimed
+ * and dispatched to sweep an empty window every tick forever.
  *
- * <p>Strictly off the ingest hot path: it reads what the substrate write path produced; it is
- * NEVER hooked into {@code SubstrateWriter.enqueue}. The worker itself is always on, and every
+ * <p>Strictly off the ingest hot path: it reads what the substrate write path produced and is
+ * never hooked into {@code SubstrateWriter.enqueue}. The worker itself is always on, and every
  * project is seeded, so participation is decided only by which built-ins the tenant left enabled.
  */
 @Component
@@ -82,9 +79,8 @@ public class ClassifierWorker {
     private final BuiltInClassifierCatalog catalog;
     private final PreDeployCheckService preDeployChecks;
     /**
-     * Every classifier sweep on this classpath, by the detector kind it claims. One bean where four
-     * concrete sweeps used to be fields: the worker no longer knows which classifiers exist, which is
-     * what lets a classifier ship from a jar this reactor does not build.
+     * Every classifier sweep on this classpath, by the detector kind it claims. The worker doesn't
+     * know which classifiers exist; a classifier attaches by being on the classpath.
      */
     private final ClassifierSweepRegistry sweeps;
 
@@ -223,7 +219,7 @@ public class ClassifierWorker {
                         .field("classifierId", job.classifierId())
                         .field("reason", reason)
                         .log();
-                jobs.markSwept(job.id(), null, null); // signal removed/disabled — leave the cursor, finish
+                jobs.markSwept(job.id(), null, null); // signal removed/disabled: leave the cursor, finish
                 sweepFailures.clear(job.id());
                 return;
             }
@@ -244,10 +240,10 @@ public class ClassifierWorker {
                 sweepSignal(job, signal, start);
             }
         } catch (RuntimeException e) {
-            // Severity policy (gh#532) meets the dead-letter budget (gh#531): one sweep failing is a WARN
-            // (deduped — first of a streak carries the stacktrace, repeats collapse to a summary), and the
-            // alertable ERROR is reserved for the budget-exhausted dead-letter transition. Clearing the
-            // streak on dead-letter means each post-cooldown revival probe that fails again logs fresh.
+            // One sweep failing is a WARN, deduped: the first of a streak carries the stacktrace,
+            // repeats collapse to a summary. The alertable ERROR is reserved for the budget-exhausted
+            // dead-letter transition. Clearing the streak on dead-letter means each post-cooldown
+            // revival probe that fails again logs fresh.
             boolean deadLettered = jobs.markFailed(job.id(), e.getMessage(), props.getMaxAttempts());
             final @Nullable String readableSignal = classifierKey;
             if (deadLettered) {
@@ -280,15 +276,13 @@ public class ClassifierWorker {
     }
 
     /**
-     * The body of one sweep, once the signal is resolved and its {@code classifierKey} is bound to MDC. The
-     * grain enum is the single source of truth for which SEAM runs: the fitting tier (TRACE and WINDOW)
-     * scores a unit larger than an observation against fitted per-project state, so it cannot ride the
-     * observation-grain detector seam — but it reuses this job's cursor, lease, and dead-letter budget
-     * verbatim. There is no new scheduler and no new job table for any of it.
+     * The body of one sweep, once the signal is resolved and its {@code classifierKey} is bound to
+     * MDC. The grain enum is the single source of truth for which seam runs: the fitting tier
+     * (TRACE and WINDOW) scores a unit larger than an observation against fitted per-project state,
+     * so it can't ride the observation-grain detector seam, but it reuses this job's cursor, lease,
+     * and dead-letter budget verbatim. There's no new scheduler and no new job table for any of it.
      *
-     * <p>WHICH sweep runs inside that seam is a lookup, not an {@code if/else} chain. This method used
-     * to name {@code BehaviorDriftSweep} and {@code ConformanceSweep} directly, which made the open
-     * engine uncompilable without both paid classifiers; now it holds
+     * <p>Which sweep runs inside that seam is a lookup, not an {@code if/else} chain: it holds
      * {@link ClassifierSweepRegistry} and a classifier attaches by being on the classpath.
      */
     private void sweepSignal(ClassifierJobRow job, ClassifierRow signal, Instant start) {
@@ -297,22 +291,14 @@ public class ClassifierWorker {
             case TRACE, WINDOW -> {
                 Optional<ClassifierSweep> sweep = sweeps.forKind(signal.detector());
                 if (sweep.isEmpty()) {
-                    // INERT, and three things it deliberately is not.
-                    //
-                    // Not a throw and not a dead-letter: this job is re-pended by every heartbeat, so a
-                    // failing branch here would burn the attempt budget of a project whose only fault is
-                    // running an edition that does not ship this classifier, forever.
-                    //
-                    // Above all not a fallthrough. The arm this replaced ended `else -> metricSweep`, so
-                    // any WINDOW kind without a case of its own silently ran metric drift instead of its
-                    // own analysis. `tool_error` did exactly that once: its config blob names no
-                    // `measures`, MetricDriftConfig fell back to the full default set, and it kept a
-                    // second copy of every duration and cost baseline and emitted a duplicate finding per
-                    // drift under its own classifier id. Nothing failed loudly.
-                    //
-                    // And the classifier is NOT retired for it. Absence of a sweep says nothing about
-                    // catalog membership — see ClassifierService#retireDroppedBuiltIns, where leaving the
-                    // catalog is permanent.
+                    // Inert, deliberately: not a throw and not a dead-letter, since this job is
+                    // re-pended by every heartbeat and a failing branch here would burn the attempt
+                    // budget of a project whose only fault is having no sweep registered for this kind,
+                    // forever. Not a fallthrough either: routing an unmatched WINDOW kind to metric
+                    // drift once kept a second copy of every duration and cost baseline and emitted a
+                    // duplicate finding under the wrong classifier id, with nothing failing loudly. And
+                    // the classifier is not retired for it; see ClassifierService#retireDroppedBuiltIns,
+                    // where leaving the catalog is permanent.
                     StructuredLog.warn(log, Markers.OPS, "signal.sweep.no-handler")
                             .message(
                                     "no classifier sweep is registered for detector kind %s; completing the job "
@@ -339,27 +325,24 @@ public class ClassifierWorker {
     }
 
     /**
-     * Drop turns whose CONVERSATION this classifier has already flagged at the HIGH band.
+     * Drop turns whose conversation this classifier has already flagged at the HIGH band.
      *
-     * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on is
-     * the CONVERSATION — and a conversation is one event, not one per turn. interview-coach carried
-     * 8,012 frustration detections over 987 conversations (2026-08-20): 8.12 rows per conversation,
-     * each one a separate encoder call, all saying the same thing about the same conversation.
+     * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on
+     * is the conversation, which is one event, not one per turn: one project measured 8.12
+     * frustration detections per conversation, each a separate encoder call, all saying the same
+     * thing.
      *
-     * <p>HIGH is the ceiling, which is what makes this safe to skip rather than merely de-duplicate on
-     * write: no later turn can move a conversation that is already flagged at the top band, so scoring
-     * one is work with no possible outcome. A conversation flagged only at LOW is deliberately still
-     * scored, so it can escalate — suppressing on any band would freeze a mild early turn as the
-     * conversation's final answer and hide the severe turn that came after it.
+     * <p>HIGH is the ceiling, which is what makes this safe to skip rather than merely de-duplicate
+     * on write: no later turn can move a conversation already flagged at the top band. A
+     * conversation flagged only at LOW is deliberately still scored so it can escalate; suppressing
+     * on any band would freeze a mild early turn as the conversation's final answer.
      *
-     * <p>Turns with no session id are never suppressed: a trace that belongs to no conversation has no
-     * conversation to have been flagged, and {@code sessionId} is legitimately null for producers that
-     * send none (see {@link SubstrateObservation}).
+     * <p>Turns with no session id are never suppressed: a trace with no conversation has none to
+     * have been flagged, and {@code sessionId} is legitimately null for producers that send none.
      *
-     * <p>This does NOT narrow what the classifier flags — a conversation still gets flagged the first
-     * time it earns it. It removes repeat rows about conversations already flagged, which is a volume
-     * and cost property, not a precision one: a signal firing on three quarters of conversations still
-     * fires on three quarters of them after this.
+     * <p>This doesn't narrow what the classifier flags; a conversation still gets flagged the first
+     * time it earns it. It removes repeat rows about conversations already flagged, a volume and
+     * cost property, not a precision one.
      */
     private List<SubstrateObservation> suppressAlreadyFlaggedConversations(
             String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
@@ -385,12 +368,11 @@ public class ClassifierWorker {
 
     /** The observation-grain sweep, drawing its candidate window at {@code grain}. */
     private void sweepObservationGrain(ClassifierJobRow job, ClassifierRow signal, Grain grain, Instant start) {
-        // A detector with no registered DetectionTable has nowhere to write a fired detection —
+        // A detector with no registered DetectionTable has nowhere to write a fired detection:
         // ClassifierDetectionWriteRepository#insert throws IllegalArgumentException for exactly this
-        // case, and the writer's own javadoc says the caller checks writesDetections first. Before
-        // this gate, nothing here actually did: only ClassifierArming's config read did. This applies
+        // case, and the writer's own javadoc says the caller checks writesDetections first. Applies
         // to CLASSIFIER and REGEX too, since both route through this same TURN/OBSERVATION grain and
-        // both share user_classifier_detection — see OpenDetectionTables, which registers both.
+        // share user_classifier_detection.
         if (!detections.writesDetections(signal.detector())) {
             StructuredLog.warn(log, Markers.OPS, "signal.sweep.no-table")
                     .message(
@@ -411,9 +393,9 @@ public class ClassifierWorker {
         BuiltInDetector detector = catalog.detectorFor(signal.detector());
         String detectorConfig = signal.configJson();
 
-        // The window is what the CURSOR advances over, and it is the same unfiltered stream at both
-        // grains so the cursor always moves. `obs` — what actually gets scored — is the window minus the
-        // rows the grain rejects, so a dropped row is never re-offered on a later tick.
+        // The window is what the cursor advances over, the same unfiltered stream at both grains so
+        // the cursor always moves. `obs`, what actually gets scored, is the window minus the rows the
+        // grain rejects, so a dropped row is never re-offered on a later tick.
         List<SubstrateObservation> window;
         List<SubstrateObservation> obs;
         if (grain == Grain.TURN) {
@@ -451,10 +433,10 @@ public class ClassifierWorker {
         Instant nowInstant = Instant.now();
         int fired = 0;
         // The first genuinely-new detection of this sweep, captured to drive the pre-deploy
-        // registration exactly once per sweep — never per-event — so the trigger stays cheap
-        // even when a whole batch fires (perf: no per-event work, no risk-model rank).
+        // registration exactly once per sweep, never per-event, so the trigger stays cheap even
+        // when a whole batch fires.
         NewDetection firstNew = null;
-        // What this sweep flagged, in sweep order, as evidence refs — handed to the arming gate so a
+        // What this sweep flagged, in sweep order, as evidence refs, handed to the arming gate so a
         // finding it opens is already pointing at the spans that opened it.
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
         if (detector != null) {
@@ -499,24 +481,24 @@ public class ClassifierWorker {
         // Cursor advances over the WINDOW, not the scored subset: a per-turn duplicate dropped above must
         // stay dropped, not resurface as the first row of the next window and get scored after all.
         SubstrateObservation last = window.get(window.size() - 1);
-        // The COMPOSITE handle, not a bare span id. Span identity is (project_id, trace_id, id), and the
-        // job table has two cursor columns for a three-part keyset, so both id halves ride cursor_id as
-        // "<trace_id>:<span_id>" — the spelling SubstrateReadRepository.parseHandle reads back. A bare
-        // span id has no colon, parses as "no cursor", and the sweep then restarts from page one on
-        // every tick forever: not a crash, just an unbounded re-scan that never advances.
+        // The composite handle, not a bare span id. Span identity is (project_id, trace_id, id), and
+        // the job table has two cursor columns for a three-part keyset, so both id halves ride
+        // cursor_id as "<trace_id>:<span_id>", the spelling SubstrateReadRepository.parseHandle reads
+        // back. A bare span id has no colon, parses as "no cursor", and the sweep then restarts from
+        // page one on every tick forever: not a crash, just an unbounded re-scan that never advances.
         jobs.markSwept(
                 job.id(), last.createdAt(), SubstrateReadRepository.handle(last.traceId(), last.observationId()));
         sweepFailures.clear(job.id());
         logSweepComplete(job, signal, grain, obs.size(), fired, start);
-        // The classifier's OWN arming, evaluated here rather than by an alerting worker reading the
+        // The classifier's own arming, evaluated here rather than by an alerting worker reading the
         // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
-        // Fail-soft for the same reason everything else after the cursor advance is — the detections
+        // Fail-soft for the same reason everything else after the cursor advance is: the detections
         // have landed, and a failure to roll them up must not make the sweep re-score the window.
         armIfConfigured(job.projectId(), signal, firedRefs, nowInstant);
-        // A genuinely-NEW production signal discovery closes the loop to the edge — register a
-        // routed, surface-scoped pre-deploy check so a FUTURE PR touching those surfaces is checked
-        // pre-merge. Fired once per sweep off `firstNew` (not per-event), behind tessary.predeploy.enabled,
-        // fail-soft (logged, never failing the sweep or blocking the cursor).
+        // A genuinely-new production signal discovery closes the loop to the edge: register a
+        // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
+        // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
+        // tessary.predeploy.enabled, fail-soft.
         registerPreDeployCheck(job.projectId(), signal, firstNew);
     }
 
@@ -557,20 +539,19 @@ public class ClassifierWorker {
     }
 
     /**
-     * At most one scored observation per turn, keeping the earliest by the window's {@code (created_at,
-     * id)} order. The structural turn-root filter already drops inner calls and the {@code agent}/{@code
-     * llm} twin (the twin is the root's CHILD), so this only bites when a producer emits several
-     * PARENTLESS root spans under one turn — several sequential top-level LLM calls answering one user
-     * message. Those are one user utterance, and the classifier must speak once about it.
+     * At most one scored observation per turn, keeping the earliest by the window's {@code
+     * (created_at, id)} order. The structural turn-root filter already drops inner calls and the
+     * {@code agent}/{@code llm} twin, so this only bites when a producer emits several parentless
+     * root spans under one turn: several sequential top-level LLM calls answering one user message.
+     * Those are one user utterance, and the classifier must speak once about it.
      *
-     * <p>Scope is the window, not all history, and it no longer needs to be more: a turn whose roots
-     * straddle a batch boundary used to be scored twice because the verdict's uniqueness was
-     * span-scoped. Frustration's detection table keys on the trace, so the cross-batch case is now a
-     * conflict rather than a duplicate row, and this filter is left doing the one job it is right for —
-     * not scoring the same turn several times inside one batch.
+     * <p>Scope is the window, not all history: frustration's detection table keys on the trace, so a
+     * turn whose roots straddle a batch boundary is a write-time conflict rather than something this
+     * filter has to catch, and it's left doing the one job it's right for, not scoring the same turn
+     * several times inside one batch.
      *
-     * <p>An observation with no turn context ({@code turnId == null}) is never folded into another — it
-     * keys on its own id, so an unparented span stays its own unit rather than colliding with one.
+     * <p>An observation with no turn context is never folded into another; it keys on its own id, so
+     * an unparented span stays its own unit rather than colliding with one.
      */
     private static List<SubstrateObservation> oneScoredObservationPerTurn(List<SubstrateObservation> window) {
         Set<String> seenTurns = new HashSet<>();
@@ -582,19 +563,16 @@ public class ClassifierWorker {
     }
 
     /**
-     * Write a fired detection into this classifier's own table (migration {@code 0088}), carrying the
-     * producer subject the detection is about — the session it belongs to (null for anonymous traffic),
-     * its trace, and its span — plus the detector's severity, confidence band and evidence.
+     * Write a fired detection into this classifier's own table, carrying the producer subject the
+     * detection is about (the session it belongs to, null for anonymous traffic, its trace, and its
+     * span) plus the detector's severity, confidence band, and evidence.
      *
-     * <p><b>The turn-grain duplicate is fixed by the table, not by a lookup.</b> This used to write a
-     * {@code verdict} whose uniqueness was span-scoped, so a frustration firing under a DIFFERENT
-     * parentless root span of the same turn inserted a second row, and the guard against it was a
-     * read of every verdict on the trace. Frustration's detection table's unique key is the trace: the
-     * turn IS the trace in v2, that is the grain the classifier judges at, and a second root under one
-     * turn now conflicts rather than needing to be looked up.
+     * <p>The turn-grain duplicate is fixed by the table, not a lookup: the detection table's unique
+     * key is the trace, the grain the classifier judges at, so a second parentless root span under
+     * one turn conflicts on write rather than needing to be checked for.
      *
-     * <p>Fail-soft: a persistence failure degrades to a logged warning so one bad detection never fails
-     * the sweep or blocks the cursor.
+     * <p>Fail-soft: a persistence failure degrades to a logged warning so one bad detection never
+     * fails the sweep or blocks the cursor.
      *
      * @return the new detection, or null when this classifier had already spoken about this subject
      */

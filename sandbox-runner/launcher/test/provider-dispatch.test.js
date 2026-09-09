@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * #939 D4: provider-dispatch coverage for the launcher's FULL REMOVAL of the deployment-env-var
- * credential path. Before D4, this file tested `requestProvider` (an optional per-request field
+ * Provider-dispatch coverage for the launcher's FULL REMOVAL of the deployment-env-var
+ * credential path. This file used to test `requestProvider` (an optional per-request field
  * layered on top of a deployment-wide AGENT_PROVIDER default) — that default is gone entirely, so
  * every function here now takes a required `credential` object (the org's own ProviderCredential
  * row, decrypted by the backend) as its only source of provider identity and secrets. The sibling
@@ -62,7 +62,7 @@ test('toProviderModel: a credential naming a non-Bedrock provider wins even for 
   assert.equal(toProviderModel('openai.gpt-5.6-luna', GROK_CRED), 'grok/openai.gpt-5.6-luna');
 });
 
-// ---- providerConfig: EXACTLY one provider block per credential (#939 D4 — no more "always both
+// ---- providerConfig: EXACTLY one provider block per credential (no more "always both
 // Bedrock endpoints plus an optional merge") ----
 
 test('providerConfig: a BEDROCK credential declares only the bedrock-runtime block, from the credential\'s own region', () => {
@@ -138,7 +138,7 @@ test('agentEnvs: a BEDROCK credential forwards the credential\'s own AWS keys, n
 });
 
 test('agentEnvs: a BEDROCK credential with unset AWS keys OMITS them entirely, not as empty strings (the IAM-role sandbox-side fix)', () => {
-  // The concrete regression carried over from #939's earlier landing: an explicitly-set-but-empty
+  // The concrete regression carried over from an earlier landing: an explicitly-set-but-empty
   // AWS_ACCESS_KEY_ID would short-circuit the AWS SDK's DefaultCredentialsProvider chain before it
   // ever reaches an instance/task role. An iam_role-mode credential never reaches this launcher in
   // production (see AGENTIC_IAM_ROLE_UNSUPPORTED on the backend), but the omission behavior itself

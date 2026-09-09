@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * D (#994): the {@code metric_drift} shape — {@code MetricFindingEvidence.toJson}'s blob.
+ * Renders the {@code metric_drift} shape — {@code MetricFindingEvidence.toJson}'s blob.
  *
  * <p><b>The contribution/concentration table is the {@code explains[]} array, ranked by
  * {@code covered}.</b> That field already answers "how much of the parent bucket's shift does this

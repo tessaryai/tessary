@@ -57,7 +57,7 @@ class ImportControllerTest {
         r.add("tessary.secret-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         // Enable auth so this test exercises the real, authenticated request path -- say so
         // directly rather than configuring a fake external-provider key as an indirect toggle.
-        // See TestAuthDisabledInitializer's javadoc (#852/#996).
+        // See TestAuthDisabledInitializer's javadoc.
         r.add("tessary.auth.disabled", () -> "false");
     }
 
@@ -292,9 +292,9 @@ class ImportControllerTest {
 
     /**
      * A full minimal bundle: one call site, one failure mode — and a grader shard that must be IGNORED.
-     * The grader file is deliberately still here after Track A removed grading: every repo written by a
-     * current plugin ships one, so "the import skips it rather than failing" is exactly what these tests
-     * have to keep proving.
+     * The grader file is deliberately still here even though this repo synthesises, runs or scores no
+     * grader: every repo written by a current plugin ships one, so "the import skips it rather than
+     * failing" is exactly what these tests have to keep proving.
      */
     private MockMultipartFile[] bundle(String prefix, MockMultipartFile... extra) {
         var base = new MockMultipartFile[] {

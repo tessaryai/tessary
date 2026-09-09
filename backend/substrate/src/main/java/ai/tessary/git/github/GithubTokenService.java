@@ -75,7 +75,7 @@ public class GithubTokenService implements GitTokenService {
         // Cache check stays FIRST, ahead of the PAT lookup: a cache hit must not require decrypting
         // the sealed credentials (see the cache field's own comment above) and a PAT integration
         // never populates this cache (below), so an App-mode cache hit costs nothing extra here —
-        // it still returns before any AES-GCM open, same as before #860.
+        // it still returns before any AES-GCM open.
         String key = integ.id();
         CachedToken cached = cache.get(key);
         if (isFresh(cached)) {
@@ -83,7 +83,7 @@ public class GithubTokenService implements GitTokenService {
         }
         // PAT fallback comes BEFORE the App-configured gate: a PAT-mode integration has no App to
         // be configured, and gating on isConfigured() up front would reject it even when the sealed
-        // credentials carry a perfectly usable token. See #860 — that gate used to be the first line
+        // credentials carry a perfectly usable token. That gate used to be the first line
         // unconditionally, which is exactly the bug PAT mode exists to fix.
         Optional<String> pat = patToken(integ);
         if (pat.isPresent()) {

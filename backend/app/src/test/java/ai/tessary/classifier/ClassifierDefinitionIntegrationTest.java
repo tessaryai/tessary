@@ -55,7 +55,7 @@ class ClassifierDefinitionIntegrationTest {
 
     @Test
     void seedsBuiltInsOnProjectCreationIdempotently() {
-        // No generation run, no repo, no graders — just a project. Auto-classification reads traces,
+        // No generation run, no repo, no graders: just a project. Auto-classification reads traces,
         // so creating the project is the whole precondition (ClassifierSeedListener).
         String pid = bootstrapGranted("signal-seed").project().id();
 
@@ -69,14 +69,9 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(0, service.seedBuiltIns(pid), "re-seeding is a no-op (idempotent)");
         assertEquals(9, service.list(pid).size(), "all built-ins are listable");
         assertTrue(defs.stream().allMatch(ClassifierRow::builtIn), "all seeded signals are marked built_in");
-        // EVERY built-in seeds enabled, with no exceptions and no derivation behind it. The catalog used to
-        // carry a lifecycle, and the two metric classifiers seeded OFF because their shared w1_floor is a
-        // guess that classifiers/metric_drift/PLAN.md §9's null-case run has not replaced. That was the
-        // right instinct in the wrong place: "we don't trust this yet" and "this org doesn't get this" are
-        // the same decision, and it now lives once, in the capability flag, where it can be changed per org
-        // without a deploy. What reaches a project at all is asserted in PartnerCatalogTest — for
-        // sop_conformance that flag (sop_conformance_enabled) is targeted on for no org yet, which is
-        // where its not-yet-running posture lives now that the row itself seeds enabled.
+        // Every built-in seeds enabled, with no per-classifier exceptions: whether a classifier
+        // actually runs for an org is a capability-flag decision, not something the seeded row
+        // encodes. What reaches a project at all is asserted in PartnerCatalogTest.
         assertTrue(defs.stream().allMatch(ClassifierRow::enabled), "every built-in seeds enabled");
     }
 
@@ -109,7 +104,7 @@ class ClassifierDefinitionIntegrationTest {
                 null,
                 true, // built_in, exactly as the old catalog seeded it
                 1,
-                true, // enabled — the zombie state this test retires
+                true, // enabled: the zombie state this test retires
                 ClassifierRow.Mode.DISCOVERY,
                 now,
                 now));
@@ -135,7 +130,7 @@ class ClassifierDefinitionIntegrationTest {
     void resyncInsertsCatalogAdditionsIntoSeededProjects() {
         String pid = bootstrapGranted("signal-catalog-add").project().id();
 
-        // Mimic a project seeded by an OLD catalog: only 'frustration' exists, at an old version —
+        // Mimic a project seeded by an OLD catalog: only 'frustration' exists, at an old version;
         // the catalog has since grown (e.g. the groundedness built-in) and bumped versions. Clear the
         // seed-on-create catalog first so the old-catalog row is the project's entire starting state.
         jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
@@ -150,7 +145,7 @@ class ClassifierDefinitionIntegrationTest {
                 "User frustration in a turn (old-catalog definition).",
                 BuiltInDetector.Kind.FRUSTRATION,
                 null,
-                true, // built_in — this project WAS seeded, by an older catalog
+                true, // built_in: this project WAS seeded, by an older catalog
                 1,
                 true,
                 ClassifierRow.Mode.DISCOVERY,
@@ -173,10 +168,10 @@ class ClassifierDefinitionIntegrationTest {
                         .version(),
                 signals.findByKey(pid, "frustration").orElseThrow().version(),
                 "the pre-existing old-version row is re-synced to the current catalog version");
-        // The version is only the TRIGGER; config_json is the payload — the operating band and the
+        // The version is only the TRIGGER; config_json is the payload: the operating band and the
         // context policy both live there. The old row above stores a null config, so if resync carried
         // the version across without the config, a seeded project would keep scoring on whatever it was
-        // seeded with while REPORTING the current version — a silent no-op that reads as shipped.
+        // seeded with while REPORTING the current version, a silent no-op that reads as shipped.
         assertEquals(
                 catalog.builtIns().stream()
                         .filter(b -> "frustration".equals(b.classifierKey()))
@@ -196,7 +191,7 @@ class ClassifierDefinitionIntegrationTest {
         // Simulate a project that predates seed-on-create: strip the catalog back out, so resync is
         // the only thing that can put it back. Auto-classification reads traces, so a project with
         // traffic must end up classified whether or not anyone ever ran generation.
-        // Table is `signal` — the 2026-07 rename kept the persisted names (see backend/AGENTS.md).
+        // Table is `signal`; the persisted name predates the domain rename (see backend/AGENTS.md).
         jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
                 .param("pid", pid)
                 .update();
@@ -226,17 +221,15 @@ class ClassifierDefinitionIntegrationTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has all four paid classifiers switched ON <b>before its project is
-     * created</b>.
+     * Bootstrap a tenant whose org has all four capability-gated classifiers switched on before its
+     * project is created.
      *
-     * <p>Two things make this necessary. The open-edition default has behavior_drift, sop_conformance,
-     * frustration and groundedness OFF (the four paid classifiers {@code CapabilityService} reports as
-     * unavailable — #887/#888 added the last two 2026-08-31), so without a grant these cases would assert
-     * the capability default rather than the behaviour they name. And the grant has to precede the
-     * project, because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project does not
-     * have. The suite used to get all of this ambiently from {@code tessary.plan.default-key=enterprise} in
-     * surefire, which went away with plan tiers (open-core epic 1 issue 1).
+     * <p>Two things make this necessary. {@code behavior_drift}, {@code sop_conformance}, {@code
+     * frustration}, and {@code groundedness} default off, so without a grant these cases would
+     * assert the capability default rather than the behavior they name. And the grant has to
+     * precede the project, because project creation is what seeds the built-in classifiers: grant
+     * afterwards and the classifier row is never inserted, leaving the test hunting findings from a
+     * classifier the project doesn't have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

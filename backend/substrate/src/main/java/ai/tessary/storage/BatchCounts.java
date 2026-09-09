@@ -4,7 +4,7 @@ package ai.tessary.storage;
 import java.sql.Statement;
 
 /**
- * The one check every batched substrate write shares (#984 M2): the driver must report a real per-row
+ * The one check every batched substrate write shares: the driver must report a real per-row
  * count. {@code SUCCESS_NO_INFO} means a batch rewrite ({@code reWriteBatchedInserts}) merged the rows
  * into one multi-row statement, which would hide the {@code event_ts} guard's per-row verdict on the
  * two {@code ON CONFLICT DO UPDATE} tables and make same-batch duplicates a statement Postgres refuses

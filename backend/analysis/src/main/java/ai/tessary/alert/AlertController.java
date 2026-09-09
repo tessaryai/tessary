@@ -29,10 +29,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The unified alert config + read surface: one {@code alert_rule} CRUD API across both grains
- * (per-classifier threshold rules and per-project digest/brief roll-up schedules) plus a fired-alert read.
- * Evaluation + firing is async ({@link AlertWorker}). Snooze/disable here never touch
- * the underlying classifier.
+ * The alert config and read surface: one {@code alert_rule} CRUD API across both grains
+ * (per-classifier threshold rules and per-project digest/brief roll-up schedules), plus a
+ * fired-alert read. Evaluation and firing happen async in {@link AlertWorker}; snooze and
+ * disable here never touch the underlying classifier.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}")
@@ -53,7 +53,7 @@ public class AlertController {
         this.mapper = mapper;
     }
 
-    /** Alerts are a paid capability ({@link Feature#ALERTS}): resolve the project AND require the entitlement. */
+    /** Resolves the project and checks the alerts entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.ALERTS);

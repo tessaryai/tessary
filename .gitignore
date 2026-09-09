@@ -18,10 +18,9 @@ tessary-paid/.claude/workflows/repo-brief.md
 # never be enumerated as this repo's own files (scripts/check-docs-links.sh learned that the
 # hard way). Was only in .git/info/exclude, so a fresh clone and CI did not have it.
 .claude/worktrees/
-# Same thing for kosho's scratch clones. `.kosho/.gitignore` used to cover these, but its patterns
-# are anchored to its own directory and that file now lives under the overlay (#1293), where it
-# guards the overlay's copy and not this one. Declared here so the rule survives the overlay's
-# removal — untracked agent worktrees becoming git-visible is how a private checkout leaks.
+# Same thing for kosho's scratch clones. `.kosho/.gitignore` is anchored to its own directory and
+# guards a different copy, so the rule is declared here too. Untracked agent worktrees becoming
+# git-visible is how a private checkout leaks.
 .kosho/worktrees/
 .kosho/hooks/*.sample
 
@@ -45,9 +44,9 @@ report.md
 
 # Java / Maven — glob covers the reactor modules (backend/target, backend/app/target, …)
 backend/**/target/
-# The paid overlay is a TOP-LEVEL folder, so the backend glob above cannot reach it. Its modules
+# The directory below is a TOP-LEVEL folder, so the backend glob above cannot reach it. Its modules
 # inherit backend/pom.xml and therefore run the same plugins, which write the same target/ output —
-# tessary-paid/target/spotless-index got committed as source before this rule existed.
+# a stray target/spotless-index got committed as source before this rule existed.
 tessary-paid/**/target/
 backend/.mvn/wrapper/maven-wrapper.jar
 *.class
@@ -58,10 +57,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
-# The paid frontend's build outputs. The four rules above are PATH-SPECIFIC to frontend/, so none of
-# them reaches the overlay — same reason `tessary-paid/**/target/` exists separately from the
-# backend glob. node_modules here is a SYMLINK to frontend/node_modules, created by the paid gate
-# script rather than committed: it points into a gitignored tree, so a committed link would be
+# A separate frontend build's outputs. The four rules above are PATH-SPECIFIC to frontend/, so none
+# of them reaches it — the same reason the target/ rule above exists separately from the backend
+# glob. node_modules here is a SYMLINK to frontend/node_modules, created by a build script
+# rather than committed: it points into a gitignored tree, so a committed link would be
 # dangling on a fresh clone until someone ran `pnpm install`.
 tessary-paid/frontend/node_modules
 tessary-paid/frontend/dist/

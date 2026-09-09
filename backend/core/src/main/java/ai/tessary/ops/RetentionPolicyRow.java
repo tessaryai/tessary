@@ -9,9 +9,9 @@ import org.jspecify.annotations.Nullable;
  * bounds it; {@code coldAfterDays} is the hot → cold (object-storage) tiering horizon. One policy per
  * {@code (project, data_class)}; {@code RetentionSweeper} enforces it hourly.
  *
- * <p>The column was called {@code signal} until 0095, which was a collision rather than a description: a
- * retention class is not a detector, and every other {@code signal} in this schema became
- * {@code classifier} in 0093.
+ * <p>The column was called {@code signal} until it was renamed, which was a collision rather than a
+ * description: a retention class is not a detector, and every other {@code signal} in this schema
+ * became {@code classifier} for the same reason.
  */
 public record RetentionPolicyRow(
         String id,
@@ -25,11 +25,11 @@ public record RetentionPolicyRow(
     /**
      * The data classes a retention policy can govern.
      *
-     * <p>{@code "verdicts"} was one until Track A removed grading and the {@code verdict} table.
-     * Changeset 0016 deletes any {@code retention_policy} row still carrying it and narrows
-     * {@code retention_policy_data_class_check}, so the string is rejected at the database rather than
-     * silently accepted into a class nothing sweeps. {@code "embeddings"} was another, until 0017 removed
-     * the vector substrate (#1116) the same way: delete the rows, narrow the CHECK.
+     * <p>{@code "verdicts"} was one until grading and the {@code verdict} table were removed; any
+     * {@code retention_policy} row still carrying it is deleted and
+     * {@code retention_policy_data_class_check} narrowed, so the string is rejected at the database rather
+     * than silently accepted into a class nothing sweeps. {@code "embeddings"} was another, until the
+     * vector substrate was removed the same way: the rows deleted, the CHECK narrowed.
      */
     public static final class DataClass {
         private DataClass() {}
@@ -37,7 +37,7 @@ public record RetentionPolicyRow(
         public static final String TRACES = "traces";
 
         /**
-         * The per-classifier detection tables (0088). Added by 0095: the six tables have accumulated
+         * The per-classifier detection tables. The six tables have accumulated
          * per-span rows at ingest rate since the cutover with no class covering them, so the honest
          * answer to "how long do you keep this" was "forever" and nobody had been asked.
          */

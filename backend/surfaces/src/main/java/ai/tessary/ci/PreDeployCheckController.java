@@ -17,10 +17,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The pre-deploy check read / lifecycle surface: list the checks a project's discovered signals
- * registered, and dismiss/reinstate a noisy one WITHOUT disabling its signal. The registration itself is
- * automatic (the async {@code ClassifierWorker} sweep, behind {@code tessary.predeploy.enabled}); this controller
- * makes the closed loop visible and lets a human curate it — mirroring {@code ClassifierController}'s posture.
+ * Lists the pre-deploy checks a project's discovered signals registered, and lets a human
+ * dismiss or reinstate a noisy one without disabling its signal. Registration itself happens
+ * automatically, via the async {@code ClassifierWorker} sweep behind {@code tessary.predeploy.enabled}.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/predeploy-checks")
@@ -37,7 +36,7 @@ public class PreDeployCheckController {
         this.capabilities = capabilities;
     }
 
-    /** CI is a paid capability ({@link Feature#CI_INTEGRATION}): resolve the project AND require the entitlement. */
+    /** Resolve the project and require the CI integration entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.CI_INTEGRATION);

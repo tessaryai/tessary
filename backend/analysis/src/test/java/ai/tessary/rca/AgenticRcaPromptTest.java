@@ -39,7 +39,7 @@ class AgenticRcaPromptTest {
             "latest_triage",
             "list_rca_reports",
             "get_rca_report",
-            // Track A deleted graders, so the registry no longer serves these two either.
+            // Graders were removed entirely, so the registry no longer serves these two either.
             "list_graders",
             "get_grader");
 

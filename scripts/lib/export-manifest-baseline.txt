@@ -1,6 +1,6 @@
 # The public export's REVIEWED file manifest — the last human-read list of what ships.
 #
-# WHY A FILE AND NOT A GATE. Two of #1293's acceptance boxes cannot be discharged mechanically:
+# WHY A FILE AND NOT A GATE. Two of the export sign-off's acceptance boxes cannot be discharged mechanically:
 # "a human has reviewed the full file manifest of the export candidate" and "the keep-list below is
 # satisfied". No script can assert that a person read 1,372 paths, and a script that claimed to
 # would be worse than none. What a file CAN do is stop the review from silently going stale: with a
@@ -9,10 +9,11 @@
 # knowing that is what they are doing.
 #
 # HOW TO REGENERATE THE CANDIDATE LIST (the same set scripts/lib/export-simulate.sh copies):
-#     git ls-files --cached --others --exclude-standard | grep -v '^tessary-paid/' | LC_ALL=C sort
-# That spelling is exact only while `tessary-paid|delete|dir` is the ONLY `delete` row in
-# scripts/lib/export-denylist.txt, which is what #1293 collapsed it to. Add a `delete` row and this
-# command stops matching the simulator; regenerate from the simulator's own output instead.
+#     Run `git ls-files --cached --others --exclude-standard`, drop this build's export-excluded
+#     directory, then `LC_ALL=C sort`. That recipe matches the simulator only while
+#     scripts/lib/export-denylist.txt has exactly one `delete` row for that directory. Add another
+#     `delete` row and this command stops matching the simulator; regenerate from the simulator's
+#     own output instead.
 #
 # HOW TO REVIEW A DELTA:
 #     diff <(sed '/^#/d;/^$/d' scripts/lib/export-manifest-baseline.txt) <(<regenerate as above>)
@@ -22,7 +23,7 @@
 # AMENDED 2026-09-08 (VERSION deletion) — TWO body rows, and nothing else, changed by hand:
 #   - `VERSION` REMOVED. The root VERSION file is deleted; the git tag `v<semver>` that
 #     .github/workflows/release.yml pushes is now the single source of truth for a published
-#     version (see the divergence row in tessary-paid/OPEN-CORE.md dated 2026-09-08).
+#     version (see the platform's internal versioning notes dated 2026-09-08).
 #   - `scripts/lib/pin-compose-version.py` ADDED. The release-time transform that stamps that
 #     version into the published compose artifact's image defaults, which is what lets the
 #     repository itself hold no version literal.
@@ -49,8 +50,8 @@
 #   was again NOT regenerated: the twelve pre-existing drift paths stay absent, unread and unabsorbed.
 #   Row count 1,358 -> 1,361.
 #
-# reviewed: NOT YET SIGNED OFF. Generated 2026-09-08 under #1293 against the post-relocation tree:
-#   1,372 paths = 1,368 tracked outside the overlay, plus FOUR files this change adds that were
+# reviewed: NOT YET SIGNED OFF. Generated 2026-09-08 against the post-relocation tree:
+#   1,372 paths = 1,368 tracked outside this build's export-excluded directory, plus FOUR files this change adds that were
 #   still untracked when it was generated — contract/LICENSE, .gitleaks.toml,
 #   .github/workflows/secret-scan.yml and this file. (`--others --exclude-standard` is why they are
 #   in the body at all: the export candidate is the working tree, not the index. They must be
@@ -64,12 +65,12 @@
 #   2026-09-08, devdocs cleanup: six retired pages removed from the body BY HAND, not by
 #   regeneration — devdocs/{concepts/compliance.md, concepts/procurement-no-train-review.md,
 #   guides/connect-traces.md, guides/quickstart.md, reference/classifier-pipeline-spec.md,
-#   reference/glossary.md}. None was on the C10 keep-list. Body is now 1,365 rows.
+#   reference/glossary.md}. None was on the keep-list below. Body is now 1,365 rows.
 #   Regenerating in full ALSO adds eleven paths that landed after the 1,372 snapshot
 #   (instrument.md and backend's ingest/spool package) — pre-existing drift, deliberately left
 #   for the next signed-off regeneration rather than folded into a docs change.
 #
-#   2026-09-08, #1144 cutover re-baseline: the seven folded open changesets
+#   2026-09-08, migration cutover re-baseline: the seven folded open changesets
 #   (0017-remove-embedding-lane.sql through 0023-trace-scope-started-index.sql) removed from the
 #   body BY HAND for the same reason — regenerating in full would also sweep in untracked local
 #   working files. Verified against a scratch regeneration: no path is present in this file and
@@ -77,12 +78,12 @@
 #   HEAD. Body is now 1,358 rows.
 #
 # ---------------------------------------------------------------------------------------------
-# THE KEEP-LIST (C10). Everything here MUST be in the body below; a delta that removes one of
+# THE KEEP-LIST. Everything here MUST be in the body below; a delta that removes one of
 # these is a regression, not a cleanup. Checked item by item on the generation date:
 #
 #   LICENSE                          present — Apache 2.0, 177 lines
-#   NOTICE                           present — attribution only; #1293 removed the past-audit
-#                                    narration and kept all 31 upstream entries
+#   NOTICE                           present — attribution only; the past-audit narration was
+#                                    removed and all 31 upstream entries were kept
 #   SECURITY.md                      present
 #   CONTRIBUTING.md                  present — and is now the ONLY licence declaration besides
 #                                    LICENSE itself (see the exemptions below)
@@ -94,11 +95,12 @@
 #   required schemas + generated     present — contract/grader.schema.json,
 #   API types and specs              frontend/src/api/generated/schema.d.ts, backend openapi spec
 #   vendored contracts               present — contract/, INCLUDING contract/LICENSE (the upstream
-#                                    MIT text; #1293 added it, see contract/VERSION)
+#                                    MIT text; it was added later, see contract/VERSION)
 #   active migrations                present — backend/core/.../db/changelog/: 0000-baseline.sql and
-#                                    db.changelog-master.yaml, the whole open lane after #1144
-#                                    folded 0017-0023 into the baseline. Both are the HARD-EXCLUDE
-#                                    set: they cite OPEN-CORE.md in `--comment:` lines inside an
+#                                    db.changelog-master.yaml, the whole open lane after the
+#                                    migration cutover folded 0017-0023 into the baseline. Both are
+#                                    the HARD-EXCLUDE set: they cite the platform's internal
+#                                    versioning notes in `--comment:` lines inside an
 #                                    APPLIED changeset, and editing a comment there changes the
 #                                    Liquibase checksum on every existing database. They ship
 #                                    unedited, deliberately.
@@ -114,20 +116,20 @@
 #   trademark policy                 mark; its use is governed by docs/trademarks.mdx
 #
 # ---------------------------------------------------------------------------------------------
-# NAMED, REASONED EXEMPTIONS to "no AGPL or CLA string survives" (#1293 C1).
+# NAMED, REASONED EXEMPTIONS to "no AGPL or CLA string survives".
 # Read that box as "no AGPL or CLA DECLARATION survives". Two greps, because the narrow one is
 # misleading about what is actually in the tree:
-#     git grep -nIE 'AGPL|\bCLA\b' -- . ':!tessary-paid'
+#     git grep -nIE 'AGPL|\bCLA\b' -- . (excluding this build's export-excluded directory)
 #         -> ONE hit: classifiers/pyproject.toml:18. CONTRIBUTING.md does NOT match, because it
 #            spells the term out and never writes the acronym.
-#     git grep -nIE 'AGPL|\bCLA\b|Contributor License Agreement|Developer Certificate' -- . ':!tessary-paid'
+#     git grep -nIE 'AGPL|\bCLA\b|Contributor License Agreement|Developer Certificate' -- . (excluding that same directory)
 #         -> TWO hits, the pair below. Use this one; the narrow pattern would let someone delete
 #            CONTRIBUTING.md's grant without the grep ever noticing it had gone.
 # Both hits are CORRECT. Deleting either would make the tree less true:
 #
 #   CONTRIBUTING.md:25 — "We don't require a separate Contributor License Agreement or Developer
 #     Certificate of Origin sign-off: submitting the pull request is the grant." This is the
-#     inbound-equals-outbound Apache 2.0 grant, and C1 makes it the source of truth. It states the
+#     inbound-equals-outbound Apache 2.0 grant, and this exemption makes it the source of truth. It states the
 #     ABSENCE of a CLA; the string is the statement, not a contradiction of it.
 #
 #   classifiers/pyproject.toml:18 — "# cleanlab relicensed AGPL->Apache-2.0 at v2.9.0 — the >=2.9
@@ -135,8 +137,8 @@
 #     history, not a declaration about this repo. Removing the comment would eventually cost the
 #     pin, which is the thing actually keeping AGPL code out of the dependency set.
 #
-# devdocs/reference/principles.md's "OSS core is AGPL-3.0 with a CLA" section was DELETED by #1293,
-# not rewritten: it was the third place LICENSE and CONTRIBUTING.md could drift apart, and it
+# devdocs/reference/principles.md's "OSS core is AGPL-3.0 with a CLA" section was deleted during
+# the license cleanup, not rewritten: it was the third place LICENSE and CONTRIBUTING.md could drift apart, and it
 # disagreed with both.
 # ---------------------------------------------------------------------------------------------
 

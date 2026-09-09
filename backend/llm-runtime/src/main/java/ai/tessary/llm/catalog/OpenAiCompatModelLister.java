@@ -16,8 +16,8 @@ import java.util.List;
  * Lists an OpenAI-compatible {@code GET /models} endpoint — the shape OpenAI itself, and every
  * OpenAI-compat provider this platform builds against, report: {@code {"data":[{"id": "..."}, ...]}}.
  * Bearer auth, per the convention every one of these providers follows. Confirmed against a live,
- * unauthenticated read of {@code https://openrouter.ai/api/v1/models} during #939 TASK 2's
- * implementation (2026-09-04) — same {@code data[].id} shape, OpenRouter's own {@code /models} just
+ * unauthenticated read of {@code https://openrouter.ai/api/v1/models}
+ * (2026-09-04) — same {@code data[].id} shape, OpenRouter's own {@code /models} just
  * carries more fields per entry.
  *
  * <p>One instance covers {@link ai.tessary.llm.ModelProvider#OPENAI}, {@code MOONSHOT},

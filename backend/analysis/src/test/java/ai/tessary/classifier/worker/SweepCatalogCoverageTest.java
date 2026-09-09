@@ -26,48 +26,34 @@ import org.junit.jupiter.api.Test;
  * Every catalog kind that sweeps at a fitting tier has exactly one sweep that claims it.
  *
  * <p>This is the invariant the registry depends on and the one nothing else pins.
- * {@link ClassifierSweepRegistryTest} proves the registry's own behaviour with {@code FixedSweep} fakes,
- * and {@code ClassifierWorkerLoggingTest} stubs {@code kinds()} on mocks — neither reads what the real
- * sweeps actually declare, so neither can see a kind fall off one.
+ * {@link ClassifierSweepRegistryTest} exercises the registry's own behaviour with {@code FixedSweep}
+ * fakes, and {@code ClassifierWorkerLoggingTest} stubs {@code kinds()} on mocks; neither reads what
+ * the real sweeps declare, so neither can see a kind fall off one.
  *
- * <p>The failure it exists to catch is silent and total. Dispatch used to send an unmatched WINDOW kind
- * into {@code MetricDriftSweep}; since #876 it is inert by design — one WARN, {@code markSwept}, done —
- * which is right for an edition that does not ship a classifier and wrong for a typo. Drop
- * {@code COST_DRIFT} from {@link MetricDriftSweep#kinds()} and cost drift stops writing findings for every
- * project on every deployment, while {@code task backend:check}, {@code backend:check:open},
- * {@code check-open-boundary.sh} and every ArchUnit rule stay green. The only signal is one
- * {@code signal.sweep.no-handler} WARN per job, in a log nobody reads until a customer asks where their
- * findings went.
+ * <p>The failure is silent and total: an unmatched kind is inert by design, one WARN and
+ * {@code markSwept}, so dropping a kind from a sweep's {@code kinds()} stops that classifier from
+ * writing findings for every project on every deployment, while every other check stays green. The
+ * only signal is a {@code signal.sweep.no-handler} WARN per job.
  *
- * <p>The sweeps are built reflectively with mocked collaborators rather than through a Spring context:
- * {@code kinds()} is a declaration, not behaviour, so nothing here needs a wired bean, a database, or a
- * container — which is the point, because the Testcontainers suite does not run on every machine.
- * A new constructor parameter needs no edit here; a new sweep does, and that is the intended friction.
+ * <p>Sweeps are built reflectively with mocked collaborators rather than through a Spring context,
+ * since {@code kinds()} is a declaration, not behaviour: nothing here needs a wired bean, a database,
+ * or a container. A new constructor parameter needs no edit here; a new sweep does.
  *
- * <p><b>Two of the four sweeps are not on this module's classpath any more</b> (#840, #841), and that is
- * why the invariant is stated in two pieces rather than one list. The catalog is NOT filtered by
- * edition — {@code BEHAVIOR_DRIFT} and {@code SOP_CONFORMANCE} are defined in every build, because
- * {@code ClassifierService.retireDroppedBuiltIns} keys on catalog membership and retirement is
- * irreversible — so their kinds are still in {@code fittingTierKinds} here while nothing open can name
- * the sweeps that claim them. Naming those two kinds in {@link #KINDS_WITH_A_PAID_SWEEP} keeps the
- * assertion an EQUALITY, which is what makes it catch things: drop {@code COST_DRIFT} from
- * {@link MetricDriftSweep#kinds()} and it is unclaimed and not excluded, so this still fails; add a
- * catalog kind with no sweep and it still fails; retire a paid classifier from the catalog without
- * deleting its line below and the exclusion is left over, so it fails from the other side too. The
- * paid half — that each moved sweep really does claim the kind excluded for it — is pinned inside the
- * overlay by {@code BehaviorDriftSweepClaimsItsKindTest} and {@code ConformanceSweepClaimsItsKindTest};
- * neither half is sufficient alone.
+ * <p>{@link #KINDS_WITH_A_PAID_SWEEP} lists catalog kinds this tree defines but has no sweep for.
+ * They still count as fitting-tier kinds the catalog must define, which keeps the assertion an
+ * equality: dropping a kind from an open sweep without excluding it fails, adding a catalog kind
+ * with no sweep fails, and leaving a stale exclusion for a kind the catalog no longer defines fails
+ * from the other side.
  */
 class SweepCatalogCoverageTest {
 
-    /** Every sweep in the OPEN tree today. A new one is added here, and the list is the enumeration. */
+    /** Every sweep this tree defines. A new one is added here, and the list is the enumeration. */
     private static final List<Class<? extends ClassifierSweep>> OPEN_SWEEPS =
             List.of(MetricDriftSweep.class, ToolErrorSweep.class);
 
     /**
-     * The catalog kinds whose sweep lives in {@code tessary-paid/} and so cannot be named from here.
-     * Not a list of kinds to ignore — every one of these is still asserted to be a fitting-tier kind the
-     * catalog defines, and a line left here for a kind the catalog dropped fails this test.
+     * Catalog kinds this tree defines but has no sweep for. Still asserted to be fitting-tier
+     * kinds the catalog defines, so a line left here for a kind the catalog dropped fails this test.
      */
     private static final Set<String> KINDS_WITH_A_PAID_SWEEP =
             Set.of(BuiltInDetector.Kind.BEHAVIOR_DRIFT, BuiltInDetector.Kind.SOP_CONFORMANCE);
@@ -126,7 +112,7 @@ class SweepCatalogCoverageTest {
         }
     }
 
-    /** {@code ObjectMapper} is a real one — it is a value, not a collaborator, and mocking it buys nothing. */
+    /** {@code ObjectMapper} is a real one: it is a value, not a collaborator, and mocking it buys nothing. */
     private static Object stub(Class<?> type) {
         return type == ObjectMapper.class ? new ObjectMapper() : mock(type);
     }

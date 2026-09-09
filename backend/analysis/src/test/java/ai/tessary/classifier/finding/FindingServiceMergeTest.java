@@ -26,13 +26,12 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * What the {@link TriageSource} merge must not change, held without a database.
  *
- * <p><b>Why this file exists.</b> #839 rewrote {@code FindingService.findings()} — the busiest read path
- * in the product — from one method that knew both tables into an iteration over adapters. Everything it
- * could plausibly get wrong is invisible to the compiler, to the enforcer and to
- * {@code check-open-boundary.sh}: a filter dropped, two filters reordered, a page limit applied once
- * instead of per source, a row order decided by bean name instead of by {@code @Order}. The
- * Testcontainers suite would catch some of it and does not run on every machine, so the properties are
- * pinned here instead — plain JUnit, hand-written stubs, no Spring, no Docker.
+ * <p>{@code FindingService.findings()}, the busiest read path in the product, iterates over adapters
+ * rather than knowing both tables itself. Everything that could plausibly get wrong in that iteration
+ * is invisible to the compiler and to the boundary enforcer: a filter dropped, two filters reordered, a
+ * page limit applied once instead of per source, a row order decided by bean name instead of by
+ * {@code @Order}. The Testcontainers suite would catch some of it and does not run on every machine, so
+ * the properties are pinned here instead, plain JUnit, hand-written stubs, no Spring, no Docker.
  */
 class FindingServiceMergeTest {
 
@@ -58,10 +57,10 @@ class FindingServiceMergeTest {
      * <b>What this pins and what it deliberately does not.</b> It pins that the merge follows the
      * INJECTED order and that the shared table's own adapter sits at {@code @Order(0)} so it answers
      * first. It no longer names conformance's adapter and asserts {@code @Order(10)} on it: the
-     * open-to-paid enforcer bans an open module from depending on a paid jar at {@code validate}, test
-     * scope included, so an assertion in this open package that names a conformance class could not be
-     * re-pointed when the package moves — only deleted. Each adapter's own {@code @Order} value is
-     * pinned in its own package's test, where it travels with the class.
+     * boundary enforcer bans this module from depending on an external one, test scope included, so an
+     * assertion here that names a conformance class could not be re-pointed if that class ever moves,
+     * only deleted. Each adapter's own {@code @Order} value is pinned in its own package's test, where
+     * it travels with the class.
      */
     @Test
     @DisplayName("the ORDER that decides that is @Order, not declaration order or bean name")

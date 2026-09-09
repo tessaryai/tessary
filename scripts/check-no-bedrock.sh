@@ -25,7 +25,7 @@ cd "$ROOT"
 
 fail=0
 
-# The scanned roots are the ones that exist. Since #1293 classifiers/ ships in BOTH editions — the
+# The scanned roots are the ones that exist. classifiers/ ships in BOTH editions — the
 # open half (framework/, tool_error/, metric_drift/, data_gen/) stayed when the research half moved
 # into the overlay — so in practice both roots are present everywhere and this loop's absent-root
 # arm is now the rare case rather than the public-repo norm it was written for. It stays: an absent
@@ -33,9 +33,9 @@ fail=0
 # with stderr discarded, so an unreadable root is an error and not a vacuous pass, and the roots that
 # were and were not scanned are printed so a green run says what it covered.
 #
-# The overlay's own Python is deliberately NOT a root here, and never was. That is unchanged by
-# #1293 even though far more Python lives there now: this gate guards the OPEN tree's promise, the
-# overlay carries its own, and this file may not name that directory anyway (boundary rule 5).
+# The overlay's own Python is deliberately NOT a root here, and never was: this gate guards the
+# OPEN tree's promise, the overlay carries its own, and this file may not name that directory
+# anyway (boundary rule 5).
 ROOTS=""
 ABSENT=""
 for r in classifiers scripts; do
@@ -89,9 +89,9 @@ fi
 
 # 3. The runtime kill-switch must stay wired into the framework package. A guard nobody imports is
 #    decoration, and this is the line most likely to be lost to a tidy-up of "unused" imports.
-#    THIS RULE NOW RUNS IN THE PUBLIC EXPORT, for the first time. Until #1293 classifiers/ was
+#    THIS RULE NOW RUNS IN THE PUBLIC EXPORT, for the first time. classifiers/ used to be
 #    private in its entirety, so the skip below was the normal outcome everywhere the export
-#    reached and the rule only ever fired in a full checkout. #1293 kept framework/ open, which
+#    reached and the rule only ever fired in a full checkout. Keeping framework/ open
 #    means the package this rule guards is one of the things the public repo now ships — and the
 #    guard being wired into it is a promise made to the people reading that repo, not an internal
 #    hygiene note. The skip stays for a checkout with no classifier tree at all; it is no longer

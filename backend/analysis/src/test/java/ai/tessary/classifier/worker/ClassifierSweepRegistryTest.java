@@ -22,13 +22,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * The discovery contract, held without a database and without Spring Boot's application context —
+ * The discovery contract, held without a database and without Spring Boot's application context:
  * {@link ApplicationContextRunner} is a plain bean factory, so this runs on any machine.
  *
- * <p>Four things are pinned, and each is a way the registry could have been written that would have
- * looked fine and been wrong: that a bean is found by the kind it CLAIMS rather than by its type or bean
- * name; that two beans claiming one kind fail the context instead of one silently winning by classpath
- * order; that an unclaimed kind answers EMPTY rather than a fallback; and — the one with teeth — that an
+ * <p>Four things are pinned, each a way the registry could have been written that would have
+ * looked fine and been wrong: a bean is found by the kind it claims, not by its type or bean
+ * name; two beans claiming one kind fail the context instead of one silently winning by classpath
+ * order; an unclaimed kind answers empty rather than a fallback; and, the one with teeth, an
  * empty registry does not shrink the catalog.
  */
 class ClassifierSweepRegistryTest {
@@ -89,10 +89,9 @@ class ClassifierSweepRegistryTest {
     @Test
     @DisplayName("an unregistered kind is EMPTY — never some other sweep")
     void an_unclaimed_kind_answers_empty() {
-        // The whole reason forKind returns an Optional. Handing back a default here is the bug the
-        // dispatch chain this replaced actually had: tool_error fell into the metric-drift arm, whose
-        // config parse then defaulted to the full measure set, and it kept a second copy of every
-        // baseline behind a green build.
+        // The whole reason forKind returns an Optional: dispatching an unclaimed kind into another
+        // sweep's arm can silently reuse that sweep's config and duplicate a baseline, and it would
+        // still pass a green build.
         context.withUserConfiguration(TwoSweeps.class)
                 .withBean(ClassifierSweepRegistry.class)
                 .run(ctx -> assertTrue(ctx.getBean(ClassifierSweepRegistry.class)
@@ -104,8 +103,8 @@ class ClassifierSweepRegistryTest {
     @DisplayName("an edition that ships no sweep at all still builds a registry rather than failing to start")
     void no_sweeps_is_a_valid_edition() {
         // This is why the constructor takes ObjectProvider rather than List<ClassifierSweep>: Spring
-        // treats a required collection with zero candidates as unsatisfied, so the List shape would turn
-        // "this build ships no fitting-tier classifier" into a boot failure.
+        // treats a required collection with zero candidates as unsatisfied, so the List shape would
+        // turn a build that ships no sweep at all into a boot failure.
         context.withBean(ClassifierSweepRegistry.class).run(ctx -> {
             assertFalse(ctx.getStartupFailure() != null, "an empty registry is a valid edition, not a failure");
             assertTrue(
@@ -116,8 +115,8 @@ class ClassifierSweepRegistryTest {
     @Test
     @DisplayName("two sweeps claiming one kind fail the context; neither silently wins")
     void a_duplicate_kind_fails_startup() {
-        // Picking one would make WHICH analysis ran depend on bean order, and both write findings under
-        // the same classifier row, so the row would read as one classifier that cannot make up its mind.
+        // Picking one would make which analysis ran depend on bean order, and both write findings
+        // under the same classifier row, so the row would read as one classifier that can't decide.
         context.withUserConfiguration(TwoSweepsClaimingOneKind.class)
                 .withBean(ClassifierSweepRegistry.class)
                 .run(ctx -> assertTrue(
@@ -128,15 +127,14 @@ class ClassifierSweepRegistryTest {
     }
 
     /**
-     * The invariant with teeth: what is REGISTERED never decides what the catalog CONTAINS.
+     * The invariant with teeth: what is registered never decides what the catalog contains.
      *
      * <p>{@code ClassifierService.retireDroppedBuiltIns} permanently disables any seeded
-     * {@code built_in=true} row whose key has left {@code catalog.builtIns()}, on a 60-second heartbeat
-     * over every active project, and the seeding path then treats the row as "not missing" and never
-     * restores it. So a registry that filtered the catalog would mean any database that had ever run the
-     * paid build silently and irreversibly retires both paid classifiers the first time it runs the open
-     * one — and re-adding the jar would not bring them back. Withheld-because-unlicensed and
-     * retired-because-dropped are two different endings and only one of them writes.
+     * {@code built_in=true} row whose key has left {@code catalog.builtIns()}, on a 60-second
+     * heartbeat, and seeding then treats the row as not missing and never restores it. If the
+     * registry filtered the catalog, a build that later ships fewer sweeps than before would
+     * retire rows for classifiers it simply isn't running yet, and re-enabling them would not
+     * bring the rows back.
      */
     @Test
     @DisplayName("an empty registry does not shrink the catalog — absence is not withdrawal")

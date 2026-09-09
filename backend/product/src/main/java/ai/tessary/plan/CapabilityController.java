@@ -26,21 +26,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The org's capability surface: the resolved payload every session is assembled from, and the overrides an
- * operator sets to change it.
+ * The org's capability surface: the resolved payload every session is assembled from, and the
+ * overrides an operator sets to change it.
  *
- * <p>Was {@code PlanController}, which served the capability payload and the plan/quota detail from one class.
- * The plan half is the HOSTED product and moved to the paid overlay's own plan controller with the
- * entitlement engine; the capability half is what the open SPA is built from and stays here, on the same path
- * and with a byte-compatible {@code capabilities} map so no frontend change was needed to split them.
- *
- * <p>{@link #capabilities} is readable by ANY org member, because every member's app is assembled from it. The
- * overrides underneath it are {@link Permission#CAPABILITIES_MANAGE} — owner and admin. The server-side
- * {@code CapabilityService.require} on each gated endpoint remains the authority; this is what the UI is built
- * from, not what enforces it.
- *
- * <p>The Settings → Features UI that drives the override endpoints is deliberately not part of this change; it
- * is issue #880 under epic 7.
+ * <p>{@link #capabilities} is readable by any org member, since every member's app is assembled
+ * from it. The overrides underneath it require {@link Permission#CAPABILITIES_MANAGE} (owner and
+ * admin). The server-side {@code CapabilityService.require} on each gated endpoint remains the
+ * authority; this is what the UI is built from, not what enforces it.
  */
 @RestController
 public class CapabilityController {
@@ -52,11 +44,10 @@ public class CapabilityController {
     private final TenantPathResolver resolver;
 
     /**
-     * Optional on purpose. {@code DbFeatureFlags} caches an org's overrides for ten seconds, and a write should
-     * bite immediately rather than after that window — but it is the OPEN adapter, and a build whose
-     * {@code FeatureFlags} bean is the hosted LaunchDarkly one has no such bean to invalidate. An
-     * {@link ObjectProvider} is how this controller stays correct in both editions instead of failing to start
-     * in one of them.
+     * Optional on purpose. {@code DbFeatureFlags} caches an org's overrides for ten seconds, and a
+     * write should bite immediately rather than after that window, but a build may not carry a
+     * {@code DbFeatureFlags} bean to invalidate. An {@link ObjectProvider} lets this controller stay
+     * correct either way instead of failing to start when the bean is absent.
      */
     private final ObjectProvider<DbFeatureFlags> openFlags;
 
@@ -72,14 +63,14 @@ public class CapabilityController {
     }
 
     /**
-     * The resolved state of EVERY capability for this org, keyed by flag key — the one object the SPA assembles
-     * itself from. Every capability is present with an explicit boolean rather than only the enabled ones
-     * listed, so the client never has to decide what an absent key means.
+     * The resolved state of every capability for this org, keyed by flag key: the one object the
+     * SPA assembles itself from. Every capability is present with an explicit boolean rather than
+     * only the enabled ones listed, so the client never has to decide what an absent key means.
      *
-     * <p>{@code unavailable} is the second question a client has to be able to answer: a capability can be off
-     * because nobody turned it on, or absent because this edition does not carry the code behind it. Those need
-     * different UI — a switch versus an explanation — and the difference is not derivable from the map. No
-     * upgrade-prompt mechanism is implied; that is epic 10's in-product upgrade path.
+     * <p>{@code unavailable} is the second question a client has to answer: a capability can be off
+     * because nobody turned it on, or absent because this build does not carry the code behind it.
+     * Those need different UI, a switch versus an explanation, and the difference is not derivable
+     * from the map.
      */
     public record CapabilitiesView(
             Map<String, Boolean> capabilities,
@@ -117,9 +108,10 @@ public class CapabilityController {
     }
 
     /**
-     * Every capability with its override state — the read behind the Features settings screen. Gated at
-     * {@link Permission#ORG_VIEW} rather than {@code CAPABILITIES_MANAGE}: seeing why a surface is missing is
-     * not a privileged act, and the row says nothing an admin could not tell a member out loud.
+     * Every capability with its override state: the read behind the Features settings screen. Gated
+     * at {@link Permission#ORG_VIEW} rather than {@code CAPABILITIES_MANAGE}: seeing why a surface
+     * is missing is not a privileged act, and the row says nothing an admin could not tell a member
+     * out loud.
      */
     @GetMapping("/api/orgs/{orgSlug}/capabilities/overrides")
     public ApiResponse<List<OverrideView>> overrides(TenantContext ctx, @PathVariable String orgSlug) {
@@ -157,7 +149,7 @@ public class CapabilityController {
         return ApiResponse.ok(one(r.org().id(), capability));
     }
 
-    /** Drop the org's override, reverting the capability to this edition's default. */
+    /** Drop the org's override, reverting the capability to this build's default. */
     @DeleteMapping("/api/orgs/{orgSlug}/capabilities/overrides/{key}")
     public ApiResponse<OverrideView> clearOverride(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String key) {
@@ -172,9 +164,9 @@ public class CapabilityController {
     }
 
     /**
-     * Resolve a wire key, refusing both an unknown one and one this edition cannot honour. The second refusal
-     * is a 422 and NOT a silent no-op on purpose: an operator who "enables" a classifier whose code is absent
-     * would get an empty result set and go hunting for the bug in their traces.
+     * Resolve a wire key, refusing both an unknown one and one this build cannot honour. The second
+     * refusal is a 422 and not a silent no-op on purpose: an operator who "enables" a classifier
+     * whose code is absent would get an empty result set and go hunting for the bug in their traces.
      */
     private Capability requireAvailable(String key) {
         Capability capability =
@@ -186,10 +178,9 @@ public class CapabilityController {
     }
 
     /**
-     * Per-org overrides are the OPEN adapter's mechanism. In the paid edition {@code FeatureFlags} is the
-     * LaunchDarkly adapter and the only flag control there is (epic 5, decision 3), so a row written into
-     * {@code org_feature_flag} would be read by nothing; refusing the write is honest, a silent no-op would
-     * not be.
+     * Per-org overrides depend on a {@code DbFeatureFlags} bean being present. When it is not, a row
+     * written into {@code org_feature_flag} would be read by nothing; refusing the write is honest,
+     * a silent no-op would not be.
      */
     private void requireDbOverrides(Capability capability) {
         if (openFlags.getIfAvailable() == null) {

@@ -32,7 +32,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest
 class TenantServiceTest {
 
-    /** These tests are about bootstrap atomicity, not the owned-org cap (#1019). */
+    /** These tests are about bootstrap atomicity, not the owned-org cap. */
     private static final int UNCAPPED = Integer.MAX_VALUE;
 
     @DynamicPropertySource
@@ -256,7 +256,7 @@ class TenantServiceTest {
     }
 
     /**
-     * #1227: {@link TenantService#ensureSampleProject} must not disturb the invariant {@link
+     * {@link TenantService#ensureSampleProject} must not disturb the invariant {@link
      * #ensureDefaultOrg_guaranteesExactlyOneDefaultProject} pins — additive, exactly one default
      * project, exactly one sample project, and the sample project is never that default.
      */
@@ -296,9 +296,8 @@ class TenantServiceTest {
                 .param("pid", sample.id())
                 .query(Long.class)
                 .single();
-        // All three counts moved in #1279, which folded the standalone fabricated finding/case/report
-        // into the showcase rows so that every seeded row hangs off a real classifier. That PR left
-        // the old numbers (7/4/2) here; these are what SampleProjectSeedListener now writes:
+        // The standalone fabricated finding/case/report were folded into the showcase rows so that
+        // every seeded row hangs off a real classifier. These are what SampleProjectSeedListener now writes:
         //   findings — four metric-drift (drift 0-3) plus two tool-error (drift 4-5);
         //   cases     — three, numbered 1..3, which is what the seeder's own comment says it takes so
         //               that the first case a real detector opens on the project continues from 4;

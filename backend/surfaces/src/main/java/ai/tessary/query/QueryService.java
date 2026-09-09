@@ -66,7 +66,7 @@ public class QueryService {
     /**
      * Search returning a bounded page of rows. {@code keyword} is the only supported mode — a
      * keyset-paginated ILIKE scan. Any other {@code mode} (including the {@code semantic} value this API
-     * used to accept before the vector substrate was removed, #1116) is a {@code 400 UNKNOWN_SEARCH_MODE}:
+     * used to accept before the vector substrate was removed) is a {@code 400 UNKNOWN_SEARCH_MODE}:
      * there is deliberately no semantic→keyword coercion, so a caller still asking for semantic search
      * gets a clear rejection rather than a silently different result set.
      *
