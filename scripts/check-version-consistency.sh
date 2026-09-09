@@ -14,8 +14,8 @@
 # THE DESIGN NOW: the git tag `v<semver>` that .github/workflows/release.yml pushes is the single
 # source of truth for a published version, and NOTHING in this repository holds a copy of it.
 #   - docker-compose.yml, docker-compose.dev.yml and sandbox-runner/launcher/server.js default to
-#     the FLOATING `-latest` tag, which every release repoints (release.yml's merge-and-tag pushes
-#     `<service>-latest` for all four services to both registries). An unset env var can therefore
+#     the FLOATING `-latest` tag, which every release repoints (release.yml's finalize pushes
+#     `<service>-latest` for all four services on Docker Hub). An unset env var can therefore
 #     never resolve to a stale pin, because it never resolves to a pin at all.
 #   - The PUBLISHED compose artifact is still fully pinned: scripts/publish-compose-artifact.sh
 #     runs scripts/lib/pin-compose-version.py over the file on the way out, stamping the release's

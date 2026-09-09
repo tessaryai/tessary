@@ -40,7 +40,7 @@
 # EACH OF THE FOUR IS CHECKED TWICE, at `<service>-<version>` and at `<service>-latest`, because
 # both are load-bearing now and they fail differently. The repository holds no version literal —
 # the git tag release.yml pushes is the only source of truth — so a clone with TESSARY_VERSION
-# unset pulls `-latest`, and a `-latest` that merge-and-tag failed to repoint is a stale image
+# unset pulls `-latest`, and a `-latest` that finalize failed to repoint is a stale image
 # nothing else in this repo can see. The pinned reference is what a `.env` and the published
 # compose artifact name.
 #

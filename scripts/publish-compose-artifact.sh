@@ -14,7 +14,8 @@
 # newer one, never an older one.
 #
 # NEITHER TAG CAN SHADOW AN IMAGE TAG. `tessaryai/tessary` publishes images as
-# `<service>-<version>` and `<service>-latest` (release.yml's merge-and-tag job); `compose` and
+# `<service>-<version>` and `<service>-latest` (release.yml's merge-manifests and finalize jobs);
+# `compose` and
 # `compose-<version>` collide with neither, and this script refuses to run if a tag it is about to
 # write already resolves as an image manifest.
 #
@@ -39,7 +40,7 @@
 #
 # --with-env IS NEVER PASSED. It would bake the PUBLISHER'S .env into a public artifact.
 #
-#   bash scripts/publish-compose-artifact.sh                       both registries, version from the newest git tag
+#   bash scripts/publish-compose-artifact.sh                       Docker Hub, version from the newest git tag
 #   bash scripts/publish-compose-artifact.sh --repo=<ref>          one repository (the rehearsal's use)
 #   bash scripts/publish-compose-artifact.sh --version=<v>         override the version suffix
 #   bash scripts/publish-compose-artifact.sh --dry-run             print what it would publish
@@ -65,7 +66,10 @@ for arg in "$@"; do
     esac
 done
 if [ "${#REPOS[@]}" -eq 0 ]; then
-    REPOS=("docker.io/tessaryai/tessary" "ghcr.io/tessaryai/tessary")
+    # Docker Hub only. The GHCR mirror was dropped from the release path (see release.yml's
+    # header): a second registry that can fail independently of the first is a second way to
+    # publish half a release, and it was doing exactly that.
+    REPOS=("docker.io/tessaryai/tessary")
 fi
 [ -n "$VERSION" ] || {
     echo "$P: no version. Pass --version=<semver>, or tag a release first — this repository has no" >&2

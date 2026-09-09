@@ -9,11 +9,18 @@
 # reusable-ecs-deploy.yml, which used to be the hosted product's own image builds, moved to
 # tessary-paid/ in the same PR that generalized this file — see that plan's divergence log).
 #
-# Registry: Docker Hub as primary (`tessaryai/tessary`), GHCR as a free mirror
-# (`ghcr.io/tessaryai/tessary`) — the repo-wide choice recorded in that same plan (prior-art
-# rationale: every comparable self-hosted OSS project checked ships its primary image on Docker
-# Hub, and `docker pull org/image` with no registry host resolves to Docker Hub by convention).
-# GHCR needs no extra secret: GITHUB_TOKEN with `packages: write` is enough for a same-repo push.
+# Registry: DOCKER HUB, and only Docker Hub (`tessaryai/tessary`) — every comparable self-hosted
+# OSS project checked ships its primary image there, and `docker pull org/image` with no registry
+# host resolves to Docker Hub by convention, so it is the one a self-hoster reaches for.
+#
+# GHCR WAS A MIRROR HERE AND IS GONE. `ghcr.io/tessaryai/tessary` was published alongside on the
+# theory that GITHUB_TOKEN with `packages: write` made it free. It is not free: that token can only
+# write a package LINKED to the repository running the workflow, and a package created any other
+# way answers `denied: permission_denied: read_package` — which is how run 34332530449 died, after
+# Docker Hub had already taken half a release. A second registry that can fail independently of the
+# first is a second way to publish half a release, and it bought nothing a self-hoster asked for.
+# The namespace is still ours and still in scripts/lib/namespace-inventory.txt; nothing publishes
+# to it.
 #
 # Versioning: SEMVER, not the repo's local short-SHA convention (D2). THE GIT TAG `v<semver>` THIS
 # WORKFLOW PUSHES IS THE SINGLE SOURCE OF TRUTH for a published version — there is no VERSION file,
@@ -47,24 +54,30 @@
 # `mvn dependency:go-offline` and `pnpm install` layers from the second release onward.
 #
 # Publish shape: each per-arch job pushes an intermediate, ARCH-SUFFIXED tag to Docker Hub only
-# (e.g. `backend-<version>-amd64`) — a scratch tag nobody is meant to pull directly, and one
-# cleanup-scratch-tags deletes once the release is out. merge-and-tag then
-# runs `docker buildx imagetools create` twice per service (once per registry; imagetools can copy
-# blobs across registries, so the GHCR merge's SOURCES are the Docker-Hub-only arch tags) to
-# publish the real multi-arch manifest — `<service>-<version>` and the repointed `<service>-latest`
-# alias — to BOTH registries under the SAME tag names. verify-registry-parity is a separate,
-# skippable job that then asserts the two registries actually agree, digest for digest: D3's own
-# gate requires this be a distinct step that CAN go red, not an assertion true by construction.
+# (e.g. `backend-<version>-amd64`) — a scratch tag nobody is meant to pull directly, and one the
+# cleanup job deletes when the run ends. merge-manifests then runs `docker buildx imagetools
+# create` once per service to publish the real multi-arch manifest under `<service>-<version>`.
+# verify-manifests is a separate, skippable job that then asserts each of those four resolves and
+# carries BOTH platforms: D3's own gate requires a distinct step that CAN go red, not an assertion
+# true by construction, and a merge that half-succeeded is exactly what it is looking for.
+#
+# `<service>-latest` AND THE GIT TAG MOVE LAST, in finalize, after the compose artifact is out.
+# Everything before that point is additive — new tags nobody was using — so a failure anywhere in
+# it leaves no alias pointing somewhere new and no tag claiming a version that did not ship, and
+# the cleanup job can simply delete what THIS RUN created. Repointing `-latest` mid-run is not
+# undoable by deletion (removing the alias is worse than leaving it moved), which is why it does
+# not happen mid-run any more. Run 34332530449 left `backend-latest` on 0.2.0 with the other three
+# services carrying no `-latest` at all; this ordering is what makes that state unreachable.
 #
 # THE COMPOSE ARTIFACT (epic 7's one-command install). After the images are merged and tagged, this
-# workflow publishes docker-compose.yml itself to BOTH registries as an OCI artifact under
+# workflow publishes docker-compose.yml itself to Docker Hub as an OCI artifact under
 # `compose` and `compose-<version>` — the one-command install the marketing site publishes:
 #
 #   docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 #
-# ORDERING IS THE GUARANTEE, and it is why publish-compose `needs: verify-registry-parity` rather
-# than running beside the builds: the config is published only after the images it names exist and
-# agree across registries, so a `compose` tag can never resolve to a config whose images are not
+# ORDERING IS THE GUARANTEE, and it is why publish-compose `needs: verify-manifests` rather than
+# running beside the builds: the config is published only after every image it names exists and has
+# been proven to resolve, so a `compose` tag can never resolve to a config whose images are not
 # there. The reverse staleness — a config OLDER than the images — is impossible by construction,
 # because scripts/publish-compose-artifact.sh stamps the file's floating `${TESSARY_VERSION:-latest}`
 # defaults with THIS release's version (scripts/lib/pin-compose-version.py) before publishing it —
@@ -76,10 +89,10 @@
 # already resolves to something other than a compose artifact. What is published is a
 # BUILD-STRIPPED copy of docker-compose.yml, because `docker compose publish` runs `docker push`
 # for every service carrying a `build:` block — from this runner, logged in to Docker Hub, that
-# would push local images over the manifests merge-and-tag just created.
+# would push local images over the manifests merge-manifests just created.
 #
-# THE GITHUB RELEASE IS LAST, after the compose artifact, not beside the tag push in merge-and-tag.
-# The tag is the source of truth and merge-and-tag pushes it; the Release is the ANNOUNCEMENT, and
+# THE GITHUB RELEASE IS LAST, after finalize. The tag is the source of truth and finalize pushes
+# it; the Release is the ANNOUNCEMENT, and
 # what it announces is the install command. Created next to the tag it could go out while
 # publish-compose was still to fail, leaving a published release whose one-liner resolves to
 # nothing. Notes are generated server-side by `gh release create --generate-notes`.
@@ -145,11 +158,9 @@ concurrency:
 
 permissions:
   contents: write
-  packages: write
 
 env:
   DOCKER_REPO: tessaryai/tessary
-  GHCR_REPO: ghcr.io/tessaryai/tessary
 
 jobs:
   # ---------------------------------------------------------------------------------------------
@@ -384,8 +395,8 @@ jobs:
             "sandbox-runner=${{ env.DOCKER_REPO }}:sandbox-runner-${VERSION}-${ARCH}" \
             "agent-sandbox=${{ env.DOCKER_REPO }}:agent-sandbox-${VERSION}-${ARCH}"
 
-  merge-and-tag:
-    name: Merge arch manifests, repoint -latest, tag the release
+  merge-manifests:
+    name: Merge the arch manifests into <service>-<version>
     runs-on: ubuntu-24.04
     needs:
       - preflight
@@ -401,77 +412,60 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # `docker buildx imagetools create` combines the two arch-suffixed images each build-*
-      # job pushed into one multi-arch manifest under the real tag — it can copy blobs cross-
-      # registry, so the GHCR merge's SOURCES are still the Docker-Hub-only arch tags above; there
-      # is no separate GHCR arch build. Run once per service, per registry: four services times
-      # two registries times two tags (pinned + -latest) = the sixteen refs below.
-      - name: Merge and publish all four images, both registries
+      # `docker buildx imagetools create` combines the two arch-suffixed images each build-* job
+      # pushed into one multi-arch manifest. VERSION TAGS ONLY — `-latest` is finalize's, after the
+      # compose artifact is out, because a repointed alias is the one thing this run cannot undo by
+      # deleting what it made. `<service>-<version>` is new and unreferenced, so it can.
+      - name: Merge all four images into <service>-<version>
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
           for service in backend frontend sandbox-runner agent-sandbox; do
-            SRC_AMD64="${{ env.DOCKER_REPO }}:${service}-${VERSION}-amd64"
-            SRC_ARM64="${{ env.DOCKER_REPO }}:${service}-${VERSION}-arm64"
-            for registry_repo in "${{ env.DOCKER_REPO }}" "${{ env.GHCR_REPO }}"; do
-              echo "Publishing ${registry_repo}:${service}-${VERSION} (+ -latest)"
-              docker buildx imagetools create \
-                -t "${registry_repo}:${service}-${VERSION}" \
-                -t "${registry_repo}:${service}-latest" \
-                "$SRC_AMD64" "$SRC_ARM64"
-            done
+            echo "Publishing ${{ env.DOCKER_REPO }}:${service}-${VERSION}"
+            docker buildx imagetools create \
+              -t "${{ env.DOCKER_REPO }}:${service}-${VERSION}" \
+              "${{ env.DOCKER_REPO }}:${service}-${VERSION}-amd64" \
+              "${{ env.DOCKER_REPO }}:${service}-${VERSION}-arm64"
           done
 
-      - name: Create and push the release tag
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.preflight.outputs.version }}"
-          git tag "v${VERSION}" "${{ github.sha }}"
-          git push origin "v${VERSION}"
-
   # ---------------------------------------------------------------------------------------------
-  # D3 item 7 / D10: a DISTINCT, skippable step that can actually fail — parity guaranteed only by
-  # construction (i.e. "the merge job pushed to both, so they must match") is an assertion that
-  # can never go red, which is exactly the failure mode this job exists to catch (a partial
-  # network failure mid-merge, a registry-side GC race, ...).
-  verify-registry-parity:
-    name: Verify Docker Hub / GHCR tag parity
+  # D3 item 7 / D10: a DISTINCT, skippable step that CAN actually fail. This used to compare Docker
+  # Hub against the GHCR mirror; with one registry there is no parity left to check, but the reason
+  # the job exists survives intact — "merge-manifests exited 0, so the tags must be fine" is an
+  # assertion that can never go red, and a merge that half-succeeded is precisely what run
+  # 34332530449 produced. So it asks the registry instead: does every tag this release just wrote
+  # RESOLVE, and does each one carry BOTH platforms? An arch silently missing from a manifest list
+  # is invisible until a self-hoster on that arch tries to pull.
+  verify-manifests:
+    name: Verify every published manifest resolves and is multi-arch
     runs-on: ubuntu-24.04
-    needs: [preflight, merge-and-tag]
+    needs: [preflight, merge-manifests]
     steps:
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compare manifest digests, both tags, all four services
+      - name: Inspect all four manifests
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
           fail=0
           for service in backend frontend sandbox-runner agent-sandbox; do
-            for tag in "${service}-${VERSION}" "${service}-latest"; do
-              hub_digest=$(docker buildx imagetools inspect "${{ env.DOCKER_REPO }}:${tag}" --format '{{json .Manifest.Digest}}')
-              ghcr_digest=$(docker buildx imagetools inspect "${{ env.GHCR_REPO }}:${tag}" --format '{{json .Manifest.Digest}}')
-              if [ "$hub_digest" != "$ghcr_digest" ]; then
-                echo "::error::Digest mismatch for ${tag}: Docker Hub=$hub_digest GHCR=$ghcr_digest" >&2
-                fail=1
-              else
-                echo "OK: ${tag} -> $hub_digest (both registries)"
-              fi
+            ref="${{ env.DOCKER_REPO }}:${service}-${VERSION}"
+            if ! platforms="$(docker buildx imagetools inspect "$ref" \
+                                --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}')"; then
+              echo "::error::${ref} does not resolve" >&2; fail=1; continue
+            fi
+            for want in linux/amd64 linux/arm64; do
+              case " $platforms " in
+                *" $want "*) ;;
+                *) echo "::error::${ref} is missing ${want} (has: ${platforms})" >&2; fail=1 ;;
+              esac
             done
+            echo "OK: ${ref} -> ${platforms}"
           done
           exit "$fail"
 
@@ -479,23 +473,21 @@ jobs:
   publish-compose:
     name: Publish the compose artifact (the one-command install)
     runs-on: ubuntu-24.04
-    # AFTER parity, deliberately — see the header. The config must never name images that are not
-    # yet published to both registries.
-    needs: [preflight, merge-and-tag, verify-registry-parity]
+    # AFTER verify-manifests, deliberately — see the header. The config must never name images that
+    # have not been proven to resolve.
+    needs: [preflight, merge-manifests, verify-manifests]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish compose + compose-<version> to both registries
-        run: bash scripts/publish-compose-artifact.sh --version=${{ needs.preflight.outputs.version }}
+      - name: Publish compose + compose-<version>
+        run: |
+          bash scripts/publish-compose-artifact.sh \
+            --repo=docker.io/${{ env.DOCKER_REPO }} \
+            --version=${{ needs.preflight.outputs.version }}
 
       # The published artifact has to RESOLVE and RENDER for a caller with nothing cloned. Run from
       # an empty directory so a stray repository file cannot make a broken artifact look fine.
@@ -504,7 +496,9 @@ jobs:
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
           EMPTY="$(mktemp -d)"
-          for repo in "${{ env.DOCKER_REPO }}" "${{ env.GHCR_REPO }}"; do
+          # `docker.io/` spelled out, because this must exercise the EXACT string the site
+          # publishes and scripts/check-compose-artifact.sh holds the docs to.
+          for repo in "docker.io/${{ env.DOCKER_REPO }}"; do
             for tag in compose "compose-${VERSION}"; do
               echo "--- oci://${repo}:${tag}"
               rendered="$(cd "$EMPTY" && docker compose -f "oci://${repo}:${tag}" config)"
@@ -519,6 +513,45 @@ jobs:
           done
 
   # ---------------------------------------------------------------------------------------------
+  # THE POINT OF NO RETURN, and everything before it is reversible on purpose. Two writes happen
+  # here and nowhere else: the four `<service>-latest` aliases move, and the git tag `v<version>` —
+  # the single source of truth for a published version — is pushed. Neither is undoable by the
+  # cleanup job (deleting a moved alias is worse than the move; a pushed tag makes the version
+  # unreleasable again), so both wait until every image exists, resolves, carries both arches, and
+  # the compose artifact naming them is published and rendering.
+  finalize:
+    name: Repoint -latest and push the release tag
+    runs-on: ubuntu-24.04
+    needs: [preflight, merge-manifests, verify-manifests, publish-compose]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      # Sourced from the MERGED manifest rather than the arch tags again, so `-latest` and
+      # `<service>-<version>` are the same digest by construction and cannot drift apart.
+      - name: Repoint <service>-latest
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.preflight.outputs.version }}"
+          for service in backend frontend sandbox-runner agent-sandbox; do
+            echo "Repointing ${{ env.DOCKER_REPO }}:${service}-latest -> ${service}-${VERSION}"
+            docker buildx imagetools create \
+              -t "${{ env.DOCKER_REPO }}:${service}-latest" \
+              "${{ env.DOCKER_REPO }}:${service}-${VERSION}"
+          done
+
+      - name: Create and push the release tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.preflight.outputs.version }}"
+          git tag "v${VERSION}" "${{ github.sha }}"
+          git push origin "v${VERSION}"
+
+  # ---------------------------------------------------------------------------------------------
   # The announcement, and deliberately the LAST thing that happens — see the header. Runs on its own
   # once every job it needs is green; a red anywhere upstream leaves the Release uncreated, which is
   # the right failure: a tag and some images with no Release is a recoverable state, a Release
@@ -526,10 +559,10 @@ jobs:
   github-release:
     name: Publish the GitHub Release
     runs-on: ubuntu-24.04
-    needs: [preflight, publish-compose]
+    needs: [preflight, finalize]
     steps:
       # NO CHECKOUT. `gh release create` works over the API against --repo, the tag it names is
-      # already on the remote (merge-and-tag pushed it), and --generate-notes builds the changelog
+      # already on the remote (finalize pushed it), and --generate-notes builds the changelog
       # server-side from the commits and pull requests since the previous tag — so there is nothing
       # for a clone here to do.
       - name: Create the release
@@ -551,47 +584,89 @@ jobs:
           echo "Release v${VERSION} published${PRERELEASE:+ (prerelease)}"
 
   # ---------------------------------------------------------------------------------------------
-  # The arch-suffixed tags are scratch, and deleting them is safe: the multi-arch manifests
-  # merge-and-tag published reference their children BY DIGEST, never by tag, so this peels a label
-  # off a box rather than throwing the box out. Left alone they accumulate EIGHT PER RELEASE on a
-  # public repository, where `backend-<version>-amd64` reads like a legitimate thing to pull and
-  # hands whoever pulls it an image that will not run on their machine.
+  # DELETES WHAT THIS RUN MADE, AND NOTHING ELSE. Every tag named here carries THIS dispatch's own
+  # version, so no earlier release's tags are reachable from this job at all.
   #
-  # LAST, AND NEVER FATAL. It runs after the release is published and announced, so a red here
-  # cannot fail a release that actually succeeded — and a run that failed earlier keeps its arch
-  # tags for whoever debugs it. Deleting a tag needs the Docker Hub API rather than the docker CLI,
-  # and a DOCKER_TOKEN scoped Read & Write but not Delete answers 403, which is a warning to act on
-  # at leisure and not a reason to redden a finished release.
-  cleanup-scratch-tags:
-    name: Delete the arch-suffixed scratch tags
+  # Two modes, one job:
+  #   release succeeded  ->  the eight arch-suffixed scratch tags go. They exist to be merged and
+  #                          for nothing else; left alone they pile up eight per release on a
+  #                          PUBLIC repository, where `backend-<version>-amd64` reads like a
+  #                          legitimate thing to pull and hands whoever pulls it an image that will
+  #                          not run on their machine.
+  #   anything went red  ->  the four `<service>-<version>` manifests go too, so a half-finished
+  #                          release leaves no version tag behind and the same version can be
+  #                          dispatched again cleanly.
+  #
+  # `<service>-latest` is touched in NEITHER mode, and never needs to be: finalize is the only job
+  # that moves it, nothing runs after finalize but the announcement, and a run that died before
+  # finalize never moved it. That is the whole reason finalize exists as a separate job.
+  #
+  # Deleting is safe: a multi-arch manifest references its children BY DIGEST, never by tag, so
+  # removing an arch tag peels a label off a box rather than throwing the box out.
+  #
+  # NEVER FATAL. It must not fail a release that succeeded, nor turn one failure into a confusing
+  # second one. Deleting a tag needs the Docker Hub API rather than the docker CLI, and a
+  # DOCKER_TOKEN scoped Read & Write but not Delete answers 403 — a warning to act on at leisure.
+  cleanup:
+    name: Delete this run's scratch tags
     runs-on: ubuntu-24.04
-    needs: [preflight, github-release]
+    if: always()
+    needs:
+      - preflight
+      - build-backend
+      - build-frontend
+      - build-sandbox-runner
+      - build-agent-sandbox
+      - verify-open-artifacts
+      - merge-manifests
+      - verify-manifests
+      - publish-compose
+      - finalize
+      - github-release
     steps:
-      - name: Delete <service>-<version>-<arch> from Docker Hub
+      - name: Delete the tags this run created
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          RELEASE_RESULT: ${{ needs.github-release.result }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.preflight.outputs.version }}"
+          # preflight is what validates and publishes the version; without it there is no version,
+          # and therefore nothing this run could have created.
+          if [ -z "$VERSION" ]; then
+            echo "preflight never produced a version; nothing was created, nothing to remove."
+            exit 0
+          fi
+          SERVICES="backend frontend sandbox-runner agent-sandbox"
+          tags=()
+          for service in $SERVICES; do
+            tags+=("${service}-${VERSION}-amd64" "${service}-${VERSION}-arm64")
+          done
+          if [ "$RELEASE_RESULT" = success ]; then
+            echo "Release ${VERSION} succeeded; removing its scratch arch tags."
+          else
+            echo "Run did not complete (github-release: ${RELEASE_RESULT}); removing this run's version tags too."
+            for service in $SERVICES; do tags+=("${service}-${VERSION}"); done
+          fi
+
           # jq builds the body so neither credential is ever spliced into JSON by the shell.
           jwt="$(curl -sf -H 'Content-Type: application/json' \
                    -d "$(jq -nc --arg u "$DOCKER_USERNAME" --arg p "$DOCKER_TOKEN" \
                            '{username:$u,password:$p}')" \
                    https://hub.docker.com/v2/users/login/ | jq -r '.token // empty')" || jwt=""
           if [ -z "$jwt" ]; then
-            echo "::warning::could not authenticate to the Docker Hub API; scratch tags left in place"
+            echo "::warning::could not authenticate to the Docker Hub API; ${#tags[@]} tag(s) left in place"
             exit 0
           fi
-          for service in backend frontend sandbox-runner agent-sandbox; do
-            for arch in amd64 arm64; do
-              tag="${service}-${VERSION}-${arch}"
-              if curl -sf -X DELETE -H "Authorization: JWT $jwt" \
-                   "https://hub.docker.com/v2/repositories/${{ env.DOCKER_REPO }}/tags/${tag}/" >/dev/null
-              then
-                echo "deleted ${tag}"
-              else
-                echo "::warning::could not delete ${tag} (a DOCKER_TOKEN without Delete scope answers 403); left in place"
-              fi
-            done
+
+          for tag in "${tags[@]}"; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+              -H "Authorization: JWT $jwt" \
+              "https://hub.docker.com/v2/repositories/${{ env.DOCKER_REPO }}/tags/${tag}/")"
+            case "$code" in
+              20*) echo "deleted  ${tag}" ;;
+              404) echo "absent   ${tag}" ;;
+              *)   echo "::warning::could not delete ${tag} (HTTP ${code}; a token without Delete scope answers 403)" ;;
+            esac
           done
