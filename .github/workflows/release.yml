@@ -2,7 +2,7 @@
 # Release: publish all four Tessary images
 # =============================================================================
 # Builds and pushes all four images (backend, frontend, sandbox-runner, agent-sandbox) from one
-# version input. It is the only publisher in this repo.
+# dispatched bump. It is the only publisher in this repo.
 #
 # Registry: DOCKER HUB, and only Docker Hub (`tessaryai/tessary`) — every comparable self-hosted
 # OSS project checked ships its primary image there, and `docker pull org/image` with no registry
@@ -28,9 +28,17 @@
 # IMAGE_VERSION/IMAGE_REVISION (short SHA / full SHA) are UNCHANGED and still govern local
 # `docker compose build`.
 #
-# The dispatch input is therefore the only place a human types the version, and preflight refuses
-# it unless it is well-formed semver and `v<version>` does not already exist — so a release cannot
-# silently re-publish a version that was already tagged.
+# NOBODY TYPES THE VERSION. The dispatch input is a major/minor/patch choice, and preflight counts
+# from the newest `v<major>.<minor>.<patch>` tag — the source of truth reading itself, which is what
+# makes the number well-formed by construction and unable to collide with one already released. The
+# tag-exists refusal that used to guard the typed value is therefore dead, and the mistake it caught
+# is now caught by asking about the COMMIT instead: preflight refuses a ref the base tag already
+# points at. Without that, pressing Run twice on one commit would ship it under two versions, where
+# typing the same number twice used to fail.
+#
+# PRERELEASE TAGS ARE FILTERED OUT OF THE BASE, and that filter is load-bearing rather than tidy:
+# git's `-v:refname` ranks `v0.4.0-rc.1` ABOVE `v0.4.0`, so an rc left in the list would silently
+# become the base every later release counts from. Nothing dispatches a prerelease any more.
 #
 # Multi-arch: linux/amd64 + linux/arm64, on NATIVE runners for both (ubuntu-24.04-arm is a
 # free GitHub-hosted runner for public repos — no QEMU emulation, which would silently mask a
@@ -116,7 +124,7 @@
 #   DOCKER_TOKEN     - Docker Hub access token (for image push from runner)
 # GHCR uses the built-in GITHUB_TOKEN (permissions.packages: write below).
 #
-# NO REPO VARIABLE, AND NO SECOND INPUT OF ANY KIND: the dispatch semver is the only thing a human
+# NO REPO VARIABLE, AND NO SECOND INPUT OF ANY KIND: the dispatch bump is the only thing a human
 # supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
 # of a number the tree already states twice — and the only workflow that read it, so nothing else
 # going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
@@ -145,18 +153,22 @@ name: Release
 #       - '.github/workflows/release.yml'
 #   workflow_dispatch:
 #     inputs:
-#       version:
-#         description: "Version to publish, SEMVER (e.g. 1.2.0) — becomes the git tag v<version>"
+#       bump:
+#         description: "Which part of the newest release tag to bump"
 #         required: true
-#         type: string
+#         default: patch
+#         type: choice
+#         options: [patch, minor, major]
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to publish, SEMVER (e.g. 1.2.0) — becomes the git tag v<version>"
+      bump:
+        description: "Which part of the newest release tag to bump"
         required: true
-        type: string
+        default: patch
+        type: choice
+        options: [patch, minor, major]
 
 # ONE RELEASE AT A TIME. Two dispatches in flight would interleave their `imagetools create` calls
 # and could leave `<service>-latest` pointing at the older of the two. `cancel-in-progress: false`
@@ -185,24 +197,46 @@ jobs:
         with:
           fetch-depth: 0 # need full tag history to check `v<version>` doesn't already exist
 
-      # The dispatch input is the ONLY place the version is typed; the tag this run pushes is what
-      # every consumer afterwards reads. So both gates that used to be spread across a file and a
-      # comparison live here: the value must be well-formed, and it must not already be taken.
+      # The version is COUNTED, not typed: the newest release tag is the base, and the dispatched
+      # bump says which part of it moves. The tag this run pushes is what every consumer afterwards
+      # reads, so this is the source of truth reading itself one release back.
       - id: check
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
-          VERSION="$(printf '%s' "${{ inputs.version }}" | tr -d '[:space:]')"
-          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
-            echo "::error::inputs.version ('$VERSION') is not a semantic version. Dispatch with e.g. 1.2.0, no leading 'v'." >&2
+          # RELEASE TAGS ONLY. `-v:refname` ranks `v0.4.0-rc.1` ABOVE `v0.4.0`, so a prerelease left
+          # in this list would become the base every later release counts from. `|| true` because a
+          # no-match grep and a SIGPIPE'd one both fail the pipeline under `pipefail`, and neither
+          # is the error worth reporting: the empty-BASE branch below says it better.
+          BASE="$(git tag --list 'v[0-9]*' --sort=-v:refname \
+                    | grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+          if [ -z "$BASE" ]; then
+            echo "::error::No v<major>.<minor>.<patch> tag exists, so a bump has nothing to count from." >&2
+            echo "::error::Tag the first release by hand: git tag v0.1.0 && git push origin v0.1.0" >&2
             exit 1
           fi
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "::error::git tag v$VERSION already exists — this version was already released." >&2
-            echo "::error::The tag is the source of truth for a published version; dispatch a higher one." >&2
+          # WHAT REPLACES THE TAG-EXISTS GATE. A typed version could name one already released, and
+          # preflight refused it. A counted one never collides, so that check could never fire again
+          # — and a second press of Run would ship one commit under two versions rather than failing.
+          # Same guard against the same mistake, asked of the commit instead of the number.
+          if [ "$(git rev-parse "${BASE}^{commit}")" = "${{ github.sha }}" ]; then
+            echo "::error::${BASE} already points at ${{ github.sha }}; there is nothing new to release." >&2
             exit 1
           fi
+          IFS=. read -r MAJOR MINOR PATCH <<<"${BASE#v}"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::Unknown bump '$BUMP'; expected major, minor or patch." >&2; exit 1 ;;
+          esac
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing version: $VERSION (revision ${{ github.sha }})"
+          # To the step summary as well as the log: nothing before this run said which version it
+          # would publish, so this line is the only place a human can read it back.
+          echo "${BASE} -> v${VERSION} (${BUMP} bump, revision ${{ github.sha }})" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------------------------
   build-backend:
@@ -725,17 +759,14 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
-          # A prerelease must not take the `Latest` badge on the repository front page. preflight's
-          # regex accepts `1.2.0-rc.1`, so this has to handle it. Build metadata (`1.2.0+abc`) is
-          # NOT a prerelease and deliberately does not match.
-          PRERELEASE=""
-          case "$VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
+          # No --prerelease branch: preflight counts a whole `<major>.<minor>.<patch>` off the
+          # newest release tag and can no longer produce `1.2.0-rc.1`, so nothing this workflow
+          # publishes should be kept off the repository front page's `Latest` badge.
           gh release create "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --title "v${VERSION}" \
-            --generate-notes \
-            $PRERELEASE
-          echo "Release v${VERSION} published${PRERELEASE:+ (prerelease)}"
+            --generate-notes
+          echo "Release v${VERSION} published"
 
   # ---------------------------------------------------------------------------------------------
   # THE ROLLBACK, and it now only exists for the failure case. When the per-arch builds pushed
