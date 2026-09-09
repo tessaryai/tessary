@@ -5,9 +5,10 @@ Re-derives the ingest capacity figure in the `tessary.redaction.parallelism` ent
 measure the objectives in [`devdocs/guides/ingest-runbook.md`](../../devdocs/guides/ingest-runbook.md)
 § *The objectives* on a box you care about.
 
-Note what it does **not** claim: O2's stated provenance is `SubstrateWriteIntegrationTest`, not this
-harness. Running a ladder here gives you a second, independent number for the same objective — useful,
-and not the same thing as reproducing the one the runbook cites.
+The runbook draws the line this harness sits on: **O2 is a floor asserted by
+`SubstrateWriteIntegrationTest`; the sustained capacity is a separate, measured number, and this is
+what measures it.** Running a ladder here tells you what a box actually does. It does not, and should
+not, restate the objective.
 
 It exists because those numbers were quoted before anything here could re-derive them. A capacity
 figure with no way to re-run it is a claim, not a measurement.
