@@ -48,10 +48,14 @@
 # `type=gha` layer cache every build job already declares, which covers the expensive
 # `mvn dependency:go-offline` and `pnpm install` layers from the second release onward.
 #
-# Publish shape: each per-arch job pushes an intermediate, ARCH-SUFFIXED tag to Docker Hub only
-# (e.g. `backend-<version>-amd64`) — a scratch tag nobody is meant to pull directly, and one the
-# cleanup job deletes when the run ends. merge-manifests then runs `docker buildx imagetools
-# create` once per service to publish the real multi-arch manifest under `<service>-<version>`.
+# Publish shape: each per-arch job pushes its image BY DIGEST — `push-by-digest=true`, so blobs
+# land in tessaryai/tessary addressable but NAMED BY NOTHING — and hands its digest to the jobs
+# below as a one-line artifact. This used to be an arch-suffixed tag (`backend-<version>-amd64`),
+# which meant eight public, pullable references to single-architecture images sitting on the
+# repository for the length of every run, and a whole job to take them away again; anyone who
+# pulled one got an image that would not start on their machine. merge-manifests runs
+# `docker buildx imagetools create` once per service over those digests, and THAT is where the run
+# writes the first tag anyone can reach: `<service>-<version>`.
 # verify-manifests is a separate, skippable job that then asserts each of those four resolves and
 # carries BOTH platforms. It must be a distinct step that CAN go red, not an assertion true by
 # construction, and a merge that half-succeeded is exactly what it is looking for.
@@ -177,7 +181,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       revision: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need full tag history to check `v<version>` doesn't already exist
 
@@ -213,9 +217,9 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
@@ -225,7 +229,8 @@ jobs:
       # profile activates on a sibling pom merely existing, and that path is not inside
       # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
       # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./backend
           file: backend/Dockerfile
@@ -234,10 +239,29 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          push: true
-          tags: ${{ env.DOCKER_REPO }}:backend-${{ needs.preflight.outputs.version }}-${{ matrix.arch }}
+          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
+          # pullable reference to an image that runs on one architecture — and it would
+          # sit on tessaryai/tessary for the length of the run, needing a job to take it
+          # away again. Pushing by digest leaves the blobs addressable and names nothing;
+          # merge-manifests writes the first tag anyone can reach.
+          outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-backend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-backend-${{ matrix.arch }}
+
+      # The digest is the only handle this build leaves, so it travels to the jobs that
+      # need it as a one-line artifact rather than as a name in the registry.
+      - name: Export the digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          printf '%s' "${{ steps.build.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/backend-${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-backend-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/backend-${{ matrix.arch }}
+          retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
   build-frontend:
@@ -252,9 +276,9 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
@@ -263,7 +287,8 @@ jobs:
       # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
       # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
       # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: frontend/Dockerfile
@@ -272,10 +297,29 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          push: true
-          tags: ${{ env.DOCKER_REPO }}:frontend-${{ needs.preflight.outputs.version }}-${{ matrix.arch }}
+          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
+          # pullable reference to an image that runs on one architecture — and it would
+          # sit on tessaryai/tessary for the length of the run, needing a job to take it
+          # away again. Pushing by digest leaves the blobs addressable and names nothing;
+          # merge-manifests writes the first tag anyone can reach.
+          outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-frontend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-frontend-${{ matrix.arch }}
+
+      # The digest is the only handle this build leaves, so it travels to the jobs that
+      # need it as a one-line artifact rather than as a name in the registry.
+      - name: Export the digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          printf '%s' "${{ steps.build.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/frontend-${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-frontend-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/frontend-${{ matrix.arch }}
+          retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
   build-sandbox-runner:
@@ -290,16 +334,17 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
       # No build-once optimization here: re2@1.26.1 is a native addon compiled by node-gyp in
       # the image, so this pnpm install genuinely happens twice, once per native arch runner.
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
@@ -310,10 +355,29 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          push: true
-          tags: ${{ env.DOCKER_REPO }}:sandbox-runner-${{ needs.preflight.outputs.version }}-${{ matrix.arch }}
+          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
+          # pullable reference to an image that runs on one architecture — and it would
+          # sit on tessaryai/tessary for the length of the run, needing a job to take it
+          # away again. Pushing by digest leaves the blobs addressable and names nothing;
+          # merge-manifests writes the first tag anyone can reach.
+          outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-sandbox-runner-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-sandbox-runner-${{ matrix.arch }}
+
+      # The digest is the only handle this build leaves, so it travels to the jobs that
+      # need it as a one-line artifact rather than as a name in the registry.
+      - name: Export the digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          printf '%s' "${{ steps.build.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/sandbox-runner-${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-sandbox-runner-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/sandbox-runner-${{ matrix.arch }}
+          retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
   build-agent-sandbox:
@@ -328,16 +392,17 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
       # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above (re2 again).
       # Repo-root context: this Dockerfile's own header requires it (reaches contract/).
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: sandbox-runner/agent-sandbox/Dockerfile
@@ -345,10 +410,29 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          push: true
-          tags: ${{ env.DOCKER_REPO }}:agent-sandbox-${{ needs.preflight.outputs.version }}-${{ matrix.arch }}
+          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
+          # pullable reference to an image that runs on one architecture — and it would
+          # sit on tessaryai/tessary for the length of the run, needing a job to take it
+          # away again. Pushing by digest leaves the blobs addressable and names nothing;
+          # merge-manifests writes the first tag anyone can reach.
+          outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-agent-sandbox-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-agent-sandbox-${{ matrix.arch }}
+
+      # The digest is the only handle this build leaves, so it travels to the jobs that
+      # need it as a one-line artifact rather than as a name in the registry.
+      - name: Export the digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          printf '%s' "${{ steps.build.outputs.digest }}" \
+            > "${{ runner.temp }}/digests/agent-sandbox-${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-agent-sandbox-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/agent-sandbox-${{ matrix.arch }}
+          retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
   # No published artifact reaches a real tag with excluded content in it. The four
@@ -382,24 +466,32 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-*-${{ matrix.arch }}
+          path: digests
+          merge-multiple: true
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-      - name: Pull this arch's four images and diff their contents
+
+      # By digest, because the builds no longer write a tag to pull. The refs are assembled here
+      # rather than written out four times: the script takes <role>=<ref> pairs and does not care
+      # whether the ref carries a tag or a digest.
+      - name: Pull this arch's four images by digest and diff their contents
         run: |
           set -euo pipefail
-          VERSION="${{ needs.preflight.outputs.version }}"
+          REPO="${{ env.DOCKER_REPO }}"
           ARCH="${{ matrix.arch }}"
+          refs=()
           for service in backend frontend sandbox-runner agent-sandbox; do
-            docker pull "${{ env.DOCKER_REPO }}:${service}-${VERSION}-${ARCH}"
+            ref="${REPO}@$(cat "digests/${service}-${ARCH}")"
+            docker pull "$ref"
+            refs+=("${service}=${ref}")
           done
-          bash scripts/check-open-artifacts.sh --images \
-            "backend=${{ env.DOCKER_REPO }}:backend-${VERSION}-${ARCH}" \
-            "frontend=${{ env.DOCKER_REPO }}:frontend-${VERSION}-${ARCH}" \
-            "sandbox-runner=${{ env.DOCKER_REPO }}:sandbox-runner-${VERSION}-${ARCH}" \
-            "agent-sandbox=${{ env.DOCKER_REPO }}:agent-sandbox-${VERSION}-${ARCH}"
+          bash scripts/check-open-artifacts.sh --images "${refs[@]}"
 
   merge-manifests:
     name: Merge the arch manifests into <service>-<version>
@@ -412,27 +504,34 @@ jobs:
       - build-agent-sandbox
       - verify-open-artifacts
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # `docker buildx imagetools create` combines the two arch-suffixed images each build-* job
-      # pushed into one multi-arch manifest. VERSION TAGS ONLY — `-latest` is finalize's, after the
-      # compose artifact is out, because a repointed alias is the one thing this run cannot undo by
-      # deleting what it made. `<service>-<version>` is new and unreferenced, so it can.
+      # `imagetools create` combines the two per-arch images into one multi-arch manifest, sourced
+      # BY DIGEST from what the build jobs pushed — this is where the run writes its first tag that
+      # anyone can pull. VERSION TAGS ONLY: `-latest` is finalize's, because a repointed alias is
+      # the one thing this run cannot undo by deleting what it made, and `<service>-<version>` is
+      # new and unreferenced, so it can.
       - name: Merge all four images into <service>-<version>
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
+          REPO="${{ env.DOCKER_REPO }}"
           for service in backend frontend sandbox-runner agent-sandbox; do
-            echo "Publishing ${{ env.DOCKER_REPO }}:${service}-${VERSION}"
+            echo "Publishing ${REPO}:${service}-${VERSION}"
             docker buildx imagetools create \
-              -t "${{ env.DOCKER_REPO }}:${service}-${VERSION}" \
-              "${{ env.DOCKER_REPO }}:${service}-${VERSION}-amd64" \
-              "${{ env.DOCKER_REPO }}:${service}-${VERSION}-arm64"
+              -t "${REPO}:${service}-${VERSION}" \
+              "${REPO}@$(cat "digests/${service}-amd64")" \
+              "${REPO}@$(cat "digests/${service}-arm64")"
           done
 
   # ---------------------------------------------------------------------------------------------
@@ -448,8 +547,8 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [preflight, merge-manifests]
     steps:
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
@@ -484,11 +583,20 @@ jobs:
     # is finalize's, because deleting a floating alias is an outage rather than a rollback.
     needs: [preflight, merge-manifests, verify-manifests]
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
+
+      # A checksum-verified oras, which is what pushes the artifact — see
+      # scripts/publish-compose-artifact.sh's header for why it is not `docker compose publish`.
+      # The install refuses outright on a hash mismatch: this binary is handed registry credentials.
+      - name: Install oras
+        run: |
+          set -euo pipefail
+          bash scripts/lib/install-oras.sh "$RUNNER_TEMP/oras-bin" >/dev/null
+          printf '%s\n' "$RUNNER_TEMP/oras-bin" >> "$GITHUB_PATH"
 
       - name: Publish compose-<version>
         run: |
@@ -536,9 +644,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [preflight, merge-manifests, verify-manifests, publish-compose]
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
@@ -559,6 +667,15 @@ jobs:
       # The floating alias, now that `-latest` resolves to this release. publish-compose already
       # wrote `compose-<version>` from the identical file and proved it renders, so this cannot be
       # the first time the publish path is exercised.
+      # A checksum-verified oras, which is what pushes the artifact — see
+      # scripts/publish-compose-artifact.sh's header for why it is not `docker compose publish`.
+      # The install refuses outright on a hash mismatch: this binary is handed registry credentials.
+      - name: Install oras
+        run: |
+          set -euo pipefail
+          bash scripts/lib/install-oras.sh "$RUNNER_TEMP/oras-bin" >/dev/null
+          printf '%s\n' "$RUNNER_TEMP/oras-bin" >> "$GITHUB_PATH"
+
       - name: Repoint the floating compose tag
         run: |
           bash scripts/publish-compose-artifact.sh \
@@ -621,41 +738,29 @@ jobs:
           echo "Release v${VERSION} published${PRERELEASE:+ (prerelease)}"
 
   # ---------------------------------------------------------------------------------------------
-  # DELETES WHAT THIS RUN MADE, AND NOTHING ELSE. Every tag named here carries THIS dispatch's own
-  # version, so no earlier release's tags are reachable from this job at all.
+  # THE ROLLBACK, and it now only exists for the failure case. When the per-arch builds pushed
+  # arch-suffixed tags this job ran on every outcome, because even a perfect release left eight
+  # public tags to sweep up. They are pushed by digest now and name nothing, so a green run has
+  # nothing to clean and this job is skipped outright.
   #
-  # Two modes, one job:
-  #   finalize succeeded  ->  the eight arch-suffixed scratch tags go, and NOTHING ELSE. They exist
-  #                           to be merged and for nothing else; left alone they pile up eight per
-  #                           release on a PUBLIC repository, where `backend-<version>-amd64` reads
-  #                           like a legitimate thing to pull and hands whoever pulls it an image
-  #                           that will not run on their machine.
-  #   finalize did not    ->  the four `<service>-<version>` manifests AND `compose-<version>` go
-  #                           too, so a half-finished release leaves nothing version-scoped behind
-  #                           and the same version can be dispatched again cleanly. The floating
-  #                           `compose` and `<service>-latest` are untouched because finalize is
-  #                           the only job that writes them and it did not run.
+  # What remains is the failure path: a run that did NOT reach finalize has written
+  # `<service>-<version>` and `compose-<version>`, both new, both unreferenced by anything, and
+  # both in the way of dispatching the same version again. Those go.
   #
   # THE GATE IS FINALIZE, NOT THE RUN'S OVERALL RESULT, and the difference is load-bearing. Once
   # finalize is green the release is committed: `<service>-latest` points at those manifests and
-  # publish-compose has named them in an artifact that outlives this run. Deleting them because a
-  # later job went red would break both. A failure AFTER finalize therefore keeps every version tag
-  # and leaves a human a coherent release to finish by hand.
+  # the compose artifact names them. Deleting them because a later job went red would break both,
+  # so a failure after finalize keeps every tag and leaves a human a coherent release to finish.
   #
-  # `<service>-latest` is touched in NEITHER mode, and never needs to be: finalize is the only job
-  # that moves it, nothing runs after finalize but the announcement, and a run that died before
-  # finalize never moved it. That is the whole reason finalize exists as a separate job.
+  # Deleting is safe: a multi-arch manifest references its children by digest, never by tag.
   #
-  # Deleting is safe: a multi-arch manifest references its children BY DIGEST, never by tag, so
-  # removing an arch tag peels a label off a box rather than throwing the box out.
-  #
-  # NEVER FATAL. It must not fail a release that succeeded, nor turn one failure into a confusing
-  # second one. Deleting a tag needs the Docker Hub API rather than the docker CLI, and a
-  # DOCKER_TOKEN scoped Read & Write but not Delete answers 403 — a warning to act on at leisure.
+  # NEVER FATAL. It must not turn one failure into a confusing second one. Deleting a tag needs the
+  # Docker Hub API rather than the docker CLI, and a DOCKER_TOKEN scoped Read & Write but not
+  # Delete answers 403 — a warning to act on at leisure.
   cleanup:
-    name: Delete this run's scratch tags
+    name: Roll back this run's tags
     runs-on: ubuntu-24.04
-    if: always()
+    if: ${{ always() && needs.finalize.result != 'success' }}
     needs:
       - preflight
       - build-backend
@@ -674,7 +779,6 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           FINALIZE_RESULT: ${{ needs.finalize.result }}
-          RELEASE_RESULT: ${{ needs.github-release.result }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
@@ -684,21 +788,13 @@ jobs:
             echo "preflight never produced a version; nothing was created, nothing to remove."
             exit 0
           fi
-          SERVICES="backend frontend sandbox-runner agent-sandbox"
+          echo "finalize did not succeed (${FINALIZE_RESULT}); nothing downstream can be holding a"
+          echo "reference, so this run's version-scoped tags go."
           tags=()
-          for service in $SERVICES; do
-            tags+=("${service}-${VERSION}-amd64" "${service}-${VERSION}-arm64")
+          for service in backend frontend sandbox-runner agent-sandbox; do
+            tags+=("${service}-${VERSION}")
           done
-          if [ "$FINALIZE_RESULT" = success ]; then
-            echo "finalize succeeded, so ${VERSION} is committed (-latest moved, tag pushed, and the"
-            echo "compose artifact may name these images). Removing the scratch arch tags only."
-            echo "  github-release: ${RELEASE_RESULT}"
-          else
-            echo "finalize did not succeed (${FINALIZE_RESULT}); nothing downstream can be holding a"
-            echo "reference, so this run's version-scoped tags go with the scratch ones."
-            for service in $SERVICES; do tags+=("${service}-${VERSION}"); done
-            tags+=("compose-${VERSION}")
-          fi
+          tags+=("compose-${VERSION}")
 
           # jq builds the body so neither credential is ever spliced into JSON by the shell.
           jwt="$(curl -sf -H 'Content-Type: application/json' \
