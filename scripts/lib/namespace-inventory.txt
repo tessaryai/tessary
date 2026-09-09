@@ -32,7 +32,7 @@
 ecosystem|coordinate|referenced by|owning account|verification|account id
 dockerhub|tessaryai/tessary|docker-compose.yml and docker-compose.dev.yml (backend, frontend, sandbox-runner, AGENT_IMAGE defaults); .env.example; docs/self-hosting/setup.mdx; .github/workflows/release.yml DOCKER_REPO|tessaryai|dockerhub-repo|
 dockerhub|tessaryai|the namespace of every published image|tessaryai|dockerhub-org|45447ec3-985b-4e4f-bf1a-b51b794ee7fe
-ghcr|ghcr.io/tessaryai/tessary|.github/workflows/release.yml GHCR_REPO (the mirror of every published image); .env.example|tessaryai|ghcr|
+ghcr|ghcr.io/tessaryai/tessary|NOTHING in the tree any more: the mirror was dropped from release.yml, because GITHUB_TOKEN can only write a package linked to the repository running the workflow and a package created any other way answers permission_denied, which took half a release with it (run 34332530449). Kept because the namespace is still ours and re-registration by someone else is still the risk this file exists to catch|tessaryai|ghcr|
 github|tessaryai|the organization every repository and package sits under|tessaryai|github-org|244997004
 github|tessaryai/tessary|docs/self-hosting/setup.mdx (the setup.md link), docs/self-hosting/deployment.mdx (the clone command), docs/trademarks.mdx (the trademark policy) — the repository the tree now names; private until the epic 11 cutover|tessaryai|github-repo-private|244997004
 github|tessaryai/evals-platform|NOTHING in the tree any more: #1293 (C9) repointed every in-tree coordinate at tessaryai/tessary ahead of the cutover. Kept because this is still the development repository's own name on GitHub, which #1293 section G deliberately does not rename|tessaryai|github-repo-private|244997004
