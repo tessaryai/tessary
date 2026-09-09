@@ -239,7 +239,7 @@ tasks:
       # Through the script, not an inline mvn: scripts/check-backend.sh hard-fails on any
       # JDK that is not major 25 BEFORE Maven starts, and this target used to bypass that guard and
       # surface the mismatch as an opaque PMD or compiler crash deep in the reactor. Its last line
-      # is `exec mvn -B verify "$@"`, so the profile threads straight through and there is exactly
+      # is `exec mvn -B -T 2 verify "$@"`, so the profile threads straight through and there is exactly
       # ONE definition of the backend gate for both editions. `task check:open` runs the same line.
       - bash scripts/check-backend.sh -P '!paid'
 
@@ -545,7 +545,7 @@ tasks:
   # defined once and "local green ⇒ CI green" holds by construction (no drift to keep in sync):
   #   contract:check + CI contract job -> scripts/check-contract-consistency.sh (vendored contract drift)
   #   contract:plugin + CI vendored-plugin job -> scripts/check-vendored-plugin.sh (validator rules + freshness)
-  #   backend:check  + CI backend job  -> scripts/check-backend.sh  (mvn -B verify)
+  #   backend:check  + CI backend job  -> scripts/check-backend.sh  (mvn -B -T 2 verify)
   #   frontend:check + CI frontend job -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the
   #                                      route render smoke test] + pnpm run build, then an assertion
   #                                      over dist/ that no paid chunk or copy is in it)
