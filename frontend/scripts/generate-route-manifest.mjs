@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Regenerates the checked-in route manifest (src/routeManifest.generated.json) from the <Route>
-// elements in src/App.tsx — #849 AC2's "written route manifest covering every open route."
+// elements in src/App.tsx: a written route manifest covering every open route.
 //
 // WHY AN AST WALK, NOT A GREP. App.tsx has 69 `path=` occurrences and roughly a tenth of them put
 // the attribute on its own line, separated from the opening `<Route` tag (the multi-line
@@ -11,7 +11,7 @@
 // exactly the routes this manifest exists to catch, so this walks the real AST via the TypeScript
 // compiler API (already a devDependency — no new package).
 //
-// "kind" is decided per #849's own note on `/pricing`: a `<Route>` whose `element` attribute's
+// "kind" is decided by a simple rule, noted here for `/pricing`: a `<Route>` whose `element` attribute's
 // OUTERMOST JSX tag is `<Navigate>` is a "redirect" (it never mounts a component); everything else,
 // including the `path="*"` catch-alls that resolve to `<ToProjectSegment>` (a real component, not a
 // literal `<Navigate>`), is a "view". That is a deliberate, explicit call on what "route" means
@@ -20,7 +20,7 @@
 // Index routes (`<Route index element={...}>`, no `path` attribute) are skipped: they render into
 // the parent's outlet and carry no path of their own for this manifest to track.
 //
-// #890 adds `fullPath` alongside the original `path`/`kind` fields (which stay untouched — see
+// This manifest adds `fullPath` alongside the original `path`/`kind` fields (which stay untouched — see
 // scripts/check-frontend.sh's existing diff). `path` is the raw, un-nested JSX literal, which is
 // NOT a navigable URL for most entries: App.tsx nests two <Routes> trees (the top-level one in
 // App(), and ProjectShell()'s own, reached only by component *reference* — <ProjectShell/> — not
@@ -62,7 +62,7 @@ const PROJECT_SHELL_BASE = PROJECT_SHELL_ROUTE.replace(/\/\*$/, "");
 // matches a literal "*" character in a navigated URL against its own wildcard segment just fine, so
 // the raw path is already a valid fullPath and substituting it would collide it with the *inner*
 // catch-all it wraps (that collision was caught by the fullPath-uniqueness assertion during
-// implementation — see the deviation note in tessary-paid/OPEN-CORE.md/the PR).
+// implementation — see the deviation note recorded elsewhere in the project's history).
 const CATCH_ALL_SENTINEL = "__unmatched__";
 
 /** Join an ancestor-path stack (already-substituted segments; PROJECT_SHELL_BASE and any

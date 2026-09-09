@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The self-host quickstart rehearsal (epic 7 clause 2, #1191; clause 5's ladder walk, #1194; and
-# clause 3's clock). Under R1 this script is the outsider: it executes docs/self-hosting/setup.mdx's
-# own command blocks, verbatim and in order, from the inputs a reader has and nothing else, and
-# asserts every observable the page states as the page words it.
+# The self-host quickstart rehearsal. It executes docs/self-hosting/setup.mdx's own command blocks,
+# verbatim and in order, from the inputs a reader has and nothing else, and asserts every observable
+# the page states as the page words it.
 #
-# THE INPUT SET, stated and enforced: the published repository (a clean-room export of this tree,
-# which is where docker-compose.yml, .env.example and scripts/emit-span.js come from; the page's own
+# The input set, enforced: the published repository (a clean-room export of this tree, which is
+# where docker-compose.yml, .env.example and scripts/emit-span.js come from; the page's own
 # prerequisite tells the reader to clone it), the published docs (setup.mdx in that export), and the
 # published images. No Taskfile, no variable the page does not name, no port moved off the compose
 # defaults. The environment is scrubbed of every cloud credential and every variable the compose
 # file interpolates before the first block runs.
 #
-# THREE FAILURE CLASSES, enforced by construction:
+# Three failure classes, enforced by construction:
 #   1. every bash fence on the page, counted page-wide and not only inside <Step>, is executed;
 #      there is no skip list, because nothing on the page is skipped;
 #   2. the harness sets no environment variable the page does not tell the reader to set: the
@@ -23,32 +22,31 @@
 #   3. every action that is not a verbatim block goes through `_glue <name>`, which refuses a name
 #      not in GLUE below, where each is paired with the sentence on the page it stands in for.
 #
-# CLAUSE 3'S CLOCK: wall clock is captured immediately before the first documented command and
-# again the moment the ladder first reports `fitting`; total and post-pull seconds are printed, and
-# the total must be under 600 s on the pulled path.
+# The clock: wall clock is captured immediately before the first documented command and again the
+# moment the ladder first reports `fitting`; total and post-pull seconds are printed, and the total
+# must be under 600s on the pulled path.
 #
-#   bash scripts/check-selfhost-quickstart.sh          the documented path (images PULLED)
-#   bash scripts/check-selfhost-quickstart.sh --build  ONE enumerated deviation: `docker compose
+#   bash scripts/check-selfhost-quickstart.sh          the documented path (images pulled)
+#   bash scripts/check-selfhost-quickstart.sh --build  one enumerated deviation: `docker compose
 #       build` stands in for the page's `docker compose pull`, for a tree whose images are not yet
-#       published. Printed loudly, recorded as "built, not pulled", and the 600 s threshold does not
-#       apply (the page says it applies to the pulled path only).
+#       published. Recorded as "built, not pulled"; the 600s threshold does not apply (the page
+#       says it applies to the pulled path only).
 #
-# Three more deviations exist ONLY for harnesses that layer on this one (clause 9's zero-egress
-# window is the first); each is printed loudly when used and none is a reader's option:
+# Three more deviations exist only for harnesses that layer on this one; each is printed loudly
+# when used and none is a reader's option:
 #   --overlay <file>      copied into the export as docker-compose.override.yml, which the page's own
-#                         verbatim `docker compose` commands then pick up (how clause 9 pins the
-#                         stack to an internal network with a DNS sink)
+#                         verbatim `docker compose` commands then pick up
 #   --env-line KEY=value  written into .env before the first documented command, the way a reader who
 #                         wants that setting from the first boot does it; the key must be one
 #                         docs/self-hosting/configuration.mdx documents, and the line is glue "the
 #                         reader sets it per the configuration page"
 #   --after <script>      run in the export, with TMP, ORG, PROJ, JAR and BASE exported, after every
-#                         documented step and before teardown; clause 9's vantage assertions live there
+#                         documented step and before teardown
 #
-# Needs Docker, the network (to pull), and ports 80 and 443 free on the host, because those are
-# the compose file's defaults and the page names no other. NEVER RUN AGENT-SIDE. Run by a person
-# (`task check:selfhost:quickstart`) or the dispatch-only open-edition-boot.yml; EXCLUDED from
-# `task check`. No cron: #1184 owns re-arming.
+# Needs Docker, the network (to pull), and ports 80 and 443 free on the host, because those are the
+# compose file's defaults and the page names no other. Never run this agent-side. Run by a person
+# (`task check:selfhost:quickstart`) or the dispatch-only boot-checks.yml; excluded from
+# `task check`. No cron re-arms this.
 set -euo pipefail
 P=check-selfhost-quickstart
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -93,8 +91,8 @@ unset DOCKER_DEFAULT_PLATFORM 2>/dev/null || true
 GLUE="
 signup|Create the first account with an email and password (the page describes the sign-up screen; the harness posts the same form to /auth/signup)
 whoami|Tessary creates your organization and a Default project during sign-up (the harness reads their slugs from /auth/me and the project list, which the browser does on landing)
-mint|a Bearer token already minted (the connect gate mints a WRITE-scoped API key on mount; the harness calls the same endpoint with the same name and scope)
-token-substitution|Copy the Header field on the gate, keep the part after Bearer (the page's emit block carries <token>; the harness substitutes the minted value)
+mint|a Bearer token the gate's Create-and-copy control mints (a WRITE-scoped API key, minted on that click; the harness calls the same endpoint with the same name and scope)
+token-substitution|Take the Bearer Token field from the gate, keep the part after Bearer (the page's emit block carries <token>; the harness substitutes the minted value)
 ps|docker compose ps shows ... healthy (the Check; read through docker compose ps --format json)
 open|Open http://localhost ... The sign-up screen loads (the Check; one GET of the page's own address)
 logs|docker compose logs backend no longer carries the placeholder warning (the Check; one read of the backend log)
@@ -104,7 +102,7 @@ after|the layering harness's own assertions, run in the export after every docum
 ladder|the gate opens on its own ... the ladder below reads fitting (the Checks; polled from /onboarding, the endpoint the Setup page renders)
 gate|a live count of spans received versus spans tagged (the gate's own numbers, read from /substrate/status, the endpoint the gate polls)
 sock-gid|The group id of the Docker socket as containers see it ... if it prints anything but 999, write DOCKER_SOCK_GID=<that number> into a .env file (the prerequisite, run with the page's own command; asserted afterwards by opening the socket from inside the sandbox runner)
-control|A second account whose gate mints a token and emits nothing must stay at listening (#1194's control arm; not on the page, run every time so the fitting assertion cannot be vacuous)
+control|A second account whose gate mints a token and emits nothing must stay at listening (the control arm; not on the page, run every time so the fitting assertion cannot be vacuous)
 "
 # `_glue <name> [command...]`: refuses a name outside GLUE, prints what it stands in for, and when
 # a command follows, runs it, so an action outside the table cannot be executed through this path.
@@ -147,7 +145,7 @@ if [ -n "$OVERLAY" ]; then
     echo "$P: DEVIATION (--overlay): $OVERLAY is in the export as docker-compose.override.yml; every verbatim 'docker compose' below runs against it"
 fi
 
-# The step list is EXTRACTED from the page: every <Step title="..."> and the bash fences inside it,
+# The step list is extracted from the page: every <Step title="..."> and the bash fences inside it,
 # plus each <Check> body, in document order. Editing a command on the page changes what runs here.
 python3 - "$DOC" "$STEPS" <<'PY'
 import re, sys
@@ -255,21 +253,21 @@ while IFS=$'\t' read -r -u 3 kind title payload; do
         [ "$title" = "Pull the images" ] && T_PULL=$(date +%s)
         if [ -n "$T_PULL" ] && [ ! -f "$TMP/.window-start" ]; then
             # The images are local from here on; a layering harness reads this as the moment after
-            # which no registry pull may happen (clause 9's host-daemon vantage). One whole second
-            # later than the pull, so the pull's own events cannot share the stamp's second.
+            # which no registry pull may happen. One whole second later than the pull, so the
+            # pull's own events cannot share the stamp's second.
             sleep 1; date +%s > "$TMP/.window-start"
         fi
         if [ "$title" = "Generate a value for each and put them in .env" ]; then
             # Failure class 2, asserted: .env is .env.example plus exactly what the page's block adds
-            # (two EVALS_ lines), plus the prerequisite line when the host needed it. Asserted BEFORE
+            # (three TESSARY_ lines), plus the prerequisite line when the host needed it. Asserted before
             # any enumerated --env-line is appended, so the page's own block is what is measured.
             extra="$(diff "$TMP/.env.example" "$TMP/.env" | grep '^>' | sed 's/^> //' || true)"
-            unexpected="$(printf '%s\n' "$extra" | grep -vE '^EVALS_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
-            n_keys="$(printf '%s\n' "$extra" | grep -cE '^EVALS_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' || true)"
-            if [ -n "$unexpected" ] || [ "$n_keys" -ne 2 ]; then
-                echo "$P: FAIL, after the page's .env block the file is not .env.example plus its two keys; extra lines: $(printf '%s' "$unexpected" | tr '\n' ' ') (keys added: $n_keys)" >&2; exit 1
+            unexpected="$(printf '%s\n' "$extra" | grep -vE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY|OBSERVER_AGENTIC_LAUNCHER_API_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
+            n_keys="$(printf '%s\n' "$extra" | grep -cE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY|OBSERVER_AGENTIC_LAUNCHER_API_KEY)=' || true)"
+            if [ -n "$unexpected" ] || [ "$n_keys" -ne 3 ]; then
+                echo "$P: FAIL, after the page's .env block the file is not .env.example plus its three keys; extra lines: $(printf '%s' "$unexpected" | tr '\n' ' ') (keys added: $n_keys)" >&2; exit 1
             fi
-            echo "$P: .env differs from .env.example by exactly the two keys the page's block appends${SOCK_GID:+, the DOCKER_SOCK_GID prerequisite line}${ENV_LINES:+ and the enumerated configuration-page line} (ok)"
+            echo "$P: .env differs from .env.example by exactly the three keys the page's block appends${SOCK_GID:+, the DOCKER_SOCK_GID prerequisite line}${ENV_LINES:+ and the enumerated configuration-page line} (ok)"
         fi
         if [ "$title" = "Connect your traces" ]; then
             _glue ladder
@@ -340,7 +338,7 @@ if [ "$executed" -ne "$n_blocks" ]; then
 fi
 echo "$P: every one of the $n_blocks command blocks on the page was executed"
 
-# #1194's control arm: mint only, emit nothing, the ladder must not move past listening.
+# Control arm: mint only, emit nothing, the ladder must not move past listening.
 _glue control
 CJAR="$TMP/.cjar"
 code="$(_req POST /auth/signup "$(jq -nc --arg e "control-$RUN_EMAIL" '{email:$e,password:"quickstart-rehearsal-passphrase"}')" "$CJAR")"
@@ -358,7 +356,7 @@ if [ -n "$AFTER" ]; then
     (cd "$TMP" && TMP="$TMP" ORG="$ORG" PROJ="$PROJ" JAR="$JAR" BASE="$BASE" bash "$AFTER") || { echo "$P: FAIL, the --after script exited non-zero" >&2; exit 1; }
 fi
 
-# Clause 3's numbers.
+# Elapsed-time numbers.
 total=$((T_FITTING - T0)); post_pull=$((T_FITTING - T_PULL))
 # A pulled image reports its registry digest; a built one has none and reports its local id.
 digests="$(cd "$TMP" && docker compose images --format json 2>/dev/null | jq -r '.[] | "\(.Repository):\(.Tag)"' | sort -u | while read -r ref; do

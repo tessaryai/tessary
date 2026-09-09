@@ -9,14 +9,12 @@ version: '3'
 # Open http://localhost:8000 in the browser.
 
 vars:
-  SESSION: evals-dev
-  # The dev stack, both editions. Same file-exists shape as DC_PROD below, for the same reason —
-  # see scripts/lib/dev-compose.sh, which is the ONE derivation all five dev compose strings (this,
+  SESSION: tessary-dev
+  # The dev stack. Same file-exists shape as DC_PROD below, for the same reason — see
+  # scripts/lib/dev-compose.sh, which is the ONE derivation all five dev compose strings (this,
   # DC_DEV_ALL, scripts/dev.sh, scripts/dev-up.sh, the agent loop's verify.start_cmd) now call, and
-  # which check-open-boundary.sh rule 4 pins them to. The paid overlay's fragment adds the
-  # eleven paid module mounts and the SOP compile service; with tessary-paid/ deleted it is absent,
-  # so no bind mount names a missing source and dockerd cannot manufacture the ghost overlay tree
-  # that used to reactivate backend/pom.xml's `paid` profile in an open checkout (#886).
+  # which check-open-boundary.sh rule 4 pins them to. With no tessary-paid/ overlay on disk, no
+  # bind mount names a missing source and dockerd builds only this tree's stack.
   #
   # Two independent `sh:` calls rather than DC_DEV_ALL: '{{.DC_DEV}} ...' — one Task var must not
   # depend on another's resolution order for something this load-bearing.
@@ -28,23 +26,18 @@ vars:
   # It is deliberately NOT reused for `up`/`--force-recreate`, because the overlay also attaches
   # -javaagent to the backend — a plain `task rb` would then start a profiler nobody asked for and
   # fail outright when the agent jar was never fetched (dev.sh only fetches it under
-  # EVALS_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
+  # TESSARY_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
   # Extra `-f` is harmless for `down`: absent services are simply nothing to remove.
   #
-  # Since #886 that reasoning has a second half, and `dev:stop` carries `--remove-orphans` for it:
-  # the profiling file is ALWAYS on disk, so naming it here is enough, but the paid fragment can
-  # DISAPPEAR between `up` and `down` — `mv tessary-paid /tmp/` (this epic's own detach ritual)
-  # while a paid stack runs leaves `compile` in the project and in none of the `-f` files.
+  # That reasoning has a second half, and `dev:stop` carries `--remove-orphans` for it: the
+  # profiling file is ALWAYS on disk, so naming it here is enough, but a compose fragment named
+  # only at `up` time can be gone by `down` time — see `dev:stop` below for why `--remove-orphans`
+  # covers that case too.
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
-  # The prod stack, both editions. The open stack is the base file alone; the paid overlay adds the
-  # SOP compile service and the four EVALS_SOP_COMPILE_* keys the backend needs to reach it, so its
-  # fragment is merged in when — and only when — tessary-paid/docker-compose.yml is on disk.
-  #
-  # A file-exists probe, never an env var and never a flag someone has to remember: the open tree has
-  # to be coherent with ZERO configuration, because after the epic 11 cutover the public repo simply
-  # has no such directory. Same activation shape as backend/pom.xml's `paid` Maven profile, which
-  # turns on for `<file><exists>../tessary-paid/pom.xml</exists></file>` and nothing else.
+  # The prod stack. A file-exists probe, never an env var and never a flag someone has to
+  # remember: the open tree has to be coherent with ZERO configuration, and with no
+  # tessary-paid/docker-compose.yml on disk this always resolves to the base compose file alone.
   #
   # All four prod targets route through this, teardown included — that is the point of doing it in
   # one place. See the DC_DEV_ALL note above for what happens when `down` cannot see a service that
@@ -55,15 +48,14 @@ vars:
 # The pnpm version baked into every image built locally. The compose files and the frontend and
 # launcher Dockerfiles carry the same literal as their default so a bare `docker compose build`
 # works with nothing exported; scripts/check-required-inputs.sh reds when any copy drifts from this
-# one (#1190). CI mirrors it with the `PNPM_VERSION` GitHub Actions variable (see the deploy
+# one. CI mirrors it with the `PNPM_VERSION` GitHub Actions variable (see the deploy
 # workflows). Keep this in step with the `packageManager` field in each package.json. Exported at
 # the top level so it reaches `bash scripts/dev.sh` and every `docker compose` invocation below.
 env:
   PNPM_VERSION: "11.15.1"
-  # The version identity stamped on the backend and frontend images (epic 5 clause 3, #1135): the
-  # repo's short-SHA convention, the same expression release.yml tags with, plus the full
-  # SHA as the revision. Both flow into docker-compose.yml's build args; a paid image built FROM an
-  # open one asserts the two agree.
+  # The version identity stamped on the backend and frontend images: the repo's short-SHA
+  # convention, the same expression release.yml tags with, plus the full SHA as the revision. Both
+  # flow into docker-compose.yml's build args.
   IMAGE_VERSION:
     sh: git rev-parse --short HEAD 2>/dev/null || echo dev
   IMAGE_REVISION:
@@ -84,25 +76,25 @@ tasks:
   dev:local:
     desc: Dev stack + a HOST launcher running your local `opencode` (no E2B) for the agentic paths (/analyze, /rca, /triage, /synthesize, /codegen). Needs `opencode` + git on PATH.
     env:
-      EVALS_LOCAL_AGENT: "1"
+      TESSARY_LOCAL_AGENT: "1"
     cmds:
       - bash scripts/dev.sh
 
-  # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads EVALS_PROFILING and
-  # self-heals the agent jar, so `EVALS_PROFILING=1 task dev:slim` (or any other dev mode) works
+  # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads TESSARY_PROFILING and
+  # self-heals the agent jar, so `TESSARY_PROFILING=1 task dev:slim` (or any other dev mode) works
   # too. These two tasks are just the common combinations spelled out.
   dev:profiling:
     desc: Dev stack + continuous CPU profiling. Flame graphs at http://localhost:4040 (local Pyroscope, no cloud account needed).
     env:
-      EVALS_PROFILING: "1"
+      TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
 
   dev:local:profiling:
     desc: Like `dev:local` (HOST launcher on your local `opencode`, no E2B) plus continuous CPU profiling at http://localhost:4040.
     env:
-      EVALS_LOCAL_AGENT: "1"
-      EVALS_PROFILING: "1"
+      TESSARY_LOCAL_AGENT: "1"
+      TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
 
@@ -118,7 +110,7 @@ tasks:
     aliases: [dev:2gb]
     desc: 'Like `dev` minus the classify + compile services: no gated encoder-weight download, no 8 GB container. Runs postgres, backend, frontend, caddy, alloy — only encoder classifier heads and SOP-conformance fits stay dormant.'
     env:
-      EVALS_SKIP_CLASSIFY: "1"
+      TESSARY_SKIP_CLASSIFY: "1"
     cmds:
       - bash scripts/dev.sh
 
@@ -179,31 +171,28 @@ tasks:
 
   # ---- backend ----
   backend:
-    desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via EVALS_JDBC_URL (e.g. `task dev:up`).
+    desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via TESSARY_JDBC_URL (e.g. `task dev:up`).
     dir: backend
     env:
-      # The bare-metal dev path, like the Docker one, runs unauthenticated -- and since #924 it has
-      # to SAY so. Absent WorkOS credentials used to be the off switch by themselves; they now fail
+      # The bare-metal dev path, like the Docker one, runs unauthenticated -- and it has to SAY so.
+      # Absent WorkOS credentials used to be the off switch by themselves; they now fail
       # closed, so without this every /api/** call here answers 401. Set here rather than left to
       # the developer because this task loads no dotenv: there is nowhere else it could come from,
-      # and a dev path that 401s with no explanation is precisely the failure #924 must not cause.
+      # and a dev path that 401s with no explanation is a failure this must not cause.
       #
       # Hardcoded rather than defaulted-from-the-environment: the safe default for a task that
       # loads no dotenv should not require a developer to remember an override.
       #
-      # CORRECTED 2026-09-01 (#996 review): this used to say exporting WORKOS_API_KEY before
-      # `task backend` gets you enforced auth instead -- that relied on the retired "a configured
-      # provider always wins over the flag" precedence (see AuthFilter#shouldNotFilter's own
-      # comment). Since #852/#996 decoupled the flag from provider state, EVALS_AUTH_DISABLED=true
-      # here is authoritative on its own: exporting a WorkOS key changes NOTHING about this task's
-      # posture, it stays unauthenticated. To actually test enforced auth locally, edit this line
-      # to "false" (or unset it) rather than relying on WorkOS config to override it.
+      # TESSARY_AUTH_DISABLED=true here is authoritative on its own: exporting a WorkOS key changes
+      # NOTHING about this task's posture, it stays unauthenticated. To actually test enforced auth
+      # locally, edit this line to "false" (or unset it) rather than relying on WorkOS config to
+      # override it.
       #
-      # Since #852, "the real auth flow" no longer means WorkOS specifically: PasswordAuthProvider
+      # "The real auth flow" no longer means WorkOS specifically: PasswordAuthProvider
       # (dependency-free email/password) is the open edition's always-on default and wins this same
       # AuthProviderConfig selection whenever WORKOS_API_KEY/WORKOS_CLIENT_ID aren't exported --
-      # EVALS_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
-      EVALS_AUTH_DISABLED: "true"
+      # TESSARY_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
+      TESSARY_AUTH_DISABLED: "true"
     cmds:
       # Install app's whole dependency chain first, then run ONLY the app module. spring-boot:run
       # can't run reactor-wide (it dies on the non-executable parent pom), and app-only can't
@@ -235,29 +224,29 @@ tasks:
       - bash scripts/check-backend.sh
 
   contract:openapi:
-    desc: "Regenerate the checked-in canonical OpenAPI spec (backend/contract/src/main/resources/openapi/evals-api.json) from the controllers via springdoc. Run after any controller/DTO change that shifts the wire contract, then commit the regenerated spec (OpenApiSpecDriftTest fails backend:check until you do)."
+    desc: "Regenerate the checked-in canonical OpenAPI spec (backend/contract/src/main/resources/openapi/tessary-api.json) from the controllers via springdoc. Run after any controller/DTO change that shifts the wire contract, then commit the regenerated spec (OpenApiSpecDriftTest fails backend:check until you do)."
     cmds:
-      - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Devals.openapi.regenerate=true test
+      - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Dtessary.openapi.regenerate=true test
 
   contract:openapi:paid:
-    desc: "Regenerate the PAID edition's OpenAPI spec (tessary-paid/contract/openapi/evals-api-paid.json) from the paid assembly (epic 5 #943): boots EvalsApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres)."
+    desc: "Regenerate the PAID edition's OpenAPI spec from the paid assembly: boots TessaryApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres). Skipped, not failed, without the tessary-paid/ overlay."
     cmds:
-      - "[ -f tessary-paid/assembly/pom.xml ] && mvn -f backend/pom.xml -pl ../tessary-paid/assembly -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PaidOpenApiSpecTest -Devals.openapi.regenerate=true test"
+      - "[ -f tessary-paid/assembly/pom.xml ] && mvn -f backend/pom.xml -pl ../tessary-paid/assembly -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PaidOpenApiSpecTest -Dtessary.openapi.regenerate=true test"
 
   backend:check:open:
-    desc: "OPEN-EDITION backend build (open-core decision D2): the whole reactor with the `paid` profile off, i.e. exactly what builds after `tessary-paid/` is filtered out of the public export. Green here = the open tree stands on its own with zero paid code. This supersedes the old shared+contract-only invariant, which the per-module bannedDependencies rules still enforce on their own."
+    desc: "OPEN-EDITION backend build: the whole reactor with the `paid` profile off, i.e. exactly what builds after `tessary-paid/` is filtered out of the public export. Green here = the open tree stands on its own with zero paid code. This supersedes the old shared+contract-only invariant, which the per-module bannedDependencies rules still enforce on their own."
     cmds:
-      # Through the script, not an inline mvn (#875): scripts/check-backend.sh hard-fails on any
+      # Through the script, not an inline mvn: scripts/check-backend.sh hard-fails on any
       # JDK that is not major 25 BEFORE Maven starts, and this target used to bypass that guard and
       # surface the mismatch as an opaque PMD or compiler crash deep in the reactor. Its last line
-      # is `exec mvn -B verify "$@"`, so the profile threads straight through and there is exactly
+      # is `exec mvn -B -T 2 verify "$@"`, so the profile threads straight through and there is exactly
       # ONE definition of the backend gate for both editions. `task check:open` runs the same line.
       - bash scripts/check-backend.sh -P '!paid'
 
   backend:coverage:
-    desc: "Refresh the JaCoCo coverage baseline for the 11 open backend modules (#930). Runs the IDENTICAL command as backend:check:open — same reactor, same `!paid` profile, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the open reactor aborts it before jacoco:report runs, same as it would for backend:check:open. It exists only as a separately-named entry point so refreshing coverage mid-extraction doesn't have to wait on CI's weekly cadence (.github/workflows/ci.yml runs the backend job on a schedule/dispatch only); it is NOT part of backend:check/check:open/CI's per-PR path itself. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Reports land at backend/<module>/target/site/jacoco/index.html. tessary-paid/ is deliberately excluded — see docs/reference/test-suite.md."
+    desc: "Refresh the JaCoCo coverage baseline for the 11 open backend modules. Runs the IDENTICAL command as backend:check:open — same reactor, same `!paid` profile, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the open reactor aborts it before jacoco:report runs, same as it would for backend:check:open. It exists only as a separately-named entry point so refreshing coverage doesn't have to wait on CI's weekly cadence (.github/workflows/drift-checks.yml runs the backend job on a schedule/dispatch only); it is NOT part of backend:check/check:open/CI's per-PR path itself. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Reports land at backend/<module>/target/site/jacoco/index.html. tessary-paid/ is deliberately excluded — see devdocs/reference/test-suite.md."
     cmds:
-      # Through the script, not a bare mvn invocation, for the same #875 reason backend:check:open
+      # Through the script, not a bare mvn invocation, for the same reason backend:check:open
       # is: the JDK-major-25 guard has to run before Maven starts, or a mismatch surfaces as an
       # opaque PMD/compiler crash deep in the reactor instead of the clear message above.
       - bash scripts/check-backend.sh -P '!paid'
@@ -268,12 +257,12 @@ tasks:
       - bash scripts/check-open-boundary.sh
 
   check:license-headers:
-    desc: "SPDX header presence over the publishable tree (#1149 clause 1). Pass --fix to insert missing headers in place: task check:license-headers -- --fix. Shared with CI via scripts/check-license-headers.sh."
+    desc: "SPDX header presence over the publishable tree. Pass --fix to insert missing headers in place: task check:license-headers -- --fix. Shared with CI via scripts/check-license-headers.sh."
     cmds:
       - bash scripts/check-license-headers.sh {{.CLI_ARGS}}
 
   check:export-denylist:
-    desc: "The must-not-publish declaration (scripts/lib/export-denylist.txt) is well-formed, every delete/exempt row still resolves in the source tree, and the tree it selects is EXACTLY root-minus-overlay (#1293). Shared with CI via scripts/lib/check-export-denylist.sh."
+    desc: "The must-not-publish declaration (scripts/lib/export-denylist.txt) is well-formed, every delete/exempt row still resolves in the source tree, and the tree it selects is EXACTLY root-minus-overlay. Shared with CI via scripts/lib/check-export-denylist.sh."
     cmds:
       - bash scripts/lib/check-export-denylist.sh
 
@@ -291,24 +280,24 @@ tasks:
         rm -rf "$d"
 
   paid:image:check:
-    desc: "The paid backend image gate (epic 5 #1134): builds the open image, builds the paid image FROM it, and proves the paid jars are on the RUNNING classpath (reached-main without a DB, edition=paid and both Liquibase lanes with one). Pass --negative for the db-less loud-failure arm. Static half runs in `task check` via the manifest."
+    desc: "The paid backend image gate: builds the open image, builds the paid image FROM it, and proves the paid jars are on the RUNNING classpath (reached-main without a DB, edition=paid and both Liquibase lanes with one). Pass --negative for the db-less loud-failure arm. Static half runs in `task check` via the manifest."
     cmds:
       - "[ -f tessary-paid/scripts/check-paid-image.sh ] && bash tessary-paid/scripts/check-paid-image.sh --with-docker {{.CLI_ARGS}}"
 
   paid:boot:check:
-    desc: "The paid boot check (epic 5 #1136): open stack, then the paid stack on the SAME Postgres volume; asserts edition=paid, both Liquibase lanes, every overlay table, the four paid capabilities available. Pass --negative to prove the open image is refused. Needs Docker and minutes; EXCLUDED from `task check`."
+    desc: "The paid boot check: open stack, then the paid stack on the SAME Postgres volume; asserts edition=paid, both Liquibase lanes, every overlay table, the four paid capabilities available. Pass --negative to prove the open image is refused. Needs Docker and minutes; EXCLUDED from `task check`."
     cmds:
       - "[ -f tessary-paid/scripts/check-paid-boot.sh ] && bash tessary-paid/scripts/check-paid-boot.sh {{.CLI_ARGS}}"
 
   paid:detections:
-    desc: "LOCAL ONLY (epic 5 decision 1): the paid boot check plus the detection leg. Starts a classify container (gated heads when HF_TOKEN is in your environment or .env), emits the private canary corpora, and asserts a classifier-produced row per paid detection table. Never a CI gate."
+    desc: "LOCAL ONLY: the paid boot check plus the detection leg. Starts a classify container (gated heads when HF_TOKEN is in your environment or .env), emits the private canary corpora, and asserts a classifier-produced row per paid detection table. Never a CI gate."
     cmds:
       - "[ -f tessary-paid/scripts/check-paid-boot.sh ] && bash tessary-paid/scripts/check-paid-boot.sh --detections {{.CLI_ARGS}}"
 
   scrub:check:
-    desc: "The public-tree scrub gate: builds the export candidate and runs gitleaks and trufflehog (filesystem mode, one allowlist), the forbidden-content sweep and the credential-file presence assertion over it. Needs gitleaks and trufflehog on PATH (skips by name otherwise). OVERLAY-OWNED since #1293 — skipped, not failed, without it. The open tree's own scan is .github/workflows/secret-scan.yml."
+    desc: "The public-tree scrub gate: builds the export candidate and runs gitleaks and trufflehog (filesystem mode, one allowlist), the forbidden-content sweep and the credential-file presence assertion over it. Needs gitleaks and trufflehog on PATH (skips by name otherwise). OVERLAY-OWNED — skipped, not failed, without it. The open tree's own scan is .github/workflows/secret-scan.yml."
     cmds:
-      # The gate and the forbidden-strings file it reads both moved into the overlay (#1293): the
+      # The gate and the forbidden-strings file it reads both live in the overlay: the
       # public repo must not carry a list of the strings we scan for. Same file-exists probe shape
       # as compile:check and paid:boot:check above, and for the same reason — the open tree has to
       # be coherent with zero configuration, so this is a probe and never a flag.
@@ -316,7 +305,7 @@ tasks:
         if [ -f tessary-paid/scripts/check-scrub.sh ]; then
           bash tessary-paid/scripts/check-scrub.sh {{.CLI_ARGS}}
         else
-          echo "scrub:check skipped: no tessary-paid/scripts/check-scrub.sh in this checkout (the scanner and its forbidden-strings input are overlay-owned since #1293; the open tree scans itself via .github/workflows/secret-scan.yml)"
+          echo "scrub:check skipped: no tessary-paid/scripts/check-scrub.sh in this checkout (the scanner and its forbidden-strings input are overlay-owned; the open tree scans itself via .github/workflows/secret-scan.yml)"
         fi
 
   backend:build:
@@ -383,12 +372,11 @@ tasks:
       - bash scripts/check-frontend.sh
 
   frontend:check:paid:
-    desc: Gate for the paid frontend surfaces (Usage, Pricing, the drift debug panel, the SOP rulebook rail, the baseline evidence block). Type-checks the OPEN shell with the '@paid' seam pointed at the overlay's registry, builds it for real, and asserts the inverse of frontend:check — those chunks and that copy ARE in the paid bundle, and Tailwind actually scanned the overlay. Shared with CI via tessary-paid/scripts/check-paid-frontend.sh. Skipped, not failed, without the overlay — the open edition has no paid frontend.
+    desc: Gate for the paid frontend surfaces (Usage, Pricing, the drift debug panel, the SOP rulebook rail, the baseline evidence block). Type-checks the OPEN shell with the '@paid' seam pointed at the overlay's registry, builds it for real, and asserts the inverse of frontend:check — those chunks and that copy ARE in the paid bundle, and Tailwind actually scanned the overlay. Shared with CI via the overlay's own check script. Skipped, not failed, without the overlay — the open edition has no paid frontend.
     cmds:
       # The gate lives in the overlay because check-open-boundary.sh rule 5 fails any scripts/*.sh
-      # naming this directory — the same settlement #843 made for check-compile-service.sh — so this
-      # target has to ask whether the overlay is on disk. A file-exists probe, never a flag: the open
-      # tree must be coherent with zero configuration.
+      # naming this directory, so this target has to ask whether the overlay is on disk. A
+      # file-exists probe, never a flag: the open tree must be coherent with zero configuration.
       - |
         if [ -d tessary-paid ]; then
           bash tessary-paid/scripts/check-paid-frontend.sh
@@ -424,18 +412,18 @@ tasks:
         fi
 
   classify:check:
-    desc: "Static gate for classify-service (syntax + models.json/scorer consistency; no model download). EDITION-AWARE since #1293: models.json is overlay-owned, so with an empty manifest in the build context the gate asserts every head is unbacked and reports UNAVAILABLE_IN_OPEN_EDITION, and says out loud that the exact-three-head assertion did not run. Shared with CI via scripts/check-classify-service.sh."
+    desc: "Static gate for classify-service (syntax + models.json/scorer consistency; no model download). EDITION-AWARE: models.json is overlay-owned, so with an empty manifest in the build context the gate asserts every head is unbacked and reports UNAVAILABLE_IN_OPEN_EDITION, and says out loud that the exact-three-head assertion did not run. Shared with CI via scripts/check-classify-service.sh."
     cmds:
       - bash scripts/check-classify-service.sh {{.CLI_ARGS}}
 
   slack:check:
-    desc: Gate for slack-service (ruff + pytest; every network call is faked, nothing reaches Slack). OVERLAY-OWNED since #1293 — the adapter and its gate moved together, so this is skipped, not failed, in an open checkout.
+    desc: Gate for slack-service (ruff + pytest; every network call is faked, nothing reaches Slack). OVERLAY-OWNED — the adapter and its gate live together, so this is skipped, not failed, in an open checkout.
     cmds:
       - |
         if [ -f tessary-paid/scripts/check-slack-service.sh ]; then
           bash tessary-paid/scripts/check-slack-service.sh {{.CLI_ARGS}}
         else
-          echo "slack:check skipped: no tessary-paid/scripts/check-slack-service.sh in this checkout (#1293 moved the Slack adapter and its gate into the overlay together; the open edition has no Slack adapter)"
+          echo "slack:check skipped: no tessary-paid/scripts/check-slack-service.sh in this checkout (the Slack adapter and its gate live in the overlay together; the open edition has no Slack adapter)"
         fi
 
   sandbox-runner:check:
@@ -449,26 +437,24 @@ tasks:
       - bash scripts/check-no-bedrock.sh
 
   classifiers:parity:
-    desc: "Run the classifier port-parity gates (Python <-> Java/JS duplicates that must not drift). ALL SIX pins are overlay-owned since #1293, so this runs 6 when they are importable and ZERO otherwise, saying so loudly rather than printing a bare OK. `--edition open` forces the zero-pin arm."
+    desc: "Run the classifier port-parity gates (Python <-> Java/JS duplicates that must not drift). ALL SIX pins are overlay-owned, so this runs 6 when they are importable and ZERO otherwise, saying so loudly rather than printing a bare OK. `--edition open` forces the zero-pin arm."
     cmds:
-      # No overlay guard here (#875), and #1293 did not add one: the script decides for itself, on
-      # the right predicate — whether `sop_compiler` actually imports, resolved through
-      # classifiers/pyproject.toml's pythonpath entries. What #1293 changed is the count. The three
-      # pins that used to be open on both sides (verifiable_claims, premise_windowing,
-      # frustration_serving) pin Python originals that moved into the overlay with groundedness/
-      # and frustration/, so the split is 0+6 now, not 3+3.
+      # No overlay guard here: the script decides for itself, on the right predicate — whether
+      # `sop_compiler` actually imports, resolved through classifiers/pyproject.toml's pythonpath
+      # entries. The three pins that used to be open on both sides (verifiable_claims,
+      # premise_windowing, frustration_serving) pin Python originals that moved into the overlay
+      # with groundedness/ and frustration/, so the split is 0+6, not 3+3.
       - bash scripts/check-classifier-parity.sh {{.CLI_ARGS}}
 
   compile:check:
-    desc: Gate for compile-service (ruff + pytest; runs the engine's real fit/export against a stubbed /embed and pins the bundle against a direct `engine.run export`). Shared with CI via tessary-paid/scripts/check-compile-service.sh. Skipped, not failed, without the overlay — the open edition has no SOP compile service.
+    desc: Gate for the SOP compile service (ruff + pytest; runs the engine's real fit/export against a stubbed /embed and pins the bundle against a direct `engine.run export`). Skipped, not failed, without the overlay — the open edition has no SOP compile service.
     cmds:
-      # The gate lives in the overlay (#843 moved the service, the engine and the script there
-      # together), so this target has to ask whether the overlay is on disk. A file-exists probe,
-      # never a flag: the open tree must be coherent with zero configuration. Taskfile.yml may name
-      # `tessary-paid` — check-open-boundary.sh rule 5 scans only classify-service/ and scripts/*.sh.
-      # Since #875 that permission is not unlimited: rule 7 of the same script requires every
-      # overlay reference in this file to be visibly conditional, and this probe is what makes
-      # these three lines legal.
+      # The gate lives in the overlay, so this target has to ask whether the overlay is on disk.
+      # A file-exists probe, never a flag: the open tree must be coherent with zero configuration.
+      # Taskfile.yml may name `tessary-paid` — check-open-boundary.sh rule 5 scans only
+      # classify-service/ and scripts/*.sh. That permission is not unlimited: rule 7 of the same
+      # script requires every overlay reference in this file to be visibly conditional, and this
+      # probe is what makes these three lines legal.
       - |
         if [ -d tessary-paid ]; then
           bash tessary-paid/scripts/check-compile-service.sh
@@ -477,7 +463,7 @@ tasks:
         fi
 
   check:overlay-schema:
-    desc: "The ordering-contract lint (Epic 3, #1075): tessary-paid/scripts/check-overlay-schema.sh's ten static rules plus its Docker half (a throwaway Postgres proving open-alone/overlay-alone/open-then-overlay via the liquibase CLI). Shared with CI via the same script. Skipped, not failed, without the overlay — the open edition has no overlay changelog to lint."
+    desc: "The ordering-contract lint: the overlay's own ten static rules plus its Docker half (a throwaway Postgres proving open-alone/overlay-alone/open-then-overlay via the liquibase CLI). Shared with CI via the same script. Skipped, not failed, without the overlay — the open edition has no overlay changelog to lint."
     cmds:
       # Same probe shape as compile:check right above, and for the same reason: the script lives in
       # the overlay (check-open-boundary.sh rule 5), so this target has to ask whether the overlay
@@ -490,7 +476,7 @@ tasks:
         fi
 
   overlay:apply-changelog:
-    desc: "Apply the paid overlay's Liquibase changelog (tessary-paid/db) to the `task dev` Postgres by hand, via the liquibase/liquibase:5.0 CLI image — opt-in, since app's dependency closure can never contain a paid module and so `task dev`'s backend never runs the paid SpringLiquibase bean itself (Epic 3, #1070). Skipped, not failed, without the overlay."
+    desc: "Apply the paid overlay's Liquibase changelog to the `task dev` Postgres by hand, via the liquibase/liquibase:5.0 CLI image — opt-in, since app's dependency closure can never contain a paid module and so `task dev`'s backend never runs the paid SpringLiquibase bean itself. Skipped, not failed, without the overlay."
     cmds:
       # Same file-exists-probe shape as compile:check right above, and for the same reason:
       # check-open-boundary.sh rule 7 requires every overlay reference here to be visibly
@@ -517,10 +503,10 @@ tasks:
   conformance:parity:
     desc: Assert the checked-in conformance parity fixture still equals a fresh generation, so the Java conformance port stays pinned to the CURRENT Python engine (a Python-side semantics change used to slip through — nothing regenerated the fixture). Shared with CI via scripts/check-conformance-parity.sh.
     cmds:
-      # No overlay guard any more (#875): the script self-guards on what it actually needs — an
+      # No overlay guard: the script self-guards on what it actually needs — an
       # importable generator — and takes `--edition open`, under which it skips whole because the
-      # generator is paid. #1293 note: the `[ -d classifiers ]` half of that self-guard is no longer
-      # the edition predicate (classifiers/ ships in both editions now), and the script exports the
+      # generator is paid. The `[ -d classifiers ]` half of that self-guard is no longer the edition
+      # predicate (classifiers/ ships in both editions now), and the script exports the
       # resolved pythonpath so `python -m experiments.engine...` finds the generator — the open
       # experiments/__init__.py shim that used to do that job was deleted with the move.
       - bash scripts/check-conformance-parity.sh {{.CLI_ARGS}}
@@ -548,47 +534,48 @@ tasks:
 
   # ---- combined ----
   # The project gate. Nothing enforces it locally, and CI is NOT a per-PR check:
-  # .github/workflows/ci.yml runs on a WEEKLY CRON (Mondays 03:00 UTC) plus workflow_dispatch, with
-  # 15 jobs. (Corrected 2026-08-31 by #875: this paragraph used to say CI "runs all six on every
-  # pull_request and on push to main", and BOTH halves were false — the trigger, and the count,
-  # with eleven pairings enumerated directly beneath it. A per-PR required workflow is #849's job.
-  # Recorrected 2026-09-03 by #1075, which also gave ci.yml its first `pull_request` trigger — but
-  # ONLY for the new overlay-schema job below; every other job stays weekly-cron/workflow_dispatch.)
-  # Each target here and the matching CI job invoke the SAME scripts/check-*.sh, so the gate is
+  # CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh --edition open` on
+  # `pull_request:`, which is this same manifest, so local green => CI green on the same script.
+  # drift-checks.yml holds the two gates check.sh does NOT run (vendored-plugin,
+  # conformance-parity), dispatch-only. Merge-blocking is still not possible: branch protection is
+  # plan-gated on this repo.
+  # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. Since
+  # the trim there are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh,
+  # so every row below that names a CI job is covered by that single job instead. The gate is
   # defined once and "local green ⇒ CI green" holds by construction (no drift to keep in sync):
   #   contract:check + CI contract job -> scripts/check-contract-consistency.sh (vendored contract drift)
   #   contract:plugin + CI vendored-plugin job -> scripts/check-vendored-plugin.sh (validator rules + freshness)
-  #   backend:check  + CI backend job  -> scripts/check-backend.sh  (mvn -B verify)
-  #   frontend:check + CI frontend job -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [#890's
+  #   backend:check  + CI backend job  -> scripts/check-backend.sh  (mvn -B -T 2 verify)
+  #   frontend:check + CI frontend job -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the
   #                                      route render smoke test] + pnpm run build, then an assertion
   #                                      over dist/ that no paid chunk or copy is in it)
-  #   frontend:check:paid + a step in the same CI frontend job -> tessary-paid/scripts/check-paid-frontend.sh
+  #   frontend:check:paid + a step in the same CI frontend job -> the overlay's own check script
   #                                      (tsc + vite build with the '@paid' seam on the overlay's registry,
   #                                      then the inverse assertions; skipped without the overlay)
   #   caddy:validate + CI caddy job    -> scripts/check-caddy.sh    (caddy validate + spec route coverage)
-  #   caddy:validate (overlay present) -> tessary-paid/scripts/check-paid-caddy.sh  (paid spec route coverage)
+  #   caddy:validate (overlay present) -> the overlay's own check script (paid spec route coverage)
   #   classify:check + CI classify-service job -> scripts/check-classify-service.sh (syntax + manifest consistency)
-  #   slack:check (no CI job since #1293) -> tessary-paid/scripts/check-slack-service.sh (ruff + pytest; skipped without the overlay)
-  #   compile:check + CI compile-service job -> tessary-paid/scripts/check-compile-service.sh (ruff + pytest, real engine fit/export; skipped without the overlay)
-  #   check:overlay-schema + CI overlay-schema job -> tessary-paid/scripts/check-overlay-schema.sh (the ordering-contract lint; static rules on every PR, Docker half + check-migrations-populated.sh in both editions off pull_request; skipped without the overlay)
+  #   slack:check (no CI job) -> the overlay's own check script (ruff + pytest; skipped without the overlay)
+  #   compile:check + CI compile-service job -> the overlay's own check script (ruff + pytest, real engine fit/export; skipped without the overlay)
+  #   check:overlay-schema + CI overlay-schema job -> the overlay's own check script (the ordering-contract lint; static rules on every PR, Docker half + check-migrations-populated.sh in both editions off pull_request; skipped without the overlay)
   #   conformance:parity + CI conformance-parity job -> scripts/check-conformance-parity.sh (fixture freshness)
   #   check:open-boundary + CI open-boundary job -> scripts/check-open-boundary.sh (open code reaching into tessary-paid/)
-  #   check:license-headers + CI license-headers job -> scripts/check-license-headers.sh (SPDX header presence over the publishable tree, #1149 clause 1)
-  #   classifiers:parity (no CI job) -> scripts/check-classifier-parity.sh (Python <-> Java/JS port pins; all six overlay-owned since #1293, so ZERO pins in the open edition and it says so)
+  #   check:license-headers + CI license-headers job -> scripts/check-license-headers.sh (SPDX header presence over the publishable tree)
+  #   classifiers:parity (no CI job) -> scripts/check-classifier-parity.sh (Python <-> Java/JS port pins; all six overlay-owned, so ZERO pins in the open edition and it says so)
   #   migrations:populated (no CI job, and not in `check` either) -> scripts/check-migrations-populated.sh,
   #                                      open lane always, overlay lane (paid baseline + fixture)
-  #                                      auto-added when tessary-paid/ is present (#1074)
+  #                                      auto-added when tessary-paid/ is present
   # That is FIFTEEN pairings, not six, and the three lines above make the point the old text hid:
   # these are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 16 of the 23
   # scripts/check-*.sh plus the three overlay gates — the seven it does not run are
   # check-migrations-populated.sh (EXCLUDED: wants a populated Postgres),
   # check-conformance-parity.sh (CI-only), check-open-boot.sh and check-open-boot-selfhost.sh
   # (EXCLUDED: Docker and minutes, run via their own dispatch-only workflow),
-  # tessary-paid/scripts/check-scrub.sh (EXCLUDED: its subject is the export candidate, run via its
-  # own weekly workflow, and overlay-owned since #1293 — the open tree scans itself with
+  # the overlay's own scrub-check script (EXCLUDED: its subject is the export candidate, run via its
+  # own weekly workflow, and overlay-owned — the open tree scans itself with
   # .github/workflows/secret-scan.yml instead),
   # check-dependency-audit.sh and check-notice-coverage.sh (both EXCLUDED: manual/on-demand only,
-  # no real credential in any check per #927) — all seven still carry a manifest row so the
+  # no real credential in any check) — all seven still carry a manifest row so the
   # completeness assertion covers them; CI runs 16 jobs including conformance:parity,
   # which `check` does not, and excluding module-hygiene, no-bedrock and classifiers:parity, which
   # it does; and three targets here belong to neither pipeline in the same way. `check:open` below
@@ -610,96 +597,95 @@ tasks:
       # always occupied — scripts/check.sh parses flags strictly ahead of it, so `task check`,
       # `task check -- rca,metering` and the unknown-slice error path are unchanged. They have to
       # be: the crew config runs `task check` as this repo's test command and the agent loop gates
-      # publishing on it. (Both of those live under the overlay since #1293 — see
-      # tessary-paid/crew.config.yaml and tessary-paid/.dev-tools/agent-loop/ — but the contract
-      # they depend on is this positional slot, which is unchanged.)
+      # publishing on it. (Both of those live under the overlay — but the contract they depend on
+      # is this positional slot, which is unchanged.)
       - bash scripts/check.sh --edition all "{{.CLI_ARGS}}"
 
   check:open:
-    desc: "The OPEN-EDITION project gate (open-core decision D2), and the command epic 1's gate names: every gate in scripts/check.sh with the paid ones declared out, the backend reactor built with `-P '!paid'`, and the classifier port-parity gate narrowed to the three pins that are open on both sides. PROVES the tree minus tessary-paid/ compiles, tests and lints with zero paid code. Does NOT prove the export: it runs with the overlay still ON DISK and only changes what is asked for, so it cannot see a break that appears only when the directory is GONE (the Python import seam and Maven's paid profile both activate on existence) — for that, detach the directory and run this again. Takes the same slice arguments as `check`."
+    desc: "The OPEN-EDITION project gate: every gate in scripts/check.sh with the paid ones declared out, the backend reactor built with `-P '!paid'`, and the classifier port-parity gate narrowed to the three pins that are open on both sides. PROVES the tree minus tessary-paid/ compiles, tests and lints with zero paid code. Does NOT prove the export: it runs with the overlay still ON DISK and only changes what is asked for, so it cannot see a break that appears only when the directory is GONE (the Python import seam and Maven's paid profile both activate on existence) — for that, detach the directory and run this again. Takes the same slice arguments as `check`."
     silent: true
     cmds:
       # CI calls `bash scripts/check.sh --edition open` directly, never this target: no workflow
       # installs Task, and scripts/check.sh's own header records that convention. This is a thin
-      # wrapper over the interface #849's per-PR job will use, not a second definition of it.
+      # wrapper over the interface CI's per-PR job uses, not a second definition of it.
       - bash scripts/check.sh --edition open "{{.CLI_ARGS}}"
 
   check:open:boot:
-    desc: "The detached open-edition BOOT check (#849 AC4, extended by #878 with a credential deny-list and an authenticated triage flow, and by #1076 with a paid-overlay-table-absence assertion when the overlay is checked out; EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and (check-open-boot.sh's own tessary-paid/pom.xml probe, same shape as migrations:populated's MIGPOP_OVERLAY_DIR) none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever (#852/#996 rule). Needs Docker and a couple of minutes; manual/local use, or the dispatch-only open-edition-boot.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
+    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
     cmds:
       # check-open-boot.sh derives OPEN_BOOT_OVERLAY_DIR itself (tessary-paid/pom.xml present or
-      # not) since #1076's follow-up fix, this target no longer duplicates that probe, which had
-      # left the dispatch-only CI workflow's direct `bash scripts/check-open-boot.sh` invocation
-      # (never routed through this Task target) silently skipping the assertion.
+      # not), so this target does not duplicate that probe — the dispatch-only CI workflow's direct
+      # `bash scripts/check-open-boot.sh` invocation (never routed through this Task target) needs
+      # no extra plumbing to get the same assertion.
       - bash scripts/check-open-boot.sh
 
   check:open:boot:selfhost:
-    desc: "The epic-2 gate's second leg (#1052): boots the SELF-HOST artifact, docker-compose.yml, in a clean-room export under the production profile (AuthRequiredInProdGuard, real backend/frontend Dockerfiles, sandbox-runner on the docker default) with only generated run-scoped values and no cloud credential. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`/`check:open`."
+    desc: "The self-host gate's second leg: boots the SELF-HOST artifact, docker-compose.yml, in a clean-room export under the production profile (AuthRequiredInProdGuard, real backend/frontend Dockerfiles, sandbox-runner on the docker default) with only generated run-scoped values and no cloud credential. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`/`check:open`."
     cmds:
       - bash scripts/check-open-boot-selfhost.sh {{.CLI_ARGS}}
 
   check:open:artifacts:
-    desc: "Epic 6 clause 3 (#1148): builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on the paid image and on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`/`check:open`; release.yml runs the same script against the images it just built before merging any manifest."
+    desc: "Builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on the paid image and on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`/`check:open`; release.yml runs the same script against the images it just built before merging any manifest."
     cmds:
-      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/evals-api-paid.json ] && echo tessary-paid/contract/openapi/evals-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
+      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/tessary-api-paid.json ] && echo tessary-paid/contract/openapi/tessary-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
 
   check:namespaces:
-    desc: "Epic 6 clause 7 (#1152): every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."
+    desc: "Every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."
     cmds:
       - bash scripts/check-namespaces.sh {{.CLI_ARGS}}
 
   check:exposure:sweep:
-    desc: "Epic 6 clause 8 (#1153): boots the self-host artifact keyless under the production profile and attacks it from outside and from a neighbouring tenant: every spec operation unauthenticated, default credentials, the served bundle for maps and secrets, SSRF and traversal against a listener on the stack network, and a two-tenant substitution sweep. Writes the result set with --record so epic 7's #1198 can re-run it unmodified and diff. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`/`check:open`."
+    desc: "Boots the self-host artifact keyless under the production profile and attacks it from outside and from a neighbouring tenant: every spec operation unauthenticated, default credentials, the served bundle for maps and secrets, SSRF and traversal against a listener on the stack network, and a two-tenant substitution sweep. Writes the result set with --record so a later run can re-run it unmodified and diff. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`/`check:open`."
     cmds:
-      # Arm 3's forbidden-string list moved into the overlay at #1293 and the script may not name
+      # Arm 3's forbidden-string list lives in the overlay, and the script may not name
       # the overlay itself (boundary rule 5), so the path is passed in here — same shape as
       # check:open:artifacts above. Empty in an open checkout, where the script records the arm as
       # `not-scanned` rather than dropping the row.
       - EXPOSURE_FORBIDDEN="$([ -f tessary-paid/scripts/lib/export-forbidden-strings.txt ] && echo tessary-paid/scripts/lib/export-forbidden-strings.txt)" bash scripts/check-exposure-sweep.sh {{.CLI_ARGS}}
 
   check:selfhost:quickstart:
-    desc: "Epic 7 clause 2 (#1191): the self-host quickstart rehearsal. Executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (needs ports 80 and 443 free), asserts every Check as the page words it, walks the onboarding ladder to fitting (#1194) and prints clause 3's clock. Pass -- --build while the images are unpublished. Docker and minutes; never run by an agent; EXCLUDED from `task check`."
+    desc: "The self-host quickstart rehearsal. Executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (needs ports 80 and 443 free), asserts every Check as the page words it, and walks the onboarding ladder to fitting. Pass -- --build while the images are unpublished. Docker and minutes; never run by an agent; EXCLUDED from `task check`."
     cmds:
       - bash scripts/check-selfhost-quickstart.sh {{.CLI_ARGS}}
 
   check:zero:egress:
-    desc: "Epic 7 clause 9 (#1197): opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and EVALS_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
+    desc: "Opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and TESSARY_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
     cmds:
       - bash scripts/check-zero-egress.sh {{.CLI_ARGS}}
 
   check:selfhost:images:
-    desc: "D10 (epic 7 clause 1, #941/#1114): asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`/`check:open`; run before the self-host boot job in open-edition-boot.yml."
+    desc: "Asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`/`check:open`; run before the self-host boot job in boot-checks.yml."
     cmds:
       - bash scripts/check-selfhost-images.sh {{.CLI_ARGS}}
 
   check:selfhost:compose:
-    desc: "Epic 7's one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`/`check:open`; run by open-edition-boot.yml's fourth job."
+    desc: "The one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`/`check:open`; run by boot-checks.yml's fourth job."
     cmds:
       - bash scripts/check-selfhost-compose-artifact.sh
 
   publish:compose:
-    desc: "Publish docker-compose.yml as the OCI artifact behind the one-command install, to Docker Hub and GHCR under `compose` and `compose-<version>` (epic 7). The published copy is build-stripped AND version-stamped: the file in the repository holds no version literal, so the release's own version is substituted into its floating image defaults on the way out. Version comes from `--version=` (what release.yml passes) or the newest `v<semver>` git tag. Normally run by release.yml AFTER the images are merged and parity-verified, never on its own; needs a registry login for both repositories. Add --dry-run to see what it would write."
+    desc: "Publish docker-compose.yml as the OCI artifact behind the one-command install, to Docker Hub and GHCR under `compose` and `compose-<version>`. The published copy is build-stripped AND version-stamped: the file in the repository holds no version literal, so the release's own version is substituted into its floating image defaults on the way out. Version comes from `--version=` (what release.yml passes) or the newest `v<semver>` git tag. Normally run by release.yml AFTER the images are merged and parity-verified, never on its own; needs a registry login for both repositories. Add --dry-run to see what it would write."
     cmds:
       - bash scripts/publish-compose-artifact.sh {{.CLI_ARGS}}
   egress:capture:
-    desc: "Epic 6 clause 9, condition 2 (#1154): boots docker-compose.yml twice (EVALS_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why). Record the result — date, destinations seen, kill-switch outcome — as a line near clause 9's evidence in tessary-paid/OPEN-CORE.md; no separate dated sign-off artifact."
+    desc: "Boots docker-compose.yml twice (TESSARY_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why)."
     cmds:
       - bash scripts/lib/egress-capture.sh
 
   # ---- docker (dev) ----
   # No tmux, so this is the only `up` available to CI, agents, and a plain ssh. It goes through a
-  # script rather than inlining `{{.DC_DEV}} up -d --build` so that EVALS_SKIP_CLASSIFY reaches
+  # script rather than inlining `{{.DC_DEV}} up -d --build` so that TESSARY_SKIP_CLASSIFY reaches
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: Start the dev stack detached, no tmux (build on demand). `EVALS_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
+    desc: Start the dev stack detached, no tmux (build on demand). `TESSARY_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
     cmds:
       - bash scripts/dev-up.sh
 
   dev:up:slim:
     desc: 'Like `dev:up` minus the classify + compile services — the non-tmux `dev:slim`. Runs postgres, backend, frontend, caddy, alloy.'
     env:
-      EVALS_SKIP_CLASSIFY: "1"
+      TESSARY_SKIP_CLASSIFY: "1"
     cmds:
       - bash scripts/dev-up.sh
 
@@ -710,12 +696,12 @@ tasks:
       # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
       # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
       #
-      # `--remove-orphans` is the same requirement one step further, and #886 is why it is here.
-      # DC_DEV_ALL is derived at INVOCATION time, so it names the paid fragment only if the overlay
-      # is on disk WHEN YOU STOP. Detach the overlay while a paid stack runs — `mv tessary-paid
-      # /tmp/`, which is exactly what scripts/check.sh's proxy warning and epic 1's boot clause ask
-      # an operator to do — and `compile` is in the project but in none of the `-f` files. Measured,
-      # not argued (compose v5.4.0, a two-file scratch project): plain `down` then exits 0 having
+      # `--remove-orphans` is the same requirement one step further. DC_DEV_ALL is derived at
+      # INVOCATION time, so it names the paid fragment only if the overlay is on disk WHEN YOU
+      # STOP. Detach the overlay while a paid stack runs — `mv tessary-paid /tmp/`, which is
+      # exactly what scripts/check.sh's proxy warning asks an operator to do — and `compile` is in
+      # the project but in none of the `-f` files. Measured, not argued (compose v5.4.0, a
+      # two-file scratch project): plain `down` then exits 0 having
       # removed nothing of it, prints `Resource is still in use` for the network, and leaves a 2 GB
       # container up on a box that has 1.9 GiB. `--remove-orphans` removes it and the network with
       # it. Also measured: a service that is only PROFILE-gated (argilla et al., `--profile
@@ -733,8 +719,8 @@ tasks:
     cmds:
       - "{{.DC_DEV}} exec backend mvn -q compile"
 
-  # ---- classifier-training tooling (dev-only, opt-in — tessary-paid/classifiers/PROGRAM.md §3,
-  #      overlay-owned since #1293 along with the training corpora it describes) ----
+  # ---- classifier-training tooling (dev-only, opt-in, overlay-owned along with the training
+  #      corpora it describes) ----
   classifiers:up:
     desc: Start the dev-only classifier tooling (Argilla on :16900, MLflow on :15000) alongside the dev stack.
     cmds:

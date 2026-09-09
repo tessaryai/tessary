@@ -3,12 +3,12 @@
 # Caddyfile gate. Two halves:
 #
 # SYNTAX: the dev Caddyfile, and every configuration frontend/caddy/render.sh can emit for the open
-# image (#1225): localhost only, a domain in each of the three TLS modes, and upstream mode with
+# image: localhost only, a domain in each of the three TLS modes, and upstream mode with
 # trusted proxies. owncert is validated against a throwaway self-signed pair, because
 # `caddy validate` loads the certificate it is told to serve.
 #
 # COVERAGE: every operation in the open OpenAPI spec is proxied to the backend by the configs that
-# actually ship (#1255). A validating config can still be a broken one — an unproxied /v1/... path
+# actually ship. A validating config can still be a broken one — an unproxied /v1/... path
 # does not 404, it falls through to the SPA and answers index.html with a 200, so the failure is a
 # page of HTML where an API response belongs, reported by nothing.
 set -euo pipefail
@@ -61,7 +61,7 @@ echo "$P: every rendered configuration validates and every bad combination is re
 # `task dev` serves; both carry the same @backend matcher, and both are checked so a route added to
 # one alone cannot pass. The acme render is included because its site block repeats the matcher.
 python3 scripts/lib/caddy-proxies-spec.py \
-    backend/contract/src/main/resources/openapi/evals-api.json \
+    backend/contract/src/main/resources/openapi/tessary-api.json \
     Caddyfile "$TMP/localhost.caddy" "$TMP/acme.caddy" \
     || { echo "$P: RED  the proxy config does not match the open spec (see above)" >&2; exit 1; }
 echo "$P: ok   every operation in the open spec reaches the backend"

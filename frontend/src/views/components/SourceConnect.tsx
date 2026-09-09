@@ -34,7 +34,7 @@ import { Button, CopyButton, cn, useToast } from "../../ui";
 export const INSTRUMENT_DOC_URL = "https://github.com/tessaryai/tessary/blob/main/instrument.md";
 
 /**
- * The connect prompt (#1227). It is one sentence pointing at {@link INSTRUMENT_DOC_URL}, because a
+ * The connect prompt. It is one sentence pointing at {@link INSTRUMENT_DOC_URL}, because a
  * prompt is a bad place to keep a spec: the previous paragraph-long version had to restate the
  * exporter rules AND the `tessary.call_site.id` ask in the copy field itself, could not say
  * anything about WHERE a given repository keeps credentials, and drifted from the docs the moment
@@ -262,12 +262,12 @@ function ExporterSnippets({ endpoint, token }: { endpoint: string; token: string
  * ingest (POST /v1/traces) is the only surface an exporter needs, so callers must never hand the
  * broadest (admin) family to something that only pushes spans.
  *
- * <p>{@link OtlpConnect} only ever calls the returned `issue` from the visible "Create a connection
- * token" button — a revisitable settings surface must not mint a fresh key on every render.
- * `ConnectGate` (the first-run gate, #1227) is the one caller that auto-issues on mount instead,
- * because its design has no button for it: the header field is always populated, never a
- * call-to-action. Exported for that one caller; every other consumer of this file keeps using
- * {@link OtlpConnect} whole.
+ * <p>Both callers issue from a visible control, never on mount — a surface that mints a fresh key
+ * on every render leaves live keys behind that nobody asked for. {@link OtlpConnect} calls `issue`
+ * from its "Create a connection token" button; `ConnectGate` (the first-run gate) calls
+ * `issueAsync` from the Bearer Token field's own control, because it puts the plaintext on the
+ * clipboard on that click and so needs the value back. Exported for that one caller; every other
+ * consumer of this file keeps using {@link OtlpConnect} whole.
  */
 export function useIngestToken(emitAction?: (action: string) => void) {
   const api = useProjectApi();
@@ -291,7 +291,14 @@ export function useIngestToken(emitAction?: (action: string) => void) {
     },
     onError: (err) => toast.error("Could not create token", err instanceof ApiError ? err.message : String(err)),
   });
-  return { token, issue: () => m.mutate(), issuing: m.isPending };
+  return {
+    token,
+    issue: () => m.mutate(),
+    // The gate mints from a click and puts the result straight on the clipboard, so it needs the
+    // plaintext back rather than only the state update `issue` leaves behind.
+    issueAsync: async () => (await m.mutateAsync()).plaintext,
+    issuing: m.isPending,
+  };
 }
 
 // ---- shared atoms ------------------------------------------------------------

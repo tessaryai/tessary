@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The one-command install, end to end, against a real registry (epic 7's one-command install).
+# The one-command install, end to end, against a real registry (the one-command install).
 #
 # scripts/check-compose-artifact.sh is the cheap gate: it reads docker-compose.yml and asserts the
 # properties a publishable file must have. This is the expensive one, and it is the only thing that
@@ -37,7 +37,7 @@
 # scripts/check-selfhost-images.sh, which asks the real registry whether the real tags resolve.
 #
 # NEVER RUN AGENT-SIDE, EVER — needs Docker, builds four images and boots a stack. Run by a human
-# (`task check:selfhost:compose`) or .github/workflows/open-edition-boot.yml. Not part of
+# (`task check:selfhost:compose`) or .github/workflows/boot-checks.yml. Not part of
 # `task check`; see its EXCLUDED manifest row in scripts/check.sh.
 set -euo pipefail
 P=check-selfhost-compose-artifact

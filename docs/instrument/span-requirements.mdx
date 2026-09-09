@@ -1,0 +1,185 @@
+---
+title: "Span Requirements"
+description: "Look up every field Tessary reads off an ingested span, with requirement status, accepted values, defaults, and constraints."
+---
+
+Tessary reads the OpenTelemetry GenAI semantic conventions. The vocabulary below is what the ingestion pipeline consumes; anything not listed is carried verbatim in the span's attribute bag, stays queryable, and drives no processing.
+
+Two rules set the scope of this page:
+
+- **Ingest is fail-open.** A missing attribute degrades a feature. It never rejects the span. "Required" below means required for the span to be usable, not required for it to be accepted.
+- **One spelling per field.** Only the canonical name in these tables is read. There are no compatibility aliases and no deprecated-spelling fallbacks, so `sessionId`, `enduser.id`, and `tessary.call_site_id` are all ignored. Third-party dialects are a separate, documented case: see [Accepted dialects](#accepted-dialects).
+
+## Span structure
+
+These are protobuf fields on the OTLP (OpenTelemetry Protocol) span, not attributes. Every OpenTelemetry SDK sets them for you.
+
+| Field | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `trace_id` | Yes | The trace's identity. One trace is one turn. | Stored verbatim. |
+| `span_id` | Yes | The span's identity, and its node in the parent graph. | Resolvable only alongside `trace_id`. A span id on its own is half a key. |
+| `parent_span_id` | On child spans | Span nesting. This is the mechanism for workflow, step, sub-workflow, and sub-agent depth. | Nesting is derived from this field only, never declared by an attribute. |
+| `name` | Yes | The span's name. The root span's name names the trace. | Also the fallback name for a tool call that states none. |
+| `start_time_unix_nano` | Yes | Start time, event ordering, and the start of latency. | |
+| `end_time_unix_nano` | Yes | End time, and tool-call and step latency. | |
+| `status.code` = `ERROR` | For failures | The only source of failure on a span. | An exception your code catches and swallows is invisible unless you set the status. |
+| `status.message` | Optional | Supplies the failure label when `error.type` is absent. | Whitespace-collapsed and capped at 120 characters when used as the label. The full prose stays recoverable from the stored payload. |
+
+`span.kind`, `trace_state`, span flags, dropped counts, instrumentation-scope attributes, and span links are all ignored.
+
+## Call site
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `tessary.call_site.id` | Yes | Binds the span to its call site, and is denormalized onto its trace. | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
+
+This is the only `tessary.*` attribute with a reader. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
+
+## Kind
+
+`gen_ai.operation.name` is the single source of a span's kind.
+
+| Attribute | Required | Carries | Accepted values |
+| --- | --- | --- | --- |
+| `gen_ai.operation.name` | Yes | What kind of call this is. | `chat`, `text_completion`, `generate_content`, `embeddings`, `execute_tool`, `retrieval`, `create_agent`, `invoke_agent`, `invoke_workflow`, plus the extension values `rerank`, `guardrail`, `plan`, `reasoning`, and `handoff`. Any value containing `memory` resolves to the memory kind. |
+| `gen_ai.tool.type` | Recommended on tool spans | Discriminates an MCP (Model Context Protocol) tool call from a local function call. | `extension` marks the call as MCP. |
+
+The enum is open, so an unrecognized value degrades to an unknown kind rather than failing. Values map to a closed 14-value step typology: `llm`, `reasoning`, `tool`, `mcp`, `retrieval`, `embedding`, `reranker`, `agent`, `workflow`, `plan`, `memory`, `handoff`, `guardrail`, `step`.
+
+A span carrying `gen_ai.request.model` but no recognized operation name still resolves as a model call. That backstop is the reason the model attribute is required rather than recommended.
+
+## Model and provider
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `gen_ai.request.model` | Yes | The requested model id. | What pricing resolves against, and the backstop that makes an otherwise unkinded span a model call. |
+| `gen_ai.provider.name` | Recommended | The provider, such as `anthropic`, `openai`, or `google`. | Carried in the span's attributes. Not promoted to its own column. `gen_ai.system` is accepted for the same content. |
+
+## Content
+
+Message content is stored whole and never truncated.
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `gen_ai.input.messages` | Yes on chat-family spans | The prompt, as JSON `[{role, parts:[{type, content}]}]`. | Stored whole. |
+| `gen_ai.output.messages` | Yes on chat-family spans | The completion, in the same shape, carrying `finish_reason`. | Stored whole. |
+| `input` / `output` | Optional | Generic verbatim carriers for tool arguments, tool results, and non-chat steps. | Read only when message attributes are absent. |
+
+<Warning>
+  These attributes carry prompt and completion text. Decide deliberately whether that content should leave your environment, and say so before you turn them on in someone else's instrumentation. Without them, Tessary receives spans that have a call site and no content, and the classifiers have nothing to read.
+</Warning>
+
+## Usage
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `gen_ai.usage.input_tokens` | Yes | Prompt tokens. | Emit alongside output tokens. A lone bucket prices nothing. |
+| `gen_ai.usage.output_tokens` | Yes | Completion tokens. | As above. |
+| `gen_ai.usage.cache_read.input_tokens` | Recommended | Cached input tokens read. | Emit wherever the provider reports it, or cached traffic is priced as full-price traffic. |
+| `gen_ai.usage.cache_creation.input_tokens` | Recommended | Cached input tokens written. | As above. |
+| `gen_ai.usage.reasoning_tokens` | Recommended | Reasoning tokens, billed apart from output. | Its own typed column, folded into the generated total. |
+| `gen_ai.usage.total_tokens` | Optional | The total. | Generated from the buckets when you omit it. |
+
+The producer's raw usage object is kept as an audit copy and is never read for arithmetic.
+
+## Cost
+
+Report a cost and Tessary stores it verbatim and never reprices it. Report none and the token buckets above are priced on arrival. Report neither and the call is unpriced, which is not the same as zero.
+
+| Attribute | Required | Carries | Precedence |
+| --- | --- | --- | --- |
+| `llm.cost.prompt` | Optional | The provider's own prompt cost in USD. | Per-bucket figures win over any total. |
+| `llm.cost.completion` | Optional | The provider's own completion cost in USD. | As above. |
+| `llm.cost.prompt_details.cache_read` | Optional | Cache-read cost in USD. | As above. |
+| `llm.cost.prompt_details.cache_write` | Optional | Cache-write cost in USD. | As above. |
+| `gen_ai.usage.cost` | Optional | The provider's own total cost for the call, in USD. | Read when no per-bucket figure is present. `gen_ai.usage.total_cost` and `llm.cost.total` are read in that order after it. |
+
+## Errors
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `error.type` | Recommended on failures | The failure's class, used to group failures. | Takes precedence over `status.message`. State neither and the span's error type stays empty while a failed tool call keeps a placeholder, because a failure with no label is still a failure. |
+
+## Tools
+
+| Attribute | Required | Carries | Applies to |
+| --- | --- | --- | --- |
+| `gen_ai.tool.name` | Yes | The tool invoked. | `execute_tool` spans. Falls back to the span name. |
+| `gen_ai.tool.call.id` | Yes | The provider's correlation id for the call. | `execute_tool` spans. |
+
+Without both, a tool call is an unnamed span.
+
+A handoff between agents needs no attribute. It is already wire-encoded as an `execute_tool` span for the transfer, followed by an `invoke_agent` span for the receiving agent under the same parent. Tessary derives the relationship from the span graph.
+
+## Session and user
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `session.id` | Yes | The session's identity, and the spine every trace and span hangs off. | The standard OpenTelemetry attribute, stored verbatim and denormalized onto every trace and span. Sessions never nest. |
+| `gen_ai.conversation.id` | Recommended | Thread grouping within a session. | A column on the trace, not a second level of nesting. |
+| `user.id` | Recommended | The end user's handle. | Denormalized onto the session, trace, and span. The only spelling read. |
+
+## Retrieval
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `retrieval.documents.<N>.document.id` | Optional | The retrieved document's id. | `<N>` is the index within the attribute name. Tessary stores the rank 1-based. |
+| `retrieval.documents.<N>.document.content` | Optional | The retrieved text. | |
+| `retrieval.documents.<N>.document.score` | Optional | The retrieval score. | |
+| `retrieval.documents.<N>.document.metadata` | Optional | Anything else about the document. | |
+
+Extraction runs on every span and does nothing when the prefix is absent, so there is no kind gate to satisfy.
+
+## Code and repository provenance
+
+These are standard OpenTelemetry semantic conventions, set by the producer. They are stored for provenance and are never used to resolve a call site.
+
+| Attribute | Required | Carries |
+| --- | --- | --- |
+| `code.filepath` / `code.function` / `code.lineno` | Optional | Where in the source your code makes the call. |
+| `vcs.repository.url` / `vcs.ref.head.revision` | Optional | The repository and the commit the code was built from. Set as resource attributes. |
+
+## Accepted dialects
+
+If an LLM auto-instrumentation is already emitting one of these, leave it alone. Both are normalized to the canonical vocabulary at ingest, so a native span and a dialect span carrying the same content produce the same stored shape. Translating a dialect by hand adds work and risk for no gain.
+
+| Dialect | Keys | Normalized to |
+| --- | --- | --- |
+| OpenInference | `openinference.span.kind`, `llm.model_name`, `llm.system` / `llm.provider`, `llm.input_messages` / `llm.output_messages`, `llm.token_count.*`, `llm.cost.*`, `tool_call.function.name`, `tool_call.id` | The `gen_ai.*` names in the tables above. |
+| OpenLLMetry (Traceloop) | `traceloop.span.kind`, the flattened `gen_ai.prompt.<N>.role` / `.content` and `gen_ai.completion.<N>.*` families, `traceloop.entity.input` / `.output` | The same. |
+
+When a span carries both the structured `gen_ai.input.messages` array and the flattened `gen_ai.prompt.<N>.*` family, the structured array wins and the flattened copy is ignored. Never treat `gen_ai.prompt.*` as a canonical message key.
+
+## Do not emit
+
+`tessary.call_site.id` is the only `tessary.*` name with a reader. Every other `tessary.*` spelling, and every ad-hoc alias of a canonical field such as `sessionId` or `enduser.id`, is carried verbatim and read by nothing. Put the content on the standard field from the tables above instead.
+
+[Ingestion contract](/reference/ingestion-contract#attributes-with-no-reader) lists each unread name against the field that replaces it.
+
+`deployment.environment.name` is accepted and survives verbatim in the attribute bag, but it scopes nothing. A project is the only scope below an organization, so use separate projects for separate environments.
+
+## Transport
+
+| Property | Value |
+| --- | --- |
+| Endpoint | Your Tessary origin plus `/v1/traces` |
+| Method and content type | `POST`, `application/x-protobuf`, an OTLP `ExportTraceServiceRequest` |
+| Authentication | `Authorization: Bearer <token>`, a project-scoped key with write or admin scope |
+
+A missing token, or one that fails verification, is refused with `401`. A token that is not project-scoped, or is query-scoped, is refused with `403`. Write and admin keys both ingest, because admin is the superset family: see [API keys](/reference/api-keys) for the three scopes and the errors each one returns. [Ingestion contract](/reference/ingestion-contract#limits) carries the batch, body, and payload limits, and the `503` the receiver answers under buffer pressure.
+
+The HTTP receiver is always on. A gRPC receiver exists and is opt-in; see [Ingest and OTLP](/self-hosting/configuration#ingest-and-otlp) for the two variables that control it, and note that the default Docker Compose configuration does not publish its port to the host.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Ingestion contract" icon="file-lines" href="/reference/ingestion-contract">
+    The exhaustive lookup behind this page: every field, every dialect, and the limits.
+  </Card>
+  <Card title="Configure an exporter" icon="share-nodes" href="/instrument/exporters">
+    Get spans to the endpoint above, without replacing the exporter you already have.
+  </Card>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    The one attribute nothing resolves without.
+  </Card>
+</CardGroup>

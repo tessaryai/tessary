@@ -68,8 +68,8 @@ Two consequences worth knowing before you reach for a workaround:
   on the client while the read is in flight (the browser has no defaults of its own). There is no
   frontend LaunchDarkly client and no plan logic.
 - `views/` — surfaces, mostly one directory per IA surface (`triage/`, `traces/`,
-  `classifiers/`, `vitals/`, `Settings/`). Track A deleted `graders/`, `review/`, `datasets/`,
-  `runs/`, `synth/` and `reposync/` along with the whole Calibrate nav group; their routes are
+  `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
+  `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are
   `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. Surface-specific shared widgets go in `views/components/`
   (`PayloadViewer`, `SpanOutline`, `SourceConnect`, …). Generic primitives belong in
   `src/ui/`, not here.
@@ -93,7 +93,7 @@ Two consequences worth knowing before you reach for a workaround:
   auth-scoped keys use slugs. After `POST .../import`, invalidate `['pipeline']`.
 - Default `staleTime` is 30 s (`main.tsx`). One-shot LLM mutations use `useMutation` with no
   cache key — single-fire, result in component state.
-- **The old progressive onboarding gate is gone, but a first-run gate exists again (#1227).**
+- **The old progressive onboarding gate is gone, but a first-run gate exists again.**
   `useOnboarding` / `OnboardingContext` / `<Gate need="pipeline"|"full">` were removed with the
   Triage · Monitor · Calibrate redesign and stay gone — don't reintroduce a call to *those*.
   What replaced them is narrower and one-shot: `ProjectShell` (`App.tsx`) renders

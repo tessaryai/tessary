@@ -81,7 +81,7 @@
               image can't run). The local JSON appender still captures all INFO
               for ops debugging on the box.
             -->
-            <filter class="ai.tessary.evals.open.obs.OpsOrWarnLogFilter"/>
+            <filter class="ai.tessary.open.obs.OpsOrWarnLogFilter"/>
             <!-- code.* capture is OFF. It was meant to say where a line came from, but every
                  StructuredLog call now routes through the fluent builder, so the appender records the
                  IMMEDIATE caller — always StructuredLog$Builder.log() at the same line number. Four

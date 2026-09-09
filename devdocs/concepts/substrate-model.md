@@ -1,9 +1,9 @@
 # Substrate — Span / Trace / Session
 
 > **Status: implemented and live since 2026-08-14.** This is the schema the code writes and
-> reads, and the schema the production database runs: the cutover shipped in commit `b7bc21a6`
-> (#758), and the baseline squash that folded the migration chain into a single starting point
-> followed in commit `f858d66a` (#759, 2026-08-15). The `context` and `observation` tables and
+> reads, and the schema the production database runs: the cutover shipped in commit `b7bc21a6`,
+> and the baseline squash that folded the migration chain into a single starting point
+> followed in commit `f858d66a` (2026-08-15). The `context` and `observation` tables and
 > the old vocabulary described in §2.2 and §11 are gone from the schema, not merely superseded
 > in code.
 >
@@ -99,7 +99,7 @@ CREATE TABLE span (
                              (CASE WHEN path IS NULL THEN NULL ELSE nlevel(path) - 1 END) STORED,
 
     -- correlation handles, denormalized onto every row
-    -- (environment_id was one of these; Track A dropped it from span, trace and session)
+    -- (environment_id was one of these; it was dropped from span, trace and session)
     session_id           text,
     correlation_state    text        NOT NULL DEFAULT 'pending',  -- resolver terminal marker, §6.3
     user_id              text,

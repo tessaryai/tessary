@@ -7,7 +7,7 @@
 # - caddy     reverse proxy on :8000 (the entry point you hit in the browser)
 #
 # Usage:
-#   echo "EVALS_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
+#   echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
 #   task docker:dev:tmux         # launches tmux + compose up
 # or (PNPM_VERSION defaults to the Taskfile's pin; a raw compose call needs nothing exported):
 #     docker compose -f docker-compose.dev.yml up -d --build
@@ -24,34 +24,33 @@ services:
     # `CREATE EXTENSION vector` (migration 042) works. Same image the test suite uses.
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: evals
-      POSTGRES_USER: evals
-      POSTGRES_PASSWORD: evals
+      POSTGRES_DB: tessary
+      POSTGRES_USER: tessary
+      POSTGRES_PASSWORD: tessary
     ports:
-      # Exposed on host so devs can psql in: psql -h localhost -p 5433 -U evals.
+      # Exposed on host so devs can psql in: psql -h localhost -p 5433 -U tessary.
       # NOT loopback-bound, unlike every other publish in this file, and that is a known gap
-      # rather than an oversight: tessary-paid/scripts/apply-overlay-changelog.sh (task
-      # overlay:apply-changelog) reaches this port from INSIDE a throwaway container through
-      # host.docker.internal. On Docker Desktop that resolves to the host and a loopback publish
-      # would still answer; on Linux Docker Engine host-gateway is 172.17.0.1 and a loopback
-      # publish refuses it. Closing this means first moving that script onto the stack network to
-      # talk to postgres:5432 directly, which is its own change.
+      # rather than an oversight: some external tooling reaches this port from INSIDE a
+      # throwaway container through host.docker.internal. On Docker Desktop that resolves to
+      # the host and a loopback publish would still answer; on Linux Docker Engine host-gateway
+      # is 172.17.0.1 and a loopback publish refuses it. Closing this means first moving that
+      # tooling onto the stack network to talk to postgres:5432 directly, which is its own change.
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U evals -d evals"]
+      test: ["CMD-SHELL", "pg_isready -U tessary -d tessary"]
       interval: 5s
       timeout: 3s
       retries: 20
     networks:
-      - evals
+      - tessary
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
-    image: evals-dev:latest
+    image: tessary-dev:latest
     # Fork the Spring Boot app JVM with a JDWP agent so a Java IDE can attach a
     # Remote JVM Debug config to localhost:5005. Passing -Dspring-boot.run.jvmArguments
     # makes the plugin fork, so the agent binds in the app JVM only (not the Maven
@@ -71,8 +70,8 @@ services:
         -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     expose:
       - "8080"
-      # OTLP/gRPC trace receiver (#235) — reachable on the internal `evals` network. Inert unless
-      # evals.ingest.otlp.enabled=true AND evals.ingest.otlp.transport is grpc|both.
+      # OTLP/gRPC trace receiver — reachable on the internal `tessary` network. Inert unless
+      # tessary.ingest.otlp.enabled=true AND tessary.ingest.otlp.transport is grpc|both.
       - "4317"
     ports:
       # Publish only the debug port to the host; HTTP still flows through Caddy (:8000). JDWP has no
@@ -82,66 +81,66 @@ services:
       # bind would refuse the forwarded connection and the debugger would never attach.
       - "127.0.0.1:5005:5005"
       # Publish the OTLP/gRPC receiver to the host so a local exporter can push to localhost:4317 when
-      # the receiver is enabled (#235). A compose `ports:` mapping works without a Dockerfile `EXPOSE`
+      # the receiver is enabled. A compose `ports:` mapping works without a Dockerfile `EXPOSE`
       # (EXPOSE is metadata only); the `EXPOSE 4317` line in backend/Dockerfile is a protected path
-      # handed off to a human (see decision.md).
+      # that changes only with sign-off from a human, not automatically.
       - "127.0.0.1:4317:4317"
     env_file:
       # Pass the entire repo-root .env into the container. Optional — if absent
       # the stack still starts and falls back to the application.yaml defaults
       # (which require an ambient AWS_REGION for the platform-Bedrock judge default
       # at request time, but the boot itself works).
-      # EVALS_SECRET_KEY (AES-256 base64) belongs here if you use ingestion sources.
+      # TESSARY_SECRET_KEY (AES-256 base64) belongs here if you use ingestion sources.
       - path: ./.env
         required: false
     environment:
       # Container-internal config — not in .env because these are wiring, not secrets.
-      EVALS_JDBC_URL: jdbc:postgresql://postgres:5432/evals
-      EVALS_DB_USERNAME: evals
-      EVALS_DB_PASSWORD: evals
-      # The dev stack runs unauthenticated, and since #924 it has to SAY so. Absent WorkOS
+      TESSARY_JDBC_URL: jdbc:postgresql://postgres:5432/tessary
+      TESSARY_DB_USERNAME: tessary
+      TESSARY_DB_PASSWORD: tessary
+      # The dev stack runs unauthenticated, and it has to SAY so. Absent WorkOS
       # credentials used to be the off switch by themselves; they now fail closed, because
       # "no provider configured" is the normal state of a self-hosted open-edition instance
       # and must not be read as consent to serve it open. Set here rather than in .env so a
       # fresh clone's `task dev` works with no manual step -- it is wiring, not a secret.
       #
-      # Parameterized (#878), default UNCHANGED: every existing caller (`task dev`, `task
+      # Parameterized, default UNCHANGED: every existing caller (`task dev`, `task
       # dev:slim`, this file's other consumers) still gets "true" with zero config, same as
       # before. The one caller that overrides it is scripts/check-open-boot.sh, which exports
-      # EVALS_AUTH_DISABLED=false on its own compose invocation ONLY -- the epic-2 gate needs to
+      # TESSARY_AUTH_DISABLED=false on its own compose invocation ONLY -- that gate needs to
       # exercise a REAL authenticated session (AuthFilter actually resolving a TenantContext from
       # the signed session cookie), and AuthFilter.shouldNotFilter bypasses itself for EVERY path
       # when this is set, which would make GET /auth/me (and everything past it) 401 unconditionally
       # regardless of whether the signup/login flow itself worked -- silently defeating the exact
-      # authenticated-flow proof #924 added to the gate. A hardcoded "true" literal cannot be
+      # authenticated-flow proof the gate depends on. A hardcoded "true" literal cannot be
       # overridden by any caller's env, which is what forced this one-line change.
-      EVALS_AUTH_DISABLED: ${EVALS_AUTH_DISABLED:-true}
+      TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-true}
       # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
       # with no .env and mints run-scoped random values for both (see its boot-recipe comment).
       # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`;
       # unset everywhere, these bind blank exactly as before.
-      EVALS_SECRET_KEY: ${EVALS_SECRET_KEY:-}
-      # EVALS_PLATFORM_BEDROCK_ENABLED lived here until #939 D4 — see docker-compose.yml's
+      TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-}
+      # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — see docker-compose.yml's
       # identical removal note; the switch it fed had zero production callers.
-      EVALS_AUTH_COOKIE_PASSWORD: ${EVALS_AUTH_COOKIE_PASSWORD:-}
+      TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-}
       # Local dev: behavior-drift profiles re-fit after ≤10 min of idleness (prod: 6h) so a
       # finished test burst arms within minutes instead of hours. The worker tick drops to 1 min
       # to match — at the prod 15-min tick a 10-min idle deadline can overshoot by a full tick.
-      EVALS_CLASSIFIER_BEHAVIOR_FIT_IDLE_INTERVAL_MS: "600000"
-      EVALS_CLASSIFIER_BEHAVIOR_FIT_MS: "60000"
+      TESSARY_CLASSIFIER_BEHAVIOR_FIT_IDLE_INTERVAL_MS: "600000"
+      TESSARY_CLASSIFIER_BEHAVIOR_FIT_MS: "60000"
       # Local dev: turn ai.tessary logging up to DEBUG (logback-spring.xml + logging.level.ai.tessary).
       # INFO everywhere by default; prod never sets this. Framework logs stay at their defaults.
       APP_LOG_LEVEL: DEBUG
       SPRING_DEVTOOLS_LIVERELOAD_ENABLED: "false"
       # Pre-wired target for OTLP traces to the local Alloy agent (below), which forwards the
       # gen_ai (judge) spans on to Langfuse — so prompt-cache token usage is inspectable on
-      # local runs, same as prod. Off by default though (#864): the base application.yaml sets
+      # local runs, same as prod. Off by default though: the base application.yaml sets
       # management.tracing.export.otlp.enabled: false, and nothing here overrides that, so with
       # no opt-in this is dead config the exporter never reads. Bring up Alloy AND flip the
       # enabled flag to actually ship: `COMPOSE_PROFILES=observability
       # MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED=true
       # task dev` (task dev:profiling / dev:local:profiling does all of this for you already —
-      # scripts/dev.sh's EVALS_PROFILING branch sets both the Compose profile and these flags).
+      # scripts/dev.sh's TESSARY_PROFILING branch sets both the Compose profile and these flags).
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: tessary-backend
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_NAME:-development},service.namespace=tessary
@@ -157,14 +156,14 @@ services:
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://alloy:4317
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT: grpc
       # The actual enable/disable flags the comment above refers to. Compose only forwards a host
-      # env var into the container when the compose YAML itself references it (crew review, PR
-      # #1013) — task dev:profiling exporting these into the shell does nothing on its own without
+      # env var into the container when the compose YAML itself references it —
+      # task dev:profiling exporting these into the shell does nothing on its own without
       # this line. Defaults to the base application.yaml's own "false" so plain `task dev` is
-      # unaffected; task dev:profiling's EVALS_PROFILING branch sets the shell var to "true" before
+      # unaffected; task dev:profiling's TESSARY_PROFILING branch sets the shell var to "true" before
       # `docker compose up`, which this then passes through.
       MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED:-false}
       MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED:-false}
-      # Host-launcher wiring for `task dev:local` (EVALS_LOCAL_AGENT=1): scripts/dev.sh
+      # Host-launcher wiring for `task dev:local` (TESSARY_LOCAL_AGENT=1): scripts/dev.sh
       # exports these into the shell env, which compose interpolation reads here (outranking
       # .env). The two launcher settings below are inert when empty, so the backend keeps its
       # .env/default config on plain `task dev`.
@@ -172,24 +171,24 @@ services:
       # The analyzer type is NOT, which is why it defaults to a value rather than to empty: Spring
       # binds "" over the Java default ("anchor") and ObserverProcessor's fail-fast rejects it, so
       # `:-` killed the backend at boot on any host whose .env did not set this.
-      EVALS_OBSERVER_AGENTIC_LAUNCHER_URL: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_URL:-}
-      EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
+      TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}
+      TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
       # RCA — defaults onto the observer's launcher/key so `task dev:local` (host launcher +
       # local opencode) powers both lanes with one setup. Without a launcher URL every
       # "Run RCA" press fails: the sandboxed agent is RCA's only analysis path.
-      EVALS_RCA_AGENTIC_LAUNCHER_URL: ${EVALS_RCA_AGENTIC_LAUNCHER_URL:-${EVALS_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
-      EVALS_RCA_AGENTIC_LAUNCHER_API_KEY: ${EVALS_RCA_AGENTIC_LAUNCHER_API_KEY:-${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}}
+      TESSARY_RCA_AGENTIC_LAUNCHER_URL: ${TESSARY_RCA_AGENTIC_LAUNCHER_URL:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
+      TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}}
       # The evidence door, for BOTH agent lanes, and neither has another one: their dossiers carry
       # the detector's claim and every row behind it is fetched over MCP, so a blank value here is a
       # broken deployment rather than a degraded mode (the engines refuse to run). Defaulted to the
       # dev API origin — Caddy on :8000 — which is what a HOST launcher (`task dev:local`) reaches.
       # E2B dev is the exception: the microVM cannot see your localhost, so point this at a tunnel.
-      EVALS_RCA_AGENTIC_MCP_BASE_URL: ${EVALS_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}
-      EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${EVALS_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}}
+      TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}
+      TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}}
       # Encoder classification — the classify service below. Same service that runs on
       # ECS Fargate in production; the dev key just has a working default.
-      EVALS_OBSERVER_ENCODER_URL: http://classify:8080
-      EVALS_OBSERVER_ENCODER_API_KEY: ${EVALS_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
+      TESSARY_OBSERVER_ENCODER_URL: http://classify:8080
+      TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
     volumes:
       # The reactor is twelve modules under backend/. The dev boot installs app's whole dependency
       # chain into the cached .m2 and then runs app alone, so EVERY module's src must be mounted —
@@ -239,17 +238,17 @@ services:
       retries: 60
       start_period: 30s
     networks:
-      - evals
+      - tessary
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
       # The Taskfile exports PNPM_VERSION (mirrored by the PNPM_VERSION Actions variable in CI);
-      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh (#1190).
+      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
-    image: evals-frontend-dev:latest
+    image: tessary-frontend-dev:latest
     expose:
       - "5173"
     volumes:
@@ -268,12 +267,12 @@ services:
       # mismatched-arch) node_modules would shadow what the image build installed.
       - frontend-node-modules:/app/node_modules
     networks:
-      - evals
+      - tessary
 
   caddy:
     image: caddy:2-alpine
     ports:
-      # HOST_BIND, not a bare publish: docker-compose.dev.yml sets EVALS_AUTH_DISABLED=true by
+      # HOST_BIND, not a bare publish: docker-compose.dev.yml sets TESSARY_AUTH_DISABLED=true by
       # default, so this port is the entire application with authentication switched off. On
       # 0.0.0.0 that is every trace, every credential and every admin surface offered to whoever
       # shares the network. Set HOST_BIND=0.0.0.0 to test from a phone on the same wifi.
@@ -291,7 +290,7 @@ services:
       frontend:
         condition: service_started
     networks:
-      - evals
+      - tessary
 
   # Optional telemetry agent for local runs: receives the backend's OTLP traces and
   # forwards just the gen_ai (judge) spans on to Langfuse, so you can inspect prompt-cache
@@ -310,7 +309,7 @@ services:
   # the provider's minimum cacheable length (OpenAI 1024, Anthropic Sonnet/Opus 1024, Haiku
   # 2048, Bedrock ~1024); small traces cache nothing and show 0 — that's expected.
   #
-  # Opt-in (#864): gated behind the `observability` Compose profile, so this is absent from a
+  # Opt-in: gated behind the `observability` Compose profile, so this is absent from a
   # default `task dev` / detached boot — that's exactly the path scripts/check-open-boot.sh
   # exercises, so this one gate is what actually satisfies "no Alloy container by default"
   # against the check that enforces it. Bring it up with `COMPOSE_PROFILES=observability
@@ -327,7 +326,7 @@ services:
       DEPLOYMENT_NAME: ${DEPLOYMENT_NAME:-development}
       # Langfuse OTLP target for the gen_ai-only trace branch. Endpoint + keys are read
       # from ./.env via Compose interpolation (the same values the ingest adapter uses).
-      # Off by default (#864): blank endpoint means the exporter has nothing to resolve, so
+      # Off by default: blank endpoint means the exporter has nothing to resolve, so
       # opting into `observability` without Langfuse keys doesn't also start dialing Langfuse
       # Cloud. Set LANGFUSE_OTLP_ENDPOINT in .env to re-enable.
       LANGFUSE_OTLP_ENDPOINT: ${LANGFUSE_OTLP_ENDPOINT:-}
@@ -343,13 +342,13 @@ services:
       - ./observability/alloy/config.dev.alloy:/etc/alloy/config.alloy:ro
       - alloy-data:/var/lib/alloy/data
     networks:
-      - evals
+      - tessary
 
   # Agentic launcher (drives E2B microVMs that run OpenCode) — powers the synth
   # CODE_GROUNDED tiers (/ground) and the observer agentic lane (/analyze). Built
   # locally so it bundles the current server.js (incl. the /ground route).
   # Reachable on the internal network at http://sandbox-runner:8080 — point the
-  # backend's EVALS_OBSERVER_AGENTIC_LAUNCHER_URL there (in .env). Optional: omit or
+  # backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL there (in .env). Optional: omit or
   # stop it and the backend's code-grounding degrades cleanly to trace/draft.
   #
   # Prereq: publish the E2B template first (cd sandbox-runner/agent-sandbox &&
@@ -369,24 +368,24 @@ services:
       # PNPM_VERSION single source — see the frontend service.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
-    image: evals-sandbox-runner-dev:latest
+    image: tessary-sandbox-runner-dev:latest
     expose:
       - "8080"
     environment:
       PORT: "8080"
-      # Empty passthrough, same as docker-compose.yml (#1052): server.js's own default, `docker`
-      # (D7's open default since #855), wins when this is unset — so the dev stack and the
+      # Empty passthrough, same as docker-compose.yml: server.js's own default, `docker`,
+      # wins when this is unset — so the dev stack and the
       # self-host stack agree, and a fresh `.env` never manufactures an E2B_API_KEY dependency.
-      # Until #1052 this defaulted to `e2b` (this service's doc comment above and its Prereq note
+      # This used to default to `e2b` (this service's doc comment above and its Prereq note
       # are about exercising the E2B template path); to dev against E2B, set SANDBOX_BACKEND=e2b
       # in .env. The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir
       # mounts + group_add below) mirrors docker-compose.yml's sandbox-runner service so the
       # default actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
-      # SANDBOX_WORK_VOLUME (crew review, PR #1081). `task dev:local`'s separate host-process
+      # SANDBOX_WORK_VOLUME. `task dev:local`'s separate host-process
       # path is untouched either way.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
       # Same tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner
-      # service (D6/D9, #941/#1114) — the tag matches the E2B template alias tessary-agent-sandbox.
+      # service — the tag matches the E2B template alias tessary-agent-sandbox.
       # Unset floats to `-latest`; the version lives in the git tag, never in a literal here.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: ${SANDBOX_DOCKER_CONCURRENCY:-1}
@@ -394,17 +393,17 @@ services:
       # service for the full Docker-outside-of-Docker mechanism. A distinct default name from the
       # prod stack's, so a dev launcher and a prod launcher on one host never share a work volume.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
-      # Must equal the backend's EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY.
-      SANDBOX_API_KEY: ${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
+      # Must equal the backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY.
+      SANDBOX_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
       E2B_API_KEY: ${E2B_API_KEY:-}
       E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary-agent-sandbox}
-      # #939 D4: FULL REMOVAL of every deployment-env-var credential this service used to read —
+      # FULL REMOVAL of every deployment-env-var credential this service used to read —
       # AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole AGENT_PROVIDER
       # dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY,
       # GEMINI_API_KEY, GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY, CUSTOM_OPENAI_BASE_URL/
       # CUSTOM_OPENAI_API_KEY) — see docker-compose.yml's identical removal note and
       # server.js's file-header doc. MANTLE_PROJECT_ID stays: an attribution scope, not a secret.
-      MANTLE_PROJECT_ID: ${EVALS_MANTLE_PROJECT_ID:-}
+      MANTLE_PROJECT_ID: ${TESSARY_MANTLE_PROJECT_ID:-}
     # docker.sock GID + the two mounts: the docker sandbox default's wiring, mirrored from
     # docker-compose.yml's sandbox-runner service (see the comments there — same trade-offs, same
     # `getent group docker` hint for DOCKER_SOCK_GID). Unconditional so switching backends stays
@@ -420,7 +419,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - sandbox-work:/launcher-work
     networks:
-      - evals
+      - tessary
 
   # Mirrors docker-compose.yml's sandbox-runner-work-init: pre-creates the launcher's work dir
   # owned by the launcher image's `node` uid (1000), so the docker sandbox default can write
@@ -454,7 +453,7 @@ services:
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
         # Bake the SOP-conformance encoder (~1.7 GB) into the DEV image, so `task dev` can
-        # run a compile-service fit and a conformance sweep against a real /embed. The
+        # run a conformance sweep against a real /embed. The
         # production passes it too, but only after the Fargate task was raised to 8 GB (see
         # classify-service/README.md) — which is why it stays an opt-in build arg rather than an
         # unconditional bake: the order is load-bearing. Local cost: a longer first build and
@@ -462,7 +461,7 @@ services:
         BAKE_EMBEDDERS: "1"
       secrets:
         - hf_token
-    image: evals-classify-dev:latest
+    image: tessary-classify-dev:latest
     expose:
       - "8080"
     ports:
@@ -471,8 +470,8 @@ services:
       - "127.0.0.1:18080:8080"
     environment:
       PORT: "8080"
-      # Must equal the backend's EVALS_OBSERVER_ENCODER_API_KEY.
-      CLASSIFY_API_KEY: ${EVALS_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
+      # Must equal the backend's TESSARY_OBSERVER_ENCODER_API_KEY.
+      CLASSIFY_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
     # 3g held the original 4 heads; adding groundedness as a 5th (MiniCheck-RoBERTa-Large fp32,
     # ~1.4 GB resident) briefly needed 6g on 2026-07-15 — but the 2026-07-16 catalog reduction
     # dropped refusal/jailbreak/unsafe_text, back down to 2 heads (frustration + groundedness).
@@ -492,7 +491,7 @@ services:
       # Pick up server.js edits on `--force-recreate` without an image rebuild.
       - ./classify-service/server.js:/app/server.js:ro
     networks:
-      - evals
+      - tessary
 
   # ---------------------------------------------------------------------------
   # Classifier-training tooling (classifiers/PROGRAM.md §3) — DEV-ONLY, opt-in.
@@ -532,7 +531,7 @@ services:
       - argilla-elasticsearch
       - argilla-redis
     networks:
-      - evals
+      - tessary
 
   # Runs Argilla's RQ background jobs (dataset import/export etc.). Same image + env,
   # worker entrypoint — the official compose's split.
@@ -551,7 +550,7 @@ services:
       - argilla-elasticsearch
       - argilla-redis
     networks:
-      - evals
+      - tessary
 
   # Argilla's own metadata DB — deliberately NOT the platform postgres (separate lifecycle,
   # disposable annotation-tool state, and the platform volume is already initialized so it
@@ -567,7 +566,7 @@ services:
     volumes:
       - argilla-postgres-data:/var/lib/postgresql/data
     networks:
-      - evals
+      - tessary
 
   argilla-elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
@@ -582,14 +581,14 @@ services:
     volumes:
       - argilla-elastic-data:/usr/share/elasticsearch/data
     networks:
-      - evals
+      - tessary
 
   argilla-redis:
     image: redis:7-alpine
     profiles: ["classifiers"]
     restart: unless-stopped
     networks:
-      - evals
+      - tessary
 
   # Experiment tracking + model registry (registry aliases @shadow/@beta/@ga mirror the
   # ClassifierModule Lifecycle ladder). SQLite backend + local artifact store in a named
@@ -612,10 +611,10 @@ services:
     volumes:
       - mlflow-data:/mlflow
     networks:
-      - evals
+      - tessary
 
 networks:
-  evals:
+  tessary:
     driver: bridge
 
 volumes:

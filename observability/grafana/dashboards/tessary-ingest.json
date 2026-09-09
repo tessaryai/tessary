@@ -257,7 +257,7 @@
           "refId": "B"
         }
       ],
-      "description": "Objective O4: the oldest unprocessed batch (ms; depth and age share the axis) stays under evals.ingest.spool.max-lag-ms; depth is a count and shares the axis only for shape. An age that climbs while depth holds is the drainer being dead rather than busy — /actuator/health/ingest says which."
+      "description": "Objective O4: the oldest unprocessed batch (ms; depth and age share the axis) stays under tessary.ingest.spool.max-lag-ms; depth is a count and shares the axis only for shape. An age that climbs while depth holds is the drainer being dead rather than busy — /actuator/health/ingest says which."
     },
     {
       "type": "timeseries",

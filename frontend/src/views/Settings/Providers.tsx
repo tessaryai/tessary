@@ -101,8 +101,8 @@ export function Providers() {
             "Could not load the provider catalog. Try again."}
         </p>
       ) : (
-        // #939 D6: the "Free judge included" banner named Ollama, the platform's one no-key
-        // provider — dropped by D6's maker filter (Amazon/Meta are not supported makers). Every
+        // The "Free judge included" banner named Ollama, the platform's one no-key
+        // provider — dropped by the maker filter (Amazon/Meta are not supported makers). Every
         // provider now needs an org key, so there is nothing left to point that banner at.
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {platforms.map((p) => (
@@ -249,7 +249,7 @@ function ProviderKeyModal({
 
   const auth = platform.auth;
   const isAws = auth === "aws";
-  // #939: CUSTOM has no real per-model catalog — one representative entry stands for "any model
+  // CUSTOM has no real per-model catalog — one representative entry stands for "any model
   // this endpoint serves" — so this is the only place a project names the actual model id it wants.
   const isCustom = platform.id === "CUSTOM";
 
@@ -260,7 +260,7 @@ function ProviderKeyModal({
   const [awsSecret, setAwsSecret] = useState("");
   const [bedrockArn, setBedrockArn] = useState(existing?.bedrock_model_arn ?? "");
   const [customModelName, setCustomModelName] = useState(existing?.custom_model_name ?? "");
-  // #939: Bedrock/mantle-only. Defaults to the stored value, else "api_key" — the same default the
+  // Bedrock/mantle-only. Defaults to the stored value, else "api_key" — the same default the
   // backend applies to a credential with no auth_mode column value (ProviderCredentialController).
   const [authMode, setAuthMode] = useState<"api_key" | "iam_role">(
     existing?.auth_mode === "iam_role" ? "iam_role" : "api_key",
@@ -375,7 +375,7 @@ function ProviderKeyModal({
           </>
         )}
 
-        {/* auth === "none" (Ollama's base-URL-only form) lived here until #939 D6 dropped Ollama —
+        {/* auth === "none" (Ollama's base-URL-only form) lived here until Ollama was dropped —
             "none" left PlatformAuth's union with it, so this branch is now unreachable and removed
             rather than dead code kept around. */}
 
@@ -397,7 +397,7 @@ function ProviderKeyModal({
               )}
             </Field>
 
-            {/* #939: API key (sealed access/secret keys) vs IAM role (the sandbox/host's own
+            {/* API key (sealed access/secret keys) vs IAM role (the sandbox/host's own
                 instance or task role — no keys stored at all). An explicit opt-in, never inferred
                 from blank key fields: see ChatModelFactory#byoOrIamAwsCredentials for why. */}
             <div className="col-span-2">

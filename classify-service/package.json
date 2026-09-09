@@ -1,8 +1,8 @@
 {
-  "name": "evals-classify-service",
+  "name": "tessary-classify-service",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone encoder classification service for the evals platform's built-in signal heads.",
+  "description": "Standalone encoder classification service for the Tessary platform's built-in signal heads.",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {

@@ -89,11 +89,11 @@ never a `tessary.*` attribute.
 - **`tessary.sdk`, `tessary.upstream.*`** — provenance markers; written, never read by processing.
 - **`gen_ai.evaluation.result`** (span event) and the `gen_ai.evaluation.*` attributes under it —
   **no longer read.** They landed explicit user feedback as first-class rows until the feature was
-  removed and its changeset `0083` (folded into the baseline in the 2026-09 epic-3 partition squash)
+  removed and its changeset `0083` (folded into the baseline in a 2026-09 partition squash)
   dropped its table. Emitting the event is harmless and has no effect; the
   keys are unclaimed rather than reserved.
 - **`deployment.environment.name`** (resource attr) — **no longer read.** It scoped an ingested span to
-  an Environment row until Track A removed the Environment concept and its changeset `0016` (since folded into
+  an Environment row until the Environment concept was removed and its changeset `0016` (since folded into
   the baseline) dropped `environment_id` from `session`, `span` and `trace`. The attribute is still ACCEPTED: a producer
   that ships it is not rejected and it survives verbatim in `span_payload.attributes` — it simply scopes
   nothing — a project is the only scope below an org, so separate environments with separate projects.

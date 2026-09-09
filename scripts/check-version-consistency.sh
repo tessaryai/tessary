@@ -1,47 +1,35 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The version-source check (D1/D9, epic 7 clause 1, #941/#1114 review).
+# The version-source check.
 #
-# WHAT CHANGED, AND WHY THIS SCRIPT IS NOT WHAT IT USED TO BE. This file used to compare ~14
-# hand-typed `0.1.0` literals against a root `VERSION` file and fail when any of them drifted. The
-# failure it guarded was real: bump the version, miss one literal, and a self-hoster with the
-# corresponding env var unset was silently pinned to a STALE image forever — `docker compose pull`
-# still exits 0 against the old tag, so nothing went red. But the guard was compensating for the
-# design, not fixing it. `VERSION` was not a build input; it was a value that had to be copied by
-# hand into every file that could not read it, because compose's `${VAR:-X}` syntax and a plain JS
-# string literal cannot read a file.
-#
-# THE DESIGN NOW: the git tag `v<semver>` that .github/workflows/release.yml pushes is the single
-# source of truth for a published version, and NOTHING in this repository holds a copy of it.
+# The git tag `v<semver>` that .github/workflows/release.yml pushes is the single source of truth
+# for a published version, and nothing in this repository holds a copy of it.
 #   - docker-compose.yml, docker-compose.dev.yml and sandbox-runner/launcher/server.js default to
-#     the FLOATING `-latest` tag, which every release repoints (release.yml's merge-and-tag pushes
-#     `<service>-latest` for all four services to both registries). An unset env var can therefore
+#     the floating `-latest` tag, which every release repoints (release.yml's finalize step
+#     pushes `<service>-latest` for all four services on Docker Hub). An unset env var can therefore
 #     never resolve to a stale pin, because it never resolves to a pin at all.
-#   - The PUBLISHED compose artifact is still fully pinned: scripts/publish-compose-artifact.sh
+#   - The published compose artifact is still fully pinned: scripts/publish-compose-artifact.sh
 #     runs scripts/lib/pin-compose-version.py over the file on the way out, stamping the release's
-#     own version into each default. That is epic 7 clause 1's pinning requirement, discharged by a
-#     generated substitution rather than a hand-typed fallback — and it is checked, by clause (4)
-#     of scripts/check-compose-artifact.sh.
+#     own version into each default via a generated substitution, checked by clause (4) of
+#     scripts/check-compose-artifact.sh.
 #   - .env.example and the self-hosting pages name `<version>` placeholders, so a reader copies a
 #     shape and fills in a release rather than copying a number that was true once.
 #
-# WHAT THIS SCRIPT ASSERTS, which is the STRONGER property that makes the old failure impossible
-# rather than merely detectable:
-#   (a) NO pinned Tessary image or compose-artifact version literal exists anywhere in the tracked
+# This script asserts two things:
+#   (a) No pinned Tessary image or compose-artifact version literal exists anywhere in the tracked
 #       tree. There is no literal to forget to bump, and none can come back unnoticed.
-#   (b) Every default site that a machine resolves — six of them — is present AND floating. (a)
+#   (b) Every default site that a machine resolves, six of them, is present and floating. (a)
 #       alone would pass on a file that deleted its default outright; this is the half that says
 #       the defaults still exist and still say `-latest`.
-# Pure text, no Docker, no network, no git tag lookup — cheap enough to run on every PR.
-# scripts/check-selfhost-images.sh is the separate, Docker-and-network leg that asks a REGISTRY
+# Pure text, no Docker, no network, no git tag lookup: cheap enough to run on every PR.
+# scripts/check-selfhost-images.sh is the separate, Docker-and-network leg that asks a registry
 # whether the tags actually resolve; it reads its expected version from the newest git tag.
 #
-# ONE CLASS OF FILE IS EXEMPT, and only from the environment: an append-only decision ledger,
-# whose rows state what was decided and what was true when — a row rewritten to match today's tree
-# stops being a record. It is named by scripts/check.sh rather than here (boundary rule 5); see
-# VERSION_LITERAL_EXEMPT below.
+# One class of file is exempt, and only from the environment: an append-only decision ledger,
+# whose rows state what was decided and what was true when, so a row rewritten to match today's
+# tree stops being a record. See VERSION_LITERAL_EXEMPT below.
 #
-# MUST GO RED ON A REINTRODUCED LITERAL — proven, not asserted: run with
+# Must go red on a reintroduced literal, proven rather than asserted: run with
 #   VERSION_SOURCE_SELFTEST=1 bash scripts/check-version-consistency.sh
 # which writes a pinned literal and a de-floated default into a scratch copy of the tree and
 # asserts this script reports both.
@@ -61,7 +49,6 @@ if [ "${VERSION_SOURCE_SELFTEST:-0}" = "1" ]; then
     trap 'rm -rf "$T"' EXIT
     mkdir -p "$T/scripts/lib" "$T/docs/self-hosting" "$T/sandbox-runner/launcher"
     for f in docker-compose.yml docker-compose.dev.yml .env.example \
-             docs/self-hosting/setup.mdx docs/self-hosting/upgrading.mdx \
              sandbox-runner/launcher/server.js scripts/check-version-consistency.sh; do
         cp "$ROOT/$f" "$T/$f"
     done
@@ -109,11 +96,9 @@ EXEMPT = {
     # This script's own header and self-test, which must be able to name the literal they forbid.
     "scripts/check-version-consistency.sh",
 }
-# Further exemptions come from the environment rather than from this list, because the only ones
-# that exist are OVERLAY paths and boundary rule 5 forbids this script from naming them — it ships
-# in the public export, where that directory has been deleted. scripts/check.sh's paid column
-# passes them in (`RUN_ENV:`), the same mechanism and for the same reason as
-# check-classifier-quality-doc.sh's inputs. Space-separated, repo-relative.
+# Further exemptions come from the environment rather than from this list, because this script
+# must not name paths outside this tree directly. scripts/check.sh passes them in (`RUN_ENV:`),
+# the same mechanism check-classifier-quality-doc.sh's inputs use. Space-separated, repo-relative.
 EXEMPT |= {p for p in os.environ.get("VERSION_LITERAL_EXEMPT", "").split() if p}
 
 try:

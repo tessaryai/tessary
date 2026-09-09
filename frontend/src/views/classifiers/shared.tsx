@@ -23,12 +23,11 @@ export const SOP_CONFORMANCE_DETECTOR = "sop_conformance";
 
 /**
  * One section of a detail rail. Sections are separated by a hairline rather than by bare
- * whitespace: five stacked blocks with only margins between them read as one long column
- * of text, which is what this rail was before.
+ * whitespace: five stacked blocks with only margins between them read as one long column of
+ * text.
  *
- * <p>Here rather than in `DetectorsPage.tsx`, where it was file-private until #846: the SOP
- * rulebook block that renders one of these moved to the paid overlay, which reaches open code
- * across the boundary and can only import what is exported. Same reason for {@link Fact}.
+ * <p>Exported here rather than kept file-private in `DetectorsPage.tsx`, so a block that renders
+ * a fact grid elsewhere can reuse it. Same reason for {@link Fact}.
  */
 export function RailBlock({ label, meta, children }: { label: string; meta?: string; children: React.ReactNode }) {
   return (
@@ -72,9 +71,9 @@ export function SectionLabel({ label, meta }: { label: string; meta?: string }) 
 /**
  * A verb on a finding. `filled` is the move the row is asking for; `outline` is everything else.
  *
- * <p>Which verb gets the fill is not decoration. `Absorb as legitimate` used to carry it on every row:
- * absorbing re-pins the reference a whole population is compared against and closes the finding, which
- * is the most consequential thing on this surface and was also the one styled as the default.
+ * <p>Which verb gets the fill is not decoration: absorbing re-pins the reference a whole
+ * population is compared against and closes the finding, the most consequential thing on this
+ * surface, so it is deliberately never the one styled as the default.
  */
 export function VerbButton({
   kind,
@@ -104,18 +103,18 @@ export function VerbButton({
 }
 
 /**
- * The human verdicts on one finding — the override, available on every finding including one triage
- * already closed. Both are `outline` for the reason VerbButton's own note gives.
+ * The human verdicts on one finding: the override, available on every finding including one
+ * triage already closed. Both are `outline` for the reason VerbButton's own note gives.
  *
  * <p>They stay reachable after a closure because triage closing a finding is a machine ruling on a
- * claim, not a decision about what matters, and a person who disagrees needs somewhere to say so. A
- * human verdict outranks the machine's wherever the two are read together.
+ * claim, not a decision about what matters, and a person who disagrees needs somewhere to say so.
+ * A human verdict outranks the machine's wherever the two are read together.
  *
- * <p>Conformance gets ONE verb. The two-verb split exists to correct a fitted reference (absorbing a
- * gram or re-pinning a baseline teaches the detector that what it saw is normal) and an SOP rule has no
- * such reference to correct: the authored SOP IS the reference, and changing it is a repo edit rather
- * than a button here. So resolving simply closes the row, and a deviation that persists opens a fresh
- * one, which is why closing is never suppression.
+ * <p>Conformance gets one verb. The two-verb split exists to correct a fitted reference (absorbing
+ * a gram or re-pinning a baseline teaches the detector that what it saw is normal), and an SOP
+ * rule has no such reference to correct: the authored SOP is the reference, and changing it is a
+ * repo edit rather than a button here. So resolving simply closes the row, and a deviation that
+ * persists opens a fresh one, which is why closing is never suppression.
  */
 export function ResolveVerbs({
   causeKind,
@@ -150,13 +149,13 @@ export function ResolveVerbs({
 /**
  * Where one finding stands with triage, in the words the queue and the finding's own page both use.
  *
- * <p>`positive` is the only state that puts a finding in front of a person, so it is the only one that
- * gets the emphatic tone; the two closures read the same weight as each other because they are the
- * same act — triage ended, nobody was paged — and differ only in why. `pending` is not a failure and
- * not a waiting room: it is a finding whose one run has not been scheduled yet.
+ * <p>`positive` is the only state that puts a finding in front of a person, so it is the only one
+ * that gets the emphatic tone; the two closures read the same weight as each other because they
+ * are the same act (triage ended, nobody was paged) and differ only in why. `pending` is not a
+ * failure and not a waiting room: it is a finding whose one run has not been scheduled yet.
  *
- * <p>A `done` status with no verdict cannot happen — the ruling and its action are written in one
- * statement, and a run that did not happen leaves the whole set null — but the fallback is here
+ * <p>A `done` status with no verdict cannot happen: the ruling and its action are written in one
+ * statement, and a run that did not happen leaves the whole set null. But the fallback is here
  * rather than a cast, because the alternative to a word is a blank cell.
  */
 export type TriageState = { label: string; tone: "positive" | "closed" | "waiting" | "failed" };
@@ -164,8 +163,8 @@ export type TriageState = { label: string; tone: "positive" | "closed" | "waitin
 export function triageState(finding: BehaviorFinding): TriageState {
   if (finding.triageStatus === "pending") return { label: "Pending", tone: "waiting" };
   if (finding.triageStatus === "in_flight") return { label: "Triaging", tone: "waiting" };
-  // Before this branch existed, a run that had given up was indistinguishable from one in flight and
-  // sat on "Triaging" forever — the row looked busy while nothing was happening to it.
+  // Without this branch, a run that gave up is indistinguishable from one in flight and sits on
+  // "Triaging" forever, the row looking busy while nothing is happening to it.
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
   if (finding.triageVerdict === "positive") return { label: "Positive", tone: "positive" };
   if (finding.triageVerdict === "negative") return { label: "Closed · negative", tone: "closed" };
@@ -190,7 +189,7 @@ export function isBaselineFinding(finding: BehaviorFinding): boolean {
  * The chain on one line: how much traffic, what triage made of it, and what has happened since.
  *
  * <p>A baseline finding's traffic is not firings. Its count is the population its violations were
- * counted over, once, at fit time — so "seen 257×" would report a fitted fact as a recurring event.
+ * counted over, once, at fit time, so "seen 257×" would report a fitted fact as a recurring event.
  *
  * <p>The recurrence count is what a closed finding is read by: triage closing a claim it could not
  * settle is a bet that the cause has stopped, and the counter is the bet being called. At the
@@ -241,10 +240,9 @@ export function detectorLabel(key: string): string {
 }
 
 /**
- * A detector description's opening sentence, which is the one that says what it watches. The rest (how
- * the bar is set, what it deliberately does not label) belongs on the detectors page, where the full
- * text is shown untouched. A summary row used to render the whole thing on one clamped line, so every
- * detector ended mid-word in an ellipsis.
+ * A detector description's opening sentence, which is the one that says what it watches. The rest
+ * (how the bar is set, what it deliberately does not label) belongs on the detectors page, where
+ * the full text is shown untouched.
  */
 export function firstSentence(text: string): string {
   const trimmed = text.trim();

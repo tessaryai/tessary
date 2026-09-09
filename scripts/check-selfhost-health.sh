@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The self-host artifact's readiness contract, asserted on the rendered compose config (epic 7
-# clause 4, #1189). "Up" means serving, and the stack says so itself: exactly the services
+# The self-host artifact's readiness contract, asserted on the rendered compose config.
+# "Up" means serving, and the stack says so itself: exactly the services
 # docs/self-hosting/setup.mdx tells a self-hoster will show `healthy` carry a probe, the frontend
 # waits on the backend being healthy rather than merely started, and every probe's interval is
 # short enough that the readiness signal adds a stated, small latency to the boot clock. The boot

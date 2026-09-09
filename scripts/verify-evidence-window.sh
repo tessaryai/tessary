@@ -40,12 +40,12 @@ SELECT id, classifier_key, win_open, win_close, ev_first, ev_last, refs
  ORDER BY win_open DESC;
 EOF
 
-TOTAL=$(docker exec "$CONTAINER" psql -U evals -d evals -At -c "
+TOTAL=$(docker exec "$CONTAINER" psql -U tessary -d tessary -At -c "
   SELECT COUNT(DISTINCT f.id) FROM finding f
     JOIN finding_evidence fe ON fe.finding_id = f.id AND fe.role = 'member'
    WHERE f.payload -> 'window' ->> 'opened_at' IS NOT NULL AND f.triage_action IS NULL")
 
-BAD=$(docker exec "$CONTAINER" psql -U evals -d evals -At -c "$SQL" | grep -c . || true)
+BAD=$(docker exec "$CONTAINER" psql -U tessary -d tessary -At -c "$SQL" | grep -c . || true)
 
 if [ "$BAD" -eq 0 ]; then
     echo "ok: $TOTAL un-ruled findings checked, 0 with evidence outside their window"
@@ -54,5 +54,5 @@ fi
 
 echo "FAIL: $BAD of $TOTAL un-ruled findings carry evidence from outside their own window"
 echo
-docker exec "$CONTAINER" psql -U evals -d evals -c "$SQL"
+docker exec "$CONTAINER" psql -U tessary -d tessary -c "$SQL"
 exit 1

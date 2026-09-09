@@ -349,7 +349,7 @@ service:
 
 | Problem | Cause |
 | --- | --- |
-| Nothing arrives at all | The endpoint does not end in `/v1/traces`, or the header is malformed. `401` is a bad or unminted token; `404` is usually the path. |
+| Nothing arrives at all | The endpoint does not end in `/v1/traces`, or the header is malformed. `401` is a missing or unverifiable token; `403` is a token that is not project-scoped, or is query-scoped; `404` is usually the path. |
 | Spans arrive, none tagged | The key is spelled with an underscore, the value is blank, or the tag is on a span that is never exported. |
 | Tagged spans arrive, but classifiers stay quiet | The spans carry a call site and no content. Check the required rows in [What a span must carry](#what-a-span-must-carry). |
 | Tagged spans still missing | The tagged span belongs to a different `TracerProvider` than the one the Tessary exporter is registered on. One provider, both exporters. |

@@ -1,0 +1,109 @@
+---
+title: "Open Edition"
+description: "What the open edition of Tessary includes, which classifiers run out of the box, what needs configuring, what is unavailable here, and where the product's boundaries are today."
+---
+
+The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). It is the build you get when you self-host. This page says what runs in it, what you have to configure first, and what it cannot do.
+
+Four categories are worth keeping apart, because they need different things from you:
+
+| Category | What it means for you |
+| --- | --- |
+| Included and on by default | Works after first boot. Nothing to configure. |
+| Included, needs configuration | Present in this build, but waits on something you supply. |
+| Unavailable in the open edition | The code behind it is not in this build. No setting turns it on. |
+| Not in service yet | Defined in the product, but not running for anyone in any edition today. |
+
+## What the open edition includes
+
+Every stage of the pipeline runs here. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases, and an agentic root-cause analysis (RCA) run investigates a case. The bundled `sandbox-runner` service runs the agentic work, and Compose wires it up for you.
+
+What the open edition does not include is the commercially licensed overlay, and Tessary Cloud, the hosted service. Neither is documented here.
+
+## Classifiers available out of the box
+
+These five are present and enabled by default on every new project:
+
+| Classifier | What it detects |
+| --- | --- |
+| `duration_drift` | A call site's turns, or one of its tools, moving away from their own recent past. |
+| `cost_drift` | A call site's cost per turn moving away from its own recent past. |
+| `tool_error` | A change in the rate at which tool calls return errors. |
+| `secret_leak` | Credentials and similar secrets appearing in trace content. |
+| `malformed_output` | Model output that does not match the structure the call site expects. |
+
+The three drift classifiers compare a call site against its own history, so each one needs a stretch of your traffic before it can report anything. A new project sits at the `fitting` milestone until they have it. [Classifiers and findings](/concepts/classifiers-and-findings) covers what fitting a baseline means and what a finding records.
+
+Each of these is switchable per project under **Classifiers**.
+
+## Classifiers that are not currently available
+
+Four classifiers exist in the product and cannot run in the open edition. They are reported as unavailable rather than off, because no setting turns them on here.
+
+| Classifier | Why it cannot run here |
+| --- | --- |
+| `frustration` | Its score comes from a model resident in the standalone `classify-service`. This configuration does not start that service, and the model weights it loads are gated and not published. |
+| `groundedness` | Same reason as `frustration`. Both are encoder-backed. |
+| `behavior_drift` | The detector code behind it is not on this build's classpath. |
+| `sop_conformance` | The detector code is not in this build, and the classifier is not in service in any edition. See [Not in service yet](#not-in-service-yet). |
+
+`TESSARY_OBSERVER_ENCODER_URL` and `TESSARY_OBSERVER_ENCODER_API_KEY` ship blank and stay blank in the open edition, so the two encoder-backed classifiers are unavailable rather than merely unconfigured. [Configuration](/self-hosting/configuration#classifier-encoder-service) covers both variables.
+
+<Note>
+  You will not find these four in the **Classifiers** list. A withheld built-in is filtered out of the listing and returns a 404 if you address it directly, and the capability API refuses an override for one rather than accepting it and doing nothing. The product does not offer a switch that would produce no findings.
+</Note>
+
+## Capabilities that require configuration
+
+These are in this build and waiting on something from you.
+
+| Capability | What it needs |
+| --- | --- |
+| Triage, and everything downstream of it | A model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. |
+| Automatic triage | An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
+| Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
+| A case reaching you | An alert rule and a notification destination. Nothing is sent until you add both. |
+| Slack notifications | The deployment's own Slack credentials, on top of the organization capability. Both must be present, and they fail closed independently. |
+
+Replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
+
+## Not in service yet
+
+`sop_conformance` is defined in the product, and it is switched off for every organization in every edition. What holds it back is supply rather than capability: it scores an authored rulebook against the turns a rule applied to, and no per-project artifact bundle has been deployed for it yet.
+
+Treat it as a classifier that does not run today rather than as something the open edition leaves out.
+
+## Current product boundaries
+
+These apply to every edition, not only this one.
+
+### Tessary explains and hands off
+
+Tessary reports what it found, the evidence behind it, and what it believes caused it. It does not open the fix, change your code, or change your agent's configuration. A case reaches a person through an alert rule and a notification destination you configure. [Cases](/concepts/cases) covers what a case carries and how it reaches you.
+
+### Automatic triage starts off
+
+Triage escalates a finding to a large language model to decide whether it is a real issue. That work runs on the model provider credential you stored, and Tessary applies no ceiling of its own to how much of it runs. Automatic triage is therefore switched off by default, so that turning it on is a decision an operator makes knowingly rather than a default they inherit.
+
+Nothing is lost while it is off. Classifiers keep evaluating every trace, findings keep being filed, and the evidence stays on each one. What waits is the escalation that turns a finding into a case.
+
+### Baselines are per project
+
+The drift classifiers learn what normal looks like from your own traffic, not from a shipped model. A new project cannot report drift until it has enough of its own history to compare against, and moving to a new project starts that history over.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Classifiers and findings" icon="magnifying-glass-chart" href="/concepts/classifiers-and-findings">
+    What a classifier is, what fitting a baseline means, and what a finding records.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How triage turns a finding into a case, and how a case reaches you.
+  </Card>
+  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
+    First boot, securing the instance, and connecting a trace source.
+  </Card>
+  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
+    Every environment variable a self-hosted deployment reads.
+  </Card>
+</CardGroup>

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# sandbox-runner gate (#855, #994). Single source of truth: invoked by both the Taskfile
-# (`task sandbox-runner:check`) and CI (.github/workflows/ci.yml) — the only job that actually runs
+# sandbox-runner gate. Single source of truth: invoked by both the Taskfile
+# (`task sandbox-runner:check`) and CI (.github/workflows/check.yml, via scripts/check.sh) — the only caller that actually runs
 # any sandbox-runner test, so a script covering just launcher/ leaves everything else in
 # sandbox-runner/ unwired into any gate. No test harness existed for
-# server.js before #855 added the docker sandbox driver — the first thing that needed real
+# server.js before the docker sandbox driver was added — the first thing that needed real
 # coverage: hardening flags a compile-time check cannot see, and a concurrency limiter whose bug
 # would only show up as a resource-limit incident in someone's self-hosted deployment.
 set -euo pipefail
@@ -21,7 +21,7 @@ node --check server.js
 # spawned container actually runs — that is sandbox-runner/README.md's documented manual proof).
 node --test
 
-# sandbox-runner/agent-sandbox/test/agent-stream.test.js (#994): F1/E coverage for
+# sandbox-runner/agent-sandbox/test/agent-stream.test.js: F1/E coverage for
 # agent-stream.js's runAgent() — a fresh-session retry must not lose the failing attempt's usage,
 # and a session that already did real work must not be silently re-run at double cost. node:test
 # with --experimental-test-module-mocks: mock.module still needs the mocked specifier
@@ -49,7 +49,7 @@ node --test
 node - "$ROOT" <<'PARITY'
 const fs = require('fs');
 const root = process.argv[2];
-const java = fs.readFileSync(root + '/backend/llm-runtime/src/main/java/ai/tessary/evals/llm/PlatformCatalog.java', 'utf8');
+const java = fs.readFileSync(root + '/backend/llm-runtime/src/main/java/ai/tessary/llm/PlatformCatalog.java', 'utf8');
 const js = fs.readFileSync(root + '/sandbox-runner/launcher/server.js', 'utf8');
 
 const MODE_CONST = { OPENAI: 'OPENAI_COMPAT_MODE', ANTHROPIC: 'ANTHROPIC_MODE', OPENROUTER: 'OPENROUTER_MODE',

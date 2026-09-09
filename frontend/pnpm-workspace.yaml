@@ -7,7 +7,7 @@
 # pnpm-lock.yaml in any Dockerfile that installs this package, or the overrides below vanish silently.
 
 overrides:
-  # js-yaml: NOT overridden, and this is the record of why (#928). @redocly/openapi-core, reached
+  # js-yaml: NOT overridden, and this is the record of why. @redocly/openapi-core, reached
   # through openapi-typescript, pins js-yaml 4.3.0; <4.3.1 has quadratic CPU consumption resolving
   # `!!omap` (GHSA-2v37-7h3g-55p8, high). Forcing `js-yaml: '>=4.3.1'` here was TRIED and REVERTED:
   # 4.3.1 changed the exported type registry, and redocly's lib/js-yaml/index.js dies at import with
@@ -17,7 +17,7 @@ overrides:
   #
   # Carried deliberately because the advisory is unreachable here, and by a wider margin than
   # "build-time only" suggests: openapi-typescript is a devDependency, so it never reaches the
-  # browser bundle at all -- and `generate:api` feeds it evals-api.json, a checked-in JSON file.
+  # browser bundle at all -- and `generate:api` feeds it tessary-api.json, a checked-in JSON file.
   # The `!!omap` path this advisory is about parses no YAML in this repo, from any source, ever.
   # Revisit when redocly moves off 4.3.0.
   # es-toolkit 1.46.0 pin: 1.47.0 (recharts' transitive dep) emits require_-prefixed CJS vars that

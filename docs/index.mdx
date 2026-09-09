@@ -1,28 +1,81 @@
 ---
-title: "Tessary self-hosting docs"
-description: "Introduce Tessary self-hosting docs and route readers to the setup, configuration, deployment, upgrading, and troubleshooting pages."
+title: "Tessary"
+description: "What Tessary does, how to self-host it, and the three steps from a running instance to your first explained case."
 ---
 
-Tessary's open edition is an open-source agent reliability platform. It ingests every trace an agent produces, runs cheap classifiers against each one to create findings, groups related findings into cases, and runs an agentic RCA (root-cause analysis) to explain what caused each case.
+Tessary watches agents running in production. It reads every trace your agents produce, runs classifiers over all of them to detect changes and likely problems, checks whether each detected change is a real issue, and then investigates what caused the ones that are.
 
-This documentation covers self-hosting the open-source product with Docker Compose. It does not cover Tessary Cloud, the SaaS-hosted product.
+The four stages have names you will see throughout these pages. A classifier creates a **finding** when it detects a change. **Triage** decides whether the finding is a real issue. A validated finding becomes a **case**. An agentic root-cause analysis (RCA) run then investigates the case and reports what it thinks caused it.
 
-## Explore the self-hosting docs
+These pages document the open edition, the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). They do not document Tessary Cloud, the hosted service.
+
+## Self-host Tessary
+
+A deployment is a single-node Docker Compose stack, and every credential it needs ships with a working default. Paste this into your coding agent:
+
+```text
+Self-host Tessary for me by following https://github.com/tessaryai/tessary/blob/main/setup.md
+```
+
+[`setup.md`](https://github.com/tessaryai/tessary/blob/main/setup.md) is written as instructions to an agent: install what is missing, bring every service up, verify the frontend, and hand back the URL. It needs Docker Engine 26 or newer and Docker Compose v2.34 or newer on the machine.
+
+Prefer to run it yourself? The same install is one command, with nothing cloned and no `.env` to edit:
+
+```bash
+docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
+```
+
+Either way, open `http://localhost` once `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Three of the shipped credentials are placeholders published in the repository, so this install is a localhost test drive until you replace them. [Secure the instance](/self-hosting/setup#secure-the-instance) covers that, and it is not something the agent does for you.
+
+## What the open edition includes
+
+Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+
+<Card title="Open edition" icon="box-open" href="/open-edition">
+  What is included, what needs configuring, what is unavailable here, and where the product's boundaries are today.
+</Card>
+
+## Start in three steps
+
+<Steps>
+  <Step title="Start Tessary">
+    Take either path above, create your account, and replace the three placeholder secrets. [Set up Tessary](/self-hosting/setup) covers first boot end to end.
+  </Step>
+  <Step title="Instrument your agent">
+    Send traces to the OTLP (OpenTelemetry Protocol) endpoint, and tag every span that covers a model call with a `tessary.call_site.id` attribute. There is no Tessary client library to install, and the connect screen carries a prompt you can hand to a coding agent. [Instrument your agent](/instrument/overview) covers both paths.
+  </Step>
+  <Step title="Review what Tessary finds">
+    Classifiers need a stretch of your own traffic before they can tell a change from normal variation. Once they have it, findings start arriving.
+  </Step>
+</Steps>
+
+## What you see after connecting traces
+
+The project reports its progress as a milestone ladder, and **Triage** names the stage whenever the queue is empty. A new project reads `not_connected`, then `listening` once the endpoint is live, then `fitting` once traces are arriving. Classifiers stay at `fitting` while they learn what your traffic normally looks like, which takes a while on low volume and is expected rather than a fault.
+
+After that, three things appear in order:
+
+| You see | What it means |
+| --- | --- |
+| A **finding** on the Classifiers page | A classifier detected a change and recorded the production evidence for it. It is not yet a validated issue. |
+| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. |
+| An **RCA report** on the case | The agentic run reports a verdict, hypotheses with the traces it cites for each, and the checks it ruled out. Connect a repository and it can ground that work in your own code. |
+
+Tessary explains the issue and hands it to you. It does not open the fix.
+
+## Read next
 
 <CardGroup cols={2}>
-  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
-    Bring up the services with Docker Compose and connect your first trace source.
+  <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
+    The four stages in detail, and what each one needs before it can run.
+  </Card>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    What a call site is, why the tag is required, and where it goes in your code.
   </Card>
   <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
-    Look up every environment variable and what it controls.
+    Every environment variable a self-hosted deployment reads, and what it controls.
   </Card>
-  <Card title="Deployment topology" icon="server" href="/self-hosting/deployment">
-    See the services Tessary runs and how they fit together.
-  </Card>
-  <Card title="Upgrading" icon="arrow-up" href="/self-hosting/upgrading">
-    Move a self-hosted deployment to a new Tessary version.
-  </Card>
-  <Card title="Troubleshooting" icon="triangle-exclamation" href="/self-hosting/troubleshooting">
-    Diagnose and resolve common self-hosting problems.
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    The three key scopes, and the surfaces each one reaches.
   </Card>
 </CardGroup>

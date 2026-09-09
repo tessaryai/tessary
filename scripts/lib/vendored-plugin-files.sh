@@ -18,7 +18,7 @@
 #   contract/PLATFORM_HANDOFF.md + contract/pack.schema.json — retired with the features they
 #     described (the handoff checklist shipped; packs died with plugin synthesis).
 #
-# LICENSE is on the list for a different reason than the other four (#1293, C3). Those are vendored
+# LICENSE is on the list for a different reason than the other four. Those are vendored
 # because the platform must agree with the plugin about the contract; LICENSE is vendored because
 # the four of them are somebody else's files sitting in our Apache-2.0 tree with no license text of
 # their own. Nothing in this repo can check that by inspection: check-license-headers.sh covers

@@ -1,0 +1,79 @@
+---
+title: "Classifiers and Findings"
+description: "Understand what a classifier is in Tessary, which ones the open edition runs, what fitting a baseline means for a new project, and what a finding records."
+---
+
+A classifier is a check that evaluates traces against a defined condition, and it creates a finding when that condition is met. That is the whole contract. A classifier does not decide whether something is worth your attention, and it never pages anyone directly.
+
+Classifiers are designed to be cheap enough to run against every trace rather than a sample. That constraint is the reason the product works the way it does: once an agent is mature, most of its failures are low-frequency, and sampling a small share of traffic structurally cannot find them.
+
+They run as a continuous sweep over stored spans, strictly off the ingest hot path. A classifier reads what the write path already produced and is never hooked into it, so classifier work delays a finding rather than an accepted batch.
+
+## What the open edition runs
+
+Five built-in classifiers run out of the box.
+
+| Classifier | Watches | Method | Cost per trace |
+| --- | --- | --- | --- |
+| `secret_leak` | Span output | A curated pattern set: cloud keys, VCS and chat tokens, private-key blocks, JWTs, and assigned secrets behind an entropy gate | None. No model call. |
+| `malformed_output` | Span output against its call site's declared output schema | JSON Schema validation. Not JSON, or JSON that fails the schema, fires. | None. No model call. |
+| `duration_drift` | A call site's turns, and each tool's own calls | Two windows of the same population compared as distributions | None. No model call. |
+| `cost_drift` | A call site's cost per turn | The same machine as `duration_drift`, on a different unit | None. No model call. |
+| `tool_error` | One tool's failure rate | A CUSUM (cumulative sum) over that tool's calls, replayed from hourly tallies | None. No model call. |
+
+Two notes on the deterministic pair. `secret_leak` reads what the write path left behind, so on a default project it usually fires on the redaction marker that replaced a credential rather than on the credential itself, and its evidence carries the marker and never the secret. `malformed_output` stays quiet until a call site has a captured output schema to validate against, so a project that has imported no pipeline bundle sees nothing from it.
+
+### What is not available in the open edition
+
+Four classifiers exist in the product and cannot run here:
+
+- `frustration` and `groundedness` depend on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
+- `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
+
+The capability API refuses an override for any of the four rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) states the same boundary from the install side.
+
+## Fitting a baseline, and why a new project waits
+
+None of the drift classifiers know what "good" looks like. There is no shipped threshold for a fast call site or a cheap one, because those numbers are properties of your agent and not of the product. Each of them compares a population against that population's own recent past instead, which means each has to observe the population first.
+
+That is what your project's `fitting` milestone means, and it is expected rather than a failure. Traces are arriving and being stored; the classifiers are accumulating the history they need before they can say anything moved. The milestone reaches `watching` when they can.
+
+**`duration_drift` and `cost_drift`** watch a bucket. For cost, and for turn duration, that bucket is a call site; `duration_drift` also watches a single tool at tool grain. A window over that bucket closes on whichever comes first, a target sample count or a span of event time, and the classifier does not read it until it holds a minimum sample. Each closed window is compared against two references, because either one alone is blind in one direction:
+
+- A **pinned** reference, held from a known-good point. It catches cumulative creep, and it keeps firing once something legitimately changed, until a person moves it.
+- A **rolling control**, merged from the windows of the recent past with older days weighted down. It catches sudden breaks, and it cannot notice a slow boil, because a change spread over 2 weeks is absorbed into 2 weeks of memory.
+
+The rolling control excludes days that a confirmed regression ran through, so the shift under investigation never quietly becomes the bar for the next window.
+
+The bar itself is expressed as a move, not as a statistical significance level. Two windows drawn from the same distribution do not produce an identical shape; they produce sampling noise, and that noise grows as the windows thin. So the bar is raised when a window is thin, and the result is that small moves on thin traffic stay invisible while large ones surface within a day. Significance would behave the other way around: with enough traffic, a test calls a 3 ms shift significant.
+
+**`tool_error`** has no window and no stored cursor. It replays the last 4 weeks of hourly call and failure tallies for a tool on every pass, builds its reference from the leading buckets until that reference holds enough calls, and then freezes it. A reference that kept moving with the traffic would drift along with a slow degradation and never notice it. The accumulator adds evidence call by call and alarms as soon as the evidence is sufficient, which also tells it when the shift began: the last moment the statistic sat at zero.
+
+<Note>
+  The duration and cost drift classifiers are uncalibrated. Their alert budget is a choice rather than a measurement, and neither has fired in production. Treat their first findings on your own traffic as something to read carefully rather than as a settled operating point.
+</Note>
+
+## What a finding is
+
+A finding is a change detected in production behavior. It records what changed and the production evidence behind it, and it is explicitly not a validated issue.
+
+The record has four properties worth understanding, because they shape what you see.
+
+**One row per cause, not per firing.** A classifier that keeps detecting the same cause refreshes the finding it already filed rather than filing another. A tool that has been failing at a raised rate all week is one finding, not a week of them.
+
+**Evidence is references, never copies.** A finding points at the sessions, traces, and spans it was seen in, tagged by the role each one plays: the flagged population, the baseline side it was compared against, exemplars, witnesses. The set is capped, so no finding can pin unbounded traffic, and retention keeps referenced traces alive past their normal period while the finding is still live.
+
+**Onset is the start of the current spell.** It holds still while the detection keeps firing and moves only after the detection has gone quiet for longer than that classifier's own window. That gap is how Tessary observes a recovery: nothing writes "this came back", a recovered detection stops appearing.
+
+**The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A finding that survives triage becomes a case; one that does not is closed. [Cases](/concepts/cases) covers that step.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Call sites" icon="tag" href="/concepts/call-sites">
+    The unit a baseline is fitted per, and why an untagged span is invisible to it.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    What triage does with a finding, and the states a case moves through.
+  </Card>
+</CardGroup>

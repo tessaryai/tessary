@@ -7,7 +7,7 @@ HTTP and the sidecar owns the sandbox lifecycle — one request, one fresh sandb
 ## What this was, and why the name changed
 
 It was `sandbox-runner`, and it ran `kind: deterministic` grader code — LLM-generated JavaScript,
-treated as untrusted and never run in the backend process. Track A (open-core epic 8) removed grading
+treated as untrusted and never run in the backend process. Grading was removed
 from the platform, and with it five of the seven routes this service served:
 
 | route | ran | fate |
@@ -43,11 +43,11 @@ it.
 ## Security model
 
 The agent this service runs is OURS, not a customer's code, and that is the one fact the whole model
-now rests on. Until Track A it also executed untrusted, LLM-generated grader JavaScript, and most of
+now rests on. Until grading was removed it also executed untrusted, LLM-generated grader JavaScript, and most of
 what follows was written for that; the boundaries described are unchanged, but what they contain is
 narrower.
 
-- **Isolation:** the E2B backend's microVM is a kernel-level boundary. The D7 **Docker** backend gets
+- **Isolation:** the E2B backend's microVM is a kernel-level boundary. The **Docker** backend gets
   an equivalent process-level one — a fresh, hardened sibling container per request (`--cap-drop=ALL`,
   `no-new-privileges`, its own bridge network). The `local` backend has **no container or VM
   isolation at all**: the agent runs as a plain host child process. It is a developer convenience
@@ -57,7 +57,7 @@ narrower.
   sandbox bridge network. `E2B_API_KEY` stays in the launcher and is never sent to the backend or
   into a sandbox.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
-    its callers were `/grade` and `/lint`. It is kept deliberately — #1020 landed the pair so that a
+    its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value
     is a default wearing a parameter's clothes.
 - **Fail-closed:** transport failure, a non-zero script exit, a timeout or malformed output all reach
@@ -81,7 +81,7 @@ expects. **This is a human step and this repo cannot do it** (it needs the team'
 cd sandbox-runner/agent-sandbox && pnpm install && E2B_API_KEY=<team key> pnpm exec tsx build.ts
 ```
 
-Until that runs after the Track A rename, `Sandbox.create('tessary-agent-sandbox', …)` resolves
+Until that runs after the rename, `Sandbox.create('tessary-agent-sandbox', …)` resolves
 nothing and both `/rca` and `/triage` fail on their first call.
 
 ## Local agent backend (`task dev:local`)
@@ -92,7 +92,7 @@ default the launcher runs each in a fresh **E2B microVM** (template
 credentials. For local development you can instead run those scripts on the **host**,
 against a locally installed `opencode`, with no E2B at all:
 
-- **`SANDBOX_BACKEND`** — `docker` (default, D7 — see below) | `e2b` (opt-in) | `local`.
+- **`SANDBOX_BACKEND`** — `docker` (default — see below) | `e2b` (opt-in) | `local`.
   In `local`, the agentic paths run the `agent-sandbox/*.js` scripts on the host via
   `node` (no `E2B_API_KEY`, no `e2b` package install, no container isolation at all).
   The launcher logs the active backend at startup:
@@ -113,9 +113,9 @@ against a locally installed `opencode`, with no E2B at all:
   Anthropic API, serving the Claude line only, and `bedrock-api-key`
   (+ `AWS_BEARER_TOKEN_BEDROCK`) runs bedrock-runtime over a bearer token, without the
   mantle GPT models. Unset (in every compose file) is always SigV4 Bedrock. `AGENT_PROVIDER`
-  is also how a self-hoster's own model keys plug into the D7 Docker backend below — it is
+  is also how a self-hoster's own model keys plug into the Docker backend below — it is
   not a dev-only escape hatch any more. Setup detail lives in
-  [`docs/guides/local-dev.md` § Agent credentials without AWS keys](../devdocs/guides/local-dev.md#agent-credentials-without-aws-keys)
+  [`devdocs/guides/local-dev.md` § Agent credentials without AWS keys](../devdocs/guides/local-dev.md#agent-credentials-without-aws-keys)
   and `.env.example`.
 - **`WORK_DIR`** — the filesystem root the analyzer scripts use (`$WORK_DIR/repo`,
   `$WORK_DIR/candidate.js`, `$WORK_DIR/units`). Defaults to `/home/user` so the E2B
@@ -130,18 +130,18 @@ task dev:local
 
 This runs the normal Docker stack **plus** a 5th tmux window (`launcher`) running the
 host launcher in local mode, and auto-points the backend container at it
-(`EVALS_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080`, key `devkey`
-unless `EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY` is set). It installs the host analyzer
+(`TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080`, key `devkey`
+unless `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` is set). It installs the host analyzer
 deps (`sandbox-runner/agent-sandbox/node_modules`) on first run. Plain `task dev` is unchanged (E2B path, no launcher window).
 
 > **Note (Linux):** the backend container reaches the host launcher via
 > `host.docker.internal`, which resolves out-of-the-box on Docker Desktop (macOS/Windows) —
 > the platform the documented `task dev:local` workflow targets. On a **native Linux** Docker
 > engine that hostname may not resolve; add an `extra_hosts: ["host.docker.internal:host-gateway"]`
-> mapping to the backend service (or point `EVALS_OBSERVER_AGENTIC_LAUNCHER_URL` at the host's
+> mapping to the backend service (or point `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` at the host's
 > IP) for it to work there.
 
-## Docker sandbox driver (D7, `SANDBOX_BACKEND=docker`, the default) — #855
+## Docker sandbox driver (`SANDBOX_BACKEND=docker`, the default)
 
 The open-source, Docker-by-default agentic backend: each of `/rca` and `/triage` runs in a
 **fresh, hardened sibling container**, spawned from the
@@ -157,14 +157,14 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
 - **Network placement (`SANDBOX_NETWORK_ISOLATION`, default OFF):** by default a sibling joins the
   network the launcher itself is on, read back from the daemon rather than named in config. That is
   what lets the agent reach the backend's MCP door at `http://backend:8080` — it reads every trace
-  it reasons about through that door, and #855's original unconditional cut-off left it no route
+  it reasons about through that door, and an earlier unconditional cut-off left it no route
   there except the public origin, which a localhost `docker compose up` does not have. Set
   `SANDBOX_NETWORK_ISOLATION=1` to restore that cut-off: siblings then run on a dedicated bridge
-  (`DOCKER_SANDBOX_NETWORK`, never the `evals` service network), and such an install must set
-  `SITE_DOMAIN` and point `EVALS_RCA_AGENTIC_MCP_BASE_URL` at that public origin, because there is
+  (`DOCKER_SANDBOX_NETWORK`, never the `tessary` service network), and such an install must set
+  `SITE_DOMAIN` and point `TESSARY_RCA_AGENTIC_MCP_BASE_URL` at that public origin, because there is
   no longer an internal route. The trade is explicit both ways: isolation off means a sibling can
   address `postgres` and the other internal services directly, not only the MCP port.
-- **Concurrency:** `SANDBOX_DOCKER_CONCURRENCY` (default `1`, per D7) — an in-process semaphore
+- **Concurrency:** `SANDBOX_DOCKER_CONCURRENCY` (default `1`) — an in-process semaphore
   around the one container-spawn call site.
 - **Teardown:** every container is removed explicitly when its run ends (not just `--rm`), and a
   startup reconciliation pass reaps any `tessary.sandbox=1`-labeled container older than a few
@@ -204,7 +204,7 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   built from the **repo root** as context (it needs `contract/` alongside its own directory).
   Published (as `agent-sandbox-<version>`) by `.github/workflows/release.yml` to Docker Hub
   (primary) and GHCR (mirror), alongside backend/frontend/sandbox-runner, when a human dispatches
-  it — every workflow trigger in this repo is currently `workflow_dispatch`-only (#1184).
+  it — every workflow trigger in this repo is currently `workflow_dispatch`-only.
 
 ### Automated coverage
 
@@ -221,12 +221,12 @@ proves the launcher asked Docker for the right thing; it cannot prove a spawned 
 actually runs, or exercise real bind-mount permissions/image-registry behavior — that's what the
 manual proof below is for. `check-open-boot.sh` (the open-edition boot gate's dev leg) does not
 probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
-`sandbox-runner` service is profile-gated off there. Since #1052 the gate's second leg,
+`sandbox-runner` service is profile-gated off there. The gate's second leg,
 `check-open-boot-selfhost.sh`, boots `docker-compose.yml` with `sandbox-runner` started
 unconditionally and `SANDBOX_BACKEND` left unset, and asserts the launcher is RUNNING on the
 docker default — the boot half of this gap. It still does not drive a sandbox run through it;
 that remains a larger, separately-scoped change. (docker-compose.dev.yml no longer defaults the
-service to `e2b` either — #1052 made its passthrough empty, matching docker-compose.yml.)
+service to `e2b` either — its passthrough is empty, matching docker-compose.yml.)
 
 ### Manual end-to-end proof (2026-09-01, against a real Docker daemon)
 
@@ -234,8 +234,8 @@ Reproduced with a minimal stub agent image (a `triage.js` that echoes its input)
 the published `AGENT_IMAGE`, both as a bare host process and as a genuinely containerized launcher
 (matching the compose deployment shape) — real Docker (`docker info`), no E2B key set anywhere:
 
-1. **Before the fix (proves AC1's "no E2B key ⇒ fails today" half):** with `SANDBOX_BACKEND`
-   unset and `E2B_API_KEY` unset, `/triage` 502s (`sandbox create failed`) — the pre-#855 default
+1. **Before the fix (proves the "no E2B key ⇒ fails today" case):** with `SANDBOX_BACKEND`
+   unset and `E2B_API_KEY` unset, `/triage` 502s (`sandbox create failed`) — the previous default
    (`e2b`) has no fallback.
 2. **After, bare host process:** `SANDBOX_BACKEND=docker`, real `AGENT_IMAGE`, `E2B_API_KEY`
    unset → `/triage` returns `200 {"raw":"ok:..."}`. `docker ps` before/after shows the container

@@ -4,62 +4,34 @@
 #
 #   1. every relative markdown link `[text](path)` resolves to a real file;
 #   2. every backticked `*.md`/`*.mdx` filename names a markdown file that exists somewhere in the tree;
-#   3. every page docs/docs.json's Mintlify nav names resolves to a real page file.
+#   3. every page in docs/docs.json's Mintlify nav resolves to a real page file.
 #
-# MINTLIFY LINKS ARE ROUTES, NOT PATHS. Inside docs/, `[Configuration](/self-hosting/configuration)`
+# Mintlify links are routes, not paths: inside docs/, `[Configuration](/self-hosting/configuration)`
 # names the published route for docs/self-hosting/configuration.mdx, extension left off. Check 1
-# resolves a leading-slash target in a docs/ page that way; everywhere else a link is still a plain
-# relative path. Widening this script to `.mdx` without that rule reports all nine existing
-# cross-links in the published set as broken.
+# resolves a leading-slash target in a docs/ page that way; everywhere else a link is a plain
+# relative path.
 #
-# `.mdx` JOINED THE SCANNED SET IN #1192, AND CHECK 3 CAME WITH IT. This script filtered on
-# `rel.endswith('.md')`, and every page this project actually PUBLISHES is `.mdx` — docs/index.mdx
-# plus the five under docs/self-hosting/. So all six published pages, and docs.json itself, sat
-# outside every check in the repo while the gate printed a green file count: the same false-green
-# shape rule 6 of check-open-boundary.sh had before #1105. The published pages happened to be
-# link-clean, which is what made it invisible. Check 3 exists because docs.json is the ONLY thing
-# that says which pages the site has, nothing had ever opened it, and a nav entry naming a page
-# that was renamed or deleted is a 404 in the published site that no other check in this repo can
-# see.
+# Check 2 matters most: every doc-deletion incident here has cited the dead file as a backticked
+# name, not a markdown link, so a link checker alone would have caught none of them. Its scope stays
+# `*.md`/`*.mdx` names only, not `.py`/`.json`/`.java`, where docs legitimately name forward
+# references and shorthands that would make the gate too noisy to keep on. A bare basename match
+# anywhere in the tree is enough — the point is "this document still exists", not "this path is
+# exactly right".
 #
-# WHY THIS EXISTS. AGENTS.md § Documentation policy already says "After moving or renaming a doc,
-# grep -rn for the old path and retarget every link in the same PR". Nothing enforced it, and the
-# rule has been missed repeatedly: #693 deleted launch.md and left nine citations behind, #181
-# deleted self_test_patterns.md and left three references inside the judge-authoring prompts that
-# ship to the model, and #824 deleted the shipped plan docs and needed #825 to clean up after it.
-# A rule that is only remembered is a rule that rots; this is the half a machine can hold.
+# GENERATED_DOCS are runtime-written files that legitimately don't exist in the tree. Adding a name
+# is deliberate — if a citation starts failing, ask first whether the doc was deleted.
 #
-# CHECK 2 IS THE ONE THAT MATTERS. All three incidents above cited the dead file as a BACKTICKED
-# NAME, not a markdown link, so a link checker alone would have caught none of them — #825 said so
-# in as many words. Check 1 still earns its place (it caught two glossary links that were a
-# directory level short), but check 2 is the one shaped like the actual failure.
+# Fenced ``` blocks are skipped, so a doc that teaches link syntax doesn't cry wolf; inline
+# single-backtick spans still count.
 #
-# SCOPE OF CHECK 2. Backticked `*.md` and `*.mdx` names only — not `.py`/`.json`/`.java`, where docs
-# legitimately name forward references to planned files and package-suffix shorthands, and where
-# the false-positive rate would be high enough that the gate would be switched off. A bare
-# basename match anywhere in the tree is enough: the point is "this document still exists", not
-# "this path is exactly right", which keeps package-relative citations from crying wolf.
+# Existence checks are case-sensitive even on a case-insensitive filesystem (macOS APFS), so a case
+# mismatch fails here instead of passing locally and breaking on CI's ext4.
 #
-# GENERATED_DOCS are the names that legitimately do not exist in the tree: files an agent or a
-# tool WRITES at runtime, described here so a reader knows what to expect. Adding a name is a
-# deliberate act — if a doc citation starts failing, the first question is whether the doc was
-# deleted, not whether to add it here.
+# Only git-tracked files are scanned. The repo hosts nested checkouts under .claude/worktrees/ and
+# .crew/workspaces/ that a filesystem walk would wrongly flag as broken.
 #
-# FENCED BLOCKS ARE SKIPPED. A doc that teaches link syntax, or quotes a broken-link bug report,
-# puts markdown inside a ``` fence; treating that as a citation is the cry-wolf failure this gate
-# is trying to avoid. Inline single-backtick spans still count — that is where citations live.
-#
-# EXISTENCE IS CASE-SENSITIVE even on a case-insensitive filesystem (macOS APFS). os.path.exists
-# would accept `Foo.MD` for `foo.md` locally and fail on CI's ext4 up to a week later, which would
-# break the "local green ⇒ CI green" property this gate is supposed to have.
-#
-# ONLY GIT-TRACKED FILES ARE SCANNED. The repo hosts full nested checkouts at .claude/worktrees/
-# and .crew/workspaces/ (agent-loop and crew scratch clones). Walking the filesystem finds their
-# vendored contract/CHANGELOG.md copies and reports thousands of "broken" links in files that are
-# not ours and are not even tracked. git ls-files is the correct definition of "this repo's docs".
-#
-# contract/ is exempt entirely: it is a verbatim vendored copy of the plugin repo (AGENTS.md §
-# Repo map), so its references point at that repo's layout and are not ours to retarget.
+# contract/ is exempt: it's a verbatim vendored copy of another repo, so its references point at
+# that repo's layout, not ours to retarget.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -126,12 +98,10 @@ def walked_files():
 md_paths, md_names = [], set()
 tracked = tracked_files()
 if tracked is None:
-    # #889 AC5: a real jj workspace (no .git of its own) is normal, current, load-bearing
-    # operation for this repo's own dev workflow — degrade and continue. A tree with NEITHER
-    # .git NOR .jj is a different animal: the untethered-export case #889's own "one wrinkle
-    # worth recording" paragraph warns about (e.g. a bare `git archive | tar -x` with no
-    # `git init`). A filesystem walk there would be a vacuous pass with no real enforcement —
-    # fail loud instead and point at the fix (scripts/lib/export-simulate.sh, which leaves a
+    # A real jj workspace (no .git of its own) is normal operation for this repo's own dev
+    # workflow — degrade and continue. A tree with neither .git nor .jj is different (e.g. a bare
+    # `git archive | tar -x` with no `git init`): a filesystem walk there would be a vacuous pass,
+    # so fail loud instead and point at the fix (scripts/lib/export-simulate.sh, which leaves a
     # real .git behind so this check runs for real).
     if os.path.isdir('.jj'):
         print(
@@ -144,7 +114,7 @@ if tracked is None:
         print(
             "check-docs-links: git ls-files unavailable and this is not a jj workspace either "
             "(no .git, no .jj) -- this looks like a naive export (e.g. a bare `git archive | tar "
-            "-x` with no `git init`), the untethered-tree case #889 warns about: a filesystem "
+            "-x` with no `git init`): a filesystem "
             "walk here would be a vacuous pass with no real enforcement. Use "
             "scripts/lib/export-simulate.sh instead -- it leaves a real .git behind so this check "
             "runs for real.",
@@ -152,8 +122,8 @@ if tracked is None:
         )
         sys.exit(1)
 
-# `.mdx` as well as `.md` (#1192): the published pages are all `.mdx`, and a gate that cannot see
-# the files a stranger actually reads is not a gate.
+# `.mdx` as well as `.md`: every published page is `.mdx`, and a gate that can't see the files a
+# reader actually opens isn't a gate.
 for rel in (tracked if tracked is not None else walked_files()):
     if rel.endswith(('.md', '.mdx')):
         md_paths.append(rel)
@@ -180,11 +150,8 @@ for path in sorted(md_paths):
                 if not bare:
                     continue
                 if bare.startswith('/') and path.startswith('docs' + os.sep):
-                    # A Mintlify cross-link is a SITE ROUTE, not a filesystem path: from any page,
-                    # `/self-hosting/setup` is docs/self-hosting/setup.mdx with the extension left
-                    # off. Resolving it relative to the citing file (or as an absolute filesystem
-                    # path) would report every correct cross-link in the published set as broken —
-                    # which is what a naive widening of this check to `.mdx` does first.
+                    # A Mintlify cross-link is a site route, not a filesystem path: `/self-hosting/setup`
+                    # is docs/self-hosting/setup.mdx with the extension left off.
                     route = bare.rstrip('/').lstrip('/')
                     if not any(exists_cased(os.path.join('docs', route + ext))
                                for ext in ('.mdx', '.md', '')):

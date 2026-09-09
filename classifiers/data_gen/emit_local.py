@@ -1,16 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Emit the ZipEats and policygpt corpora to a local Tessary instance as OTLP traces.
 
-Why this exists separately from `data_gen.food_delivery.emit` (which targets Langfuse):
-
-  * the platform's own receiver is **protobuf-only** (`OtlpTraceController` declares
-    `consumes = application/x-protobuf`) and authenticates a project-scoped `tsy_` bearer, so the
-    project is resolved from the token — no org/project path segment;
-  * that emitter tags `tessary.call_site.id` on TOOL spans only, one id per tool name. Behaviour
-    drift resolves a trace's scope from the *first tagged span*
-    (`BehaviorSubstrateRepository.SELECT_TRACE_HEAD`), so per-tool tagging shatters one agent into
-    ~15 call sites, none of which ever accumulates enough support to arm. Here the call site is a
-    property of the **agent surface** and is stamped on every span in the trace.
+Why this exists separately from `data_gen.food_delivery.emit` (which targets Langfuse): the
+platform's own receiver is protobuf-only and authenticates a project-scoped `tsy_` bearer, and
+the call site here is a property of the agent surface, stamped on every span in the trace,
+rather than on TOOL spans only (which would shatter one agent into many call sites, none of
+which accumulates enough support for behaviour drift to arm).
 
 Shape produced, matching the substrate spine `StructuralEnricher` builds:
 
@@ -20,7 +15,7 @@ Shape produced, matching the substrate spine `StructuralEnricher` builds:
                   └── trace
                         └── observations: AGENT root, LLM / TOOL / RETRIEVAL children
 
-One OTel trace per conversational TURN — that is what makes turn segmentation work, and it is the
+One OTel trace per conversational TURN: that is what makes turn segmentation work, and it is the
 grain the offline evals in `behavior_drift/` were measured against, so the fitted profile here is
 comparable to the numbers in PROGRAM.md.
 
@@ -32,7 +27,7 @@ one bucket, where nothing can graduate.
 Resumable: emitted conversation ids are appended to a per-corpus ledger, so re-running neither
 duplicates nor loses work.
 
-    # preflight only — proves the endpoint, token and key scope before sending anything
+    # preflight only, proves the endpoint, token and key scope before sending anything
     python -m data_gen.emit_local --check
 
     # small verification batch, look at it in the UI first
@@ -249,31 +244,14 @@ def load_policygpt() -> Iterator[Conversation]:
 
 
 def load_canary() -> Iterator[Conversation]:
-    """One hand-built conversation, no fixture file, no LLM key — for scripts/check-open-boot.sh (#878).
+    """One hand-built conversation, no fixture file, no LLM key, for scripts/check-open-boot.sh.
 
-    Why this exists instead of reusing `zipeats`/`policygpt` as the plan for #878 originally assumed:
-    neither is actually available in a genuine clean-room export. `zipeats`'s backing file
-    (`classifiers/data/food_delivery/conversations.jsonl`) is covered by `classifiers/.gitignore`'s
-    blanket `data/` rule and is only on a machine that ran `data_gen.food_delivery.generate` (an
-    LLM-keyed step — exactly the kind of credential this check exists to prove absent) at some
-    point; `policygpt` reads from `POLICYGPT_STATE_DIR`, which defaults to a path under the
-    OPERATOR'S HOME directory outside the repo entirely. `scripts/lib/export-simulate.sh` copies
-    tracked-or-not-ignored files only, so a fresh CI checkout (`actions/checkout` into a clean
-    workspace) has neither. This loader needs nothing but the interpreter.
-
-    Also solves a second problem the original plan's "either corpus satisfies the same proof"
-    framing did not check against the code: of the classifiers the open edition actually provisions
-    (`duration_drift`/`cost_drift`/`tool_error`/`secret_leak`/`malformed_output` — `frustration` and
-    `groundedness`, the only two that read the classify-service encoder, are in
-    `CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`), every one but `secret_leak` is a statistical
-    detector requiring a 100-500-call baseline (`min_sample`/`min_baseline_calls` in
-    `BuiltInClassifierCatalog`) before it can fire at all — no realistic single-trace emission trips
-    them. `secret_leak` is `Grain.OBSERVATION`: it scores one call's own output against a fixed
-    pattern set with no baseline. So this conversation's one tool call returns an AWS-access-key-id
-    shaped string (`AKIA` + 16 upper/digit chars) matching `SecretLeakDetector`'s first, STRONG
-    pattern verbatim — no entropy gate, no ambiguity, HIGH confidence, fires on the very first sweep
-    after ingest. That is what makes `/classifiers/events` reliably non-empty for step (g) of the
-    check without waiting on volume the check's time budget cannot afford.
+    `zipeats` and `policygpt` both need a file that a fresh CI checkout does not have (a generated
+    fixture, or one under the operator's home directory), so this loader needs nothing but the
+    interpreter. `secret_leak` is the one classifier here that scores an observation's own output
+    against a fixed pattern with no baseline to accumulate first, so this conversation's one tool
+    call returns a value shaped to fire it on the very first sweep after ingest, keeping
+    `/classifiers/events` reliably non-empty without waiting on volume.
     """
     yield Conversation(
         conversation_id="canary-open-boot-check-0001",
@@ -287,20 +265,15 @@ def load_canary() -> Iterator[Conversation]:
                         kind="tool",
                         name="read_deploy_config",
                         args={"service": "payments"},
-                        # Deliberately fake and unusable — a canary shape, not a real credential.
+                        # Deliberately fake and unusable, a canary shape, not a real credential.
                         # sk_test_ + 16+ alnum matches SecretLeakDetector's "stripe-key" pattern
                         # (strong, no entropy gate) exactly.
                         #
-                        # WHY NOT AN AWS AKIA KEY (the previous literal): the platform's default PII
-                        # redaction guard (BuiltInRedactionRules "Provider API key", enabled on every
-                        # project, run in SubstrateWriter BEFORE the row is persisted) rewrites
-                        # AKIA[0-9A-Z]{16} to [REDACTED_API_KEY] — and SecretLeakDetector scores the
-                        # PERSISTED output. So an AKIA canary can never produce a detection; the first
-                        # CI run of check-open-boot.sh to reach this step (33614514928) proved that.
-                        # The Stripe shape is matched by the detector and by NO built-in redaction
-                        # rule (checked against both lists). The gap itself — every strong secret_leak
-                        # pattern except this one is also a default redaction rule — is #1044; this
-                        # literal only keeps the boot canary honest until that lands.
+                        # Not an AWS AKIA key: the platform's default PII redaction guard rewrites
+                        # AKIA[0-9A-Z]{16} to [REDACTED_API_KEY] before the row is persisted, and
+                        # SecretLeakDetector scores the persisted output, so an AKIA canary can
+                        # never produce a detection. The Stripe shape is matched by the detector
+                        # and by no built-in redaction rule.
                         result={"config": "region=us-east-1\nstripe_sk=sk_test_BOOTCHECKCANARY000001\n"},
                     ),
                     Step(kind="llm", name="answer"),
@@ -313,13 +286,13 @@ def load_canary() -> Iterator[Conversation]:
 
 
 def load_groundedness_canary() -> Iterator[Conversation]:
-    """One RAG turn whose answer contradicts the passage it retrieved (epic 5, #1137).
+    """One RAG turn whose answer contradicts the passage it retrieved.
 
-    The groundedness detector (paid) scores an `rag_answer`-shaped call site's answer against the
-    `retrieved_doc` rows of the nearest earlier retrieval span in the conversation. So this turn
-    retrieves one passage that states a 14-day return window and then answers with a 90-day window
-    and a two-hour refund, two verifiable claims the passage does not support. The call site's shape
-    is not on the wire (shape is a pipeline fact); the local detection run sets it before emitting.
+    The groundedness detector scores an `rag_answer`-shaped call site's answer against the
+    `retrieved_doc` rows of the nearest earlier retrieval span. This turn retrieves a passage
+    stating a 14-day return window and then answers with a 90-day window and a two-hour refund,
+    claims the passage does not support. Call site shape is a pipeline fact, not on the wire; the
+    local detection run sets it before emitting.
     """
     yield Conversation(
         conversation_id="canary-groundedness-0001",
@@ -364,12 +337,11 @@ def load_groundedness_canary() -> Iterator[Conversation]:
 
 
 def load_frustration_canary() -> Iterator[Conversation]:
-    """Two user turns, the second unmistakably angry AT THE AGENT (epic 5, #1161).
+    """Two user turns, the second unmistakably angry at the agent.
 
-    The frustration built-in scores the user turn with one prior user turn of context
-    (`context_min_prior_user_turns: 1`) and demotes a fire to LOW unless the attribution head agrees
-    the agent caused it, so the anger here names the assistant's own failures, not a courier or a
-    third party. Deterministic and fixture-free, like `canary`.
+    The frustration built-in demotes a fire to LOW unless the attribution head agrees the agent
+    caused it, so the anger here names the assistant's own failures, not a courier or a third
+    party. Deterministic and fixture-free, like `canary`.
     """
     yield Conversation(
         conversation_id="canary-frustration-0001",
@@ -418,14 +390,12 @@ DRIFT_CANARY_CONVERSATIONS = 320
 
 
 def load_drift_canary() -> Iterator[Conversation]:
-    """A stable order-support behaviour, repeated enough to fit and ARM a drift profile (epic 5, #1160).
+    """A stable order-support behaviour, repeated enough to fit and arm a drift profile.
 
-    Behaviour drift fits n-gram baselines over a call site's traces and arms the profile only past
-    hard floors (200 reservoir samples, 300 traces by default) once discovery has flattened across
-    sustained fits. Every conversation here runs the same four-step sequence, `llm:plan`,
-    `tool:lookup_order`, `tool:check_refund_eligibility`, `llm:answer`, with only the order id and
-    the wording varying, so the alphabet saturates quickly and the profile arms. Deterministic and
-    fixture-free; the companion `drift-canary-novel` breaks the sequence.
+    Every conversation here runs the same four-step sequence, `llm:plan`, `tool:lookup_order`,
+    `tool:check_refund_eligibility`, `llm:answer`, with only the order id and wording varying, so
+    the alphabet saturates quickly and the profile arms past the reservoir/trace floors.
+    Deterministic and fixture-free; the companion `drift-canary-novel` breaks the sequence.
     """
     openers = [
         "Where is my order {oid}? It was due yesterday.",
@@ -456,12 +426,11 @@ def load_drift_canary() -> Iterator[Conversation]:
 
 
 def load_drift_canary_novel() -> Iterator[Conversation]:
-    """One conversation that breaks the fitted sequence: no lookup, two never-seen tools (epic 5, #1160).
+    """One conversation that breaks the fitted sequence: no lookup, two never-seen tools.
 
-    Against an ARMED profile fitted on `drift-canary`, the grams here are novel, which is the D1
-    novelty firing the drift detector writes a `behavior_drift_detection` row for. The same turn
-    also omits `tool:lookup_order`, so an engine SOP obliging that tool on every conversation scores
-    it as a violation once the SOP is compiled: one conversation serves both remaining arms.
+    Against an armed profile fitted on `drift-canary`, the grams here are novel, firing the drift
+    detector. It also omits `tool:lookup_order`, so an engine SOP obliging that tool on every
+    conversation scores it as a violation once compiled: one conversation serves both arms.
     """
     user = "Order 99901 never arrived and nobody answers the phone. Give me my money back."
     yield Conversation(
@@ -484,7 +453,7 @@ def load_drift_canary_novel() -> Iterator[Conversation]:
 
 
 def load_drift_canary_violation() -> Iterator[Conversation]:
-    """A second sequence-breaking conversation, distinct id, for the conformance sweep (epic 5, #1160).
+    """A second sequence-breaking conversation, distinct id, for the conformance sweep.
 
     Emitted after the SOP compiles so the sweep has a fresh turn to score; a re-emit of the novel
     conversation would carry the same deterministic trace id and be deduplicated by ingest.
@@ -676,7 +645,7 @@ def _emit_turn(tracer, spec: CorpusSpec, conv: Conversation, turn: Turn, index: 
     base = _base_attributes(spec, conv, index)
     cursor = start_ns
 
-    # Context() with no active span forces a fresh trace id — one provider trace per turn is what
+    # Context() with no active span forces a fresh trace id: one provider trace per turn is what
     # `StructuralEnricher` segments turns on.
     root = tracer.start_span(
         name=f"{spec.agent_name} turn {index}",
@@ -753,19 +722,19 @@ def emit_corpus(spec: CorpusSpec, args: argparse.Namespace) -> tuple[int, int]:
         with ledger.open("a") as fh:
             loaded = spec.load()
             if args.start_order:
-                # Trace-grain sweeps advance a keyset cursor on started_at while ingest settles traces on a
-                # wall-clock timer in ARRIVAL order; a trace that settles after the cursor passed its start
-                # is never swept. Emitting in start order makes the two orders agree (epic 5, #1160).
+                # Trace-grain sweeps advance a keyset cursor on started_at while ingest settles traces
+                # in arrival order; a trace that settles after the cursor passed its start is never
+                # swept. Emitting in start order makes the two orders agree.
                 loaded = sorted(loaded, key=lambda c: _conversation_start(c.conversation_id, args.window_days, now))
             for conv in loaded:
                 if conv.conversation_id in done:
                     continue
                 if args.limit and convs >= args.limit:
                     break
-                # Re-seed per conversation, off the corpus AND the conversation id. The OTel SDK draws
-                # trace and span ids from `random`, so one global seed made turn 0 of EVERY corpus share
-                # a trace id; ingesting two corpora into one project then merged them (epic 5, #1137).
-                # Still deterministic, still resumable, now unique per (corpus, conversation).
+                # Re-seed per conversation, off the corpus and the conversation id. The OTel SDK draws
+                # trace and span ids from `random`, so one global seed made turn 0 of every corpus
+                # share a trace id, merging them on ingest. Still deterministic, still resumable, now
+                # unique per (corpus, conversation).
                 random.seed(f"{args.seed}:{spec.key}:{conv.conversation_id}")
                 if not conv.turns:
                     continue
@@ -794,13 +763,12 @@ def emit_corpus(spec: CorpusSpec, args: argparse.Namespace) -> tuple[int, int]:
 
 
 def _empty_export_request() -> bytes:
-    """A valid ExportTraceServiceRequest carrying zero spans, and — importantly — zero *bytes*.
+    """A valid ExportTraceServiceRequest carrying zero spans, and zero *bytes* too.
 
-    A default-constructed request serializes to an empty byte string, which Spring rejects during
-    argument resolution ("Required request body is missing") before `OtlpTraceController.export` is
-    ever entered — so it tests nothing. Adding one empty `ResourceSpans` gives a 2-byte body
-    (field 1, wire type 2, length 0) that parses cleanly and still contains no spans, so
-    `StructuralEnricher` short-circuits on `entries.isEmpty()` and nothing is written.
+    A default-constructed request serializes to an empty byte string, which Spring rejects before
+    `OtlpTraceController.export` is ever entered, so it tests nothing. One empty `ResourceSpans`
+    gives a 2-byte body that parses cleanly and still contains no spans, so `StructuralEnricher`
+    short-circuits on `entries.isEmpty()` and nothing is written.
     """
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
@@ -813,7 +781,7 @@ def preflight(endpoint: str, token: str) -> bool:
     """POST a zero-span OTLP request to exercise the auth path and nothing else.
 
     This reaches the controller body, so it proves project resolution, the project-scoped-token
-    requirement and the WRITE key-scope check — all of which a silent OTLP exporter would swallow,
+    requirement and the WRITE key-scope check, all of which a silent OTLP exporter would swallow,
     making a 401 look exactly like a successful export.
     """
     req = urllib.request.Request(
@@ -832,7 +800,7 @@ def preflight(endpoint: str, token: str) -> bool:
             400: "body rejected before the controller — the request is not valid OTLP protobuf",
             401: "token rejected — needs a project-scoped tsy_ key",
             403: "wrong key scope — the receiver requires a WRITE (or mcp) key, not query-only",
-            404: "route absent — deployment may be evals.ingest.otlp.transport=grpc",
+            404: "route absent — deployment may be tessary.ingest.otlp.transport=grpc",
             413: "body too large — lower EXPORT_BATCH",
             415: "content type rejected — the receiver consumes application/x-protobuf only",
         }.get(e.code, "")
@@ -862,7 +830,7 @@ def main() -> int:
         help="real-time pause between the turns of one conversation, flushing after each. A turn-grain "
         "classifier scores a turn against the turns already ingested and threaded; emitting a whole "
         "conversation in one flush can race the sweep, which then scores the later turn with no prior "
-        "context and moves its cursor past it for good (epic 5, #1161)",
+        "context and moves its cursor past it for good",
     )
     ap.add_argument("--check", action="store_true", help="run the auth preflight and exit")
     ap.add_argument("--seed", type=int, default=17)

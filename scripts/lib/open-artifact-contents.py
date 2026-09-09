@@ -66,8 +66,8 @@ def main() -> int:
     with tarfile.open(args.tar) as tar:
         for member in tar:
             path = member.name.lstrip("./")
-            # Path rules see every member, links included: a symlink or hardlink at /app/paid is a
-            # paid mount whether or not anything is behind it in this layer.
+            # Path rules see every member, links included: a symlink or hardlink at a denylisted
+            # path still matches whether or not anything is behind it in this layer.
             for kind, pattern, why in rules:
                 if kind == "path" and pattern in "/" + path:
                     findings.append(f"path {path}: {why}")
@@ -90,14 +90,14 @@ def main() -> int:
                     findings.append(f"jar {path}: not a readable zip")
                     continue
                 jar_entries += len(names)
-                if any(n.startswith("ai/tessary/evals/") for n in names):
+                if any(n.startswith("ai/tessary/") for n in names):
                     stem = jar_stem(path)
                     own_jars.append(stem)
                     if open_modules and stem not in open_modules:
                         findings.append(f"jar {path}: an ai.tessary jar that is not an open reactor module ({stem})")
                 # Entry rules match as substrings of "/" + entry and jar rules run over entry base
-                # names, so a fat jar (BOOT-INF/classes/ai/tessary/paid/, BOOT-INF/lib/launchdarkly-*.jar)
-                # is as visible as the extracted layout backend/Dockerfile produces today.
+                # names, so a fat jar's inner classes and nested jars are as visible as the
+                # extracted layout backend/Dockerfile produces today.
                 for kind, pattern, why in rules:
                     if kind == "entry":
                         hit = next((n for n in names if "/" + pattern in "/" + n), None)

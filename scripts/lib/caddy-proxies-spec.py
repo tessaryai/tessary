@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Every operation in the open OpenAPI spec must be proxied to the backend by a Caddy config.
 
-The gap this closes (#1255) is silent by construction: an unproxied /v1/... path does not 404, it
-falls through to the SPA and is answered by index.html with a 200, so a self-hoster sees a page of
-HTML where an API response belongs and nothing anywhere reports an error. A controller reaching the
-spec without reaching the matcher is therefore invisible until someone calls the route in anger.
+The gap this closes is silent by construction: an unproxied /v1/... path doesn't 404, it falls
+through to the SPA and is answered by index.html with a 200, so a self-hoster sees a page of HTML
+where an API response belongs and nothing reports an error.
 
 Reads the `@backend` matcher's tokens rather than the whole file, and applies Caddy's own `path`
-semantics: a token ending in `/*` matches that prefix (and the bare prefix itself), anything else is
+semantics: a token ending in `/*` matches that prefix (and the bare prefix itself); anything else is
 an exact match.
 """
 
@@ -16,13 +15,13 @@ import json
 import sys
 
 def matcher_tokens(config):
-    """The path tokens of every line that BEGINS with `path `.
+    """The path tokens of every line that begins with `path `.
 
     Caddy's other matchers here are written inline (`@hashed path /assets/*`,
-    `@document not path /assets/*`), so they begin with their matcher name or with `not` and are
-    excluded by this test rather than by naming them. The `/assets` filter below is belt-and-braces
-    for a future named matcher written as a standalone `path` line, which would otherwise be
-    vacuumed into the @backend token set and could mask a real gap.
+    `@document not path /assets/*`), so they begin with their matcher name or `not` and are excluded
+    by that rather than by naming them. The `/assets` filter is belt-and-braces for a future named
+    matcher written as a standalone `path` line, which would otherwise land in the @backend token set
+    and mask a real gap.
     """
     tokens = []
     with open(config, encoding="utf-8") as handle:
@@ -37,19 +36,18 @@ def proxied(tokens, path):
     for token in tokens:
         if token == path:
             return True
-        # Caddy's `/x/*` requires the literal `/x/` before the wildcard, so it matches `/x/anything`
-        # and `/x/` but NOT a bare `/x` — which would fall through to the SPA exactly as #1255
-        # describes. Reporting the bare prefix as covered would be this checker passing a config that
-        # is still broken, which is worse than having no checker.
+        # Caddy's `/x/*` requires the literal `/x/` before the wildcard: it matches `/x/anything` and
+        # `/x/`, but not a bare `/x`, which would fall through to the SPA. Reporting the bare prefix
+        # as covered would mean this checker passes a config that's still broken.
         if token.endswith("/*") and path.startswith(token[:-1]):
             return True
     return False
 
 def main(argv):
-    # --internal PATH: a spec operation that must NOT be reachable through the proxy. Asserted in
-    # both directions — the path has to still exist in the spec, so the declaration cannot rot into a
-    # silent exemption, and it has to stay OUT of the matcher, so nobody widens the public surface by
-    # reflex when this checker reports it missing.
+    # --internal PATH: a spec operation that must not be reachable through the proxy. Checked both
+    # ways — the path must still exist in the spec, so the declaration can't rot into a silent
+    # exemption, and it must stay out of the matcher, so nobody widens the public surface by reflex
+    # when this checker reports it missing.
     internal = set()
     argv = list(argv)
     while "--internal" in argv:

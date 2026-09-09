@@ -4,7 +4,7 @@
 A ``Scorer`` is any callable ``list[str] -> list[float]``. Two ship:
 
 - ``ClassifyServiceScorer`` — calls the standalone **classify-service** ``/classify`` (extracted
-  from the launcher onto its own box, #524), so we baseline the *actual* head the platform runs.
+  from the launcher onto its own box), so we baseline the *actual* head the platform runs.
 - ``LocalHFScorer`` — loads a local HuggingFace/ONNX model directly, for evaluating a freshly
   trained artifact before it's deployed to the classify-service.
 """
@@ -25,7 +25,7 @@ class Scorer(Protocol):
 
 class ClassifyServiceScorer:
     """POST /classify on the standalone classify-service. ``head`` is a name in its ``models.json``
-    (e.g. 'refusal'). Config mirrors the backend's ``evals.observer.encoder.*``:
+    (e.g. 'refusal'). Config mirrors the backend's ``tessary.observer.encoder.*``:
 
     - URL  from ``CLASSIFY_URL`` (default ``http://localhost:8080``). Note the dev compose service is
       ``expose``-only, so from the host you need it published/port-forwarded, or point at the ECS URL.

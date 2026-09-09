@@ -16,10 +16,10 @@
 # (Xenova/bart-large-mnli) is public and always bakes. A build that supplies the token
 # gets all 3 heads, exactly as before:
 #   HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-#     --platform linux/arm64 -t <ecr>/evals-classify:<sha> .
+#     --platform linux/arm64 -t <ecr>/tessary-classify:<sha> .
 #
-# Omitting --secret id=hf_token entirely is a SUPPORTED keyless build (#877, for the
-# open-core edition): the mount below has no `required=true`, so it already tolerates a
+# Omitting --secret id=hf_token entirely is a SUPPORTED keyless build, so this image can
+# be built with no token at all: the mount below has no `required=true`, so it already tolerates a
 # missing secret and yields HF_TOKEN="". download.js then skips the two gated heads
 # instead of failing, and classify.js reports them as a clean 400 "unavailable" at
 # /classify rather than crash-looping the container's boot-time pre-warm — no Dockerfile

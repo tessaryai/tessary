@@ -31,6 +31,7 @@ import {
   COLUMN_DEFS,
   ColumnsControl,
   SESSION_EXPAND_COLUMN_WIDTH,
+  columnWidths,
   useColumnConfig,
   type ColumnDef,
   type ColumnKey,
@@ -130,10 +131,13 @@ export function TracesIndex() {
     else next.delete("groupBy");
     setSearchParams(next);
   };
-  const tableWidth = Math.max(
+  // The floor the table never goes below — below it the wrapper scrolls rather than the columns
+  // shrinking. Above it the table fills the page and `columnWidths` decides where the surplus goes.
+  const tableMinWidth = Math.max(
     760,
     columns.reduce((sum, c) => sum + c.width, 0) + (groupBySession ? SESSION_EXPAND_COLUMN_WIDTH : 0),
   );
+  const colWidths = columnWidths(columns, groupBySession ? SESSION_EXPAND_COLUMN_WIDTH : 0);
 
   // Filtering happens server-side — the list is keyset-paginated, so narrowing
   // it in the browser would only ever filter the page that happens to be loaded.
@@ -358,10 +362,12 @@ export function TracesIndex() {
         // depend on what's currently in it. Under auto layout, Input/Output swinging between a long
         // preview (trace rows) and a bare "—" (session rollup rows) resized the whole table on every
         // flat/grouped toggle and every session expand/collapse — see COLUMN_DEFS's width doc comment.
-        <Table className="text-body" style={{ tableLayout: "fixed", width: tableWidth, minWidth: tableWidth }}>
+        // The table itself stays `w-full` (from Table) so a monitor wider than the column sum is
+        // used rather than left blank; `columnWidths` hands that surplus to the text columns.
+        <Table className="text-body" style={{ tableLayout: "fixed", minWidth: tableMinWidth }}>
           <colgroup>
-            {columns.map((col) => (
-              <col key={col.key} style={{ width: col.width }} />
+            {columns.map((col, i) => (
+              <col key={col.key} style={{ width: colWidths[i] }} />
             ))}
             {groupBySession && <col style={{ width: SESSION_EXPAND_COLUMN_WIDTH }} />}
           </colgroup>

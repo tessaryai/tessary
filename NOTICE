@@ -1,4 +1,4 @@
-Tessary Evals Platform
+Tessary
 Copyright 2026 Tessary Software Private Limited
 
 This product includes software developed by Tessary Software Private Limited.
@@ -22,7 +22,7 @@ of this file tracks. OFL 1.1 does require its own license text to travel with th
 files themselves, and Vite does not copy npm package license files into `dist` by
 default, so the frontend build copies each package's own LICENSE into the served bundle
 alongside the font binaries it ships. Deliberately no count is given here: the set grows
-(Space Grotesk joined it in #1154 when the wordmark's face moved off the Google Fonts
+(Space Grotesk joined it when the wordmark's face moved off the Google Fonts
 CDN to make the self-host egress claim true), and a number in this paragraph goes stale
 without anything failing. scripts/check-notice-coverage.sh checks both halves against
 the built frontend image — that this paragraph exists, and that license text travels

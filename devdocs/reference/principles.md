@@ -14,7 +14,7 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   threshold and the evidence behind every finding, and take the pipeline bundle with them if they
   leave. An opaque detector dies at the buyer's code review and is unadoptable by regulated buyers.
   The proprietary asset is the trained classifier weights and the cross-customer priors, not any
-  individual threshold. *(This read "graders" until Track A removed them; the principle transferred
+  individual threshold. *(This read "graders" until they were removed; the principle transferred
   to what the product actually detects with.)*
 - **Ingestion is push, never pull.** Customers forward OTel traces (direct OTLP or the
   substrate `sdk` source); we do not reach into vendor APIs to fetch them. This is an
@@ -34,9 +34,9 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   assert — which provider is in the path is a deployment choice, so it is the operator's to
   confirm against their own configuration.
 - **Single-tenant intelligence mode is default-on and fail-closed.**
-  `evals.intelligence-mode.single-tenant` (default `true`) is the coarse tenancy gate sitting above
-  the governed pooling pipeline's own switch (`evals.priors.enabled`, default `false`) — two
-  independent gates, the outer one in the safe state, so an accidentally enabled `evals.priors.*`
+  `tessary.intelligence-mode.single-tenant` (default `true`) is the coarse tenancy gate sitting above
+  the governed pooling pipeline's own switch (`tessary.priors.enabled`, default `false`) — two
+  independent gates, the outer one in the safe state, so an accidentally enabled `tessary.priors.*`
   can never pool across tenants. With it on, `PriorsService` refuses every cross-tenant operation
   before storage is touched: `optIn` is a no-op, `contribute` returns `false`, `derive` returns
   `Optional.empty()`. `SingleTenantModeTest` asserts it with no database — even with pooling
@@ -48,8 +48,8 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
 - **One versioned contract is the plugin↔platform interface.** The plugin owns the contract; the
   platform consumes a vendored copy in `contract/` (see `contract/AUTHORING_CONTRACT.md`) and
   validates every import against it (schema plus cross-field invariants).
-- **The platform reads the pipeline half and ignores the rest.** Track A removed everything that
-  could execute a grader, so `BundleAssembler` routes the bundle's grader and quality-dimension
+- **The platform reads the pipeline half and ignores the rest.** Everything that
+  could execute a grader was removed, so `BundleAssembler` routes the bundle's grader and quality-dimension
   shards to `Shard.IGNORE`. The contract is unchanged and the plugin still emits them; a hard
   reject would make every existing bundle un-importable and buy nothing.
 
@@ -59,16 +59,16 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   may be proposed only when a quantified volume trigger in
   [storage-migrations](../guides/storage-migrations.md) is sustained for two consecutive weeks
   on a single tenant. There used to be a `TraceStore` SPI in front of it so adoption would be a
-  bean swap; Track A took the interface's last method with the `verdict` table, so the seam is
+  bean swap; that method was removed with the `verdict` table, so the seam is
   gone and a columnar adoption is a real piece of work again. State that honestly when proposing
   one.
-> **The vector/embedding lane left the platform (#1116).** Two principles used to stand here:
+> **The vector/embedding lane left the platform.** Two principles used to stand here:
 > vectors lived in pgvector (HNSW) behind a `VectorIndex` SPI, and the embedding lane was one
 > queue (`embedding_job`), one worker (`EmbeddingJobWorker`), and one closed per-dataset enum
 > (`EmbeddingDataset`). The durable embed-on-ingest lane was off by default and nothing in the
 > open edition read the vector store back — global search's semantic leg and the query API's
 > `mode=semantic` are gone with it, both surfaces are lexical/keyword-only now, and the `vector`
-> extension is dropped from the schema (the Postgres image itself is unchanged, D3).
+> extension is dropped from the schema (the Postgres image itself is unchanged).
 
 ## Trace model & ingestion
 
@@ -109,7 +109,7 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   materialized ltree `path` for `path <@` ancestry reads; kind from `gen_ai.operation.name`).
   `gen_ai.conversation.id` is not a materialized tier — it lands as the plain `trace.thread_id`
   column. The recursive `context` table this section used to describe was dropped along with
-  v1 `trace`, `observation`, `message`, `message_block`, and `feedback` by migration 0083 (the
+  v1 `trace`, `observation`, `message`, `message_block`, and `feedback` (the
   2026-08-13 substrate-v1 teardown, commit `fe37a325`) — the baseline changelog has no `context`
   table today. See [the substrate model](../concepts/substrate-model.md) for why.
 - **Turns are positional.** There is no turn attribute: one turn per distinct provider trace,
@@ -146,14 +146,14 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
 
 ## Evaluation
 
-Track A removed graders, judging, datasets, golden labels, review queues and the CI merge gate from
+Graders, judging, datasets, golden labels, review queues and the CI merge gate were removed from
 the platform. The principles that governed them are gone with them — a rule about grader
 calibration is not a durable constraint once nothing calibrates. Three survive because they were
 never really about grading:
 
 - **Multimodal is handled at the ingest/export boundary, not inside analysis.** A new modality
   that maps to a content type is a routed case in `ContentExtractor` at ingestion and render,
-  never an analysis redesign. Track A removed the model-facing media boundary along with
+  never an analysis redesign. The model-facing media boundary was removed along with
   grading (`llm/ContentBlocks` and its 422 reject on `UNSUPPORTED_CONTENT_TYPE` are gone with
   the judge's request build — `JudgeError.UNSUPPORTED_CONTENT_TYPE`/`MEDIA_NOT_FOUND` stay
   declared in the wire catalogue but nothing raises them); an unrecoverable media block now
@@ -165,7 +165,7 @@ never really about grading:
   pattern/telemetry detectors and the shared ONNX encoder heads served CPU-side by
   classify-service's `/classify` run unsampled — model cost paid at train/serve time, not per
   event. (The per-project trained centroid classifier was removed along with the vector
-  substrate in #1116; the only user-authored classifier kind today is the regex detector.) An
+  substrate; the only user-authored classifier kind today is the regex detector.) An
   LLM only runs once a cheap detector has already filed a finding. This was the "online
   grading is opt-in and layered" principle, and it outlived the grading half: the layering was
   always the point, and Layer 2 is triage now.
@@ -178,10 +178,10 @@ never really about grading:
   detections idempotently (first-write-wins natural key). Sweep cursors are keyset
   `(created_at, id)` pairs — a timestamp-only cursor silently drops rows that share a
   timestamp across a batch boundary.
-- **The change-history risk model was removed by Track A and is not yet rebuilt.**
+- **The change-history risk model was removed and is not yet rebuilt.**
   `SignalSource`/`RiskNeighborhood` and the recency-decayed, Laplace-smoothed scoring they
-  backed (`analysis/risk/`, `analysis/trend/`) were deleted with grading; a rebuild is tracked
-  as #1021 (epic 13, post-launch). Any future version must keep the same honesty constraints:
+  backed (`analysis/risk/`, `analysis/trend/`) were deleted with grading; a rebuild is deferred to
+  post-launch. Any future version must keep the same honesty constraints:
   never fabricate confidence, report `insufficient_history` with no ranks on an empty model,
   label low support and neighbor-borrowed evidence.
 - **Alert destinations are a multi-impl fan-out registry.** Every configured destination is
@@ -198,7 +198,7 @@ never really about grading:
   shipped logs.
 - **Tool-rejection is operational telemetry, not a human gesture.** A tool that ran and errored is a
   fact about the tool call, and its home is the `tool_call` row and the trace. This was written when
-  the platform had a `feedback` table to keep it out of; that table is gone (0083), so today the rule
+  the platform had a `feedback` table to keep it out of; that table is gone, so today the rule
   reads forward instead: whatever reintroduces explicit human feedback must not be fed by machine
   outcomes, and a user permission-deny qualifies only if a typed, stable signal distinguishes a human
   deny from a policy deny AND a first-class per-call correlation field exists.

@@ -26,7 +26,7 @@
 // When any exporter's env vars are unset, Alloy still starts but that exporter
 // fails to connect and backs off — useful for local smoke runs, and load-bearing
 // now that the alloy service itself is opt-in (docker-compose.yml's `observability`
-// profile, #864): a self-hoster who enables only Langfuse, or only Grafana Cloud,
+// profile): a self-hoster who enables only Langfuse, or only Grafana Cloud,
 // must not crash-loop the whole collector over the piece they left unconfigured.
 // Every endpoint/username/password below is wrapped in coalesce(env(...), "<placeholder>")
 // for exactly that reason — Alloy's component loader hard-fails config load (not a
@@ -278,7 +278,7 @@ discovery.docker "containers" {
 // `compile` is here because its absence cost a day of an incident. compile-service
 // logs with the json-file driver (10m x 3, docker-compose.yml), so its only copy
 // lived on the host and `docker compose up -d --force-recreate` destroyed it on
-// every deploy — the three defects that kept all v3 SOPs out of production (#793)
+// every deploy — the three defects that kept all v3 SOPs out of production
 // had to be read off a container that a redeploy would have erased. It is also
 // cheap to ship: a whole compile emits tens of lines (routing decisions, per-stage
 // spend, one line per parked conversation), not per-request traffic.
@@ -334,7 +334,7 @@ discovery.relabel "container_logs" {
 }
 
 // One tailer per discovered container (discovery.docker emits one target per
-// container network — every service here is on the single `evals` network, so
+// container network — every service here is on the single `tessary` network, so
 // that is one target each). Lines are forwarded verbatim, with no loki.process
 // in between: the launcher writes free-form console output, unlike the OTLP
 // branch whose exporter wraps records in a JSON envelope that must be unwrapped.

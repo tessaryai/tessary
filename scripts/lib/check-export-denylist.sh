@@ -1,35 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Validates scripts/lib/export-denylist.txt, the one must-not-publish declaration (epic 4, clause 1).
-#
-# Always `bash scripts/lib/check-export-denylist.sh`, never sourced. It lives under scripts/lib/
-# because boundary rule 5 fails any scripts/*.sh that names the overlay outside a four-name
-# allowlist, and this file has to name every denied path by its whole job. Same settlement as
-# scripts/lib/export-simulate.sh and scripts/lib/dev-compose.sh: place the file, do not grow the list.
-#
-# Four jobs, two scopes:
-#   everywhere        every row is well-formed (four fields, known kind and scope), and no row
-#                     names this file or its declaration: a self-denying denylist deletes the input
-#                     the public repo's own rule 6 reads.
-#   source tree only  every `delete` and `exempt` row matches at least one path. A row matching
-#                     nothing is a dead row, and a scrub that no-ops on a dead row is the
-#                     absence-looks-like-compliance failure the epic exists to kill. The probe is
-#                     `tessary-paid/pom.xml`, the repo's standing overlay-present test: in the export
-#                     candidate and in the public repo every `delete` row matches nothing BY
-#                     CONSTRUCTION, so the liveness half prints a named skip there instead.
-#   source tree only  SET EQUALITY (#1293): the tree the denylist selects is EXACTLY the tree you get
-#                     by deleting tessary-paid/. Before #1293 those were two different sets and only
-#                     a reader comparing twenty rows against the checkout could tell; now the overlay
-#                     is the boundary and this asserts it in one comparison. It fails naming the
-#                     difference, and it fails in BOTH directions: a `delete` row for a public path
-#                     (a path outside tessary-paid/ that the export would strip) and a private path
-#                     that no row covers are equally wrong. Skipped on the same overlay-absent probe,
-#                     where the two sets are trivially equal.
-#   `never` rows are declared and validated here and enforced by tessary-paid/scripts/check-scrub.sh
-#   over the export candidate (clause 6). #1293 moved that scanner into the overlay: the public repo
-#   ships neither it nor the forbidden-strings file it reads, so the `never` rows are declared
-#   publicly and enforced privately, which is the only arrangement that does not publish the list of
-#   strings we are scanning for.
+# Validates scripts/lib/export-denylist.txt: every row is well-formed, every delete/exempt row
+# matches something in the source tree, and the denylist selects exactly root-minus-tessary-paid/.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -106,12 +78,8 @@ while IFS='|' read -r pattern kind scope reason; do
     fi
 done < <(grep -vE '^[[:space:]]*(#|$)' "$DECL")
 
-# Set equality, source tree only, from the SAME listing the liveness half used.
-#   A  root-minus-overlay   what the public repo is: every tracked path not under tessary-paid/
-#   B  denylist-filtered    what the export produces: every tracked path no `delete` row removes
-# export-simulate.sh applies the `delete` rows exactly as the liveness loop above matches them
-# (dir => "$pattern/" prefix, file => whole-line), so B is computed the same way rather than by
-# running the simulation: this gate has to be cheap enough to sit in front of the expensive one.
+# Set equality, source tree only: A = root-minus-tessary-paid/, B = denylist-filtered tree.
+# B is computed the same way export-simulate.sh applies `delete` rows, not by running it.
 _a="$(mktemp)"; _b="$(mktemp)"; _deny="$(mktemp)"
 trap 'rm -f "$_a" "$_b" "$_b.all" "$_b.next" "$_deny"' EXIT
 

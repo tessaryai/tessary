@@ -5,7 +5,7 @@ separate process to install — Claude Code (or any MCP client) connects to the 
 service that already hosts the REST API and the curation UI.
 
 Platform reference (auth model, key store, code map):
-[`docs/reference/auth-and-mcp.md`](../../devdocs/reference/auth-and-mcp.md).
+[`devdocs/reference/auth-and-mcp.md`](../../devdocs/reference/auth-and-mcp.md).
 
 ```
 ┌──────────────────────────┐                ┌──────────────────────────────────┐
@@ -111,7 +111,7 @@ Conventions the tools share, stated here once rather than per row:
 
 **Gate** is the capability an org must hold to be *offered* the tool. **Nothing on this surface is gated
 today**: all 19 rows are open, so a launch partner's `tools/list` is the whole catalogue. It was 22 with two
-gated on `GRADERS` until Track A deleted grading — the two grader reads and `list_quality_dimensions` went
+gated on `GRADERS` until grading was deleted — the two grader reads and `list_quality_dimensions` went
 with it, and `Capability.GRADERS` itself no longer exists. The per-tool mechanism stays (`McpTool.capability`,
 null on every tool today), because a paid classifier's own reads are the obvious next thing to want it.
 **`Capability.RCA` gates nothing here any more** — a case
@@ -122,7 +122,7 @@ the truth, and a client should render that rather than prose.
 ### Removed
 
 Six tools left in one breaking release, alongside `describe_dataset` and the plural readers. Each now reads
-as `unknown tool`; there is no alias and no shim. Track A removed three more, listed after them.
+as `unknown tool`; there is no alias and no shim. Three more were removed along with grading, listed after them.
 
 - **`propose_grader_edit`** — the last write. It filled a human curator's queue from a model's reasoning,
   and the grader body is the ruler the whole product measures against. Authoring stays in the UI, where the
@@ -133,7 +133,7 @@ as `unknown tool`; there is no alias and no shim. Track A removed three more, li
 - **`list_rca_reports`** / **`get_rca_report`** — the report is the answer to "why is this case open", so it
   reaches MCP inlined on the case that owns it (`get_case.rca`) rather than through a second gated tool.
 
-Track A removed grading from the platform, and three more tools went with it — there is no curated set to
+Grading was removed from the platform, and three more tools went with it — there is no curated set to
 read and no rubric behind a score:
 
 - **`list_graders`** / **`get_grader`** — the two `GRADERS`-gated reads. The capability constant is gone too,
@@ -144,7 +144,7 @@ read and no rubric behind a score:
 
 Earlier removals, kept here because clients still ask about them:
 
-- **`reload_pipeline`** (was: "re-read evals.yaml from disk"). A no-op since phase D — pipeline content lives
+- **`reload_pipeline`** (was: "re-read evals.yaml from disk"). A no-op — pipeline content lives
   in the DB — and it answered `valid: true` with pre-push counts, so an agent that pushed a bundle and probed
   it read the shim as proof the import landed. `POST .../import` reports its own result.
 - **`list_pipelines`** → **`get_project`**. A token binds to exactly one project, so the old name promised a
@@ -165,7 +165,7 @@ This MCP server is **not** part of evals-synth. Synthesis runs in the plugin's C
 session and writes a `.tessary/` bundle on disk. MCP is a **post-import** read surface: inspect the
 imported pipeline, read the cases and findings raised on the project's traffic, page and read its
 traces and spans, and query the aggregates. Details on the two synthesis paths:
-[`docs/reference/architecture.md`](../../devdocs/reference/architecture.md) § *Synthesis (two paths)*.
+[`devdocs/reference/architecture.md`](../../devdocs/reference/architecture.md) § *Synthesis (two paths)*.
 
 ## Wire details
 

@@ -9,17 +9,17 @@ Code lives in [`../../claude-skill/evals-mcp/README.md`](../../claude-skill/eval
 
 | Surface | Credential | Notes |
 |---|---|---|
-| Browser UI | WorkOS AuthKit (BYO) or built-in email/password (open-edition default, `PasswordAuthProvider`) → local AES-GCM sealed cookie (`evals-session`) | Cookie preferred on `/api/**`; no JWKS on the hot path |
+| Browser UI | WorkOS AuthKit (BYO) or built-in email/password (open-edition default, `PasswordAuthProvider`) → local AES-GCM sealed cookie (`tessary-session`) | Cookie preferred on `/api/**`; no JWKS on the hot path |
 | Headless REST | `Authorization: Bearer` API key | Managed in Settings → API keys; scopes `write` / `query` / `admin` |
 | MCP (`POST /mcp`) | Same bearer store; cookies ignored | Minted in Settings → MCP tokens (admin-scoped) or plugin device-link |
 | Device-link | `/auth/link/start\|poll` + browser confirm | Bypasses cookie auth; the `device_code` is the credential until exchange |
-| Actuator | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` | Exactly these three, so orchestrators can poll before anything holds a credential. Every other actuator path requires auth (#929) — health groups, the bare `/actuator` index, and anything added to `management.endpoints.web.exposure`. Exposing an endpoint does not publish it |
+| Actuator | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` | Exactly these three, so orchestrators can poll before anything holds a credential. Every other actuator path requires auth — health groups, the bare `/actuator` index, and anything added to `management.endpoints.web.exposure`. Exposing an endpoint does not publish it |
 
-`AuthFilter` bypasses every request **only when `EVALS_AUTH_DISABLED=true` is set** (#924,
-re-decided by #852) — unconditionally, regardless of which `AuthProvider` (WorkOS or the
+`AuthFilter` bypasses every request **only when `TESSARY_AUTH_DISABLED=true` is set** —
+unconditionally, regardless of which `AuthProvider` (WorkOS or the
 always-enabled `PasswordAuthProvider`) is active. Absent that flag, every guarded path fails
 CLOSED and answers 401: an unconfigured WorkOS is the normal state of a self-hosted open-edition
-instance and must not be read as consent to serve it open, and since #852 the open edition always
+instance and must not be read as consent to serve it open, and the open edition always
 has a working provider (`PasswordAuthProvider`) anyway, so "no provider configured" is no longer a
 real state. The dev stack and the test suite both set the flag explicitly. In the `production`
 profile, `AuthRequiredInProdGuard` refuses to boot with no provider at all.
@@ -39,6 +39,19 @@ MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **
 keys via `ApiKeyService.issue(...)`. `AuthFilter` / `BearerTokenAuthenticator` verify any live
 key and populate `TenantContext`; MCP tools always read `ctx.projectId()`.
 
+**Verification is cached, and every revocation path must evict.** `ApiKeyService.verify` answers a
+recently-seen token from `tenant/VerifiedTokenCache` without a query or a bcrypt — bcrypt at cost 10 was
+62% of backend CPU on the ingest path, for a credential that never changes between requests. Because a
+cache that outlives a revocation is an authentication bypass, three things hold rather than one TTL:
+`revoke`/`rotate` evict the key in the same call that writes the revocation; **project deletion**
+(`TenantService.deleteProjectAsync`, which revokes a project's whole key set straight at the repository)
+calls `invalidateProject`; and every invalidation bumps a generation that a verification already in
+flight must still match before its result is cached. `tessary.auth.token-cache.ttl-seconds` is the backstop
+for changes that reached the database without going through this class at all, not the revocation
+control. **Any new bulk-revocation path has to invalidate too** — the ingest front doors authenticate on
+the key alone, so a stale entry there keeps a deleted project writable. Keys and bounds:
+[config-keys.md](./config-keys.md).
+
 ## MCP server
 
 Hosted in-process: `mcp/McpController` → `McpDispatcher` → `McpToolRegistry`. Streamable HTTP
@@ -54,7 +67,7 @@ adding a write tool is not one more registration: it is a decision that an agent
 customer's project, and it invalidates that sentence. `McpCapabilityGateTest` pins the invariant —
 no registered tool name is write-shaped, and none of the tools removed by the cutover
 (`propose_grader_edit`, `run_triage`, `get_triage`, `latest_triage`, `list_rca_reports`,
-`get_rca_report`) or by Track A (`list_graders`, `get_grader`, `list_quality_dimensions`) is back.
+`get_rca_report`) or by the removal of grading (`list_graders`, `get_grader`, `list_quality_dimensions`) is back.
 
 **`get_finding_evidence` is the door the analysis lanes read through.** A detector enumerates the
 population its claim rests on at finding-open — one `finding_evidence` ref per measured row, uncapped —
@@ -73,7 +86,7 @@ them, and a call to a withheld tool reads as unknown rather than forbidden. The 
 product's own output is open (project, imported taxonomy, cases and the RCA reports they carry,
 findings, query, the substrate list/read tools). The full catalogue is **19 tools, and every one of
 them is open** — `McpTool.capability` is null on all of them. It was 22 with two gated on `GRADERS`
-until Track A deleted grading and took three with it: `list_graders` and `get_grader` (the gated pair)
+until grading was deleted and took three with it: `list_graders` and `get_grader` (the gated pair)
 plus the open `list_quality_dimensions`, whose axes each named a grader; the mechanism stays, because
 a paid classifier's own reads are the obvious next thing to want it. `McpCapabilityGateTest` pins the
 count alongside the read-only invariant.
@@ -96,7 +109,7 @@ rather than the gate the firewall exists to check. It applies to **every** MCP c
 RCA-minted keys alone: `TenantContext` carries no marker for the key family and `KeyScope` is too
 coarse to tell them apart, and a firewall that depends on identifying its caller is a firewall with
 a bypass. What the surface loses is a ruling a human can see one click away in the UI, which reads
-these fields through `FindingController` (renamed from `BehaviorController` in #921) and is untouched. Background:
+these fields through `FindingController` (renamed from `BehaviorController`) and is untouched. Background:
 [`architecture.md`](./architecture.md) § *The three analysis layers*.
 
 ## Known limitations
@@ -125,10 +138,11 @@ these fields through `FindingController` (renamed from `BehaviorController` in #
 | `auth/AuthFilter` | Cookie + bearer resolution; `/mcp` bearer-only |
 | `auth/BearerTokenAuthenticator` | Shared Bearer → `TenantContext` |
 | `auth/link/*` | Device-authorization for Claude Code connect |
-| `auth/SignupPolicyService` | The sign-up policy gate (#1226): `admit` after authentication, before any principal; `update` writes the governing org's `settings.signupPolicy` + an audit row |
+| `auth/SignupPolicyService` | The sign-up policy gate: `admit` after authentication, before any principal; `update` writes the governing org's `settings.signupPolicy` + an audit row |
 | `tenant/SignupPolicy` | The policy record: `open` / `domain` / `invite`, parsed from and written into `organization.settings` |
 | `tenant/OrganizationController` `GET`/`PUT …/signup-policy` | Owner/admin read and write of the instance policy; `PATCH …/orgs/{slug}` refuses a differing policy in the raw blob |
-| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup) |
+| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup); verification is served from `VerifiedTokenCache` |
+| `tenant/VerifiedTokenCache` | Short-lived memory of verified tokens, so bcrypt is off the per-request path. Every revocation path must evict it |
 | `tenant/ApiKeyController` | Managed API keys (scoped) |
 | `tenant/McpTokenController` | MCP personal tokens (admin mint shape) |
 | `mcp/*` | JSON-RPC MCP endpoint + tools |

@@ -55,11 +55,11 @@
         </dependency>
         <!-- A logback ListAppender is the only way to assert what a class actually EMITS, and one
              assertion here needs it: `SopIntakeDispatch`'s no-intake line must be latched to once per
-             process, because that branch is the open edition's permanent steady state and `/import` is a
+             process, because that branch is this build's permanent steady state and `/import` is a
              per-REQUEST path. (It used to be `SopCompileWorker`'s no-compiler line, on the same
-             argument; #842 took that class to `tessary-paid/sop` and the dependency followed the
-             assertion rather than the class.) Same two test-scope artifacts
-             `tessary-paid/conformance/pom.xml` declares, and the same pattern
+             argument; that class later moved out of this build and the dependency followed the
+             assertion rather than the class.) Same two test-scope artifacts the corresponding
+             conformance module declares, and the same pattern
              `ClassifierWorkerLoggingTest` uses in `analysis`. -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
@@ -144,7 +144,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, open module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as every other plugin above. No coverage gate. -->
             <plugin>

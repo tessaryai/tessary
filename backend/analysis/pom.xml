@@ -54,15 +54,15 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- THREE dependencies were here until #841 and are not any more, so that a `git log -p` on this
+        <!-- THREE dependencies were here and are not any more, so that a `git log -p` on this
              file answers the question rather than a `git log` on the whole reactor.
 
              onnxruntime and ai.djl.huggingface:tokenizers served SOP conformance's in-JVM encoder, and
              classifier/conformance/encoder/OnnxConformanceEncoder was their only user in the entire
              backend; jackson-dataformat-yaml served the SOP parser, likewise its only user here. All
-             three went to tessary-paid/conformance with the classifier. Left declared, the published
-             open image would carry two native-binding artifacts nothing open can call — a D4 smell and
-             real image weight.
+             three moved out along with the classifier's conformance module. Left declared, the published
+             open image would carry two native-binding artifacts nothing open can call, plus
+             real image weight for nothing.
 
              com.networknt:json-schema-validator below did NOT go with them: its user is the open
              classifier/detector/MalformedOutputDetector. -->
@@ -177,7 +177,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, open module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as every other plugin above. No coverage gate. -->
             <plugin>
