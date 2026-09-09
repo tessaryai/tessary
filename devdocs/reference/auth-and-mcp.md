@@ -39,6 +39,19 @@ MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **
 keys via `ApiKeyService.issue(...)`. `AuthFilter` / `BearerTokenAuthenticator` verify any live
 key and populate `TenantContext`; MCP tools always read `ctx.projectId()`.
 
+**Verification is cached, and every revocation path must evict.** `ApiKeyService.verify` answers a
+recently-seen token from `tenant/VerifiedTokenCache` without a query or a bcrypt — bcrypt at cost 10 was
+62% of backend CPU on the ingest path, for a credential that never changes between requests. Because a
+cache that outlives a revocation is an authentication bypass, three things hold rather than one TTL:
+`revoke`/`rotate` evict the key in the same call that writes the revocation; **project deletion**
+(`TenantService.deleteProjectAsync`, which revokes a project's whole key set straight at the repository)
+calls `invalidateProject`; and every invalidation bumps a generation that a verification already in
+flight must still match before its result is cached. `evals.auth.token-cache.ttl-seconds` is the backstop
+for changes that reached the database without going through this class at all, not the revocation
+control. **Any new bulk-revocation path has to invalidate too** — the ingest front doors authenticate on
+the key alone, so a stale entry there keeps a deleted project writable. Keys and bounds:
+[config-keys.md](./config-keys.md).
+
 ## MCP server
 
 Hosted in-process: `mcp/McpController` → `McpDispatcher` → `McpToolRegistry`. Streamable HTTP

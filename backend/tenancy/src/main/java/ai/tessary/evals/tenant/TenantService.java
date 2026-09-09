@@ -29,6 +29,7 @@ public class TenantService {
     private final InvitationRepository invitations;
     private final ApplicationEventPublisher events;
     private final ApiKeyRepository apiKeys;
+    private final VerifiedTokenCache tokenCache;
     private final ProjectDeleteJobRepository deleteJobs;
 
     /**
@@ -51,6 +52,7 @@ public class TenantService {
             InvitationRepository invitations,
             ApplicationEventPublisher events,
             ApiKeyRepository apiKeys,
+            VerifiedTokenCache tokenCache,
             ProjectDeleteJobRepository deleteJobs,
             @Lazy TenantService self) {
         this.events = events;
@@ -60,6 +62,7 @@ public class TenantService {
         this.projects = projects;
         this.invitations = invitations;
         this.apiKeys = apiKeys;
+        this.tokenCache = tokenCache;
         this.deleteJobs = deleteJobs;
         this.self = self;
     }
@@ -408,6 +411,10 @@ public class TenantService {
             return ProjectDeleteAcceptance.ALREADY_ACCEPTED;
         }
         int revoked = apiKeys.revokeAllForProject(projectId, now);
+        // The UPDATE above is deliberately synchronous so nothing new lands in a project on its way out;
+        // without this the verified-token cache would keep answering for those keys for a full TTL and
+        // hand that window straight back, on the ingest path, which authenticates on the key alone.
+        tokenCache.invalidateProject(projectId);
         deleteJobs.enqueue(projectId, now);
         return new ProjectDeleteAcceptance(true, revoked);
     }

@@ -8,6 +8,7 @@ import java.util.Base64;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Component;
 
 /**
@@ -33,14 +34,30 @@ import org.springframework.stereotype.Component;
  * separate caps. Only a caller holding a real token can place an entry in the map that matters; the
  * rejection map is the one anyone can drive, and filling it evicts nothing but other rejections.
  *
- * <p><b>Outliving a revocation.</b> A cache that answers for a revoked key is an authentication bypass.
- * {@link ApiKeyService#revoke} and {@link ApiKeyService#rotate} call {@link #invalidate} inside the same
- * call that writes the revocation, so a key withdrawn through the product stops verifying immediately
- * rather than at the end of a TTL. {@link TokenCacheProperties#getTtlSeconds()} is the backstop for
- * changes that never went through those methods — a hand-edited row, a restored backup, another replica
- * — and not the primary control. {@code invalidate} scans rather than keeping a key-id index: the map is
- * bounded at a few thousand entries and revocation is a rare human action, so a linear scan is cheaper
- * than a second index that could drift out of step with the first and silently keep a revoked key alive.
+ * <p><b>Outliving a revocation.</b> A cache that answers for a revoked key is an authentication bypass,
+ * and there are two distinct ways to get one. Both are closed here, and both were found in review rather
+ * than by the 590-test suite, which is why they are written down.
+ *
+ * <p><em>Every</em> revocation path must evict, not just the per-key one. {@link ApiKeyService#revoke}
+ * and {@link ApiKeyService#rotate} call {@link #invalidate}; project deletion revokes a whole project's
+ * keys in one indexed UPDATE and calls {@link #invalidateProject}. That second path is the one that
+ * matters most: {@code ApiKeyRepository.revokeAllForProject} is documented as "the whole access story for
+ * a project being deleted", deliberately synchronous so that nothing new lands in a project on its way
+ * out — and a cache that kept answering for those keys would reintroduce exactly the window that
+ * synchronous revoke exists to close, on the ingest path, which authenticates on the key alone.
+ *
+ * <p><em>A verification already in flight must not overwrite the eviction.</em> Removing an entry is not
+ * enough on its own: a request that read a live row, then spent tens of milliseconds in bcrypt, would
+ * store that now-stale row <em>after</em> the revoke had swept a map it was never in. Every invalidation
+ * therefore bumps a generation counter, and {@link #rememberVerified} refuses to store a result derived
+ * from a read that began before the current generation. The window is small and the consequence was a
+ * full TTL of accepting a credential the operator had just withdrawn.
+ *
+ * <p>{@link TokenCacheProperties#getTtlSeconds()} is the backstop for changes that reached the database
+ * without going through this class at all — a hand-edited row, a restored backup, another replica — and
+ * not the primary control. The invalidations scan rather than keeping an id index: the map is bounded at
+ * a few thousand entries and revocation is rare, so a scan is cheaper than a second index that could
+ * drift out of step with the first and silently keep a revoked key alive.
  *
  * <p><b>Reading the secrets back out.</b> Entries are keyed on the SHA-256 of the presented token, never
  * the token, so a heap dump, a core file or a debugger session yields digests rather than working
@@ -88,6 +105,13 @@ public final class VerifiedTokenCache {
     private final Map<String, Entry> verified;
     private final Map<String, Long> rejected;
 
+    /**
+     * Bumped by every invalidation. A verification that began before the bump is refused at
+     * {@link #rememberVerified}, which is what stops an in-flight bcrypt from re-caching a key that was
+     * revoked while it ran.
+     */
+    private final AtomicLong generation = new AtomicLong();
+
     public VerifiedTokenCache(TokenCacheProperties props) {
         this.props = props;
         this.verified = boundedLru(props.getMaxEntries());
@@ -101,6 +125,14 @@ public final class VerifiedTokenCache {
                 return size() > max;
             }
         };
+    }
+
+    /**
+     * The generation to quote back to {@link #rememberVerified}. Read it <em>before</em> the database
+     * read whose result you intend to cache, never after.
+     */
+    public long generation() {
+        return generation.get();
     }
 
     /** What is known about {@code presented}, without touching the database. */
@@ -128,12 +160,19 @@ public final class VerifiedTokenCache {
         return UNKNOWN;
     }
 
-    /** Record that {@code presented} verified against {@code key}, and that its usage was just written. */
-    public void rememberVerified(String presented, ApiKey key) {
+    /**
+     * Record that {@code presented} verified against {@code key}, and that its usage was just written.
+     *
+     * @param observedGeneration the value {@link #generation()} returned before the row was read. If an
+     *     invalidation has landed since, the result is discarded rather than cached — it may describe a
+     *     key that was revoked while this verification was in flight.
+     */
+    public void rememberVerified(String presented, ApiKey key, long observedGeneration) {
         if (!props.isEnabled()) return;
         long now = System.currentTimeMillis();
         Entry e = new Entry(key, now + props.getTtlSeconds() * 1000L, now);
         synchronized (this) {
+            if (generation.get() != observedGeneration) return;
             verified.put(digest(presented), e);
         }
     }
@@ -152,19 +191,27 @@ public final class VerifiedTokenCache {
      * a rotation, so the withdrawal takes effect on the next request rather than after the TTL.
      */
     public void invalidate(String keyId) {
-        synchronized (this) {
-            Iterator<Map.Entry<String, Entry>> it = verified.entrySet().iterator();
-            while (it.hasNext()) {
-                if (it.next().getValue().key().id().equals(keyId)) it.remove();
-            }
-        }
+        evict(e -> e.key().id().equals(keyId));
     }
 
-    /** Drop everything. For tests and for an operator who wants the cache cold without a restart. */
-    public void invalidateAll() {
+    /**
+     * Forget every key of one project. Called from project deletion, which revokes a project's whole key
+     * set in one UPDATE without going through {@link ApiKeyService} — so without this the deleted
+     * project would keep authenticating ingest for a full TTL.
+     */
+    public void invalidateProject(String projectId) {
+        evict(e -> e.key().projectId().equals(projectId));
+    }
+
+    private void evict(java.util.function.Predicate<Entry> matches) {
         synchronized (this) {
-            verified.clear();
-            rejected.clear();
+            // Bumped inside the monitor and before the sweep, so a verification racing this call is
+            // refused at rememberVerified whether it would have stored before or after the removal.
+            generation.incrementAndGet();
+            Iterator<Map.Entry<String, Entry>> it = verified.entrySet().iterator();
+            while (it.hasNext()) {
+                if (matches.test(it.next().getValue())) it.remove();
+            }
         }
     }
 

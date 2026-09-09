@@ -167,6 +167,9 @@ public class ApiKeyService {
             }
         }
 
+        // Read BEFORE the row read, so an invalidation that lands while bcrypt runs below is detected
+        // and this result is discarded instead of re-caching a key that was revoked mid-verification.
+        long observedGeneration = cache.generation();
         String prefix = presented.substring(0, PREFIX_LEN);
         Optional<ApiKey> row = tokens.findByPrefix(prefix);
         if (row.isEmpty() || row.get().isRevoked()) {
@@ -179,7 +182,7 @@ public class ApiKeyService {
             cache.rememberRejected(presented);
             return Optional.empty();
         }
-        cache.rememberVerified(presented, row.get());
+        cache.rememberVerified(presented, row.get(), observedGeneration);
         markUsed(row.get());
         return row;
     }
