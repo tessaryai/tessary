@@ -49,11 +49,13 @@ public class ApiKeyService {
 
     private final ApiKeyRepository tokens;
     private final AuditLogRepository audit;
+    private final VerifiedTokenCache cache;
     private final SecureRandom rng = new SecureRandom();
 
-    public ApiKeyService(ApiKeyRepository tokens, AuditLogRepository audit) {
+    public ApiKeyService(ApiKeyRepository tokens, AuditLogRepository audit, VerifiedTokenCache cache) {
         this.tokens = tokens;
         this.audit = audit;
+        this.cache = cache;
     }
 
     /** Result of an issue() call: row + the plaintext token (shown to user once). */
@@ -106,6 +108,7 @@ public class ApiKeyService {
         if (existing.isEmpty() || existing.get().isRevoked()) return Optional.empty();
         ApiKey old = existing.get();
         tokens.revoke(old.id(), Instant.now().toString());
+        cache.invalidate(old.id());
         recordAudit(old.projectId(), old.id(), actorUserId, AuditLog.Action.REVOKED, "rotated");
         Issued fresh = issueWithoutAudit(old.projectId(), actorUserId, old.name(), old.scopeEnum());
         recordAudit(old.projectId(), fresh.token().id(), actorUserId, AuditLog.Action.ROTATED, "from=" + old.id());
@@ -139,22 +142,57 @@ public class ApiKeyService {
      * the token exists, is unrevoked, and the bcrypt verification succeeds. We update
      * {@code last_used_at} on success (best effort; failure to update is logged but
      * does not reject the auth).
+     *
+     * <p>A recently-seen token is answered from {@link VerifiedTokenCache} without a query or a bcrypt.
+     * That is the whole point of the cache — bcrypt at cost 10 is deliberately expensive and the answer
+     * for a machine credential does not change between requests — and its bounds, its separation of
+     * verified from rejected tokens, and the reason a revocation does not wait for a TTL are all
+     * documented on that class. {@code last_used_at} is written at most once per
+     * {@code tessary.auth.token-cache.last-used-write-interval-seconds} per key rather than per request.
      */
     public Optional<ApiKey> verify(String presented) {
         if (presented == null || !presented.startsWith(TOKEN_PREFIX)) return Optional.empty();
         if (presented.length() < PREFIX_LEN) return Optional.empty();
+
+        switch (cache.lookup(presented)) {
+            case VerifiedTokenCache.Lookup.Verified v -> {
+                if (v.writeLastUsed()) markUsed(v.key());
+                return Optional.of(v.key());
+            }
+            case VerifiedTokenCache.Lookup.Rejected ignored -> {
+                return Optional.empty();
+            }
+            case VerifiedTokenCache.Lookup.Unknown ignored -> {
+                /* fall through to the real verification */
+            }
+        }
+
+        // Read BEFORE the row read, so an invalidation that lands while bcrypt runs below is detected
+        // and this result is discarded instead of re-caching a key that was revoked mid-verification.
+        long observedGeneration = cache.generation();
         String prefix = presented.substring(0, PREFIX_LEN);
         Optional<ApiKey> row = tokens.findByPrefix(prefix);
-        if (row.isEmpty() || row.get().isRevoked()) return Optional.empty();
+        if (row.isEmpty() || row.get().isRevoked()) {
+            cache.rememberRejected(presented);
+            return Optional.empty();
+        }
         BCrypt.Result result =
                 BCrypt.verifyer().verify(presented.toCharArray(), row.get().tokenHash());
-        if (!result.verified) return Optional.empty();
+        if (!result.verified) {
+            cache.rememberRejected(presented);
+            return Optional.empty();
+        }
+        cache.rememberVerified(presented, row.get(), observedGeneration);
+        markUsed(row.get());
+        return row;
+    }
+
+    private void markUsed(ApiKey key) {
         try {
-            tokens.markLastUsed(row.get().id(), Instant.now().toString());
+            tokens.markLastUsed(key.id(), Instant.now().toString());
         } catch (RuntimeException ignored) {
             /* best effort */
         }
-        return row;
     }
 
     /** Revoke a key (idempotent) and, when it was live, write a {@code revoked} audit row. */
@@ -166,6 +204,7 @@ public class ApiKeyService {
     public boolean revoke(String tokenId, @Nullable String actorUserId) {
         Optional<ApiKey> existing = tokens.findById(tokenId);
         boolean revoked = tokens.revoke(tokenId, Instant.now().toString());
+        cache.invalidate(tokenId);
         if (revoked && existing.isPresent()) {
             recordAudit(existing.get().projectId(), tokenId, actorUserId, AuditLog.Action.REVOKED, null);
         }

@@ -42,6 +42,13 @@
 #   added or dropped, and the twelve paths of pre-existing drift (the ten `ingest/spool` files,
 #   `instrument.md` and `scripts/lib/caddy-proxies-spec.py`) are still absent, exactly as before.
 #
+# AMENDED 2026-09-09 (merge of PR #5) — THREE body rows added by hand:
+#   `backend/tenancy/.../tenant/{TokenCacheProperties,VerifiedTokenCache}.java` and
+#   `backend/app/src/test/.../tenant/VerifiedTokenCacheTest.java`, the bearer-token cache PR #5
+#   landed on main after this branch was cut. They are listed at their post-rename paths. The body
+#   was again NOT regenerated: the twelve pre-existing drift paths stay absent, unread and unabsorbed.
+#   Row count 1,358 -> 1,361.
+#
 # reviewed: NOT YET SIGNED OFF. Generated 2026-09-08 under #1293 against the post-relocation tree:
 #   1,372 paths = 1,368 tracked outside the overlay, plus FOUR files this change adds that were
 #   still untracked when it was generated — contract/LICENSE, .gitleaks.toml,
@@ -519,6 +526,7 @@ backend/app/src/test/java/ai/tessary/tenant/OrgCreationBoundaryTest.java
 backend/app/src/test/java/ai/tessary/tenant/ProjectDeleteEndpointTest.java
 backend/app/src/test/java/ai/tessary/tenant/RbacEnforcementIntegrationTest.java
 backend/app/src/test/java/ai/tessary/tenant/TenantServiceTest.java
+backend/app/src/test/java/ai/tessary/tenant/VerifiedTokenCacheTest.java
 backend/app/src/test/java/ai/tessary/testsupport/CapabilityFixture.java
 backend/app/src/test/java/ai/tessary/testsupport/ClassifierConversations.java
 backend/app/src/test/java/ai/tessary/testsupport/ClassifierObservations.java
@@ -1045,6 +1053,8 @@ backend/tenancy/src/main/java/ai/tessary/tenant/ProjectDeleteJobRow.java
 backend/tenancy/src/main/java/ai/tessary/tenant/ProjectRepository.java
 backend/tenancy/src/main/java/ai/tessary/tenant/SignupPolicy.java
 backend/tenancy/src/main/java/ai/tessary/tenant/TenantService.java
+backend/tenancy/src/main/java/ai/tessary/tenant/TokenCacheProperties.java
+backend/tenancy/src/main/java/ai/tessary/tenant/VerifiedTokenCache.java
 backend/tenancy/src/main/java/ai/tessary/tenant/rbac/Permission.java
 backend/tenancy/src/main/java/ai/tessary/tenant/rbac/Role.java
 backend/tenancy/src/main/java/ai/tessary/tenant/rbac/RolePermissions.java

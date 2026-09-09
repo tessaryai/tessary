@@ -39,6 +39,19 @@ MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **
 keys via `ApiKeyService.issue(...)`. `AuthFilter` / `BearerTokenAuthenticator` verify any live
 key and populate `TenantContext`; MCP tools always read `ctx.projectId()`.
 
+**Verification is cached, and every revocation path must evict.** `ApiKeyService.verify` answers a
+recently-seen token from `tenant/VerifiedTokenCache` without a query or a bcrypt — bcrypt at cost 10 was
+62% of backend CPU on the ingest path, for a credential that never changes between requests. Because a
+cache that outlives a revocation is an authentication bypass, three things hold rather than one TTL:
+`revoke`/`rotate` evict the key in the same call that writes the revocation; **project deletion**
+(`TenantService.deleteProjectAsync`, which revokes a project's whole key set straight at the repository)
+calls `invalidateProject`; and every invalidation bumps a generation that a verification already in
+flight must still match before its result is cached. `tessary.auth.token-cache.ttl-seconds` is the backstop
+for changes that reached the database without going through this class at all, not the revocation
+control. **Any new bulk-revocation path has to invalidate too** — the ingest front doors authenticate on
+the key alone, so a stale entry there keeps a deleted project writable. Keys and bounds:
+[config-keys.md](./config-keys.md).
+
 ## MCP server
 
 Hosted in-process: `mcp/McpController` → `McpDispatcher` → `McpToolRegistry`. Streamable HTTP
@@ -128,7 +141,8 @@ these fields through `FindingController` (renamed from `BehaviorController` in #
 | `auth/SignupPolicyService` | The sign-up policy gate (#1226): `admit` after authentication, before any principal; `update` writes the governing org's `settings.signupPolicy` + an audit row |
 | `tenant/SignupPolicy` | The policy record: `open` / `domain` / `invite`, parsed from and written into `organization.settings` |
 | `tenant/OrganizationController` `GET`/`PUT …/signup-policy` | Owner/admin read and write of the instance policy; `PATCH …/orgs/{slug}` refuses a differing policy in the raw blob |
-| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup) |
+| `tenant/ApiKeyService` | Issue / verify / revoke (bcrypt at rest, prefix lookup); verification is served from `VerifiedTokenCache` |
+| `tenant/VerifiedTokenCache` | Short-lived memory of verified tokens, so bcrypt is off the per-request path. Every revocation path must evict it |
 | `tenant/ApiKeyController` | Managed API keys (scoped) |
 | `tenant/McpTokenController` | MCP personal tokens (admin mint shape) |
 | `mcp/*` | JSON-RPC MCP endpoint + tools |

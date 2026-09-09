@@ -11,6 +11,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -29,6 +31,7 @@ public class TenantService {
     private final InvitationRepository invitations;
     private final ApplicationEventPublisher events;
     private final ApiKeyRepository apiKeys;
+    private final VerifiedTokenCache tokenCache;
     private final ProjectDeleteJobRepository deleteJobs;
 
     /**
@@ -51,6 +54,7 @@ public class TenantService {
             InvitationRepository invitations,
             ApplicationEventPublisher events,
             ApiKeyRepository apiKeys,
+            VerifiedTokenCache tokenCache,
             ProjectDeleteJobRepository deleteJobs,
             @Lazy TenantService self) {
         this.events = events;
@@ -60,6 +64,7 @@ public class TenantService {
         this.projects = projects;
         this.invitations = invitations;
         this.apiKeys = apiKeys;
+        this.tokenCache = tokenCache;
         this.deleteJobs = deleteJobs;
         this.self = self;
     }
@@ -333,6 +338,31 @@ public class TenantService {
     }
 
     /**
+     * Run {@code action} once this transaction has finished, whichever way it finished, or immediately
+     * when there is no transaction to wait for.
+     *
+     * <p><b>{@code afterCompletion}, not {@code afterCommit}, and the difference is the whole point.</b>
+     * Spring skips {@code afterCommit} in exactly one case: {@code doCommit} threw while the database had
+     * in fact committed. For a cache eviction that is the worst case to skip — the revocation is durable
+     * and the cache still answers for the key — and it does not self-heal, because the retry finds
+     * {@code markDeleting} already false, returns {@code ALREADY_ACCEPTED}, and never reaches this line
+     * again. {@code afterCompletion} always runs. On a genuine rollback it evicts entries that did not
+     * need evicting, which costs one bcrypt on their next request and nothing else.
+     */
+    private static void afterCompletion(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                action.run();
+            }
+        });
+    }
+
+    /**
      * Lazily create the org's quiet "sample project" (#1227) — a real, deletable project row marked
      * via {@code settings: {"sample": true}} ({@link Project#isSample()}), never wired through {@link
      * #ensureDefaultOrg} or the signup tail. It exists only once a user follows the connect gate's
@@ -408,6 +438,16 @@ public class TenantService {
             return ProjectDeleteAcceptance.ALREADY_ACCEPTED;
         }
         int revoked = apiKeys.revokeAllForProject(projectId, now);
+        // AFTER the transaction, not here. The UPDATE above is deliberately synchronous so nothing new lands
+        // in a project on its way out, and the verified-token cache has to be told or it keeps answering
+        // for those keys — but evicting inside this transaction reopens the same window from the other
+        // side: a verification on another connection reads the bumped generation, then reads the row this
+        // transaction has not committed yet, sees it still live, and caches it with a generation nothing
+        // will invalidate again. READ COMMITTED is what makes that reachable, and the ingest front doors
+        // authenticate on the key alone, so the stale entry is a writable deleted project for a full TTL.
+        // ApiKeyService.revoke is safe from this only because it is NOT transactional — its UPDATE
+        // autocommits before it evicts.
+        afterCompletion(() -> tokenCache.invalidateProject(projectId));
         deleteJobs.enqueue(projectId, now);
         return new ProjectDeleteAcceptance(true, revoked);
     }
