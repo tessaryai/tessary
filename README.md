@@ -24,13 +24,21 @@ Agents develop production issues without crashing or returning an error. A promp
 
 ## Get running
 
-You need Docker Engine 26 or newer and Docker Compose v2.34 or newer. Then run one command, with nothing cloned and no `.env` to edit:
+Paste this into your coding agent:
+
+```text
+Self-host Tessary for me by following https://github.com/tessaryai/tessary/blob/main/setup.md
+```
+
+[`setup.md`](./setup.md) is written as instructions to an agent: install what's missing, bring every service up, verify the frontend, and hand back the URL. It needs Docker Engine 26 or newer and Docker Compose v2.34 or newer on the machine.
+
+Prefer to run it yourself? The same install is one command, with nothing cloned and no `.env` to edit:
 
 ```bash
 docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 ```
 
-Open <http://localhost> when `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Two of the shipped credentials are placeholders published in this repository, so this install is for a localhost test drive until you replace them. [Set up Tessary](./docs/self-hosting/setup.mdx) covers that, along with a custom domain, upgrades, and troubleshooting. Handing the install to a coding agent instead? [`setup.md`](./setup.md) is written as instructions to one.
+Either way, open <http://localhost> when `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Two of the shipped credentials are placeholders published in this repository, so this install is for a localhost test drive until you replace them. [Set up Tessary](./docs/self-hosting/setup.mdx) covers that, along with a custom domain, upgrades, and troubleshooting.
 
 ### 1. Point your agent's traces at it
 
