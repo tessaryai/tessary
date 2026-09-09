@@ -91,8 +91,8 @@ unset DOCKER_DEFAULT_PLATFORM 2>/dev/null || true
 GLUE="
 signup|Create the first account with an email and password (the page describes the sign-up screen; the harness posts the same form to /auth/signup)
 whoami|Tessary creates your organization and a Default project during sign-up (the harness reads their slugs from /auth/me and the project list, which the browser does on landing)
-mint|a Bearer token already minted (the connect gate mints a WRITE-scoped API key on mount; the harness calls the same endpoint with the same name and scope)
-token-substitution|Copy the Header field on the gate, keep the part after Bearer (the page's emit block carries <token>; the harness substitutes the minted value)
+mint|a Bearer token the gate's Create-and-copy control mints (a WRITE-scoped API key, minted on that click; the harness calls the same endpoint with the same name and scope)
+token-substitution|Take the Bearer Token field from the gate, keep the part after Bearer (the page's emit block carries <token>; the harness substitutes the minted value)
 ps|docker compose ps shows ... healthy (the Check; read through docker compose ps --format json)
 open|Open http://localhost ... The sign-up screen loads (the Check; one GET of the page's own address)
 logs|docker compose logs backend no longer carries the placeholder warning (the Check; one read of the backend log)
@@ -259,15 +259,15 @@ while IFS=$'\t' read -r -u 3 kind title payload; do
         fi
         if [ "$title" = "Generate a value for each and put them in .env" ]; then
             # Failure class 2, asserted: .env is .env.example plus exactly what the page's block adds
-            # (two TESSARY_ lines), plus the prerequisite line when the host needed it. Asserted before
+            # (three TESSARY_ lines), plus the prerequisite line when the host needed it. Asserted before
             # any enumerated --env-line is appended, so the page's own block is what is measured.
             extra="$(diff "$TMP/.env.example" "$TMP/.env" | grep '^>' | sed 's/^> //' || true)"
-            unexpected="$(printf '%s\n' "$extra" | grep -vE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
-            n_keys="$(printf '%s\n' "$extra" | grep -cE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' || true)"
-            if [ -n "$unexpected" ] || [ "$n_keys" -ne 2 ]; then
-                echo "$P: FAIL, after the page's .env block the file is not .env.example plus its two keys; extra lines: $(printf '%s' "$unexpected" | tr '\n' ' ') (keys added: $n_keys)" >&2; exit 1
+            unexpected="$(printf '%s\n' "$extra" | grep -vE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY|OBSERVER_AGENTIC_LAUNCHER_API_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
+            n_keys="$(printf '%s\n' "$extra" | grep -cE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY|OBSERVER_AGENTIC_LAUNCHER_API_KEY)=' || true)"
+            if [ -n "$unexpected" ] || [ "$n_keys" -ne 3 ]; then
+                echo "$P: FAIL, after the page's .env block the file is not .env.example plus its three keys; extra lines: $(printf '%s' "$unexpected" | tr '\n' ' ') (keys added: $n_keys)" >&2; exit 1
             fi
-            echo "$P: .env differs from .env.example by exactly the two keys the page's block appends${SOCK_GID:+, the DOCKER_SOCK_GID prerequisite line}${ENV_LINES:+ and the enumerated configuration-page line} (ok)"
+            echo "$P: .env differs from .env.example by exactly the three keys the page's block appends${SOCK_GID:+, the DOCKER_SOCK_GID prerequisite line}${ENV_LINES:+ and the enumerated configuration-page line} (ok)"
         fi
         if [ "$title" = "Connect your traces" ]; then
             _glue ladder

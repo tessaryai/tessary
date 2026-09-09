@@ -49,6 +49,7 @@ function deferred<T>() {
 }
 
 let ensureSampleProjectImpl: () => Promise<Project>;
+let createApiKeyCalls = 0;
 
 vi.mock("../../api/client", () => ({
   auth: {
@@ -58,7 +59,10 @@ vi.mock("../../api/client", () => ({
   projectApi: () => ({
     base: "/api/orgs/fake-org/projects/fake-project",
     substrateStatus: () => Promise.resolve(NOT_CONNECTED_STATUS),
-    createApiKey: () => Promise.resolve({ plaintext: "tsy_test_token" }),
+    createApiKey: () => {
+      createApiKeyCalls += 1;
+      return Promise.resolve({ plaintext: "tsy_test_token" });
+    },
     createSource: () => Promise.resolve({ id: "source-fake" }),
   }),
   orgApi: () => ({ base: "/api/orgs/fake-org" }),
@@ -90,6 +94,7 @@ function renderGate() {
 
 afterEach(() => {
   cleanup();
+  createApiKeyCalls = 0;
   vi.restoreAllMocks();
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
 });
@@ -131,27 +136,30 @@ describe("ConnectGate — sample-project link loading state", () => {
 });
 
 /*
- * The Bearer Token field shows an ELIDED token (`tsy_…oken`) so a full bearer secret is not sitting
- * in a screenshot, but the point of the button is to put the WHOLE token on the clipboard. The gate
- * used to get this by writing the elided value through CopyField and then racing a second write of
- * the real one behind it, with no confirmation either way; the field now takes an explicit `copyValue`.
+ * The Bearer Token field mints on the click that takes the value, not on mount — a mounted gate
+ * that nobody used must leave no key behind. Once minted it shows an ELIDED token (`tsy_…oken`) so
+ * a full bearer secret is not sitting in a screenshot, while the button puts the WHOLE token on the
+ * clipboard through the field's explicit `copyValue`.
  */
 describe("ConnectGate — copy affordances", () => {
-  it("copies the full bearer token, not the elided one, and says Copied", async () => {
+  it("mints nothing until the token control is clicked, then copies the full token", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
     renderGate();
 
-    const header = await screen.findByText(/^tsy_test/);
-    expect(header.textContent).not.toContain("tsy_test_token"); // elided on screen
+    const mint = await screen.findByRole("button", { name: "Create and copy" });
+    expect(createApiKeyCalls).toBe(0);
+    expect(screen.queryByText(/^tsy_test/)).toBeNull();
 
-    const copy = header.parentElement!.querySelector("button")!;
-    fireEvent.click(copy);
+    fireEvent.click(mint);
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("tsy_test_token"));
+    expect(createApiKeyCalls).toBe(1);
     expect(writeText).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(copy.textContent).toContain("Copied"));
+
+    const header = await screen.findByText(/^tsy_test/);
+    expect(header.textContent).not.toContain("tsy_test_token"); // elided on screen
   });
 
   it("copies the connect prompt", async () => {

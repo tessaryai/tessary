@@ -291,7 +291,14 @@ export function useIngestToken(emitAction?: (action: string) => void) {
     },
     onError: (err) => toast.error("Could not create token", err instanceof ApiError ? err.message : String(err)),
   });
-  return { token, issue: () => m.mutate(), issuing: m.isPending };
+  return {
+    token,
+    issue: () => m.mutate(),
+    // The gate mints from a click and puts the result straight on the clipboard, so it needs the
+    // plaintext back rather than only the state update `issue` leaves behind.
+    issueAsync: async () => (await m.mutateAsync()).plaintext,
+    issuing: m.isPending,
+  };
 }
 
 // ---- shared atoms ------------------------------------------------------------

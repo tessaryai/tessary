@@ -38,7 +38,7 @@ Prefer to run it yourself? The same install is one command, with nothing cloned 
 docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 ```
 
-Either way, open <http://localhost> when `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Two of the shipped credentials are placeholders published in this repository, so this install is for a localhost test drive until you replace them. [Set up Tessary](./docs/self-hosting/setup.mdx) covers that, along with a custom domain, upgrades, and troubleshooting.
+Either way, open <http://localhost> when `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Three of the shipped credentials are placeholders published in this repository, so this install is for a localhost test drive until you replace them. [Set up Tessary](./docs/self-hosting/setup.mdx) covers that, along with a custom domain, upgrades, and troubleshooting.
 
 ### 1. Point your agent's traces at it
 

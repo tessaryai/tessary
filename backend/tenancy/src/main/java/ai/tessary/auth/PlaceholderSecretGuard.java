@@ -24,12 +24,13 @@ import org.springframework.stereotype.Component;
  * with no signal at all. A documented placeholder keeps backup and restore whole, and keeps the key
  * visible to the operator who owns it.
  *
- * <p><b>This class is what makes that defensible.</b> The two defaults below are published in our
+ * <p><b>This class is what makes that defensible.</b> The three defaults below are published in our
  * own repository, so an instance still running them is not "weakly configured", it is open: anyone
- * can forge a session cookie against the first, and decrypt every stored provider API key with the
- * second. That is an acceptable state on the localhost box the quickstart describes and nowhere
- * else, so the boundary this guard draws is exactly that: a placeholder is permitted while the
- * instance has no domain, and fatal the moment it has one.
+ * can forge a session cookie against the first, decrypt every stored provider API key with the
+ * second, and drive the sandbox launcher with the third. That is an acceptable state on the
+ * localhost box the quickstart describes and nowhere else, so the boundary this guard draws is
+ * exactly that: a placeholder is permitted while the instance has no domain, and fatal the moment
+ * it has one.
  *
  * <p><b>Not gated on the {@code production} profile</b>, unlike {@link AuthRequiredInProdGuard}. The
  * exposure is a property of being reachable, not of which profile booted, and a non-production boot
@@ -122,8 +123,8 @@ public class PlaceholderSecretGuard {
         log.warn(
                 "Running on the shipped placeholder value for {}. Those defaults are public, so this instance "
                         + "is safe only while it stays on localhost and holds nothing real. Generate a replacement "
-                        + "for each with `openssl rand -base64 32` before it does. Setting SITE_DOMAIN with either "
-                        + "still in place refuses the boot.",
+                        + "for each with `openssl rand -base64 32` before it does. Setting SITE_DOMAIN with any of "
+                        + "them still in place refuses the boot.",
                 String.join(" and ", stillDefault));
     }
 }
