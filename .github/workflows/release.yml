@@ -61,13 +61,23 @@
 # carries BOTH platforms: D3's own gate requires a distinct step that CAN go red, not an assertion
 # true by construction, and a merge that half-succeeded is exactly what it is looking for.
 #
-# `<service>-latest` AND THE GIT TAG MOVE LAST, in finalize, after the compose artifact is out.
-# Everything before that point is additive — new tags nobody was using — so a failure anywhere in
-# it leaves no alias pointing somewhere new and no tag claiming a version that did not ship, and
-# the cleanup job can simply delete what THIS RUN created. Repointing `-latest` mid-run is not
-# undoable by deletion (removing the alias is worse than leaving it moved), which is why it does
-# not happen mid-run any more. Run 34332530449 left `backend-latest` on 0.2.0 with the other three
-# services carrying no `-latest` at all; this ordering is what makes that state unreachable.
+# FINALIZE IS THE COMMIT POINT, and the whole job order is built around it. Everything BEFORE it is
+# additive — new tags nobody was using — so a failure there leaves no alias pointing somewhere new,
+# no tag claiming a version that did not ship, and nothing the cleanup job cannot simply delete.
+# Finalize itself does the two writes that deletion cannot undo: it repoints the four
+# `<service>-latest` (removing a moved alias is worse than leaving it moved) and pushes the git tag
+# `v<version>` (which makes the version unreleasable again). Run 34332530449 left `backend-latest`
+# on 0.2.0 with the other three services carrying no `-latest` at all; this ordering is what makes
+# that state unreachable.
+#
+# AND IT IS WHY publish-compose RUNS AFTER FINALIZE, not before it. The compose artifact NAMES
+# `<service>-<version>`, and cleanup deletes exactly those tags when a run does not commit. Publish
+# the config first and a finalize failure would leave the floating `compose` tag — the one the
+# marketing site publishes — resolving to a config whose images had just been deleted, breaking the
+# one-command install for everyone until the next release. So the config is written only once the
+# images it names are permanent, which is precisely what finalize succeeding means. cleanup's own
+# gate is the same fact read the other way: it removes version tags only when finalize did NOT
+# succeed.
 #
 # THE COMPOSE ARTIFACT (epic 7's one-command install). After the images are merged and tagged, this
 # workflow publishes docker-compose.yml itself to Docker Hub as an OCI artifact under
@@ -75,10 +85,10 @@
 #
 #   docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 #
-# ORDERING IS THE GUARANTEE, and it is why publish-compose `needs: verify-manifests` rather than
-# running beside the builds: the config is published only after every image it names exists and has
-# been proven to resolve, so a `compose` tag can never resolve to a config whose images are not
-# there. The reverse staleness — a config OLDER than the images — is impossible by construction,
+# ORDERING IS THE GUARANTEE, and it is why publish-compose `needs: finalize` rather than running
+# beside the builds: the config is published only after every image it names exists, has been proven
+# to resolve, and has been committed to, so a `compose` tag can never resolve to a config whose
+# images are not there. The reverse staleness — a config OLDER than the images — is impossible by construction,
 # because scripts/publish-compose-artifact.sh stamps the file's floating `${TESSARY_VERSION:-latest}`
 # defaults with THIS release's version (scripts/lib/pin-compose-version.py) before publishing it —
 # so a `compose` tag always carries a config pinned to its own release or newer, and the repository
@@ -473,9 +483,11 @@ jobs:
   publish-compose:
     name: Publish the compose artifact (the one-command install)
     runs-on: ubuntu-24.04
-    # AFTER verify-manifests, deliberately — see the header. The config must never name images that
-    # have not been proven to resolve.
-    needs: [preflight, merge-manifests, verify-manifests]
+    # AFTER FINALIZE, deliberately — see the header. This config names `<service>-<version>`, and
+    # those tags are only permanent once finalize has committed the release; published any earlier,
+    # a finalize failure would leave the floating `compose` tag pointing at images cleanup had just
+    # deleted.
+    needs: [preflight, merge-manifests, verify-manifests, finalize]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/login-action@v4
@@ -517,12 +529,15 @@ jobs:
   # here and nowhere else: the four `<service>-latest` aliases move, and the git tag `v<version>` —
   # the single source of truth for a published version — is pushed. Neither is undoable by the
   # cleanup job (deleting a moved alias is worse than the move; a pushed tag makes the version
-  # unreleasable again), so both wait until every image exists, resolves, carries both arches, and
-  # the compose artifact naming them is published and rendering.
+  # unreleasable again), so both wait until every image exists, resolves and carries both arches.
+  #
+  # Reaching this job green is what MAKES `<service>-<version>` permanent, and everything that
+  # depends on those tags staying put — publish-compose above all — is downstream of it for that
+  # reason. See the header.
   finalize:
     name: Repoint -latest and push the release tag
     runs-on: ubuntu-24.04
-    needs: [preflight, merge-manifests, verify-manifests, publish-compose]
+    needs: [preflight, merge-manifests, verify-manifests]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -559,7 +574,9 @@ jobs:
   github-release:
     name: Publish the GitHub Release
     runs-on: ubuntu-24.04
-    needs: [preflight, finalize]
+    # The Release announces the install command, so it waits on the artifact that command fetches —
+    # publish-compose, which in turn waits on finalize, so the tag this names is already pushed.
+    needs: [preflight, publish-compose]
     steps:
       # NO CHECKOUT. `gh release create` works over the API against --repo, the tag it names is
       # already on the remote (finalize pushed it), and --generate-notes builds the changelog
@@ -588,14 +605,20 @@ jobs:
   # version, so no earlier release's tags are reachable from this job at all.
   #
   # Two modes, one job:
-  #   release succeeded  ->  the eight arch-suffixed scratch tags go. They exist to be merged and
-  #                          for nothing else; left alone they pile up eight per release on a
-  #                          PUBLIC repository, where `backend-<version>-amd64` reads like a
-  #                          legitimate thing to pull and hands whoever pulls it an image that will
-  #                          not run on their machine.
-  #   anything went red  ->  the four `<service>-<version>` manifests go too, so a half-finished
-  #                          release leaves no version tag behind and the same version can be
-  #                          dispatched again cleanly.
+  #   finalize succeeded  ->  the eight arch-suffixed scratch tags go, and NOTHING ELSE. They exist
+  #                           to be merged and for nothing else; left alone they pile up eight per
+  #                           release on a PUBLIC repository, where `backend-<version>-amd64` reads
+  #                           like a legitimate thing to pull and hands whoever pulls it an image
+  #                           that will not run on their machine.
+  #   finalize did not    ->  the four `<service>-<version>` manifests go too, so a half-finished
+  #                           release leaves no version tag behind and the same version can be
+  #                           dispatched again cleanly.
+  #
+  # THE GATE IS FINALIZE, NOT THE RUN'S OVERALL RESULT, and the difference is load-bearing. Once
+  # finalize is green the release is committed: `<service>-latest` points at those manifests and
+  # publish-compose has named them in an artifact that outlives this run. Deleting them because a
+  # later job went red would break both. A failure AFTER finalize therefore keeps every version tag
+  # and leaves a human a coherent release to finish by hand.
   #
   # `<service>-latest` is touched in NEITHER mode, and never needs to be: finalize is the only job
   # that moves it, nothing runs after finalize but the announcement, and a run that died before
@@ -628,6 +651,7 @@ jobs:
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          FINALIZE_RESULT: ${{ needs.finalize.result }}
           RELEASE_RESULT: ${{ needs.github-release.result }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -643,10 +667,13 @@ jobs:
           for service in $SERVICES; do
             tags+=("${service}-${VERSION}-amd64" "${service}-${VERSION}-arm64")
           done
-          if [ "$RELEASE_RESULT" = success ]; then
-            echo "Release ${VERSION} succeeded; removing its scratch arch tags."
+          if [ "$FINALIZE_RESULT" = success ]; then
+            echo "finalize succeeded, so ${VERSION} is committed (-latest moved, tag pushed, and the"
+            echo "compose artifact may name these images). Removing the scratch arch tags only."
+            echo "  github-release: ${RELEASE_RESULT}"
           else
-            echo "Run did not complete (github-release: ${RELEASE_RESULT}); removing this run's version tags too."
+            echo "finalize did not succeed (${FINALIZE_RESULT}); nothing downstream can be holding a"
+            echo "reference, so this run's version tags go with the scratch ones."
             for service in $SERVICES; do tags+=("${service}-${VERSION}"); done
           fi
 
