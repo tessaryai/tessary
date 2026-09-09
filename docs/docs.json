@@ -26,7 +26,8 @@
       {
         "group": "Get started",
         "pages": [
-          "index"
+          "index",
+          "open-edition"
         ]
       },
       {
@@ -69,5 +70,29 @@
         ]
       }
     ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Releases",
+        "href": "https://github.com/tessaryai/tessary/releases",
+        "icon": "tag"
+      },
+      {
+        "label": "License",
+        "href": "https://github.com/tessaryai/tessary/blob/main/LICENSE",
+        "icon": "scale-balanced"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/tessaryai/tessary"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/tessaryai/tessary",
+      "website": "https://tessary.ai"
+    }
   }
 }
