@@ -57,10 +57,19 @@ VERSION="$(git -C "$ROOT" tag --list 'v[0-9]*' --sort=-v:refname 2>/dev/null | h
 VERSION="${VERSION#v}"
 REPOS=()
 DRY_RUN=0
+# WHICH OF THE TWO TAGS TO WRITE. They are not interchangeable: `compose-<version>` is new on every
+# release and can be deleted again, while `compose` is a FLOATING ALIAS that already points at the
+# previous release and cannot be rolled back by deleting it. release.yml therefore writes the
+# pinned one before it commits (so a publish that does not work fails while everything is still
+# reversible) and the floating one only in finalize, alongside `<service>-latest`. `both` stays the
+# default so a human running this by hand against an already-tagged release gets both.
+TAGS=both
 for arg in "$@"; do
     case "$arg" in
         --repo=*) REPOS+=("${arg#--repo=}") ;;
         --version=*) VERSION="${arg#--version=}" ;;
+        --tags=pinned|--tags=floating|--tags=both) TAGS="${arg#--tags=}" ;;
+        --tags=*) echo "$P: --tags takes pinned, floating or both" >&2; exit 2 ;;
         --dry-run) DRY_RUN=1 ;;
         *) echo "$P: unknown argument '$arg'" >&2; exit 2 ;;
     esac
@@ -90,9 +99,14 @@ python3 "$ROOT/scripts/lib/strip-compose-build.py" docker-compose.yml "$STRIPPED
 python3 "$ROOT/scripts/lib/pin-compose-version.py" "$STRIPPED" "$PINNED" "$VERSION"
 mv "$PINNED" "$STRIPPED"
 
+case "$TAGS" in
+    pinned)   WANT=("compose-${VERSION}") ;;
+    floating) WANT=("compose") ;;
+    both)     WANT=("compose" "compose-${VERSION}") ;;
+esac
 REFS=()
 for repo in "${REPOS[@]}"; do
-    for tag in "compose" "compose-${VERSION}"; do
+    for tag in "${WANT[@]}"; do
         REFS+=("${repo}:${tag}")
     done
 done
@@ -124,8 +138,27 @@ for ref in "${REFS[@]}"; do
         continue
     fi
     echo "$P: publishing $ref"
-    docker compose -f "$STRIPPED" publish -y "$ref"
+    # `yes |` IS LOAD-BEARING, and `-y` alone is not enough. `-y` answers the variables prompt;
+    # the file also declares a bind mount (the docker socket, which check-compose-artifact.sh
+    # allows by name) and THAT prompt is separate. On a runner it reads EOF, defaults to No, and
+    # `docker compose publish` then EXITS 0 HAVING WRITTEN NOTHING — which is how run
+    # 34336599569 printed "published" for two tags that were never created. Same TTY-gated trap
+    # as the `-y` on the `up` command in check-compose-artifact.sh's own note.
+    yes | docker compose -f "$STRIPPED" publish -y "$ref"
 done
 
 [ "$DRY_RUN" = 1 ] && exit 0
-echo "$P: published compose + compose-${VERSION} to: ${REPOS[*]}"
+
+# PUBLISHING IS NOT BELIEVED, IT IS CHECKED. The exit code above has already been observed to be 0
+# for a publish that silently did nothing, so the only trustworthy evidence is the registry saying
+# the tag is there and is a compose artifact.
+for ref in "${REFS[@]}"; do
+    if raw=$(docker buildx imagetools inspect "$ref" --raw 2>/dev/null) \
+       && printf '%s' "$raw" | grep -q 'application/vnd.docker.compose.file+yaml'; then
+        echo "$P: ok       $ref is published and is a compose artifact"
+    else
+        echo "$P: FAILED — $ref did not publish; the registry does not hold a compose artifact there." >&2
+        exit 1
+    fi
+done
+echo "$P: published ${WANT[*]} to: ${REPOS[*]}"
