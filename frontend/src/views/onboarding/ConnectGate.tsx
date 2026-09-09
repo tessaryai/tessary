@@ -366,9 +366,9 @@ function MintTokenField({ pending, onMint }: { pending: boolean; onMint: () => v
           type="button"
           variant="secondary"
           size="sm"
-          disabled={pending}
+          loading={pending}
           onClick={onMint}
-          leadingIcon={pending ? <Spinner size="sm" /> : <Copy size={13} strokeWidth={1.8} aria-hidden="true" />}
+          leadingIcon={<Copy size={13} strokeWidth={1.8} aria-hidden="true" />}
           className="font-medium flex-none"
         >
           {pending ? "Creating" : "Create and copy"}

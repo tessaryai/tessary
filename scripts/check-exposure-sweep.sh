@@ -371,11 +371,11 @@ done
 echo "$P: arm 5 done, $n5 probes"
 
 # ---- arm 2, second half: the shipped keys refuse a real host --------------------------------
-# docker-compose.yml ships its two sealing keys as public placeholders on purpose, so the
-# credential that "still authenticates after first boot" is the session cookie anyone could forge
-# against them. PlaceholderSecretGuard is what makes that defensible: with SITE_DOMAIN set to a
-# real hostname and either key still at its default, the backend must refuse to start, naming the
-# key. Proven here by re-creating the backend under a domain and watching it refuse.
+# docker-compose.yml ships three keys as public placeholders on purpose, so the credential that
+# "still authenticates after first boot" is the session cookie anyone could forge against them.
+# PlaceholderSecretGuard is what makes that defensible: with SITE_DOMAIN set to a real hostname
+# and any of them still at its default, the backend must refuse to start, naming the key. Proven
+# here by re-creating the backend under a domain and watching it refuse.
 echo "$P: arm 2b, the shipped placeholder keys must refuse to boot under a real domain"
 (cd "$TMP" && env "${_empty_cred_assignments[@]}" SITE_DOMAIN=sweep.example.invalid $COMPOSE up -d --no-build backend) >/dev/null 2>&1 || true
 refused=0

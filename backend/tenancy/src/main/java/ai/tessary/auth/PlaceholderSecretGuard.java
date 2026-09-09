@@ -116,7 +116,7 @@ public class PlaceholderSecretGuard {
             throw new IllegalStateException("Refusing to start: this instance is served on " + domain.trim()
                     + ", and " + String.join(" and ", stillDefault) + " still hold the placeholder value "
                     + "docker-compose.yml ships. Those defaults are published in Tessary's own repository, so "
-                    + "anyone can forge a session against this instance and read every credential it has sealed. "
+                    + "an instance still running them is readable and drivable by anyone who reaches it. "
                     + "Generate a replacement for each with `openssl rand -base64 32` and set it in .env, or "
                     + "unset SITE_DOMAIN to run on localhost only.");
         }

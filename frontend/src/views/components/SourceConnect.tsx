@@ -262,12 +262,12 @@ function ExporterSnippets({ endpoint, token }: { endpoint: string; token: string
  * ingest (POST /v1/traces) is the only surface an exporter needs, so callers must never hand the
  * broadest (admin) family to something that only pushes spans.
  *
- * <p>{@link OtlpConnect} only ever calls the returned `issue` from the visible "Create a connection
- * token" button — a revisitable settings surface must not mint a fresh key on every render.
- * `ConnectGate` (the first-run gate) is the one caller that auto-issues on mount instead,
- * because its design has no button for it: the header field is always populated, never a
- * call-to-action. Exported for that one caller; every other consumer of this file keeps using
- * {@link OtlpConnect} whole.
+ * <p>Both callers issue from a visible control, never on mount — a surface that mints a fresh key
+ * on every render leaves live keys behind that nobody asked for. {@link OtlpConnect} calls `issue`
+ * from its "Create a connection token" button; `ConnectGate` (the first-run gate) calls
+ * `issueAsync` from the Bearer Token field's own control, because it puts the plaintext on the
+ * clipboard on that click and so needs the value back. Exported for that one caller; every other
+ * consumer of this file keeps using {@link OtlpConnect} whole.
  */
 export function useIngestToken(emitAction?: (action: string) => void) {
   const api = useProjectApi();

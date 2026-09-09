@@ -11,8 +11,9 @@
 #   bash scripts/quickstart.sh
 #
 # No .env required. This script still does not GENERATE secrets, and the reason it never
-# should is unchanged: the two sealing keys are what every session cookie and every stored provider
-# credential are sealed with, and a script that invents a different value on each run (or on every
+# should is unchanged: the three placeholder keys seal every session cookie and every stored
+# provider credential, and authenticate the backend to the sandbox launcher, and a script that
+# invents a different value on each run (or on every
 # `docker compose down && up`, having written nothing durable) locks the operator out of their own
 # data. What changed is that refusing to start is no longer the alternative — docker-compose.yml
 # ships a documented placeholder for each, so a localhost test drive needs no configuration at all,

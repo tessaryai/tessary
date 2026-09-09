@@ -56,7 +56,7 @@ Changing this key makes everything already sealed with the old one unreadable, s
 | `WORKOS_CLIENT_ID` | WorkOS client ID, for bring-your-own SSO. | Optional, ships blank |
 
 <Warning>
-  `TESSARY_AUTH_COOKIE_PASSWORD` is the more urgent of the two placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
+  `TESSARY_AUTH_COOKIE_PASSWORD` is the most urgent of the three placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
 </Warning>
 
 <Note>
@@ -141,6 +141,7 @@ Both ship blank, and in the open edition they stay blank: the model weights clas
 | `SANDBOX_BACKEND` | Where sandbox-runner launches sandboxed agent sessions: `docker` (sibling containers), `e2b` (Tessary-hosted microVMs), or `local` (the host's logged-in `claude`). | `docker` |
 | `SANDBOX_WORK_VOLUME` | Name of the Docker volume sandbox-runner shares with the sibling containers it spawns. The launcher hands this exact string to the Engine API, so it is the volume's real name and not a project-prefixed one. | `tessary-sandbox-work` |
 | `AGENT_PROVIDER` | Where the sandboxed agent runs: unset for SigV4 Bedrock, `anthropic` for the first-party Anthropic API, or `bedrock-api-key` for Bedrock over a bearer token. | Unset (SigV4 Bedrock) |
+| `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` | The bearer the backend presents to the sandbox launcher, and the launcher checks it against. Anyone holding the published default can drive the launcher into spawning containers on the host, so replace it before the instance holds anything real: see [Secure the instance](/self-hosting/setup#secure-the-instance). | A placeholder, published in `docker-compose.yml` |
 
 ## GitHub integration
 
