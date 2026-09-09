@@ -7,12 +7,12 @@
 Storage is treated as a **migration, not greenfield**. We ship a **tuned-Postgres** interim and
 adopt **ClickHouse** only when a quantified volume threshold is crossed — never on intuition.
 (The vector-corpus trigger this gate used to carry alongside the ones below, tracking pgvector
-behind the `VectorIndex` SPI, was retired with the rest of the vector substrate — #1116. This
+behind the `VectorIndex` SPI, was retired with the rest of the vector substrate. This
 gate now governs only the trace substrate.)
 
 **There is no longer a seam to swap.** A `TraceStore` SPI used to sit in front of the substrate
-so adoption would be a bean swap; its last remaining method was `insertVerdict`, so Track A
-removed the interface with the `verdict` table and the write path is plain Postgres code now.
+so adoption would be a bean swap; its last remaining method was `insertVerdict`, so removing the
+`verdict` table took the interface with it, and the write path is plain Postgres code now.
 A columnar adoption is therefore real work — repository by repository — not a configuration
 change. Say that honestly when proposing one.
 
@@ -42,7 +42,7 @@ the triggers below fires; until then, the answer is "tune Postgres."
 
 ## Configuration keys (this seam)
 
-**None.** There is no store-selection key and no interface behind one — `evals.storage.trace-store`
+**None.** There is no store-selection key and no interface behind one — `tessary.storage.trace-store`
 was reserved for a gate that never landed, and the `TraceStore` SPI it would have selected is gone.
 A key here is something the ClickHouse work would introduce along with the seam it selects, not
 something a deployment can set today.

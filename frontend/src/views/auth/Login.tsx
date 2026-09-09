@@ -8,7 +8,7 @@ import { ApiError } from "../../api/types";
 import { Button, Field, Input, Spinner } from "../../ui";
 
 /**
- * The frontend's own {@code /login} screen (#853) — the backend's {@code GET /auth/login} degrade
+ * The frontend's own {@code /login} screen — the backend's {@code GET /auth/login} degrade
  * branch now bounces here instead of the app root, which is what breaks the redirect loop
  * ProtectedRoute used to walk an unauthenticated visitor into (app root → ProtectedRoute →
  * /auth/login → app root → …). This view itself is deliberately mounted OUTSIDE ProtectedRoute and
@@ -19,14 +19,14 @@ import { Button, Field, Input, Spinner } from "../../ui";
  *   1. already signed in → redirect straight past this screen (returnTo, or "/").
  *   2. the active provider drives a redirect flow (WorkOS) → bounce to {@code auth.loginUrl()}
  *      immediately, same as the old app-root behavior, rather than render a form nobody can submit.
- *   3. the deployment has no account yet ({@code firstRun}, #1227) → hand the visitor to
+ *   3. the deployment has no account yet ({@code firstRun}) → hand the visitor to
  *      {@code /signup}, which is the only thing they can do here.
- *   4. otherwise → the email/password form, against the endpoints #852 already shipped.
+ *   4. otherwise → the email/password form, against the endpoints already shipped.
  */
 export function Login() {
   const [params] = useSearchParams();
   const returnTo = params.get("returnTo") ?? undefined;
-  // GET /auth/callback lands here with the reason when the sign-up policy refused a new account (#1226).
+  // GET /auth/callback lands here with the reason when the sign-up policy refused a new account.
   const refused = params.get("error") === "signup_refused";
   const nav = useNavigate();
   const { isAuthenticated, refetch } = useAuth();
@@ -57,8 +57,8 @@ export function Login() {
   }
 
   if (mode.data?.redirectFlow && refused) {
-    // GET /auth/callback sent the visitor here because the sign-up policy refused a new account
-    // (#1226). Under a redirect-flow provider this screen would otherwise bounce straight back into
+    // GET /auth/callback sent the visitor here because the sign-up policy refused a new account.
+    // Under a redirect-flow provider this screen would otherwise bounce straight back into
     // the provider, which returns to the same callback: a loop the visitor could never read. Show
     // the reason and let them choose to try again, after an administrator has invited them.
     return (
@@ -91,7 +91,7 @@ export function Login() {
   }
 
   if (mode.data?.firstRun) {
-    // Nobody has an account on this deployment yet, so a sign-in form is a dead end (#1227). The
+    // Nobody has an account on this deployment yet, so a sign-in form is a dead end. The
     // backend sends the common path -- an unauthenticated hit on the app root, via GET /auth/login
     // -- straight to /signup, so this covers the rest: a typed or bookmarked /login. It runs before
     // the form has ever rendered, so there is nothing for the visitor to see flicker.

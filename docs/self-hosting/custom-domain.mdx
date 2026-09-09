@@ -17,15 +17,15 @@ In `.env` beside `docker-compose.yml`:
 SITE_DOMAIN=tessary.acme-corp.com
 ```
 
-A bare hostname: no `https://`, no port, no path. A scheme-prefixed value is refused at boot with the key named, because the stack builds the full origin itself wherever it needs one. Setting `SITE_DOMAIN` also arms the placeholder-key guard: both sealing keys must be your own before the instance answers on a real hostname, as [Secure the instance](/self-hosting/setup#secure-the-instance) describes.
+A bare hostname: no `https://`, no port, no path. A scheme-prefixed value is refused at boot with the key named, because the stack builds the full origin itself wherever it needs one. Setting `SITE_DOMAIN` also arms the placeholder-key guard: all three placeholder keys must be your own before the instance answers on a real hostname, as [Secure the instance](/self-hosting/setup#secure-the-instance) describes.
 
 From `SITE_DOMAIN`, the backend derives:
 
 | Derived | Value | Override |
 | --- | --- | --- |
-| Sign-in and sign-out landing | `https://tessary.acme-corp.com/` | `EVALS_AUTH_FRONTEND_URL`, which must then name the same host |
+| Sign-in and sign-out landing | `https://tessary.acme-corp.com/` | `TESSARY_AUTH_FRONTEND_URL`, which must then name the same host |
 | WorkOS callback | `https://tessary.acme-corp.com/auth/callback` | `WORKOS_REDIRECT_URI`, same rule, checked only when WorkOS is configured |
-| Agentic lanes' callback origin | `https://tessary.acme-corp.com` | `EVALS_RCA_AGENTIC_MCP_BASE_URL` and `EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL`, each of which must then name the same host |
+| Agentic lanes' callback origin | `https://tessary.acme-corp.com` | `TESSARY_RCA_AGENTIC_MCP_BASE_URL` and `TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL`, each of which must then name the same host |
 
 An override that names a different host, `localhost` included, refuses the boot, naming the key beside `SITE_DOMAIN`, so a domain change cannot leave a stale origin behind. The backend logs the resolved set on every boot as `public origin https://… from SITE_DOMAIN=…`.
 

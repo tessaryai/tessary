@@ -10,7 +10,7 @@
  * and the llm inputs of one trace are prefix-nested (arr[3] ⊂ arr[5] ⊂ arr[31]),
  * because every tool round-trip re-sends everything before it. Rendering each
  * span's payload independently therefore prints the same history once per span
- * and prints the turn itself twice — once from the agent, once as the tail of
+ * and prints the turn itself twice, once from the agent, once as the tail of
  * the llm call.
  *
  * So the view is planned for the trace, not the span: one transcript, each
@@ -40,7 +40,7 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.i
  * check that for you" *and* emits `tool_use` blocks in the same message.
  * Flattening the whole thing loses the structure; refusing to flatten any of it
  * loses the sentence. So prose renders as prose, and the blocks this cannot
- * speak for — `tool_use`, `tool_result`, images — go to {@link PayloadBody},
+ * speak for, `tool_use`, `tool_result`, images, go to {@link PayloadBody},
  * which shows structure and decodes images rather than dropping them.
  *
  * Returns null when `content` is neither string nor array, leaving the caller to
@@ -76,7 +76,7 @@ function splitContent(content: unknown): ContentSplit | null {
 
 /**
  * A roleless payload is the content-block array itself; a roled one nests it
- * under `content` (OpenAI/Anthropic) or under `parts` — the shape the OTLP
+ * under `content` (OpenAI/Anthropic) or under `parts`, the shape the OTLP
  * receiver normalises to and the one `ContentExtractor` reads on the backend.
  * Reading only `content` left every `parts` trace with no body at all, so the
  * whole message fell through to being printed as raw JSON.
@@ -104,7 +104,7 @@ function signatureOf(message: ChatMessage): string {
  * prompt caching, so one assistant turn reaches us as
  * `{id, caller, input, name, type}` from the llm span that produced it and as
  * `{id, caller, input, name, type, cache_control}` from the span that replayed
- * it. Same turn, different bytes — enough to defeat dedup and print it twice.
+ * it. Same turn, different bytes, enough to defeat dedup and print it twice.
  */
 const TRANSPORT_KEYS = new Set(["cache_control"]);
 
@@ -126,7 +126,7 @@ const isToolBlock = (b: unknown): boolean =>
 /**
  * True when this is a person talking. A `tool_result` is delivered under
  * `role:"user"` by both major SDKs, so role alone would put the tool's output in
- * the human's seat — right-aligned and labelled USER, which is what made the
+ * the human's seat, right-aligned and labelled USER, which is what made the
  * transcript look like it was swapping sides.
  */
 function isHumanSpeech(message: ChatMessage): boolean {
@@ -140,7 +140,7 @@ function isHumanSpeech(message: ChatMessage): boolean {
 
 /**
  * How a message is labelled and placed. An llm span's own output carries no
- * role — it is a bare content-block array — but it is still the assistant
+ * role, it is a bare content-block array, but it is still the assistant
  * speaking, and leaving it blank put an unlabelled bubble next to an identical
  * labelled one further down the same transcript.
  */
@@ -169,7 +169,7 @@ export type SpanPlan = {
 };
 
 export type ConversationPlan = {
-  /** Dialogue that precedes this trace's turn — real, but not what the reader came for. */
+  /** Dialogue that precedes this trace's turn, real, but not what the reader came for. */
   prior: ChatMessage[];
   bySpan: Map<string, SpanPlan>;
 };
@@ -189,7 +189,7 @@ function chronological(spans: Span[]): Span[] {
 /**
  * Decide, once for the whole trace, who says what and where the history stops.
  *
- * The fullest input in the trace is the complete transcript — the last llm call
+ * The fullest input in the trace is the complete transcript, the last llm call
  * re-sends everything. Everything in it before the final human turn is prior
  * context; from that turn on is this trace. Each span then keeps only what no
  * earlier span already showed.
@@ -264,12 +264,12 @@ export function messageItems(messages: ChatMessage[]): ChatItem[] {
  * Two records exist and neither is complete on its own. The model's output is
  * the authoritative statement of what was *requested*; the `execute_tool` span
  * is the record of what actually *ran*, with the latency and outcome. Traces
- * exist with one and not the other — one in forty here calls a tool, gets its
- * result back, and records no tool span at all — so reading only the spans
+ * exist with one and not the other, one in forty here calls a tool, gets its
+ * result back, and records no tool span at all, so reading only the spans
  * showed no tool calls whatsoever for that turn.
  *
  * So: walk the requests, claim a matching span for each where one exists, and
- * keep any span nothing claimed. Attribution is exact — the span carries the
+ * keep any span nothing claimed. Attribution is exact, the span carries the
  * request's own id as `gen_ai.tool.call.id` (OTel GenAI semconv), which matched
  * 15/15 requests across the sampled traces. Name-and-order is only the fallback
  * for a producer that omits it, and mismatches whenever a tool is called twice.
@@ -287,7 +287,7 @@ export function planTools(spans: Span[]): ToolPlan {
   const ordered = chronological(spans);
 
   // A tool's result reaches us in the *next* call's input, never in its own span
-  // when that span is missing — so harvest every replayed input in the trace.
+  // when that span is missing, so harvest every replayed input in the trace.
   const results = new Map<string, string>();
   for (const o of ordered) {
     const msgs = chatMessages(o.input);
@@ -405,7 +405,7 @@ function isOnlyToolResults(message: ChatMessage): boolean {
  * Flatten messages into what the reader sees.
  *
  * `deriveTools` is false wherever the trace also recorded `execute_tool` spans
- * for the same calls — those spans carry the real latency and outcome, so the
+ * for the same calls, those spans carry the real latency and outcome, so the
  * embedded `tool_use` blocks are dropped rather than shown twice. It is true for
  * prior context, where the earlier turns' spans are not part of this trace and
  * the message blocks are the only record left.
@@ -421,7 +421,7 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
     const toolUses = Array.isArray(content) ? content.filter((b) => blockType(b) === "tool_use") : [];
     // A tool's request and its answer are both shown as a pill, so neither
     // belongs in the bubble. `isOnlyToolResults` above drops the messages that
-    // are nothing but transport; this drops the block from a *mixed* message —
+    // are nothing but transport; this drops the block from a *mixed* message,
     // the one that carries a `tool_result` alongside an `image_ref`, where the
     // reader wants the screenshot and not the JSON wrapped around it.
     const rest = (split?.rest ?? []).filter(
@@ -437,7 +437,7 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
 
     // Without `deriveTools` the trace has real `execute_tool` spans for these
     // calls; emitting a row here too would show each call once per llm span
-    // that carries it — three times over, for a two-step agent.
+    // that carries it, three times over, for a two-step agent.
     if (!deriveTools) return;
 
     for (const [ti, block] of toolUses.entries()) {
@@ -521,7 +521,7 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-/** Rendered dialogue for a run of items — the caller decides there are any. */
+/** Rendered dialogue for a run of items, the caller decides there are any. */
 export function ChatItems({ items, failed }: { items: ChatItem[]; failed?: boolean }) {
   return <Items items={items} failed={failed} />;
 }
@@ -553,7 +553,7 @@ function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; 
 /**
  * Ten lines of the bubble's own line-height. A pasted skill prompt or a dumped
  * file runs to hundreds of lines, and one such message pushed every turn after
- * it off the screen — the transcript stopped being scannable. Ten is enough to
+ * it off the screen, the transcript stopped being scannable. Ten is enough to
  * recognise a message and decide whether to open it.
  */
 const CLAMP_EM = 16.5;
@@ -562,7 +562,7 @@ const CLAMP_EM = 16.5;
  * A message folded to {@link CLAMP_EM}, with the rest one click away.
  *
  * The height is measured rather than guessed from the text, because a bubble is
- * not only prose — a markdown table, a code block and a JSON tree all render
+ * not only prose, a markdown table, a code block and a JSON tree all render
  * here, and counting characters would clamp some messages that fit and leave
  * others overflowing. The observer is on the *content*, not the clamped box,
  * whose height is pinned and would therefore never report a change.
@@ -603,7 +603,7 @@ function Clamped({ children }: { children: React.ReactNode }) {
         <div ref={inner}>{children}</div>
         {folded && (
           // The fade says "there is more" before the reader gets to the button,
-          // and it has to match whichever side's bubble it sits in — hence the
+          // and it has to match whichever side's bubble it sits in, hence the
           // custom property the bubble sets rather than a hard-coded colour.
           <div
             aria-hidden="true"

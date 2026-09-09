@@ -1,5 +1,5 @@
-# Hosts the served frontend bundle NAMES as strings without ever fetching from them (epic 7
-# clause 9, #1197). scripts/check-zero-egress.sh's served-page vantage reds on any host string in
+# Hosts the served frontend bundle NAMES as strings without ever fetching from them.
+# scripts/check-zero-egress.sh's served-page vantage reds on any host string in
 # the HTML, stylesheets or scripts Caddy serves that is not on this list, so a new foreign origin
 # in the bundle, fetched or not, is a decision recorded here rather than a surprise.
 # Row shape: <host>|<why it is named>

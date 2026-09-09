@@ -208,8 +208,8 @@ otelcol.auth.basic "langfuse" {
   // config-evaluation error ("no credential source provided"), not a runtime 401,
   // taking the whole agent down on load exactly like the endpoint bug this file's own
   // header already documents. Caught by an independent live-boot re-verification with
-  // blank Langfuse env vars during #864's landing, after the endpoint-only fix left
-  // this parallel block unfixed.
+  // blank Langfuse env vars, after the endpoint-only fix left this parallel block
+  // unfixed.
   username = coalesce(env("LANGFUSE_PUBLIC_KEY"), "disabled")
   password = coalesce(env("LANGFUSE_SECRET_KEY"), "disabled")
 }

@@ -1,17 +1,25 @@
-# Namespace ownership recheck (epic 6 clause 7, #1152): every registry, hub and source-control
+# Namespace ownership recheck: every registry, hub and source-control
 # coordinate the tree's own install instructions and release pipeline reference still resolves,
 # through the platform's own ownership signal, to tessaryai, and every coordinate the tree
-# references is in scripts/lib/namespace-inventory.txt. Quarterly, because the namespace-reuse
-# precedents this clause cites ran on multi-year gaps between abandonment and exploitation, plus
-# on dispatch. release.yml runs the same check before any manifest merges. A red run opens an issue for the security rota, the same routing
+# references is in scripts/lib/namespace-inventory.txt. Dispatch-only, and the consequence is
+# spelled out here because it is not the usual dispatch-only trade: THIS CHECK NOW RUNS NOWHERE
+# AUTOMATICALLY. #12 took `verify-namespaces` off the release path (correctly: it made every release
+# depend on Docker Hub, GitHub and Hugging Face all being reachable to answer a question that is not
+# a property of the release being cut), citing this file's quarterly cron; the cron was then dropped
+# too. Somebody has to press Run.
+#
+# What that costs: a published coordinate that stops resolving to tessaryai is not detected until
+# the next manual dispatch, and nothing about that looks wrong in the meantime. The compose file is
+# unchanged, the tag is unchanged, the pull succeeds. The bet is that namespace-reuse attacks
+# typically rely on multi-year gaps between abandonment and exploitation.
+#
+# Dispatch it before cutting a release, and after any change to the org's registry or GitHub account
+# state. A red run opens an issue for the security rota, the same routing
 # scrub-gate.yml uses and for the same reason: no mail credentials, and an issue is what the rota
-# can act on. The confusable-name scan the clause originally carried is cut for this launch
-# (ruled 2026-09-07); this job is the ownership half.
+# can act on. This job covers namespace ownership only, not confusable-name scanning.
 name: namespace-recheck
 
 on:
-  schedule:
-    - cron: '0 6 1 */3 *'
   workflow_dispatch:
 
 permissions:
@@ -34,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          body="The quarterly namespace recheck failed: ${run_url}"
+          body="The namespace recheck failed: ${run_url}"
           body="${body}"$'\n\n'"A published coordinate no longer resolves to tessaryai, or the tree references a coordinate scripts/lib/namespace-inventory.txt does not list. Owner per SECURITY.md's rota: security@tessary.ai."
           body="${body}"$'\n'"Private rows (the two GitHub repositories, the Hugging Face heads and dataset) verify only with gh auth and HF_TOKEN on an operator's machine; a UNVERIFIED line is not this issue's cause."
           body="${body}"$'\n'"Do not publish a release until the coordinate is reclaimed or the inventory is corrected with a reason, and log the recheck in the inventory's recheck section."

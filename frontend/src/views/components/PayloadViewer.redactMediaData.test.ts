@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * redactMediaData had no case for image_ref/document_ref (#985/#987) — those blocks fell through to
+ * redactMediaData had no case for image_ref/document_ref — those blocks fell through to
  * the generic per-field recursion, which copies string fields (including a document_ref's `text`)
  * through unchanged. MediaExternalizer caps extracted PDF text at 200,000 chars and persists it into
  * document_ref.text, so any trace message mixing text with one document rendered that entire blob

@@ -1,4 +1,4 @@
-# The open frontend image's Caddy configuration, rendered by render.sh (#1225): this file is the
+# The open frontend image's Caddy configuration, rendered by render.sh: this file is the
 # part every deployment shares. render.sh writes the global options first (admin off, and the
 # operator's trusted proxies when TRUSTED_PROXIES is set), then this file, then one site block for
 # SITE_DOMAIN chosen by TLS_MODE: site-acme.caddy, site-owncert.caddy, or none for upstream, where

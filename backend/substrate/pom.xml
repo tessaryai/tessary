@@ -37,13 +37,13 @@
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
         </dependency>
-        <!-- HealthIndicator for the `ingest` health component (#984): the health contributor API alone,
+        <!-- HealthIndicator for the `ingest` health component: the health contributor API alone,
              not the actuator starter, so the module stays a library and the app decides what to expose. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-health</artifactId>
         </dependency>
-        <!-- The opt-in Kafka-API ingest spool (#984): the plain client, not spring-kafka, because the
+        <!-- The opt-in Kafka-API ingest spool: the plain client, not spring-kafka, because the
              spool owns one producer and one consumer and needs nothing of the listener container. -->
         <dependency>
             <groupId>org.apache.kafka</groupId>
@@ -73,7 +73,7 @@
         <!-- OTLP protobuf message types (ExportTraceServiceRequest, ResourceSpans, Span,
              KeyValue, AnyValue, ...) AND the generated TraceServiceGrpc service stub. Already on the
              runtime classpath transitively via spring-boot-starter-opentelemetry
-             (opentelemetry-exporter-otlp); the OTLP receivers (HTTP #117 + gRPC #235, ingest/otlp/)
+             (opentelemetry-exporter-otlp); the OTLP receivers (HTTP + gRPC, ingest/otlp/)
              decode these at COMPILE time, so it is declared explicitly here rather than relied on as a
              transitive. Version pinned to the one the otel exporter already resolves so it cannot skew.
              protobuf-java rides in transitively (locked to 4.x via dependencyManagement above). The
@@ -83,7 +83,7 @@
             <artifactId>opentelemetry-proto</artifactId>
             <version>1.11.0-alpha</version>
         </dependency>
-        <!-- gRPC server runtime for the OTLP/gRPC TraceService/Export receiver (#235). Versions come
+        <!-- gRPC server runtime for the OTLP/gRPC TraceService/Export receiver. Versions come
              from the grpc-bom imported above. grpc-netty-shaded brings a self-contained (shaded) Netty
              so it can't clash with Tomcat's HTTP stack; grpc-protobuf/grpc-stub back the generated
              TraceServiceGrpc stub that ships in opentelemetry-proto. grpc-protobuf's transitive
@@ -206,7 +206,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, open module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as every other plugin above. No coverage gate. -->
             <plugin>

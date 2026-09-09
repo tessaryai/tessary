@@ -1,15 +1,14 @@
 # The metric-drift program — windowed distribution drift on duration and cost
 
 Status: **spec, not built.** Agreed 2026-07-30 between Akhil and Claude.
-Sibling of the behavior_drift PROGRAM note (overlay-owned since #1293, not part of this repo's
-public export), which is the structural precedent for everything here: per-project fitting, an
+Follows the same structural pattern used elsewhere: per-project fitting, an
 epoch lifecycle, findings-not-firings, and an
 alert budget instead of a guessed threshold.
 
-Base: **`main` at `1c3b0071`.** PR #652 ("Land the cases redesign on real production data") has
-merged, so the `cases/` slice this classifier plugs into is on main and there is no branch to
-track. Reviewed against main as of 2026-07-30, which also carries #653 (behaviour-drift
-saturation) and #654 (abstention cursor rewind) — both changed assumptions this spec had made.
+Base: **`main` at `1c3b0071`.** The cases redesign has landed on real production data, so the
+`cases/` slice this classifier plugs into is on main and there is no branch to
+track. Reviewed against main as of 2026-07-30, which also carries behaviour-drift
+saturation handling and abstention cursor rewind — both changed assumptions this spec had made.
 
 ---
 
@@ -207,7 +206,7 @@ unpriced trace leaves the distribution rather than joining it at $0 — the post
 already takes, and the counterpart to vitals counting unpriced calls rather than reading them as
 free.
 
-**And that abstention strands history.** This is #654's bug in a new place: the sweep's keyset
+**And that abstention strands history.** This is the abstention cursor rewind bug in a new place: the sweep's keyset
 cursor only moves forward, so every trace abstained on for a missing rate is unscoreable forever,
 and a price book that gains the model later never recovers them. Two mitigations, in order of
 preference:
@@ -319,7 +318,7 @@ observe → settle → fold into current window → close window → compare ×2
     not blanket: a trace whose root is already in is swept on the pass it appears in. Both failures are
     length-biased toward long turns, which is why neither is survivable — the detector would go quieter
     as a latency regression got worse.
-- **Window close: on event time, not ingest time.** This is #653's lesson generalized. A backfill
+- **Window close: on event time, not ingest time.** This is the behaviour-drift saturation lesson generalized. A backfill
   lands a whole corpus in one burst, so by `created_at` "the last hour of traffic" is an artefact of
   the writer's chunking — a time-cut window would swallow a month of traffic in one window and
   compare it against nothing. Cut windows on `COALESCE(started_at, created_at)`, the same
@@ -491,7 +490,7 @@ those flags being on for anyone but us is the risk.
 Both modules satisfy the L1 cost model: **no per-observation API call.** These are arithmetic over
 facts that already exist.
 
-**`callSiteFactsRead()`: declare nothing, deliberately.** #654 added this seam to `BuiltInDetector`
+**`callSiteFactsRead()`: declare nothing, deliberately.** This seam was added to `BuiltInDetector`
 for detectors that gate on a `call_site` column captured from the repo (`output_schema`, `shape`) —
 a fact landing later rewinds the sweep cursor of exactly the signals that declare it, and a catalog
 test asserts that a detector reading such a column without declaring it fails. Both read
@@ -606,7 +605,7 @@ CREATE UNIQUE INDEX metric_baseline_scope
 mergeable and bounded — a raw sample list grows without limit across a month-long window on a
 thin bucket.
 
-Per the documentation policy, a schema change updates `docs/reference/data-model.md` in the
+Per the documentation policy, a schema change updates `devdocs/reference/data-model.md` in the
 same PR, and controller/DTO changes regenerate the OpenAPI spec.
 
 ---

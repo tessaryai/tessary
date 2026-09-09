@@ -3,7 +3,7 @@
 """Write docker-compose.yml back out with every service's `build:` block removed.
 
 This is the ONE transform between the file a contributor edits and the OCI artifact a
-one-command install pulls (epic 7's one-command install), and it exists for one reason:
+one-command install pulls, and it exists for one reason:
 `docker compose publish` runs `docker push` for every service that carries a `build:` section.
 In the release workflow that runner is logged in to Docker Hub as the publisher of
 `tessaryai/tessary`, so publishing the file as-is would push whatever local image happens to be

@@ -666,7 +666,7 @@ function toEnvelope(turns, structured, text) {
  *     (analyze, which fails open downstream). 'never' always resolves, for runs whose artifact
  *     is a file the agent wrote (codegen).
  *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
- *   - maxTurns: B (#994) — the operator-configured turn BUDGET (triage/RCA only; every other
+ *   - maxTurns: the operator-configured turn BUDGET (triage/RCA only; every other
  *     caller omits this). Passed to the SDK as `config.agent.build.maxSteps`, whose own doc
  *     comment ("Maximum number of agentic iterations before forcing text-only response") is the
  *     mechanism this relies on for a soft landing rather than a hard kill — set 2 LOWER than the
@@ -716,7 +716,7 @@ async function runAgent(spec) {
     };
   }
   if (Number.isFinite(spec.maxTurns) && spec.maxTurns > 0) {
-    // B (#994) — see the JSDoc above for the mechanism and its margin. No prompt selects a
+    // See the JSDoc above for the mechanism and its margin. No prompt selects a
     // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
     // opencode's default agent identity, which is `build` — the one this config key names.
     config.agent = { build: { maxSteps: Math.max(1, spec.maxTurns - 2) } };

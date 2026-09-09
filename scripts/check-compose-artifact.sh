@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # docker-compose.yml stays publishable as an OCI artifact, and stays runnable by someone who has
-# cloned nothing (epic 7's one-command install).
+# cloned nothing (the one-command install).
 #
 # THE COMMAND THIS DEFENDS, published verbatim on tessary.ai's hero, its closing block and
 # /llms.txt:
@@ -41,7 +41,7 @@
 # Pure text plus `docker compose config` (a client-side render — no daemon, no network), so it is
 # a RUN|RUN row in scripts/check.sh. The end-to-end proof that the artifact actually publishes,
 # resolves over oci:// and boots is a separate, Docker-heavy leg:
-# scripts/check-selfhost-compose-artifact.sh, run by open-edition-boot.yml.
+# scripts/check-selfhost-compose-artifact.sh, run by boot-checks.yml.
 #
 #   bash scripts/check-compose-artifact.sh              the tree
 #   bash scripts/check-compose-artifact.sh --negative   in scratch copies: re-add a ${PWD} bind
@@ -191,7 +191,7 @@ echo "$P: --- (4) the release stamp pins every image and changes nothing else"
 # only source of truth, so docker-compose.yml's image defaults float to `${TESSARY_VERSION:-latest}`
 # and scripts/publish-compose-artifact.sh stamps the release's own version in on the way out
 # (scripts/lib/pin-compose-version.py). That stamp is the whole reason a floating repository file
-# can still publish a PINNED artifact, which is epic 7 clause 1's requirement, so it is checked here
+# can still publish a PINNED artifact, which the one-command install requires, so it is checked here
 # rather than trusted: run it with a probe version and require the rendered config to differ from
 # the unpinned one in exactly the image references and nowhere else. A stamp that silently missed a
 # service would otherwise publish a config with one floating image in it, and the ordering guarantee
@@ -251,31 +251,19 @@ print("check-compose-artifact: ok   the stamp pins all four images and changes n
 PY
 fi
 
-echo "$P: --- the command the site publishes is the command the docs give"
-# -y IS PART OF THE COMMAND, not an optional extra a doc may drop. Without it Compose stops
-# on an interactive confirmation listing every variable the remote file interpolates, and
-# setup.md is read by an AGENT, which has no way to answer a prompt. CI could never have
-# caught its absence: the prompt is TTY-gated, so the rehearsal's own `up -d` passed
-# without it. Keep this literal equal to what tessary.ai's hero publishes.
-SITE_COMMAND='docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y'
-for doc in setup.md README.md docs/self-hosting/setup.mdx; do
-    if [ ! -f "$doc" ]; then
-        echo "$P: RED  $doc is missing; it is one of the places the install command must appear" >&2; fail=1; continue
-    fi
-    if grep -qF "$SITE_COMMAND" "$doc"; then
-        echo "$P: ok   $doc carries the command verbatim"
-    else
-        echo "$P: RED  $doc does not carry '$SITE_COMMAND' verbatim; the site publishes that exact string" >&2; fail=1
-    fi
-done
+# Removed 2026-09-09 under the standing rule in scripts/check.sh's header: no gate reads a .md
+# or .mdx file. The clause here asserted that setup.md, README.md and
+# docs/self-hosting/setup.mdx each carry the published install command verbatim. What it protected
+# is real -- the site's hero command and the docs' command drifting apart, with `-y` the thing that
+# goes missing -- but a per-PR gate keyed on three prose files reds when somebody rewrites a
+# paragraph. This gate now asserts the artifact's structure: long-syntax ports, no host binds in
+# default-profile services, a clean build strip. All of that is YAML.
 
 if [ "$NEGATIVE" = 1 ]; then
     echo "$P: --- negative: each of the three classes must be red"
     T="$(mktemp -d)"; trap 'rm -rf "$T"; rm -f "$STRIPPED"' EXIT
-    mkdir -p "$T/scripts/lib" "$T/docs/self-hosting"
+    mkdir -p "$T/scripts/lib"
     cp "$COMPOSE" "$T/$COMPOSE"
-    cp setup.md README.md "$T/" 2>/dev/null || true
-    cp docs/self-hosting/setup.mdx "$T/docs/self-hosting/" 2>/dev/null || true
     cp "$ROOT/scripts/lib/strip-compose-build.py" "$T/scripts/lib/"
     _must_be_red() {
         if bash "$0" --root="$T" >/dev/null 2>&1; then

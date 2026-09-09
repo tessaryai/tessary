@@ -5,7 +5,7 @@
          xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
 
     <description>
-        Curated PMD ruleset for the evals backend: PMD 7's recommended quickstart,
+        Curated PMD ruleset for the Tessary backend: PMD 7's recommended quickstart,
         trimmed of rules that conflict with this project's conventions (Spotless owns
         formatting; AGENTS.md documents the rest). Exclusions are deliberate and
         rationale'd — genuine findings are fixed in code, not silenced here.

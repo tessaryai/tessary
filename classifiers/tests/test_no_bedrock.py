@@ -5,7 +5,7 @@ Owner instruction 2026-08-21: "forbid bedrock usage for anything now onwards. cr
 guardrail." Three layers, each tested here:
 
   1. RUNTIME — `framework.no_bedrock` patches boto3 so a Bedrock client cannot be constructed.
-  2. BACKEND SELECTION — `BedrockJudge` refuses to construct, `EVALS_JUDGE=bedrock` is refused,
+  2. BACKEND SELECTION — `BedrockJudge` refuses to construct, `TESSARY_JUDGE=bedrock` is refused,
      and ambient AWS credentials can no longer silently select it (that last one is how dev work
      ended up on a billed API in the first place).
   3. STATIC — `scripts/check-no-bedrock.sh` fails on a new, undisarmed call site.
@@ -66,7 +66,7 @@ def test_bedrock_judge_refuses_to_construct() -> None:
 def test_explicit_bedrock_selection_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     from framework.judge import default_judge
 
-    monkeypatch.setenv("EVALS_JUDGE", "bedrock")
+    monkeypatch.setenv("TESSARY_JUDGE", "bedrock")
     with pytest.raises(BedrockForbidden):
         default_judge()
 
@@ -77,7 +77,7 @@ def test_ambient_aws_credentials_no_longer_select_a_backend(monkeypatch: pytest.
     anyone choosing it. Credentials must never again pick the backend."""
     from framework.judge import ClaudeCliJudge, default_judge
 
-    monkeypatch.delenv("EVALS_JUDGE", raising=False)
+    monkeypatch.delenv("TESSARY_JUDGE", raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFAKE")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

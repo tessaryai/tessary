@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * First test coverage for server.js (none existed before #855). Pure `node:test`, zero new
+ * First test coverage for server.js. Pure `node:test`, zero new
  * dependency — matches the repo's own "no new npm dependency" constraint on the docker backend
  * itself (see server.js's Docker-backend header comment).
  *
@@ -19,7 +19,7 @@
  * Manual/documented end-to-end proof against a REAL Docker daemon (this test's necessary
  * complement, not a redundant duplicate — a fake daemon cannot prove the container that gets
  * created actually runs, only that the launcher ASKED for the right thing) lives in
- * sandbox-runner/README.md, per #855's own plan.
+ * sandbox-runner/README.md.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -31,7 +31,7 @@ const { spawn } = require('node:child_process');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 
-// #939 D4: every /rca and /triage request now carries its own `credential` object — the launcher
+// Every /rca and /triage request now carries its own `credential` object — the launcher
 // no longer reads a provider secret from process.env, so every payload below needs one. A BEDROCK
 // credential mirrors what these tests' AWS_REGION env var used to feed providerConfig() directly.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
@@ -41,7 +41,7 @@ const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_a
 // (ensureSandboxNetwork/reapOrphanSandboxContainers) for the launcher to boot cleanly.
 function startFakeDaemon(
   socketPath,
-  { waitDelayMs = 0, imageMissing = false, waitStatusCode = 0, selfNetworks = ['evals-platform_evals'] } = {},
+  { waitDelayMs = 0, imageMissing = false, waitStatusCode = 0, selfNetworks = ['tessary_tessary'] } = {},
 ) {
   const createBodies = [];
   const networkCreates = [];
@@ -296,10 +296,10 @@ test('docker backend: pulls AGENT_IMAGE when the daemon does not already have it
   }
 });
 
-test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset (finding #855-3)', async () => {
+test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset', async () => {
   // Every other test in this file pins SANDBOX_BACKEND: 'docker' explicitly. That proves the
   // docker code path works when selected, but not that a self-hoster who sets nothing gets it —
-  // D7's whole point is zero-cloud-credential-by-default. This test omits SANDBOX_BACKEND
+  // zero-cloud-credential-by-default is the whole point. This test omits SANDBOX_BACKEND
   // entirely so server.js's own fallthrough (`process.env.SANDBOX_BACKEND || 'docker'`) is what
   // actually picks the backend, same as a genuinely fresh self-host's .env.
   const scratch = tempDir('docker-backend-test-');
@@ -335,8 +335,8 @@ test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset (findi
   }
 });
 
-// #856's UNTRUSTED_POSTURE assertions lived here — /grade and /lint running with no credentials and
-// NetworkMode:'none' — and went with their routes in Track A. The posture constant survives with no
+// The UNTRUSTED_POSTURE assertions lived here — /grade and /lint running with no credentials and
+// NetworkMode:'none' — and were removed along with their routes. The posture constant survives with no
 // caller (see server.js) and test/sandbox-posture.test.js covers it at the unit level; there is no
 // route left to drive it through this fake daemon.
 
@@ -381,7 +381,7 @@ test('docker backend: two agentic routes share the SAME semaphore under concurre
 });
 
 // ---- SANDBOX_NETWORK_ISOLATION -------------------------------------------------------------
-// #855 put every sibling on a dedicated bridge, "never the evals service network". That is now
+// Every sibling used to run on a dedicated bridge, "never the tessary service network". That is now
 // opt-in, because the cut-off was not reachability-neutral: the agent reads its evidence through
 // the backend's MCP door, and off the service network its only route there is the public origin,
 // which a localhost `docker compose up` does not have. These three pin the inversion — the default
@@ -421,8 +421,8 @@ async function runOneAgentJob(env, daemonOpts) {
 }
 
 test('sandbox network: the DEFAULT joins the network the launcher itself is on', async () => {
-  const { create, networkCreates } = await runOneAgentJob({}, { selfNetworks: ['evals-platform_evals'] });
-  assert.equal(create.HostConfig.NetworkMode, 'evals-platform_evals',
+  const { create, networkCreates } = await runOneAgentJob({}, { selfNetworks: ['tessary_tessary'] });
+  assert.equal(create.HostConfig.NetworkMode, 'tessary_tessary',
     'without isolation the sibling must land on the service network, so `backend` resolves for MCP');
   assert.equal(networkCreates.length, 0,
     'the dedicated bridge must not be created when nothing is going to run on it');
@@ -430,7 +430,7 @@ test('sandbox network: the DEFAULT joins the network the launcher itself is on',
 
 test('sandbox network: SANDBOX_NETWORK_ISOLATION=1 restores the dedicated bridge', async () => {
   const { create, networkCreates } = await runOneAgentJob(
-    { SANDBOX_NETWORK_ISOLATION: '1' }, { selfNetworks: ['evals-platform_evals'] });
+    { SANDBOX_NETWORK_ISOLATION: '1' }, { selfNetworks: ['tessary_tessary'] });
   assert.equal(create.HostConfig.NetworkMode, 'tessary-sandbox',
     'with isolation on the sibling must be cut off from the service network');
   assert.deepEqual(networkCreates.map((n) => n.Name), ['tessary-sandbox'],

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * #857: the E2B backend's localhost/blank MCP-callback-URL guard in runAgenticScript. An E2B
+ * The E2B backend's localhost/blank MCP-callback-URL guard in runAgenticScript. An E2B
  * microVM is a separate machine on E2B's network — it cannot reach this host's `localhost`, so a
  * callback URL pointed there (docker-compose.dev.yml's own dev default) or missing entirely must be
  * rejected BEFORE the launcher spends an E2B sandbox create call, not discovered as an opaque
@@ -23,7 +23,7 @@ const { spawn } = require('node:child_process');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 
-// #939 D4: every /rca and /triage request now carries its own `credential` object — see
+// Every /rca and /triage request now carries its own `credential` object — see
 // docker-backend.test.js's identical constant for why.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 

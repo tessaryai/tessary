@@ -1,0 +1,187 @@
+name: Check
+
+# Runs `bash scripts/check.sh --edition open`, the CI-callable entrypoint documented in that
+# script's own header. An overlay directory stays checked out during this run; the flag only
+# changes what the script builds and tests, so a green run doesn't prove the tree survives
+# with that directory actually removed. That boot check lives separately in
+# boot-checks.yml.
+#
+# Everything before the final step assembles the toolchains that script needs in one job:
+# Four toolchains: Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm
+# + node (frontend and classify-service), python (the gates that shell out to python3),
+# and caddy on PATH (the caddy gate). Order matters once: pnpm/action-setup must run before
+# actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
+# path.
+#
+# This repo's GitHub plan doesn't support branch protection or rulesets, so nothing enforces
+# this workflow as a required check yet beyond convention: treat a red run as blocking even
+# though GitHub won't stop a merge past it. Wire it into branch protection for real once the
+# plan or visibility changes.
+on:
+  # Armed per PR. scripts/check.sh is a superset of what the old drift-checks.yml's fourteen jobs ran, so one
+  # job here buys more coverage per PR than that weekly cron ever did, and it is the gate this file
+  # was always written to be. If the minutes bill bites, the revert is deleting the `pull_request:`
+  # line; nothing else in this file depends on it.
+  pull_request:
+  workflow_dispatch:
+
+# One run per PR at a time. Without this, every push to an open PR starts a fresh run while the
+# previous one keeps going to completion; on a stacked branch that is most of the minutes bill.
+# cancel-in-progress is the opposite of release.yml's setting, deliberately: a superseded check is
+# waste, a superseded release is a half-published registry.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  open-edition:
+    name: check.sh (the full gate manifest, --edition open)
+    runs-on: ubuntu-latest
+
+    # -----------------------------------------------------------------------------------------
+    # AUTHORED BUT NOT ARMED — the toolchain image, .github/toolchain/Dockerfile.
+    # -----------------------------------------------------------------------------------------
+    # Same precedent as codeql.yml at the top of that file: the change is written out in full and
+    # left commented, because a prerequisite that is not this repo's to satisfy today is missing.
+    # A silently absent file would look like nobody considered baking the toolchain; a comment
+    # claiming it would work without the workflow to point at is a claim nobody can check.
+    #
+    # WHAT IT WOULD DO: the six steps between `checkout` and `check.sh` exist only to assemble
+    # toolchains — setup-java, pnpm/action-setup, setup-node, `pnpm install`, setup-python, and
+    # "Install Caddy". .github/toolchain/Dockerfile bakes all of them (plus Maven, which
+    # ubuntu-latest gave us for free and a container does not). With the `container:` key below,
+    # every one of those steps except `pnpm install` deletes, and the job's setup cost becomes a
+    # `docker pull`.
+    #
+    # BLOCKER 1 — NOTHING BUILDS OR PUBLISHES THE IMAGE YET. `container:` takes a registry
+    # reference, not a Dockerfile path; GitHub will not build one for you. The image has to exist
+    # in a registry before this key can name it. release.yml is the natural home: it already
+    # authenticates to Docker Hub and publishes under `tessaryai/tessary` (its DOCKER_REPO env),
+    # so a `ci-toolchain` tag alongside the service tags needs no new registry, no new secret and
+    # no new account. That publishing step is not written yet, deliberately — it is a separate
+    # change with its own tagging and freshness questions (when does the image get rebuilt? what
+    # pins the workflow to a specific build rather than a moving tag?).
+    #
+    # BLOCKER 2 — TESTCONTAINERS NEEDS THE DOCKER SOCKET, AND CONTAINER JOBS DO NOT GET IT.
+    # check-backend.sh's `mvn verify` drives a real pgvector Postgres through Testcontainers.
+    # On `runs-on: ubuntu-latest` that works because the steps run on the host, which has Docker.
+    # Inside a job container there is no /var/run/docker.sock unless it is mounted in explicitly,
+    # and even then Ryuk and the container's view of the test's network need proving. This must be
+    # demonstrated green on a branch before arming — an image that pulls fast and then fails every
+    # backend test is strictly worse than the six setup steps it replaced.
+    #
+    # BLOCKER 3 — THE ACTIONS' CACHES GO WITH THEM. setup-java's `cache: maven` and setup-node's
+    # `cache: pnpm` are doing real work on every run. Deleting those steps deletes the caches too,
+    # so this trade is only a win once the equivalent actions/cache entries are written, or once
+    # it is measured and the pull-vs-cache arithmetic actually comes out ahead.
+    #
+    # ARMING IS UNCOMMENTING THE TWO LINES BELOW (with a real tag in place of `latest`) and then
+    # deleting the toolchain setup steps. Nothing else in this file depends on it.
+    #
+    # container:
+    #   image: docker.io/tessaryai/tessary:ci-toolchain-latest
+    #   # Testcontainers, per BLOCKER 2. Unverified — this is the shape the fix takes, not a
+    #   # configuration anyone has seen pass.
+    #   options: --volume /var/run/docker.sock:/var/run/docker.sock
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Must precede setup-node: its `cache: pnpm` shells out to pnpm to resolve the store path.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      # classify-service pins the same pnpm version and installs its own deps inside
+      # check-classify-service.sh; no separate install step needed here.
+
+      # Six surviving gates shell out to python3 (version-consistency, open-boundary,
+      # license-headers, caddy, compose-artifact, export-denylist). Pinned rather than relying on
+      # whatever ubuntu-latest ships. No pip install: pyyaml and pytest were vendored-plugin's, and
+      # that gate moved to drift-checks.yml. Nothing left here imports either.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
+
+      - name: Install Caddy
+        # A pinned release tarball, not the Cloudsmith apt repo. The apt route cost 41 seconds of
+        # this job, and almost none of it was the download: it ran `apt-get update` TWICE (once to
+        # be able to install the keyring packages, once more after writing the new sources list),
+        # and installed debian-keyring, debian-archive-keyring and apt-transport-https purely so
+        # apt could be taught to trust a third-party repo. All of that machinery existed to deliver
+        # one statically linked binary.
+        #
+        # Nothing here needs the apt package's extras. scripts/check-caddy.sh only ever runs
+        # `caddy validate` — no systemd unit, no `caddy` user, no /etc/caddy, no service that has
+        # to survive a reboot. A binary on PATH is the entire toolchain that gate wants.
+        #
+        # PINNED ON PURPOSE. An unpinned `apt-get install caddy` meant this gate's result depended
+        # on which Caddy was current the day it ran, so a Caddyfile that validated on Monday could
+        # red on Friday with nothing in the diff. Bumping is a two-line edit: CADDY_VERSION and
+        # CADDY_SHA512 move together, and the hash is copied verbatim out of the release's own
+        # caddy_<version>_checksums.txt. Note that file is SHA-512, not SHA-256 — hence
+        # `sha512sum` below; feeding a 64-char SHA-256 to it fails with a format error, which is
+        # the correct outcome but an easy one to misread as a corrupted download.
+        env:
+          CADDY_VERSION: 2.11.4
+          CADDY_SHA512: 8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9
+        run: |
+          set -euo pipefail
+          tarball="caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+
+          # --fail matters more than it looks: without it curl happily writes a 404 page to the
+          # output file and exits 0, and the failure then surfaces one line later as a checksum
+          # mismatch, which reads like a supply-chain event rather than a wrong version string.
+          # --retry covers a flaky release CDN without papering over a genuinely absent asset,
+          # since a 404 is not retried into success.
+          curl --fail --location --silent --show-error \
+               --retry 3 --retry-all-errors \
+               --output "$tarball" \
+               "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/${tarball}"
+
+          # The gate. `set -e` plus a non-zero sha512sum is what stops the job; there is no
+          # fallback path and deliberately no `|| true` anywhere in this step. If this line fails,
+          # the run must die here rather than continue to `check.sh` and fail there with
+          # "caddy: command not found", which points at the wrong thing.
+          echo "${CADDY_SHA512}  ${tarball}" | sha512sum --check --strict -
+
+          # Extract only the binary; the tarball also carries LICENSE and README.md, which have no
+          # business in /usr/local/bin.
+          sudo tar -xzf "$tarball" -C /usr/local/bin caddy
+          sudo chmod 0755 /usr/local/bin/caddy
+          cd / && rm -rf "$workdir"
+
+          # Prove it before check-caddy.sh has to. A binary that unpacked but will not execute
+          # (wrong arch, missing loader) fails here with a legible message instead of surfacing as
+          # that gate's "the dev Caddyfile does not validate".
+          caddy version
+
+      # CI never loads the Taskfile, so this calls the script directly.
+      - run: bash scripts/check.sh --edition open
+
+      # Coverage baseline, open modules only. The JaCoCo report is a build-time side effect of the
+      # `mvn verify` inside check-backend.sh; this step only captures it. It lived in the old
+      # drift-checks.yml `backend` job and moved here with that file's trim, so the artifact keeps being
+      # produced, on every PR now rather than weekly. `if: always()` so a red run still leaves a
+      # baseline to look at.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-jacoco-coverage
+          path: backend/*/target/site/jacoco/**
+          if-no-files-found: warn

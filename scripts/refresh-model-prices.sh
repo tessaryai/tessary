@@ -36,8 +36,8 @@
 # snapshot by the hash of its bytes: a refreshed file is a NEW price_book version,
 # picked up at the next boot or the next daily tick, and rows already priced keep
 # pointing at the book that priced them. No migration, and no repricing of history.
-# There is no hand-maintained correction file layered over this one (#1032 retired
-# manual-overrides.json): a stale or wrong row here is a bug to raise with LiteLLM
+# There is no hand-maintained correction file layered over this one (manual-overrides.json
+# was retired): a stale or wrong row here is a bug to raise with LiteLLM
 # upstream, and a model priced under a different spelling than a producer reports it
 # needs a producer-side fix (see BedrockModelProfile.MANTLE_ROUTE_PREFIX for the
 # precedent), not a hand-edit to this file.

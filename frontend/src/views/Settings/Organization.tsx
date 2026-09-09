@@ -30,7 +30,7 @@ import { AppearanceControls } from "./Appearance";
 /**
  * Owner-facing organization administration: rename / archive / transfer-ownership /
  * delete the organization, plus per-project lifecycle (rename, set-default, archive,
- * delete). Mirrors the owner-gating the backend enforces — non-owners see a
+ * delete). Mirrors the owner-gating the backend enforces: non-owners see a
  * read-only view. The "default project" invariant is surfaced here: the default
  * project cannot be archived or deleted, and exactly one project carries the badge.
  */
@@ -63,8 +63,8 @@ export function Organization() {
     qc.invalidateQueries({ queryKey: ["org", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-projects", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-members", orgSlug] });
-    // GET /auth/me carries the org list now (#862) -- AuthProvider owns its own refetch, invoked
-    // by paid.orgLifecycleSections itself after a rename-shaped org change, not by this key.
+    // GET /auth/me carries the org list; AuthProvider owns its own refetch, invoked by
+    // paid.orgLifecycleSections itself after a rename-shaped org change, not by this key.
   };
 
   const rename = useMutation({
@@ -76,11 +76,9 @@ export function Organization() {
     onError: (err) => toast.error("Could not rename organization", (err as ApiError).message),
   });
 
-  // Archive/unarchive/delete-org and transfer-ownership moved to
-  // the paid overlay's OrgLifecycleSections.tsx with #862 -- paired with the backend routes that
-  // moved to the paid overlay's plan/tenant/MultiOrgController. `paid.orgLifecycleSections` renders
-  // those two sections' UI and mutations; this page just hands it what it needs and how to
-  // invalidate its own queries afterward.
+  // `paid.orgLifecycleSections` renders the archive/unarchive/delete-org and transfer-ownership
+  // sections' UI and mutations; this page just hands it what it needs and how to invalidate its
+  // own queries afterward.
 
   const setDefault = useMutation({
     mutationFn: (slug: string) => auth.makeProjectDefault(orgSlug, slug),

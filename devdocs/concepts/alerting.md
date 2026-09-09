@@ -4,7 +4,7 @@ Nobody should have to be looking at the app to find out something regressed. Thi
 fires, what it carries, and the two decisions in the design that are easy to get wrong.
 
 Schema: [`data-model.md`](../reference/data-model.md) § *Alerts*. Config keys:
-[`config-keys.md`](../reference/config-keys.md) § `evals.alert.*`. Capability gate:
+[`config-keys.md`](../reference/config-keys.md) § `tessary.alert.*`. Capability gate:
 `alerts_enabled`, on by default.
 
 > **Slack is not part of the launch.** `slack_enabled` is off, so the launch delivery route is a signed
@@ -83,7 +83,7 @@ several-line message rather than a title (`AlertPayload.caseMessage`):
   cases from different detectors comparable to a reader;
 - **who ruled it real**: an evidence-only Layer-2 run, or a person. Those are claims of different
   strength and the message says which, for the same reason the case page does;
-- a link back, when `evals.alert.app-base-url` is set. When it is not, the message carries no link
+- a link back, when `tessary.alert.app-base-url` is set. When it is not, the message carries no link
   rather than a broken one.
 
 The payload is resolved once, at fire time, and stored on the row. Delivery is retried; a retry an
@@ -121,27 +121,27 @@ The gate is applied in three places, and the third is the one that is easy to fo
    so the refusal lands in front of the person rather than in a log.
 2. **Delivering to one** (`AlertDeliveryDispatcher`) — a Slack channel created *before* the flag flipped is
    skipped at fan-out. Refusing only at write would leave every existing channel delivering forever; this
-   is the same reasoning segment D applies to a withdrawn classifier's output. No delivery-attempt row is
+   is the same reasoning applied to a withdrawn classifier's output. No delivery-attempt row is
    written, because nothing was attempted — a withheld transport is not a failed send.
 3. **The native app**, outbound (`SlackBriefPublisher`) and inbound (`SlackMentionService`), both through
-   `SlackCapability` — all in `tessary-paid/slack` since #842, joined by the route itself
-   (`SlackMentionController`) and its `SlackMentionSource` port in #920, so an open build simply has no
+   `SlackCapability` — live in the paid overlay, joined by the route itself
+   (`SlackMentionController`) and its `SlackMentionSource` port, so an open build simply has no
    native app at all: without this jar the endpoint does not exist, and `AuthFilter` does not bypass its
    path either — an open-only `auth/SelfAuthenticatingPath` port (`tenancy`) replaces the hard-coded
-   bypass #920 removed, empty by default. Webhook-channel delivery
+   bypass, empty by default. Webhook-channel delivery
    (item 2, `SlackDelivery`) is a different feature and stays open. The inbound gate is checked *after* the workspace install resolves, because the
    install is what names the organization, and it stays silent rather than replying — posting "you do not
    have Slack" into Slack is the one message the gate exists to prevent.
 
 **Slack runs out of process.** The protocol — signature verification, bot tokens, Web API calls, webhook
-posts — lives in the Slack adapter service (`tessary-paid/slack-service/`, a Python service using `slack_sdk`; not
+posts — lives in the Slack adapter service (a Python service using `slack_sdk`; not
 part of the public export).
 The backend holds no Slack credential and cannot reach Slack directly; it POSTs a composed message to the
 adapter's `/deliver`, and the adapter calls back to `/internal/slack/mention` for the one thing it cannot
 answer. Every gate above is still evaluated on this side, before the adapter is ever called — the adapter
 makes no product decisions, which is what lets it be deleted whole if Slack never ships.
 
-**A second, unrelated switch.** Whether the adapter is deployed and reachable (`evals.slack.base-url` +
+**A second, unrelated switch.** Whether the adapter is deployed and reachable (`tessary.slack.base-url` +
 `service-key` on this side, `SLACK_SIGNING_SECRET` + `SLACK_BOT_TOKEN` on its side) is deploy-level.
 `slack_enabled` is per-org. Both must be on, each fails closed independently, and they are kept apart on
 purpose — an unconfigured deploy is not the same fact as an org that is not entitled, and one switch would

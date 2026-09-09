@@ -1,0 +1,84 @@
+---
+title: "Root-Cause Analysis"
+description: "Understand what Tessary's agentic RCA run reads, what it is deliberately not told, what a connected repository adds, and what the report returns."
+---
+
+Detection says something moved. RCA (root-cause analysis) says what changed. It is an agent session that investigates one case, and it is the reason Tessary treats identifying a problem as the beginning of the work rather than the end of it.
+
+An RCA run starts when a person presses **Run RCA** on a case. The decision to run it is a human one, made after reading the case, and the identifier of the finding under that case is the entire input: everything the run works from is read off that finding, never accepted from the caller.
+
+## What the agent is given
+
+The run hands the investigation to an agent session with three sources of evidence.
+
+**The finding's dossier, as files.** What the classifier asserts, over what population, since when, and the measured checklist assembled for this finding. The dossier is a snapshot taken at trigger time, so a report still reads correctly after the finding it analyzed has been resolved.
+
+**A live connection back to your instance**, over MCP (Model Context Protocol), authenticated with a short-lived key minted for the run and revoked when it ends. This is required rather than optional. The dossier states the claim, and every row of the evidence behind it is fetched on demand, so a run that cannot reach your instance cannot open a single trace it is investigating. Neither the triage agent nor the RCA agent copies trace rows into its prompt.
+
+**Your repository**, cloned at the connected integration's default-branch head, when one is connected. Connect one under **Settings → Git integration**.
+
+### What a connected repository changes
+
+The repository is what turns "the outputs changed" into "this commit changed them". It deepens every run that has one.
+
+A project with no repository still gets an investigation, with a stated ceiling: it can show what changed in production and it cannot show what changed in the code. Connecting a repository is optional and is not required to complete setup, but it is the single largest difference in what a report can conclude.
+
+## What the run is not told
+
+The agent is never told that a triage pass happened on this finding, what it ruled, or what it wrote. Not the ruling, not its summary, not its citations, not the fact of its existence.
+
+This is enforced structurally rather than by convention, and in three places at once, because the run could otherwise read the ruling through the dossier, through its prompt, or through the same MCP tools it uses to read evidence.
+
+The reason is one conclusion Tessary wants to keep available: **nothing happened here.** Triage already applied a gate, and RCA is the only independent check on that gate. An investigation told what triage decided cannot provide it.
+
+## Where the run happens
+
+The `sandbox-runner` service spawns a fresh sandbox for every agentic run, and tears it down afterward. The backend itself holds no sandbox client and runs nothing customer-adjacent in its own process.
+
+In a default self-hosted install, the sandbox is a fresh hardened container per request: all capabilities dropped, no new privileges, and its own bridge network. That is what the read-write Docker socket mount on `sandbox-runner` is for, and it is why the [setup prerequisites](/self-hosting/setup#prerequisites) ask you to check the socket's group id as containers see it. Getting that wrong shows up as a run that never starts.
+
+The agent needs both credentials and egress, since it clones a repository and calls a model provider. A transport failure, a non-zero exit, a timeout, or malformed output all reach the backend as a classified failure, never as a silent success.
+
+## What the run returns
+
+A report, immutable once written. It carries four things.
+
+**A verdict**, one of five:
+
+| Verdict | Reads as |
+| --- | --- |
+| `behavior_change` | Agent behavior changed. The one verdict that says the agent itself got worse. |
+| `model_change` | Serving model changed. |
+| `traffic_shift` | Traffic mix shifted. |
+| `definition_change` | Grader definition changed. |
+| `inconclusive` | Inconclusive. |
+
+Three of these are structural: the agent did not get worse, something around it moved. **Grader definition changed** is the one whose label needs unpacking: it means the criteria an output is judged against changed, and a run reaches that verdict only after locating the change in your repository, citing the commit and the diff hunk.
+
+**Hypotheses, each with its receipts.** Every hypothesis carries the trace identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that was not actually measured is dropped, and a hypothesis whose citations were all invented survives with no receipts rather than with fabricated ones.
+
+**An assessment of every check that was measured**, including the ones ruled out. The agent is the judge of those measurements and the prompt demands an explicit assessment of each, because fixed thresholds ruled causes in and out wrongly often enough to poison the verdict. An invented check identifier is dropped the same way an invented trace identifier is.
+
+**A written investigation**, in full, alongside the summary.
+
+<Note>
+  Tessary downgrades a comparative verdict that cites no evidence from the baseline side to `inconclusive`, with a note explaining why. A comparison whose "before" side was never observed is not a finding of fact, and a bad root-cause report is worse than no report.
+</Note>
+
+## What a run needs before it is useful
+
+- **A case to press it on.** RCA analyzes the finding behind a case, so the chain from [classifiers and findings](/concepts/classifiers-and-findings) through [cases](/concepts/cases) has to have produced one.
+- **An LLM (large language model) provider credential**, under **Settings → Providers**. The sandboxed agent is the only analysis path there is, so a run has nothing to fall back to without one.
+- **A reachable `sandbox-runner` service.** It starts by default in the self-hosting configuration.
+- **A connected repository**, for the runs that need to name a commit rather than describe a symptom.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    Where the case an RCA run investigates came from, and how it closes.
+  </Card>
+  <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
+    The whole chain, from an arriving trace to an explained case.
+  </Card>
+</CardGroup>

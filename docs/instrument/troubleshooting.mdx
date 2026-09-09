@@ -1,0 +1,118 @@
+---
+title: "Instrumentation Troubleshooting"
+description: "Diagnose instrumentation problems by what you observe: nothing arriving, spans arriving untagged, a connect gate that stays closed, or a milestone ladder that stops advancing."
+---
+
+The connect screen is the instrument for every symptom below. It updates itself while you work, and its counts tell you which half of the problem you have: no spans at all is an exporter problem, spans with no tag is a tagging problem.
+
+## Nothing arrives at Tessary
+
+**Symptom:** The connect gate shows the pulsing **Listening on /v1/traces. Nothing has arrived yet.** banner and never changes. The application has run.
+
+**Causes and resolution, in order:**
+
+1. **The endpoint does not end in `/v1/traces`.** The path is part of the value, not something the SDK appends. Compare what you configured against the **Endpoint** field on the connect screen, character for character. A wrong path never reaches the receiver at all: every path except `/v1/traces` is served by the static site, so the response is HTML rather than OTLP.
+2. **The header is malformed, or the token is wrong.** The value is `Authorization: Bearer <token>`, with one space after `Bearer`. A token that is missing or fails verification is refused with `401`. A token that is not project-scoped, or is query-scoped, is refused with `403`. Write and admin keys both ingest.
+3. **The token belongs to a different project.** The gate is per project, and a token minted on one project's screen never opens another's. Confirm you are watching the project whose screen you copied the token from.
+4. **The unsuffixed environment variables are set.** `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` redirect metrics and logs as well as traces. Use the `_TRACES_` variants instead. See [Configure an exporter](/instrument/exporters#use-environment-variables).
+5. **The application did not reload.** A configuration change in a file the process read at startup takes effect on the next start, not on the next request.
+6. **The receiver is configured for gRPC only.** The HTTP route answers `404` in that configuration. Check `TESSARY_INGEST_OTLP_TRANSPORT` in [Ingest and OTLP](/self-hosting/configuration#ingest-and-otlp). This applies only to an instance somebody deliberately reconfigured; the shipped default serves HTTP.
+
+**Expected result:** Spans appear, and the connect screen changes state on its next poll.
+
+<Note>
+  A `503` with a `Retry-After` header is not a failure to fix. It means the write buffer was full and nothing was persisted, and a stock OpenTelemetry exporter resends on its own. The write path is idempotent, so the resend closes the gap rather than duplicating it.
+</Note>
+
+## Spans arrive, none carry a call site
+
+**Symptom:** The gate replaces itself with **Spans are arriving without a call site**, showing spans received, tagged, last span, and service. **Tagged** reads `0`.
+
+**Cause:** Your exporter works. The `tessary.call_site.id` attribute is not reaching Tessary, for one of four reasons.
+
+**Resolution:**
+
+1. **Check the spelling.** The key is `tessary.call_site.id`, dotted throughout. `tessary.call_site_id` with an underscore is never read, so the span looks tagged in your code and resolves to nothing.
+2. **Check the value is a non-empty literal.** A blank string, an f-string, a variable, or an enum lookup all fail here for the same reason: the value has to be traceable back to the code that set it.
+3. **Check the span is exported at all.** A span opened on a second `TracerProvider` is never handed to the Tessary exporter, which is registered on the first. One provider, both exporters.
+4. **Check the tagged code path actually ran.** A tag becomes telemetry only when the code runs. Exercise the instrumented path directly rather than assuming a deployment covered it.
+
+The connect screen carries a repair prompt for this state. It deep-links the tagging instructions only and tells your coding agent not to touch the exporter, which already works.
+
+**Expected result:** The **Tagged** count moves off `0` and the gate opens on its next poll.
+
+<Note>
+  The counts on this screen are capped at 1,000. A project pushing heavy traffic shows `1,000` rather than a true total, which is expected. What matters here is whether **Tagged** is zero or not.
+</Note>
+
+## Tagged spans arrive, but classifiers stay quiet
+
+**Symptom:** The gate opened, traces are visible, and no findings appear.
+
+**Cause, most likely first:**
+
+1. **The spans carry a call site and no content.** A tracing stack built for latency and errors often records nothing about the model call itself, so there is nothing for a classifier to read. Check your spans against the required rows in [Span requirements](/instrument/span-requirements). An LLM auto-instrumentation such as OpenLLMetry or OpenInference emits those attributes for you and attaches to the provider you already configured.
+2. **The classifiers have not finished fitting a baseline.** This is a wait, not a fault, and it is covered in [Classifiers aren't producing findings](/self-hosting/troubleshooting#classifiers-arent-producing-findings).
+
+**Resolution:** Add the missing attributes at the producer, then let traffic accumulate. Do not translate an auto-instrumentation's dialect by hand: OpenInference and OpenLLMetry spans are normalized at ingest already.
+
+**Expected result:** New spans carry input, output, and usage attributes, and findings appear once a baseline has enough comparable samples on both sides.
+
+## The gate does not open
+
+**Symptom:** Spans are arriving and tagged spans exist, but the connect gate is still there.
+
+**Cause:** The gate opens on a tagged span reaching **this project**. Three things break that link.
+
+**Resolution:**
+
+1. **Confirm the project.** Look at the project in the URL and confirm it is the one whose token your exporter carries.
+2. **Confirm the tag is on the exported spans, not only in the code.** The untagged state's **Tagged** count is the ground truth. If it reads `0`, treat this as the previous section, not this one.
+3. **Give the poll a moment.** The screen polls on an interval and opens itself. It does not need a reload.
+
+**Expected result:** The gate disappears and the project becomes reachable.
+
+<Note>
+  A sample project is not a substitute. **Start with a sample project** creates a separate, clearly labeled project full of generated data. It never opens the gate on your real project, which stays closed until your own tagged span arrives.
+</Note>
+
+## The old backend still gets traces and Tessary does not
+
+**Symptom:** Your existing observability vendor keeps receiving traces. Tessary receives nothing.
+
+**Cause:** The exporter was replaced rather than added, or the unsuffixed `OTEL_EXPORTER_OTLP_*` variables redirected everything to one destination.
+
+**Resolution:** Add a second span processor to the provider you already have, or a second exporter to your collector's traces pipeline, and keep the existing one in the list. [Configure an exporter](/instrument/exporters) shows both forms.
+
+**Expected result:** Both destinations receive the same spans.
+
+## The milestone ladder is stuck
+
+The ladder is a broader question than the gate: it advances on any span, tagged or not. It always reports the furthest rung reached, so it never walks backwards. [Confirm traces are arriving](/self-hosting/setup#confirm-traces-are-arriving) defines each rung.
+
+| Stuck at | What to do |
+| --- | --- |
+| `not_connected` | Open **Settings** → **Sources** → **Connect a source** and select **Create a connection token**. The first-run connect gate mints one on its own, so there is nothing to select there. |
+| `listening` | Work through [Nothing arrives at Tessary](#nothing-arrives-at-tessary). A project that only ever minted a token stays here. |
+| `fitting` | Nothing. This is the honest wait, and it takes days on low-volume traffic. A baseline stays in learning until both the window it is filling and the window it would compare against clear the minimum sample count, 100 by default. |
+| `watching` | Nothing. This is the healthy steady state. |
+
+**Expected result:** Once a rung's condition is met, the ladder reports the next stage on its next poll.
+
+<Note>
+  The ladder can read `fitting` while the connect gate is still closed. The two ask different questions: the ladder asks whether traffic arrived at all, and the gate asks whether traffic arrived that Tessary can attribute to a call site. Untagged traffic advances the first and not the second.
+</Note>
+
+## The spans come from software you cannot edit
+
+**Symptom:** The model calls you need to tag are made by a vendored dependency, a managed service, or a binary you do not build.
+
+**Cause:** There is no source file to add a `set_attribute` call to.
+
+**Resolution:** Stamp the attribute in an OpenTelemetry Collector `transform` processor instead, one layer out from the application. The call site is still named explicitly, with a literal value. The rules in [The call-site tag](/instrument/call-site-tag) apply unchanged.
+
+**Expected result:** The **Tagged** count moves off `0` and the gate opens.
+
+## Something else
+
+If your symptom is not on this page, it is not documented yet. Report the exact symptom, the state the connect screen is in, and the counts it shows, rather than assuming a fix from a similar problem above.

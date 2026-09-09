@@ -9,7 +9,7 @@
   },
   "packageManager": "pnpm@11.15.1",
   "dependencies": {
-    "@opencode-ai/sdk": "1.18.13",
+    "@opencode-ai/sdk": "1.18.30",
     "acorn": "^8.18.0",
     "acorn-walk": "^8.3.5",
     "e2b": "^2.46.1",

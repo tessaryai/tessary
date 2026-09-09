@@ -6,7 +6,7 @@
  * Unlike the /classify heads (one calibrated score per text), /embed returns the raw
  * pooled+normalised embedding vector under the conformance FIT CONTRACT, the exact
  * arithmetic every coefficient in a conformance artifact bundle was fitted against
- * (the conformance engine's shared/encoders.py, overlay-owned since #1293, mirrored by the backend's
+ * (the conformance engine's shared/encoders.py, maintained separately and mirrored by the backend's
  * EmbeddingPooling.java):
  *
  *   tokenize with the checkpoint's own tokenizer.json, truncation to 256 tokens

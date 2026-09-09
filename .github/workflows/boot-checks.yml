@@ -1,0 +1,148 @@
+name: Boot checks
+
+# The detached open-edition boot check, deliberately dispatch-only. This workflow is fully wired
+# to scripts/check-open-boot.sh on a Docker-capable runner, on demand from the Actions tab, but
+# not on an automatic trigger, to conserve this repo's free-tier GitHub Actions minutes. Appending
+# it to check.yml's job list or drift-checks.yml's cron would put it on every trigger those files
+# already carry (`on:` is file-level), hence a separate workflow file with `on: workflow_dispatch`
+# only, which costs zero minutes until a human presses the button.
+#
+# Until this is turned on, boot correctness rests on manual dispatch of this workflow or
+# `task check:open:boot` run locally, not on continuous enforcement.
+#
+# To enable it per PR, add `pull_request:` under `on:` below, e.g.
+#
+#   on:
+#     pull_request:
+#     workflow_dispatch:
+#
+# (the same two-key shape check.yml already uses), once there are enough CI minutes to
+# afford a Docker-capable runner on every PR.
+on:
+  workflow_dispatch:
+
+jobs:
+  open-edition-boot:
+    name: Detached open-edition boot (clean-room export, tessary-paid/ stripped, authenticated triage)
+    # The one job in this repo's CI that genuinely needs Docker: it builds and starts the real
+    # slim dev stack inside a clean-room export of the working tree with tessary-paid/ removed
+    # (scripts/lib/export-simulate.sh's copy + `git init` recipe, not `git archive`, which only
+    # materializes the last commit and would silently miss an uncommitted boundary violation).
+    # ubuntu-latest ships Docker and Compose preinstalled, no extra setup step needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history, not the default shallow clone: export-simulate.sh copies the working
+          # tree, not a specific commit, so a shallow checkout would already satisfy it, but a
+          # full checkout costs nothing extra on a job already building and booting a whole stack.
+          fetch-depth: 0
+
+      # `uv`, for step (f) of check-open-boot.sh's authenticated-triage assertion
+      # (classifiers/data_gen/emit_local.py, run via `uv run`). No committed classifiers/.venv to
+      # rely on; `uv run --extra otlp` resolves classifiers/pyproject.toml + uv.lock on demand.
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: classifiers/uv.lock
+
+      - name: Run the detached open-edition boot check
+        # No secret here on purpose: no test or check may require a real credential, local or CI.
+        # The BYO-provider-credential step inside the script uses a clearly-fake placeholder,
+        # which proves the seal + read-back path, all it can prove without a model-graded classifier.
+        run: bash scripts/check-open-boot.sh
+
+  open-edition-boot-selfhost:
+    name: Detached open-edition boot, self-host artifact (docker-compose.yml, production profile)
+    # A separate job so it runs in parallel with the dev leg above and its ~9 minutes of
+    # build+boot are not serialised behind it. Boots docker-compose.yml, the file a self-hoster
+    # actually runs, with SPRING_PROFILES_ACTIVE left at that file's production default, the real
+    # backend/Dockerfile and frontend/Dockerfile, and only four generated run-scoped values in the
+    # environment. Boot + production auth guard + credential deny-list; the authenticated triage
+    # flow stays the dev leg's job, since proving it twice against the same image buys nothing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify the published images resolve before the boot clock starts
+        # scripts/check-selfhost-images.sh — no registry login. Runs first, deliberately: a broken
+        # or unpublished image tag should fail here, in seconds, as "image unresolvable", not
+        # several minutes into `docker compose up -d --build` as an opaque `manifest unknown`.
+        # Until the first tessaryai/tessary release is published, this step is expected to fail;
+        # it is not yet wired to gate the job (continue-on-error) for that reason alone, and that
+        # line should come out the moment the first release ships.
+        continue-on-error: true
+        run: bash scripts/check-selfhost-images.sh
+
+      - name: Run the detached self-host boot check
+        # No secret here either. The four values the script mints (postgres user/password,
+        # TESSARY_SECRET_KEY, TESSARY_AUTH_COOKIE_PASSWORD) are openssl-random and die with the job.
+        run: bash scripts/check-open-boot-selfhost.sh
+      - name: Prove the readiness signal can fail
+        run: bash scripts/check-open-boot-selfhost.sh --negative-health
+      - name: Boot on a custom domain
+        run: bash scripts/check-open-boot-selfhost.sh --domain
+      - name: Boot with the bundled Redpanda under the kafka profile
+        run: bash scripts/check-open-boot-selfhost.sh --kafka
+
+  open-edition-quickstart-rehearsal:
+    name: Self-host quickstart rehearsal
+    # The outsider's run, mechanised: setup.mdx's own command blocks, verbatim, from the published
+    # inputs and nothing else, on the compose defaults. `--build` stands in for the page's `docker
+    # compose pull` until the first tessaryai/tessary release publishes every image the compose
+    # names; drop the flag the day check-selfhost-images.sh goes green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Rehearse the documented quickstart (built, not pulled, until the images publish)
+        run: bash scripts/check-selfhost-quickstart.sh --build
+
+  open-edition-zero-egress:
+    name: Zero-egress with the opt-out set
+    # The quickstart rehearsal again, on an internal network with a DNS sink and the heartbeat off,
+    # holding the stack to the permitted set the configuration page publishes; then the heartbeat
+    # as the positive control and a planted call, so a green run is known to be able to go red.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Boot on a network with no way out, rehearse, and watch the sink
+        run: bash scripts/check-zero-egress.sh --build
+
+  open-edition-exposure-sweep:
+    name: Fresh-deployment exposure sweep
+    # A separate job so its own boot runs in parallel with the legs above. Boots the same
+    # self-host artifact the second leg does, keyless under the production profile, then attacks
+    # it: every spec operation unauthenticated, default credentials, the served bundle, SSRF and
+    # traversal against a listener on the stack network, and a two-tenant substitution sweep. Green
+    # is a listed result set (scripts/lib/exposure-sweep-baseline.txt is the recorded one; a run
+    # names every probe whose status moved), red is a finding. No secret: the two accounts it
+    # creates are its own.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run the exposure sweep
+        run: bash scripts/check-exposure-sweep.sh
+
+  open-edition-compose-artifact:
+    name: The one-command install, end to end
+    # The only leg that exercises what tessary.ai's hero actually tells people to run. Publishes
+    # docker-compose.yml to a throwaway TLS registry on the runner, then runs `docker compose -f
+    # oci://.../tessary:compose up -d -y` from an empty directory (no clone, no .env, no build
+    # context), and asserts the stack comes up healthy, pins this release's image tags, mounts no
+    # host path, leaves the working directory empty, and tears down clean. Parallel with the legs
+    # above; own runner, own registry, own Compose project name.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run the compose-artifact rehearsal
+        run: bash scripts/check-selfhost-compose-artifact.sh

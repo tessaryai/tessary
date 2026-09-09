@@ -1,9 +1,9 @@
 # The media contract — supported modalities, storage, and export
 
-> **Status: images and PDF documents are both live** (#985, Epic 8 Track B — the gate's first branch:
-> extend to at least one non-image modality, not the images-only-with-a-roadmap second branch). This
-> doc is the public, documented decision the gate asked for; `MediaResolver`'s old "images-only v1"
-> framing predates it and has been corrected in code alongside this doc (Rule 4).
+> **Status: images and PDF documents are both live** — extending to at least one non-image modality
+> rather than staying images-only. This
+> doc is the public, documented decision; `MediaResolver`'s old "images-only v1"
+> framing predates it and has been corrected in code alongside this doc.
 
 Flagged in the 2026-09-01 review of the Langfuse migration gap analysis: "declare the supported media
 contract … fail explicitly on unsupported modalities rather than silently labeling them." This is that
@@ -28,18 +28,18 @@ deliberately defers (see §3).
 ## 2. Storage: PostgreSQL `bytea`, not an object store
 
 `PostgresMediaStore` stays the only storage-backing `MediaStore` implementation (`CachingMediaStore` is a
-decorator — an in-memory read cache in front of it, not an alternate backend; see §3). A 2026-09-02 comment on #987 proposed a
-storage-backend selector (`evals.media.store`: `filesystem` default, `postgres`, `s3`) with Range-serving
+decorator — an in-memory read cache in front of it, not an alternate backend; see §3). A 2026-09-02 comment proposed a
+storage-backend selector (`tessary.media.store`: `filesystem` default, `postgres`, `s3`) with Range-serving
 and per-modality caps — **not adopted**. The `MediaStore` interface already isolates this choice behind a
 seam an object store could fill later without touching callers or the schema; PDF sizes don't force that
 now the way audio/video would, and building a filesystem/S3 backend for a modality that fits comfortably
-in a `bytea` column is scope the gate doesn't require (Rule 6).
+in a `bytea` column is scope the gate doesn't require.
 
 ## 3. Size limit: one shared 8 MiB cap, not an inherited one
 
-`evals.ingest.max-media-bytes` (default 8 MiB, tuned for images) now bounds documents too. No new config
-key was added — Decision 3 asked to state the resulting limit, not build a new one, and Rule 6 disfavors
-config surface the gate doesn't require.
+`tessary.ingest.max-media-bytes` (default 8 MiB, tuned for images) now bounds documents too. No new config
+key was added — the goal was to state the resulting limit, not build a new one, and unnecessary
+config surface is disfavored.
 
 **This is a deliberate, real per-item cap, not an inherited or object-store-scale one.** Postgres `bytea`
 has no practical size ceiling anywhere near a gigabyte in principle, but a hot OLTP table serving live
@@ -51,12 +51,12 @@ by this contract. When audio/video needs headroom beyond a `bytea`-friendly size
 object-store `MediaStore` implementation is due, not a reason to raise this cap past what Postgres should
 carry.
 
-`CachingMediaStore`'s in-memory read cache (`evals.media.cache.max-bytes`, 64 MiB default) sits in front
+`CachingMediaStore`'s in-memory read cache (`tessary.media.cache.max-bytes`, 64 MiB default) sits in front
 of storage and was previously undocumented — see [`config-keys.md`](./config-keys.md). It was sized for
 image-scale objects (a handful of images per grader call); a document up to the 8 MiB ingest cap fits the
 same budget without resizing it.
 
-## 4. Export shape (#986): inline, not referenced or bundled
+## 4. Export shape: inline, not referenced or bundled
 
 Media is preserved on export as a base64 `data:` URI inlined **inside the existing plain-string `content`
 field** `TraceSpanMapper` already emits — no new part-shape, no bundled sidecar file, and no referenced
@@ -86,7 +86,7 @@ production callers before this issue; this endpoint is the caller.
 `document_url` mirrors `image_url`'s field layout exactly (the `url` field holds the real URL) and is
 **never fetched server-side** — not at ingest (`MediaResolver`, `MediaExternalizer`), and not at export
 (`TraceSpanMapper` labels it, never downloads it). There is no judge boundary left to fetch it either:
-Track A removed grading and `ContentBlocks` with it (§6). This adds no new outbound-fetch surface anywhere in the
+grading and `ContentBlocks` were removed along with it (§6). This adds no new outbound-fetch surface anywhere in the
 pipeline. A caller that needs a document graded must send its bytes (`document_b64`) or let it externalize
 through the normal ingest path to a `document_ref`.
 
@@ -100,8 +100,8 @@ gradable boundary belongs:
 - **Fail-loud (422)** at the judge/grading boundary — `ContentBlocks` threw
   `JudgeError.UNSUPPORTED_CONTENT_TYPE` for any block type it didn't route, because a
   silently-incomplete grade is a **wrong verdict** and a grader that graded half an input without
-  saying so is worse than one that refused to run. **This boundary no longer exists**: Track A removed
-  grading and `ContentBlocks` with it, so `JudgeError.UNSUPPORTED_CONTENT_TYPE` is declared and thrown
+  saying so is worse than one that refused to run. **This boundary no longer exists**: grading and
+  `ContentBlocks` were removed, so `JudgeError.UNSUPPORTED_CONTENT_TYPE` is declared and thrown
   nowhere. The policy is recorded because the reasoning is what any future gradable boundary should
   re-adopt — not because something enforces it today.
 - **Silently labeled** at the classifier-context/trajectory-rendering boundary —
@@ -122,4 +122,4 @@ A Braintrust `braintrust_attachment`/`external_attachment` reference still degra
 document modality: the public download endpoint for a `braintrust_attachment` key is undocumented (the
 Braintrust SDK resolves it internally), and `external_attachment`'s `s3://` URL is not `http(s)`, so
 `UrlGuard` rejects it. Neither obstacle is closed by adding a document/PDF `ContentBlock` kind, so this
-path is untouched by #985/#986/#987 and stays detect-and-label only.
+path is untouched and stays detect-and-label only.

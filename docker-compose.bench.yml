@@ -1,0 +1,73 @@
+# Ingest throughput measurement overlay — layered on docker-compose.yml (the SELF-HOST reference
+# stack, not the dev stack). Opt-in: nothing loads it unless you name it with -f.
+#
+# It is checked in so the capacity figures quoted in devdocs can be re-derived rather than taken on
+# trust — see scripts/bench/README.md for what to run and how to read the output.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.bench.yml up -d
+#
+# It does two things and nothing else.
+#
+# 1. PINS THE REFERENCE BOX. Docker Desktop hands this stack the whole VM (12 CPUs / 19.5 GiB here),
+#    which is not a machine anyone deploys on, and a throughput number measured against it is a
+#    number about my laptop. The limits below carve out a stated 4 vCPU / 8 GiB box:
+#
+#      backend         2.00 vCPU   2048 MiB   (mem_limit is docker-compose.yml's own declared 2g)
+#      postgres        1.25 vCPU   3072 MiB
+#      frontend/caddy  0.50 vCPU    512 MiB
+#      sandbox-runner  0.25 vCPU   1536 MiB   (declared; idle throughout, it runs no ingest work)
+#      ------------------------------------
+#      total           4.00 vCPU   7168 MiB   leaving ~1 GiB for the host and its page cache
+#
+#    Postgres gets its own limit because without one the shared page cache grows into whatever the
+#    VM has, and a drain rate measured against a fully-cached working set is not the rate a real box
+#    sustains once the tables outgrow RAM.
+#
+# 2. TURNS ON JFR AND NATIVE MEMORY TRACKING, because the heap is the thing most likely to be
+#    misread here. -XX:MaxRAMPercentage=75 in backend/Dockerfile sizes the heap off the container
+#    limit, so the 2g above is what makes the heap 1.5 GiB rather than whatever share of 19.5 GiB
+#    the ergonomics would otherwise pick. NMT is what separates that heap from the metaspace, thread
+#    stacks, code cache and direct buffers the cgroup limit also has to cover; it costs a few percent
+#    of footprint itself, which is why it is here and not in the shipped file.
+#
+# JAVA_TOOL_OPTIONS is additive to the image ENTRYPOINT's flags, so the production heap, OOM-dump
+# and OOM-exit settings all still apply exactly as shipped.
+
+services:
+  backend:
+    cpus: 2.0
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -XX:NativeMemoryTracking=summary
+        -XX:StartFlightRecording=name=ingest,settings=${BENCH_JFR_SETTINGS:-default},disk=true,maxsize=1g,maxage=2h,dumponexit=true,filename=/jfr/ingest.jfr
+        -XX:FlightRecorderOptions=repository=/jfr/repo
+      PYROSCOPE_AGENT_ENABLED: "false"
+      # The heartbeat is the queue-depth instrument, and once a minute is too coarse to see a step
+      # of a ramp. Cadence only — it changes what is logged, never what is admitted or drained.
+      TESSARY_INGEST_SUBSTRATE_REPORT_MS: "10000"
+      # Passthrough so an A/B can flip one property between arms (redaction parallelism, the token
+      # cache) without editing this file. Empty in a normal run, which leaves every default in place.
+      SPRING_APPLICATION_JSON: ${SPRING_APPLICATION_JSON:-}
+    volumes:
+      - ./.local/bench/jfr:/jfr
+      # The shipped image is a JRE: it has java and jfr but no jcmd, so there is no way to ask the
+      # live JVM for an NMT summary or a heap info. A sidecar JDK sharing this container's PID
+      # namespace can, but HotSpot's attach handshake goes through a socket in the target's /tmp,
+      # which a sidecar in its own mount namespace cannot see. Making /tmp a named volume both
+      # containers mount is what lets the handshake complete. Storage only; nothing about the
+      # application changes.
+      - bench-tmp:/tmp
+
+  postgres:
+    cpus: 1.25
+    mem_limit: 3g
+
+  frontend:
+    cpus: 0.5
+    mem_limit: 512m
+
+  sandbox-runner:
+    cpus: 0.25
+
+volumes:
+  bench-tmp:

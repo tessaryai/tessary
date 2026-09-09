@@ -1,40 +1,33 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # classify-service gate. Single source of truth: invoked by both the Taskfile
-# (`task classify:check`) and CI (.github/workflows/ci.yml). Fast static checks only —
-# no model download (the image build's offline warmup validation covers the heads).
+# (`task classify:check`) and CI (.github/workflows/check.yml, via scripts/check.sh). Fast static checks only, no model
+# download (the image build's offline warmup validation covers the heads).
 #
-# EDITIONS (#1293). The scoring code in classify.js is open source; models.json — the manifest
-# binding each head to a pinned checkpoint and revision — is not, and moved into the paid overlay.
-# The open edition therefore ships `classify-service/models.json` as literally `{}` and every head
-# is registered UNBACKED. That is a different assertion, not a weaker one, so this gate BRANCHES:
+# The scoring code in classify.js is open source; models.json, the manifest binding each head to
+# a pinned checkpoint and revision, is not shipped in this build, so `classify-service/models.json`
+# here is literally `{}` and every head registers unbacked. That is a different assertion from a
+# populated manifest, not a weaker one, so this gate branches on which shape it finds:
 #
-#   --edition open             the manifest MUST be empty. A populated models.json under this flag
-#                              is a leak, not a nicety, so it is a hard failure. Then: every head
-#                              in HEADS is unbacked and carries no model/revision/dtype, and asking
-#                              to serve one produces the literal token UNAVAILABLE_IN_OPEN_EDITION
-#                              rather than `unknown classify head`.
-#   --edition all   (default)  whichever manifest is in THIS build context, asserted exactly, and
-#                              SAID OUT LOUD. Populated => the pre-#1293 exact-set assertion,
-#                              unchanged: exactly frustration/groundedness/attribution, each with
-#                              model + 40-hex revision + dtype + score. Empty => the open
-#                              assertions, plus a printed line naming the assertion that did NOT
-#                              run and why.
+#   --edition open             the manifest must be empty. A populated models.json under this flag
+#                              is a hard failure. Every head in HEADS is then unbacked, carries no
+#                              model/revision/dtype, and asking to serve one returns the literal
+#                              token UNAVAILABLE_IN_OPEN_EDITION rather than `unknown classify head`.
+#   --edition all   (default)  whichever manifest is present is asserted exactly, and the result is
+#                              printed. Populated: exactly frustration/groundedness/attribution,
+#                              each with model + 40-hex revision + dtype + score. Empty: the same
+#                              assertions as --edition open, plus a printed line naming the
+#                              assertion that did not run and why.
 #
-# WHY `all` DISPATCHES ON THE MANIFEST AND NOT ON THE FLAG. `classify-service/` is the build context
-# for the dev image AND for the paid deploy (both COPY models.json from it), so in a full checkout
-# with the overlay on disk that path still holds `{}` — the populated manifest sits in the overlay
-# and is copied over this one at image-build time. A flag-only `all` arm would therefore turn
-# `task check` red in every developer checkout for a condition that is correct. Dispatching on the
-# manifest keeps the gate honest in both places; printing which arm ran is what keeps the empty arm
-# from being the absence-looks-like-compliance skip this repo has been bitten by before. This file
-# cannot simply go read the overlay's copy instead: check-open-boundary.sh rule 5 forbids any
-# scripts/*.sh outside a four-name allowlist from naming that directory at all.
+# `all` dispatches on the manifest rather than the flag, because a flag-only `all` arm would turn
+# `task check` red on a checkout where an empty models.json is the correct state. Dispatching on
+# the manifest keeps the gate honest either way, and printing which arm ran keeps an empty result
+# from reading as silent compliance.
 #
-# Branching rather than widening the exact-set list below. That list is exact BY DESIGN (see its
-# own comment) — a head appearing without anyone updating the line is what it exists to catch — and
-# a list widened to "three heads, or none, or some" catches nothing. Two exact assertions, one per
-# manifest shape, keeps that property in both.
+# Branching rather than widening the exact-set list below: that list is exact by design (see its
+# own comment, a head appearing without anyone updating the line is what it exists to catch), and
+# a list widened to "three heads, or none, or some" would catch nothing. Two exact assertions, one
+# per manifest shape, keeps that property in both.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -63,16 +56,16 @@ for f in server.js classify.js embed.js download.js warmup.js queue.js queue.tes
 done
 
 # Concurrency-gate + windowing + /embed unit tests (node:test, no deps, no model
-# download — embed.test.js pins the pooling arithmetic against the backend parity
-# fixture; embed.smoke.test.js self-skips unless CONFORMANCE_ENCODER_MODEL_DIR is set).
+# download; embed.test.js pins the pooling arithmetic against the backend parity
+# fixture, embed.smoke.test.js self-skips unless CONFORMANCE_ENCODER_MODEL_DIR is set).
 node --test queue.test.js windowing.test.js embed.test.js embed.smoke.test.js
 
 # Loading classify.js enforces the models.json <-> scorer consistency contract and
 # validates the manifest shape; HEADS must expose exactly the built-in heads.
 #
-# `attribution` is the second head of the FRUSTRATION signal, not a signal of its own: the backend
-# scores it only for turns the emotion head already put in the HIGH band, and demotes them when it
-# disagrees. It is listed here because this gate is an exact-set assertion by design — a head
+# `attribution` is the second head of the frustration signal, not a signal of its own: the backend
+# scores it only for turns the emotion head already put in the high band, and demotes them when it
+# disagrees. It is listed here because this gate is an exact-set assertion by design, and a head
 # appearing in the service without anyone updating this line is precisely what it exists to catch.
 MANIFEST_HEADS="$(node -e "process.stdout.write(String(Object.keys(require('./models.json')).length))")"
 
@@ -86,17 +79,17 @@ fi
 if [ "$MANIFEST_HEADS" = 0 ]; then
   # The open manifest's three assertions, in the order a reader would ask them.
   #
-  # (1) The manifest is EMPTY, read as JSON, not grepped. `{}` and `{"frustration": {...}}` differ
+  # (1) The manifest is empty, read as JSON, not grepped. `{}` and `{"frustration": {...}}` differ
   #     by more than a byte count, and a half-emptied manifest is exactly the state that would
   #     otherwise publish one checkpoint pin and hide the other two.
-  # (2) Every head is UNBACKED and carries no weight fields. `unbacked: true` alone is not enough:
+  # (2) Every head is unbacked and carries no weight fields. `unbacked: true` alone is not enough:
   #     a spec that kept `model`/`revision` and merely gained a flag would still publish the pin.
-  # (3) Asking to serve one produces the LITERAL token. This is the half that actually matters to
-  #     the open backend, which still calls these heads by name (BuiltInClassifierCatalog carries
-  #     their thresholds), so `/classify` must answer "I know this head, this edition cannot serve
-  #     it" and not the generic `unknown classify head` — which reads as a caller bug and sends
-  #     someone hunting a typo that is not there. Driven through the exported classify() with a
-  #     minimal VALID payload per head shape, because requireResident() sits deliberately behind
+  # (3) Asking to serve one produces the literal token. This is the half that actually matters to
+  #     the backend, which still calls these heads by name (BuiltInClassifierCatalog carries their
+  #     thresholds), so `/classify` must answer "I know this head, this edition cannot serve it"
+  #     and not the generic `unknown classify head`, which reads as a caller bug and sends someone
+  #     hunting a typo that is not there. Driven through the exported classify() with a minimal
+  #     valid payload per head shape, because requireResident() sits deliberately behind
   #     request-shape validation; a malformed probe would get the shape error and prove nothing.
   node -e "
 const fs = require('node:fs');
@@ -161,17 +154,17 @@ console.log('classify-service check OK: ' + actual.join(', '));
 "
 fi
 
-# Loading embed.js enforces the embedders.json manifest shape (model + 40-hex revision
-# + fp32). On top of that: the conformance encoder MUST stay DECLARED. That part is config,
-# present in every image — an empty or differently-keyed manifest is not a harmless default,
-# it is a 400 on every /embed call, which parks a compile-service fit and fails a conformance
+# Loading embed.js enforces the embedders.json manifest shape (model + 40-hex revision +
+# fp32). On top of that, the conformance encoder must stay declared. That part is config,
+# present in every image: an empty or differently-keyed manifest is not a harmless default, it
+# is a 400 on every /embed call, which parks a compile-service fit and fails a conformance
 # sweep, and nothing else in the gate touches the registry. The expected key is read from the
 # backend parity fixture rather than hardcoded, so it tracks the checkpoint the engine
 # actually fits and names in a bundle manifest (encoder_smoke.checkpoint == ENCODERS['gte']).
 #
-# The WEIGHTS behind that declaration are a separate, opt-in thing (BAKE_EMBEDDERS=1), so
-# they are only asserted when this run is one that claims to have them — which is how the
-# same script passes on a laptop with no model cache and inside a baked image.
+# The weights behind that declaration are a separate, opt-in thing (BAKE_EMBEDDERS=1), so
+# they are only asserted when this run is one that claims to have them, which is how the same
+# script passes on a laptop with no model cache and inside a baked image.
 node -e "
 const fs = require('node:fs');
 const { EMBEDDERS, checkpointResidency } = require('./embed');

@@ -39,7 +39,7 @@ export function Sources() {
         subtitle="Forward your OpenTelemetry traces to Tessary so the classifiers can watch them."
         actions={
           <div className="flex items-center gap-2">
-            {/* Ungated since Track A: this was behind `graders_enabled`, and importing a `.tessary/`
+            {/* Ungated: this was behind `graders_enabled`, and importing a `.tessary/`
                 bundle is plain pipeline authoring now. */}
             <Button
               variant="secondary"

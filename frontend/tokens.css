@@ -246,7 +246,7 @@
  * static usage scan can't see that — it only keeps an @theme custom property
  * whose name appears literally somewhere in scanned source, so slots not
  * otherwise referenced as a literal get silently pruned from the compiled
- * CSS and render as invisible black on the dark canvas (#1172). `static`
+ * CSS and render as invisible black on the dark canvas. `static`
  * forces Tailwind to always emit every variable in this block regardless of
  * detected usage. Keep this block scoped to just the series ramp — applying
  * `static` repo-wide would force-generate every unused token's utility

@@ -13,11 +13,11 @@
 // point here fails on an unresolved import or an argument count, that is what happened: fix the snippet
 // against the current signatures rather than working around it.
 
-import ai.tessary.evals.classifier.toolerror.ToolErrorConfig;
-import ai.tessary.evals.classifier.toolerror.ToolErrorDetector;
-import ai.tessary.evals.classifier.toolerror.ToolErrorDetector.Decision;
-import ai.tessary.evals.classifier.toolerror.ToolErrorDetector.State;
-import ai.tessary.evals.classifier.toolerror.ToolErrorRate;
+import ai.tessary.classifier.toolerror.ToolErrorConfig;
+import ai.tessary.classifier.toolerror.ToolErrorDetector;
+import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
+import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
+import ai.tessary.classifier.toolerror.ToolErrorRate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;

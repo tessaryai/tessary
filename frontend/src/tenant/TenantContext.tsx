@@ -7,7 +7,7 @@ interface TenantValue {
   orgSlug: string;
   projectSlug: string;
   api: ProjectApi;
-  /** Org-scoped API (#939 D1) — provider credentials and anything else keyed to the org, not the project. */
+  /** Org-scoped API — provider credentials and anything else keyed to the org, not the project. */
   orgApi: OrgApi;
 }
 
@@ -46,7 +46,7 @@ export function useProjectApi() {
   return useTenant().api;
 }
 
-/** #939 D1: provider credentials (Settings → Providers) are org-scoped, not project-scoped. */
+/** Provider credentials (Settings → Providers) are org-scoped, not project-scoped. */
 export function useOrgApi() {
   return useTenant().orgApi;
 }

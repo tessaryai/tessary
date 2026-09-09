@@ -4,8 +4,8 @@
  * Timeline. All read the same observation list — they differ only in what they
  * make legible.
  *
- * A fourth surface, the Verdicts panel, sat over them until Track A: it read the grader rulings on
- * the trace, and grading left the platform. What a trace is judged by now is a classifier finding,
+ * A fourth surface, the Verdicts panel, sat over them until grading left the platform: it read the
+ * grader rulings on the trace. What a trace is judged by now is a classifier finding,
  * which has its own page.
  */
 import { useMemo, useState } from "react";

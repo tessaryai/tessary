@@ -4,8 +4,8 @@ An agent-reliability platform: ingest every trace, filter it with cheap classifi
 survivors into cases, and explain a case with an agentic root-cause run grounded in the customer's
 own repository. The `.tessary/` pipeline bundle authored by the **evals plugin** (a Claude Code
 plugin in a separate repo) is an INPUT — it names call sites, failure modes and intent, and Layer-2
-triage rules against it. Nothing in this tree synthesises, runs or scores a grader: Track A removed
-graders, datasets, experiments, review queues and the observer outright. Details:
+triage rules against it. Nothing in this tree synthesises, runs or scores a grader: this repo has
+no graders, datasets, experiments, review queues, or observer. Details:
 [`devdocs/reference/architecture.md`](./devdocs/reference/architecture.md).
 
 The product thesis lives in Tessary's internal *Agent Reliability* document,
@@ -46,8 +46,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`classify-service/`](./classify-service/) | Standalone encoder `/classify` service (ECS Fargate) — see its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| `compile-service/` | The SOP-conformance compile service (Python + uv): runs `experiments.engine.run fit` + `export` over a project's own traffic and returns the bundle. Owns no policy, no storage, and no checkpoint — see its README. **Paid**: it lives at `tessary-paid/compile-service/` in this repo, with the two `classifiers/` packages it runs, and is absent from the public export — hence no link |
-| [`classifiers/`](./classifiers/) | The Python classifier tree, split by the open/paid boundary: the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters. The paid classifier modules live in the overlay and are absent from the public export |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
@@ -74,11 +73,9 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
   in order: `contract/` → backend records → frontend types → views. The plugin still emits grader
   and quality-dimension shards this tree has nothing to run; `BundleAssembler` routes them to
   `Shard.IGNORE` rather than rejecting the bundle, and that is deliberate.
-- **Python uses uv, never pip or poetry.** `classifiers/` and `tessary-paid/compile-service/`
-  each own a `pyproject.toml` + `uv.lock`; the gate runs
-  `uv sync --frozen`, so a stale lockfile is a failure rather than a silent re-resolve. The three
-  packages the compile service runs (`sop_compiler`, `experiments/engine`, `experiments/shared`)
-  moved into the overlay with it and still resolve in `classifiers/`'s environment, not their own.
+- **Python uses uv, never pip or poetry.** `classifiers/` owns a `pyproject.toml` + `uv.lock`;
+  the gate runs `uv sync --frozen`, so a stale lockfile is a failure rather than a silent
+  re-resolve.
 - **Node packages use pnpm, never npm.** Each has its own `pnpm-lock.yaml`; they are deliberately
   NOT a workspace, so every Dockerfile can build from its own directory. Two consequences worth
   knowing before you touch one: pnpm 11 keeps settings in `pnpm-workspace.yaml` rather than the
@@ -95,10 +92,12 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
 ## Validation
 
 Run the slices your change touches (`task check -- rca,metering` or `task check -- frontend`),
-and the bare `task check` before merging. **Your machine is the only gate that runs on a change** —
-`.github/workflows/ci.yml` runs the same scripts but is `workflow_dispatch:` only ahead of the public
-cutover, as is every other workflow here bar `namespace-recheck.yml`'s quarterly cron (#1184 tracks
-re-arming them). A PR merged on a red local check stays red on `main` until a human presses Run. Docker is required for any backend slice. Full cost model and recount commands:
+and the bare `task check` before merging. **CI runs the same gate on every pull request** —
+`.github/workflows/check.yml` calls `scripts/check.sh`, the same manifest `task check` runs, so local
+green means CI green by construction; `secret-scan.yml` is armed alongside it. Those two are the only
+workflows that run on their own; everything else is `workflow_dispatch:` only, with no cron anywhere.
+Nothing is merge-blocking (branch protection is plan-gated on this tier), so a red check still has to
+be respected by a human. Docker is required for any backend slice. Full cost model and recount commands:
 [`devdocs/reference/test-suite.md`](./devdocs/reference/test-suite.md).
 
 ## Documentation policy
@@ -109,9 +108,9 @@ Where a new piece of documentation goes, by kind:
    directory's `AGENTS.md` (`backend/`, `frontend/`); this root file only for rules that apply
    repo-wide.
 2. **Lookup / reference material** (tables, inventories, schemas, topology) →
-   `docs/reference/`.
-3. **Step-by-step runbook or cross-stack recipe** → `docs/guides/`.
-4. **Why-explanations of a subsystem** → `docs/concepts/`.
+   `devdocs/reference/`.
+3. **Step-by-step runbook or cross-stack recipe** → `devdocs/guides/`.
+4. **Why-explanations of a subsystem** → `devdocs/concepts/`.
 5. **Durable engineering constraint** → `devdocs/reference/principles.md`. **Product thesis,
    positioning, and market framing do NOT live in this repo** — they live in Notion, and a PR
    that adds a strategy doc here is adding a second source of truth that will go stale.
@@ -125,12 +124,11 @@ Rules that keep this working:
 - **Same-PR co-update.** A code change that invalidates any of these docs updates the doc in
   the same PR (schema changes update `devdocs/reference/data-model.md`; package-set changes
   update the architecture inventory; controller/DTO changes regenerate the OpenAPI spec). The
-  classifier-quality reference page moved to the overlay with the measured numbers it carries
-  (#1293), so that co-update obligation is the paid tree's; its gate
+  classifier-quality reference page lives outside this tree; its gate
   `scripts/check-classifier-quality-doc.sh` stays here and skips with a named reason wherever the
   page is absent.
 - **Size budgets.** This file stays ≤ ~150 lines; a scoped `AGENTS.md` ≤ ~250. When a budget
-  is blown, extract reference material to `docs/reference/` instead of growing the guide.
+  is blown, extract reference material to `devdocs/reference/` instead of growing the guide.
 - **New top-level code directory** → gets a `README.md`; add an `AGENTS.md` only once it
   accrues agent-imperative conventions (the `frontend/` precedent).
 - After moving or renaming a doc, `grep -rn` for the old path and retarget every link in the

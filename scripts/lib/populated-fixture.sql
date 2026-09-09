@@ -1,54 +1,29 @@
 -- =============================================================================
--- Populated-database fixture — rows in every table a value rename would have to move
+-- Populated-database fixture: rows in every table a value rename would have to move
 -- =============================================================================
--- Loaded by scripts/check-migrations-populated.sh between the OLD migration chain (today
--- just the baseline, the script's pinned boundary) and the NEW one. Its whole job is to
+-- Loaded by scripts/check-migrations-populated.sh between the old migration chain (today
+-- just the baseline, the script's pinned boundary) and the new one. Its whole job is to
 -- make the migrations under test run against rows instead of against nothing. It is
--- written against ONE schema — the baseline's — which is why that baseline is a pinned
+-- written against one schema, the baseline's, which is why that baseline is a pinned
 -- filename there rather than whatever `git merge-base` happens to resolve to today.
 --
--- WHY THIS FILE EXISTS AT ALL. `task check` applies Liquibase to an EMPTY Testcontainers
+-- Why this file exists at all: `task check` applies Liquibase to an empty Testcontainers
 -- database, where `ADD CONSTRAINT ... CHECK` validates zero rows and an
 -- `UPDATE ... WHERE col='old'` that matches zero rows is indistinguishable from one that
 -- matches every row. Both failures are invisible until a populated database sees them.
 --
--- WHAT IT HOLDS. A loaded board: one row in each table that carries a persisted vocabulary
--- value (job.kind, the three annotation subject_kind grains,
--- eval_case.detector, retention_policy.data_class, metric_rollup.metric, the model lane,
--- the alert payload keys, the three OPEN detection tables — secret_leak_detection,
--- malformed_output_detection, user_classifier_detection), plus the FK graph they all hang off.
--- The day a migration renames one of those values, the row it has to move is already here and
--- only the assertion needs writing.
---
--- WHAT MOVED OUT (2026-09, #1074). This file used to also carry rows for the saved-view table,
--- two behaviour-review job rows, `finding`'s review columns, the two retired model lanes of
--- project_model_setting/llm_call, and, from epic 8 Track A (PR #1095, which landed BEFORE the
--- partition), two environment rows threaded through the substrate, rows in the tables Track A
--- dropped (verdict, label, the annotation queue, dataset), colliding metric_rollup and
--- metric_baseline rows, four retired job kinds and the verdict retention class — fixture rows
--- that existed only to feed the now-inside-the-baseline "Model lane cutover"/"Triage cutover"
--- and "Track A removal" release blocks in check-migrations-populated.sh (0004-0007, 0009, 0016).
--- The epic-3 partition folded 0001-0016 into 0000-baseline.sql, so those migrations are no
--- longer a separate chain to run rows through — the rows they existed for were deleted rather
--- than moved (several of their tables no longer exist, and the folded baseline's CHECKs admit
--- none of their values), and the release blocks that asserted on them were deleted from
--- check-migrations-populated.sh in the same commit. The rows for tables that moved to the paid
--- overlay DID move too — see the paid overlay's own populated fixture (MIGPOP_OVERLAY_FIXTURE),
--- loaded after this file by the overlay lane of check-migrations-populated.sh because its rows FK
--- against `prj_fix`/`cls_fix`/`org_fix` below.
---
--- WHAT ELSE MOVED OUT (2026-09, #1116). The vector/embedding substrate leaves the open tree in the
--- same commit as changeset 0017: the `classifier_model` row (the centroid user-classifier's trained
--- model), the `embedding` row (and its comment about the platform-seeded `embedding_space` parent),
--- and the `rp_fix_embeddings` retention_policy row (0017 narrows retention_policy_data_class_check
--- to drop 'embeddings', so this row would now violate the CHECK it used to exercise). The matching
--- release block in check-migrations-populated.sh (0017's) was deleted by the #1144 re-baseline,
--- which folded 0017 into the baseline and so left the block asserting against both sides of its
--- own cut.
+-- What it holds: a loaded board, one row in each table that carries a persisted vocabulary
+-- value (job.kind, the three annotation subject_kind grains, eval_case.detector,
+-- retention_policy.data_class, metric_rollup.metric, the model lane, the alert payload keys,
+-- the three open detection tables: secret_leak_detection, malformed_output_detection,
+-- user_classifier_detection), plus the FK graph they all hang off. The day a migration renames
+-- one of those values, the row it has to move is already here and only the assertion needs
+-- writing. `prj_fix`/`cls_fix`/`org_fix` below are also used as FK anchors by fixture rows loaded
+-- elsewhere in the pipeline, so keep their ids stable.
 --
 -- Consequence for anyone editing it: adding a rename to a release means adding an
--- assertion in the script, and a row here if the value is not covered above — or the gate
--- reports PASS on an untested change. The script's fixture-coverage block fails if a value
+-- assertion in the script, and a row here if the value is not covered above, or the gate
+-- reports pass on an untested change. The script's fixture-coverage block fails if a value
 -- it asserts on never got loaded, which is the guard against this file quietly drifting.
 --
 -- Ids are all `*_fix` so a human reading a failed assertion's output can tell fixture rows
@@ -109,12 +84,10 @@ VALUES ('ae_fix', 'prj_fix', 'ar_fix', 'cls_fix', 'threshold', 'firing',
         '{"classifiers":[{"classifier_key":"fixture_classifier","count":3}],"classifier_key":"fixture_classifier"}',
         '2026-08-01T01:00:00Z', '2026-08-01T01:00:00Z');
 
--- ---------------------------------------------------------------- the three OPEN detection tables
--- The old six-table detection UNION view was dropped by #1074 — superseded by the registry-owned
--- union (#1071) at the application layer, and its arms split 3-open/3-paid at the SQL level.
--- These three are the open arms; the paid arms' rows moved to the paid overlay's own populated
--- fixture. One row each, all span-grain (subject_span_id set), which is the fact the script's
--- coverage block asserts rather than assumes.
+-- ---------------------------------------------------------------- the three detection tables
+-- Detection reads a registry-owned union at the application layer; these are the tables this
+-- fixture covers. One row each, all span-grain (subject_span_id set), which is the fact the
+-- script's coverage block asserts rather than assumes.
 
 INSERT INTO malformed_output_detection (id, project_id, classifier_id, classifier_key, subject_session_id,
                                         subject_trace_id, subject_span_id, severity, confidence, created_at)
@@ -129,11 +102,11 @@ INSERT INTO user_classifier_detection (id, project_id, classifier_id, classifier
 VALUES ('det_uc_fix', 'prj_fix', 'cls_fix', 'fixture_classifier', 'ses_fix', 'trc_fix', 'spn_fix', 'warn', 'high', '2026-08-01T00:00:00Z');
 
 -- ---------------------------------------------------------------- the three subject grains
--- annotation gets one row per grain — session, trace, span — because it carries a subject_kind
+-- annotation gets one row per grain (session, trace, span) because it carries a subject_kind
 -- CHECK and a grain CHECK, and a re-cut that handles the span arm and forgets the session arm
 -- passes on any fixture that only has spans. annotation is the classifier's training set as
 -- well as the review store; the review half (its verdict pointer, the label and queue tables)
--- left with Track A.
+-- has since been removed.
 
 INSERT INTO annotation (id, project_id, subject_kind, session_id, trace_id, span_id,
                         key, annotator_kind, value_type, passed, created_at)
@@ -157,8 +130,8 @@ VALUES ('fmi_fix_ses', 'prj_fix', 'fm_fix', 'session', 'ses_fix', NULL, NULL, 'c
 
 -- ---------------------------------------------------------------- findings and cases
 -- Two cases: one with a finding, one resolved without. `ck_eval_case_finding_forward` says a
--- live case must have a finding, so the second is the only shape a finding-less case may take
--- — and it is what proves a future narrowing of that constraint runs against both arms.
+-- live case must have a finding, so the second is the only shape a finding-less case may take,
+-- and it is what proves a future narrowing of that constraint runs against both arms.
 -- eval_case.detector and finding.subject_kind are both CHECK-backed vocabularies.
 
 INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
@@ -190,9 +163,9 @@ VALUES ('pdc_fix', 'prj_fix', 'cls_fix', 'checkout', 'fm_fix', 'medium', 'active
 -- `metric` has no CHECK, which is exactly why it needs rows: a zero-row UPDATE here is silent,
 -- and the consequence (CapabilityService reading month-to-date usage as 0) shows up as
 -- unmetered work, not as an error. Only a count under the old value can tell the difference.
--- The org-level quota-override rows moved to the paid fixture (#1074) — their FK anchor
--- (org_fix) lives here, unaffected. One row per metric: the unique key is
--- (org, project, metric, bucket_start, granularity) and nothing scopes it further.
+-- `org_fix` also anchors quota-override rows loaded elsewhere in the pipeline; keep it stable.
+-- One row per metric: the unique key is (org, project, metric, bucket_start, granularity) and
+-- nothing scopes it further.
 INSERT INTO metric_rollup (id, org_id, project_id, metric, value, bucket_start, granularity, created_at)
 VALUES ('mr_fix_l1', 'org_fix', 'prj_fix', 'l1_evals', 155, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z'),
        ('mr_fix_l2', 'org_fix', 'prj_fix', 'l2_evals', 7, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z');
@@ -211,13 +184,13 @@ INSERT INTO retention_policy (id, project_id, data_class, ttl_days, cold_after_d
 VALUES ('rp_fix_traces', 'prj_fix', 'traces', 30, 7, '2026-08-01T00:00:00Z'),
        ('rp_fix_detections', 'prj_fix', 'detections', 14, NULL, '2026-08-01T00:00:00Z');
 
--- The conformance rule/detection rows moved to the paid overlay's fixture (#1074) —
--- the paid overlay's own fixture (MIGPOP_OVERLAY_FIXTURE), FK-anchored on prj_fix/trc_fix/ses_fix here.
+-- `prj_fix`/`trc_fix`/`ses_fix` also anchor fixture rows loaded elsewhere in the pipeline; keep
+-- them stable.
 
 -- ---------------------------------------------------------------- model lanes + LLM ledger
 -- `triage` is one of the two lanes ck_project_model_setting_lane admits today (rca, triage);
--- the retired lanes' rows (grading, synthesis, and — as of 0018 (#1117) — assistant) went with
--- the migrations that retired them, all folded in.
+-- the retired lanes' rows (grading, synthesis, assistant) went with the migrations that retired
+-- them, all folded in.
 INSERT INTO project_model_setting (project_id, lane, model_key, service_tier, reasoning_effort, created_at, updated_at)
 VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
 

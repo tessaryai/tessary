@@ -2,22 +2,17 @@
 /*
  * One finding, drawn from its own evidence.
  *
- * <h2>What replaced what</h2>
- * The queue used to print the Layer-2 agent's answer in full, several hundred words of prose per row,
- * and that was the only rendering of a finding's argument anywhere in the product. So a reader got
- * somebody else's reading of the numbers instead of the numbers, in a form nobody could scan.
+ * This page shows the numbers: the measure's own quantiles then and now, the workload block
+ * beside them, and for a cost shift the token decomposition that names what got more expensive.
+ * Triage's ruling sits under the figures rather than in place of them, and it is a decision, not
+ * a second opinion: it is what settled whether anyone was ever paged about this. So the citations
+ * that back it are shown in full, including the check scripts the agent wrote, which is the only
+ * part of a ruling a reader can re-run for themselves.
  *
- * This page shows the numbers. The measure's own quantiles then and now, the workload block beside them,
- * and for a cost shift the token decomposition that names WHAT got more expensive. Triage's ruling sits
- * under the figures rather than in place of them — and it is a DECISION, not a second opinion: it is
- * what settled whether anyone was ever paged about this. So the citations that back it are shown in
- * full, including the check scripts the agent wrote, which is the only part of a ruling a reader can
- * re-run for themselves.
- *
- * <h2>The order is the argument</h2>
- * Measure first (what moved), then workload (whether the input moved with it), then the decomposition
- * (which component of the measure carries it). That is the order the ruling is made in, and reversing it
- * would present the explanation before the thing being explained.
+ * The order is the argument: measure first (what moved), then workload (whether the input moved
+ * with it), then the decomposition (which component of the measure carries it). That is the order
+ * the ruling is made in, and reversing it would present the explanation before the thing being
+ * explained.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -38,7 +33,7 @@ import {
 } from "./shiftStory";
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { EvidenceTable } from "./EvidenceTable";
-// The paid seam (open-core D2): `null` in this build, the baseline audit block in a paid one.
+// This build's baseline renderer returns null by default.
 import { paid } from "@paid";
 
 type Detail = BehaviorFindingDetail;
@@ -187,10 +182,9 @@ export function FindingPage() {
         </section>
       )}
       {rate && <ToolErrorEvidence rate={rate} />}
-      {/* PAID (#846): only an SOP-conformance finding carries a baseline, so rendering one is a
-          paid surface. The guard is a nullability check on an OPEN DTO and stays here; the
-          two `!detail.baseline` siblings below stay too — they decide what an open build
-          renders in its place. */}
+      {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
+          the two `!detail.baseline` siblings below decide what renders in its place when there
+          isn't one. */}
       {detail.baseline && paid.findingEvidence(detail.baseline)}
       {!story && !detail.baseline && (
         <p className="text-subtle mt-6 text-body" style={{ maxWidth: 560 }}>
@@ -263,9 +257,9 @@ export function FindingPage() {
           </span>
         }
         subtitle={
-          /* Identity used to be a section of its own at the foot of the page printing the raw cause
-             key. Everything a reader needs off it — which bucket, over what window, against what —
-             says itself here in words; the key itself stays reachable as the line's title. */
+          /* Everything a reader needs about identity (which bucket, over what window, against
+             what) says itself here in words; the raw cause key stays reachable as the line's
+             title. */
           <span title={f.causeKey}>
             {[bucket, window && `${window} vs ${referenceWords(sh.reference)}`].filter(Boolean).join(" · ")}
           </span>
@@ -289,10 +283,9 @@ export function FindingPage() {
   /**
    * The header of a rate finding. Same anatomy as {@link ShiftHeader}, different claim.
    *
-   * <p>The one action lives here and nowhere else before triage. The resolve verbs used to sit under
-   * this header on every finding, which offered a reader "absorb as legitimate" and "open a case" as
-   * the first thing on the page — a decision, before any of the evidence for it. They now appear only
-   * inside the ruling, as overrides of a decision that has actually been made.
+   * <p>The one action lives here and nowhere else before triage. The resolve verbs appear only
+   * inside the ruling, as overrides of a decision that has actually been made, not as a way to
+   * skip past the evidence for it.
    */
   function RateHeader({
     rate: r,
@@ -359,16 +352,16 @@ export function FindingPage() {
 /**
  * What triage ruled, and everything it ruled on.
  *
- * <p>The verdict line first, because the verdict is what happened to this finding — `positive` handed it
- * to a person, the other two ended it — and a reader who stops after one line should have that fact
- * rather than the prose.
+ * <p>The verdict line first, because the verdict is what happened to this finding (`positive`
+ * handed it to a person, the other two ended it), and a reader who stops after one line should
+ * have that fact rather than the prose.
  *
  * <p>Then the citations, which are now two different objects wearing the same shape. An evidence
  * pointer is a claim about something already on this page ("window.n_cur", a trace id the agent
- * fetched) and reads as one line. A CHECK SCRIPT is code the agent wrote, ran in its sandbox, and is
- * offering as a receipt — so it is shown as code, with what it printed under it and the detector
- * numbers it re-derived beside that. Flattening a script into a line of prose would hide the one part
- * of a ruling a reader can actually re-run.
+ * fetched) and reads as one line. A check script is code the agent wrote, ran in its sandbox, and
+ * is offering as a receipt, so it is shown as code, with what it printed under it and the
+ * detector numbers it re-derived beside that. Flattening a script into a line of prose would hide
+ * the one part of a ruling a reader can actually re-run.
  */
 function TriageRuling({ finding }: { finding: Detail["finding"] }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
@@ -469,15 +462,13 @@ function CheckScript({ citation }: { citation: TriageCitation }) {
   );
 }
 
-/** A rate shift: the rate itself, then the signature breakdown that says whether it is one failure. */
 /**
  * What is behind a rate shift: the failure signatures, then instances of them.
  *
- * <p>The rate itself is NOT here any more. It used to be a one-row `PairBlock` printing
- * `1.28 → 2.49  +94%`, which stated the finding's whole claim as a percent change of a percentage —
- * the single most misleading way to write it. The chart above says it as a share of calls and the
- * pins say it as a count per hundred; repeating it here as a table would only reintroduce that
- * column.
+ * <p>The rate itself is not repeated here: stating it as a percent change of a percentage (e.g.
+ * `1.28 → 2.49  +94%`) is the single most misleading way to write it. The chart above says it as
+ * a share of calls and the pins say it as a count per hundred; a table here would only
+ * reintroduce that column.
  */
 function ToolErrorEvidence({ rate }: { rate: NonNullable<Detail["toolError"]> }) {
   return (
@@ -524,7 +515,7 @@ function ToolErrorEvidence({ rate }: { rate: NonNullable<Detail["toolError"]> })
  * turns in the order it ranked them, and a distribution shift can point at members of the window it
  * measured. One nullable id could carry the first of those and silently drop the rest.
  *
- * Renders nothing when the set is empty — a finding whose traces have aged out keeps its claim and
+ * Renders nothing when the set is empty: a finding whose traces have aged out keeps its claim and
  * loses its evidence, and an empty list under a heading reads as a bug rather than as history.
  */
 function EvidenceLinks({ evidence, basePath }: { evidence: EvidenceRef[]; basePath: string }) {

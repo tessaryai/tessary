@@ -22,7 +22,7 @@ FROM node:22-alpine3.24
 WORKDIR /app
 # Global install rather than corepack — see frontend/Dockerfile. PNPM_VERSION comes from the build
 # orchestrator (Taskfile `PNPM_VERSION` locally; the `PNPM_VERSION` Actions variable in CI); the
-# default is the same pin, held equal by scripts/check-required-inputs.sh (#1190).
+# default is the same pin, held equal by scripts/check-required-inputs.sh.
 ARG PNPM_VERSION=11.15.1
 # npm@12.0.2 pinned alongside pnpm to clear CVE-2026-59873 (node-tar, bundled inside npm's own
 # node_modules, not an app dependency): the base's stock npm 10.9.8 bundles tar 7.5.11, and no npm
@@ -46,8 +46,8 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY server.js ./
 
-# The image's version identity (epic 5 clause 3, #1135; extended here per epic 7 clause 1, #941);
-# same convention and same "dev" fallback as backend/Dockerfile, so the release workflow's OCI
+# The image's version identity, same convention and same "dev" fallback as
+# backend/Dockerfile, so the release workflow's OCI
 # label assertion has something to check on every published image, not just backend/frontend.
 # Written to a file as well as a LABEL for the same reason backend/Dockerfile gives: a derived
 # image can COPY a file from its base and cannot read its base's labels.

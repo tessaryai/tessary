@@ -1,146 +1,128 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-# Baseline equivalence proof — a database born from the pinned pre-partition chain
+# Baseline equivalence proof: a database born from the pinned pre-partition chain
 # (plus a declared schema delta) is the same database the open master (plus an
-# optional paid overlay) builds today
+# optional overlay) builds today.
 # =============================================================================
-# Built for the 2026-08-15 squash (95 changesets folded into 0000-baseline.sql) and
-# generalised for the epic-3 partition commit that follows it, which moves tables
-# OUT of 0000-baseline.sql rather than folding files IN — neither is reviewable by
-# reading. A 6400-line dump either reproduces the reference chain's end state or it
-# quietly doesn't, and the ways it quietly doesn't are exactly the ways nobody
-# notices — a DEFAULT that came from an ALTER and not from the CREATE TABLE, an
-# index the chain dropped and the photograph kept, a CHECK arm a later changeset
-# widened, a seed row whose value a rename moved after it was first inserted. So
-# this script builds both databases and diffs them.
+# A migration baseline squash is not reviewable by reading a multi-thousand-line dump: it either
+# reproduces the reference chain's end state or it quietly doesn't, and the ways it quietly
+# doesn't are exactly the ways nobody notices: a DEFAULT that came from an ALTER and not from the
+# CREATE TABLE, an index the chain dropped and the photograph kept, a CHECK arm a later changeset
+# widened, a seed row whose value a rename moved after it was first inserted. So this script
+# builds both databases and diffs them.
 #
-#   DB A — an empty pgvector:pg16 + the PINNED OLD CHAIN: the changelog at
-#          EQCHK_OLD_REV, materialised from git (read out of the object store,
-#          never checked out — a rev with uncommitted local changes proves nothing
-#          about the tree that will actually ship), plus that same rev's paid
-#          overlay when the overlay is in play at all, plus EQCHK_DELTA_FILE's
-#          self-checking schema delta on top — the objects the regeneration under
-#          proof is allowed to move or change, declared and asserted rather than
-#          left to the diff to discover.
-#   DB B — an empty pgvector:pg16 + the OPEN master changelog from the working
-#          tree, plus — when EQCHK_OVERLAY_DIR is set, or defaulted from an
-#          overlay checkout present on disk — the paid overlay's own changelog
-#          applied second, against the SAME database, after the open update, so
-#          the overlay's floor-pin precondition sees the open ledger already there.
+#   DB A - an empty pgvector:pg16 + the pinned old chain: the changelog at EQCHK_OLD_REV,
+#          materialised from git (read out of the object store, never checked out; a rev with
+#          uncommitted local changes proves nothing about the tree that will actually ship), plus
+#          that same rev's overlay when the overlay is in play at all, plus
+#          EQCHK_DELTA_FILE's self-checking schema delta on top: the objects the regeneration
+#          under proof is allowed to move or change, declared and asserted rather than left to
+#          the diff to discover.
+#   DB B - an empty pgvector:pg16 + the open master changelog from the working tree, plus, when
+#          EQCHK_OVERLAY_DIR is set, or defaulted from an overlay checkout present on disk, the
+#          overlay's own changelog applied second, against the same database, after the open
+#          update, so the overlay's floor-pin precondition sees the open ledger already there.
 #
 # A pass means: no schema difference at all, and the seeded rows are identical.
 #
-# BOTH SIDES GET THE OVERLAY, OR NEITHER DOES, and which rev each side's overlay
-# comes from is what makes the comparison meaningful. A takes OLD_REV's overlay and
-# B takes the working tree's, so a run proves the WHOLE database — both lanes,
-# composed in apply order, including the anchor FK that spans them — rather than
-# proving the open lane and assuming the overlay still fits it. Where a run
-# regenerates only one lane, the other lane is identical on both sides and
-# contributes nothing to the diff, which is the correct answer, not a gap: it is
-# the lane under proof that has to come out byte-identical.
+# Both sides get the overlay, or neither does, and which rev each side's overlay comes from is
+# what makes the comparison meaningful. A takes OLD_REV's overlay and B takes the working tree's,
+# so a run proves the whole database (both lanes, composed in apply order, including the anchor
+# FK that spans them) rather than proving the open lane and assuming the overlay still fits it.
+# Where a run regenerates only one lane, the other lane is identical on both sides and
+# contributes nothing to the diff, which is the correct answer, not a gap: it is the lane under
+# proof that has to come out byte-identical. An A without the overlay while B has one is simply a
+# smaller database than B, and every overlay-only table lands in the diff as a spurious difference, so
+# both sides must agree on whether the overlay is in play.
 #
-# This replaces an asymmetry that was correct exactly once. Before #1074 the paid
-# tables lived in the OPEN baseline, so A got them from its open chain and only B
-# needed an overlay to match; applying one to A as well would have double-created
-# every paid table. #1074 moved them out for good, so from the rev after it
-# onwards an A without the overlay is simply a smaller database than B, and every
-# paid table lands in the diff as a spurious difference.
+# The identity mode still exists: EQCHK_DELTA_FILE pointed at an empty file and
+# EQCHK_OVERLAY_DIR= forced empty makes A and B the same changelog applied twice, which is what
+# proves the harness itself.
 #
-# The identity mode still exists — EQCHK_DELTA_FILE pointed at an empty file and
-# EQCHK_OVERLAY_DIR= forced empty makes A and B the same changelog applied twice,
-# which is what proves the harness itself.
+# Why each rule exists. Every one of these was a way to get a green diff that proves nothing, so
+# none of them is a style preference:
 #
-# WHY EACH RULE EXISTS. Every one of these was a way to get a green diff that proves
-# nothing, so none of them is a style preference:
+#  1. Same apply tool both sides: liquibase/liquibase:5.0 for A and for B. Apply the old chain
+#     with one Liquibase and the baseline with another and any difference in the diff has a
+#     second explanation ("that's just tool skew"), which is precisely the explanation a real
+#     finding would hide behind. Neither database's changelog ledger is ever read again (both are
+#     throwaway), so using the CLI here costs nothing. The app's own SpringLiquibase applies the
+#     swapped changelog on fresh databases elsewhere, which is where that question belongs.
 #
-#  1. SAME APPLY TOOL BOTH SIDES — liquibase/liquibase:5.0 for A and for B. Apply the old
-#     chain with one Liquibase and the baseline with another and any difference in the
-#     diff has a second explanation ("that's just tool skew"), which is precisely the
-#     explanation a real finding would hide behind. Neither database's changelog ledger is
-#     ever read again — both are throwaway — so using the CLI here costs nothing. The
-#     app's own SpringLiquibase applies the swapped changelog in Gates 4 and 5, on fresh
-#     databases, which is where that question belongs.
-#
-#  2. pg_dump RUNS INSIDE THE CONTAINERS — `docker exec`, never the host binary. The host
-#     is Postgres 18.4 and the servers are 16: a newer pg_dump emits a newer `SET`
-#     preamble and formats objects differently, so a host dump is both noisier and,
-#     because Phase 1's baseline is a dump pasted into a changeset, actively dangerous —
-#     one newer-server `SET` transplanted into a `splitStatements:false` changeset aborts
-#     the whole changeset. Same image on both sides means the same pg_dump build on both
+#  2. pg_dump runs inside the containers: `docker exec`, never the host binary. A newer host
+#     pg_dump emits a newer `SET` preamble and formats objects differently, so a host dump is
+#     both noisier and, because the baseline is a dump pasted into a changeset, actively
+#     dangerous: one newer-server `SET` transplanted into a `splitStatements:false` changeset
+#     aborts the whole changeset. Same image on both sides means the same pg_dump build on both
 #     sides, and the diff can only be about the databases.
 #
-#  3. THE NORMALIZATION IS DECLARED AND TINY — and it is the whole list:
+#  3. The normalization is declared and tiny, and it is the whole list:
 #       a. the dump preamble (the banner comment and the `SET`/`set_config` block). It is
 #          identical on both sides anyway; stripping it just keeps a diff readable.
-#       b. `databasechangelog` / `databasechangeloglock`, via pg_dump's own
-#          --exclude-table rather than a regex. These are Liquibase's bookkeeping, not the
-#          product schema, and their CONTENT necessarily differs (A ran 166 changesets, B
-#          ran 1) — but their SHAPE is not something this proof has an opinion about.
-#       c. pg_dump's `\restrict` / `\unrestrict` guard pair. Postgres 16.10 wrapped every
-#          dump in these psql meta-commands, and their argument is a RANDOM token minted
-#          per invocation: dump one database twice and the two files differ on exactly
-#          those two lines. They are a property of the dumping session, not of anything in
-#          the database, and they are the reason for the control below.
-#     NOTHING ELSE. If you find yourself reaching for a fourth rule, stop: what you are
-#     about to normalize away is a real difference between the two databases, and the fix
-#     belongs in 0000-baseline.sql. A normalizer that grows to fit the diff is a proof
-#     that has been edited until it passes.
+#       b. `databasechangelog` / `databasechangeloglock`, via pg_dump's own --exclude-table
+#          rather than a regex. These are Liquibase's bookkeeping, not the product schema, and
+#          their content necessarily differs (A and B ran different numbers of changesets), but
+#          their shape is not something this proof has an opinion about.
+#       c. pg_dump's `\restrict` / `\unrestrict` guard pair. These psql meta-commands wrap every
+#          dump, and their argument is a random token minted per invocation: dump one database
+#          twice and the two files differ on exactly those two lines. They are a property of the
+#          dumping session, not of anything in the database, and they are the reason for the
+#          control below.
+#     Nothing else. If you find yourself reaching for a fourth rule, stop: what you are about to
+#     normalize away is a real difference between the two databases, and the fix belongs in
+#     0000-baseline.sql. A normalizer that grows to fit the diff is a proof that has been edited
+#     until it passes.
 #
-#  3b. THE NORMALIZATION IS ITSELF UNDER TEST. Rule 3 is only safe if it is complete, so
-#     before A is compared to B, A is compared to ITSELF — dumped twice, normalized, and
-#     required to be byte-identical. That control is what separates "this normalizer
-#     removes pg_dump's nondeterminism" from "this normalizer removes whatever was in the
-#     way": a rule that is too weak fails the control, and the day a future Postgres adds
-#     another per-run token the control fails first and names it, instead of the real diff
-#     quietly acquiring noise.
+#  3b. The normalization is itself under test. Rule 3 is only safe if it is complete, so before A
+#     is compared to B, A is compared to itself: dumped twice, normalized, and required to be
+#     byte-identical. That control is what separates "this normalizer removes pg_dump's
+#     nondeterminism" from "this normalizer removes whatever was in the way": a rule that is too
+#     weak fails the control, and the day a future Postgres adds another per-run token the
+#     control fails first and names it, instead of the real diff quietly acquiring noise.
 #
-#  4. THE DATA DIFF NAMES ITS COLUMNS. The seeds are compared through a projection table
-#     (`zz_eqcheck_<table>`) built from a column list spelled out below, so "which columns
-#     did this compare?" is answerable by reading rather than by trusting. A column that
-#     cannot match by construction is excluded BY NAME with the reason attached and asserted
-#     NOT NULL instead (the precedent: old 0018 stamped two singleton rows with `now()` while
-#     the baseline transcribed literals; Track A has since dropped both of those tables, so
-#     the exclusion list is empty today). `embedding_space` — every column, including 0093's
-#     renamed key over its unrenamed id — used to be this rule's one worked example, until
-#     0017 (#1116) dropped the table along with the rest of the vector substrate. Nothing
-#     platform-seeded survives it, so SEEDED_TABLES is empty and rule 5 below now asserts
-#     that emptiness explicitly rather than iterating zero times and reading as a silent PASS.
+#  4. The data diff names its columns. The seeds are compared through a projection table
+#     (`zz_eqcheck_<table>`) built from a column list spelled out below, so "which columns did
+#     this compare?" is answerable by reading rather than by trusting. A column that cannot
+#     match by construction is excluded by name with the reason attached and asserted not null
+#     instead. Nothing is platform-seeded today, so SEEDED_TABLES is empty and rule 5 below
+#     asserts that emptiness explicitly rather than iterating zero times and reading as a silent
+#     pass.
 #
-#  5. THE SEEDED-TABLE LIST IS DERIVED, NOT TRUSTED. Before the per-table dumps, both
-#     databases are asked which tables have rows at all, and the two answers must match
-#     each other AND the declared list. A table the chain seeds and the baseline forgets
-#     would otherwise be invisible: nobody diffs a table they didn't think to name. With the
-#     declared list empty (see rule 4), the census still runs and both answers are asserted
-#     empty by name — a future seed that lands with no matching entry here fails loudly
-#     instead of the loop silently having nothing to walk.
+#  5. The seeded-table list is derived, not trusted. Before the per-table dumps, both databases
+#     are asked which tables have rows at all, and the two answers must match each other and the
+#     declared list. A table the chain seeds and the baseline forgets would otherwise be
+#     invisible: nobody diffs a table they didn't think to name. With the declared list empty
+#     (see rule 4), the census still runs and both answers are asserted empty by name; a future
+#     seed that lands with no matching entry here fails loudly instead of the loop silently
+#     having nothing to walk.
 #
 # Usage:  ./scripts/verify-baseline-equivalence.sh [--keep]
 #           --keep   leave both containers running; prints the psql lines
 #         EQCHK_OLD_REV=<rev>       commit whose tree holds the pre-partition chain
-#                                   (default HEAD — the placeholder before the
+#                                   (default HEAD, the placeholder before the
 #                                   partition commit, which pins its own parent's
-#                                   sha the same way the squash pinned one)
+#                                   sha the same way the baseline squash pinned one)
 #         EQCHK_DELTA_FILE=<path>   self-checking SQL applied to A after the old
 #                                   chain, before the schema dump (default
-#                                   scripts/lib/partition-expected-delta.sql, empty
-#                                   — a no-op — until the partition commit fills it
-#                                   in with the objects it moves)
-#         EQCHK_OVERLAY_DIR=<dir>   a paid module's resources root, holding
-#                                   db/changelog/paid/db.changelog-paid.yaml —
+#                                   scripts/lib/partition-expected-delta.sql, empty,
+#                                   a no-op, until the partition commit fills it in
+#                                   with the objects it moves)
+#         EQCHK_OVERLAY_DIR=<dir>   an overlay module's resources root, holding
+#                                   db/changelog/paid/db.changelog-paid.yaml,
 #                                   applied second, against the same database as the
-#                                   open master, on BOTH sides: this directory is B's
+#                                   open master, on both sides: this directory is B's
 #                                   overlay, and A gets OLD_REV's own (default: the
-#                                   paid overlay/db's resources root, if that tree
+#                                   overlay's resources root, if that tree
 #                                   exists in this checkout; pass EQCHK_OVERLAY_DIR=
-#                                   empty to force BOTH sides open-only)
+#                                   empty to force both sides open-only)
 #
 # Requires: docker and a Postgres JDBC driver in ~/.m2 (any backend build puts one there).
 # Runs two small Postgres containers and applies the whole old chain; several minutes on
 # one CPU.
 # Leaves nothing behind.
 #
-# Not wired into `task check`: it is the gate for a squash, and a squash happens once.
+# Not wired into `task check`: it is the gate for a baseline squash, and a squash happens rarely.
 # Checked in so the next one can rerun it instead of reinventing it.
 # =============================================================================
 
@@ -152,32 +134,33 @@ MASTER="$RESOURCES/db/changelog/db.changelog-master.yaml"
 CHANGES="$RESOURCES/db/changelog/changes"
 
 # The pre-partition placeholder. There is no fixed pre-partition commit to pin until the
-# epic-3 partition commit exists, so before then this runs as an IDENTITY check — the same
-# open changelog materialised twice, once via git archive at HEAD and once from the working
-# tree — which is what proves the harness before it has a real delta to prove. The partition
-# commit replaces this default with a sha the same way the 2026-08-15 squash pinned
-# 3b3f43b783e65dd82626c8b2fc9b51e3743acaab (its own parent, the last tree holding the old
-# 96-file chain intact): a sha, never a symbolic ref, so a later rebase produces a clear
-# failure below (`git cat-file -e`) instead of a quietly different comparison.
+# partition commit exists, so before then this runs as an identity check: the same open
+# changelog materialised twice, once via git archive at HEAD and once from the working tree,
+# which is what proves the harness before it has a real delta to prove. The partition commit
+# replaces this default with a sha the same way the baseline squash pinned its own parent (the
+# last tree holding the old chain intact): a sha, never a symbolic ref, so a later rebase
+# produces a clear failure below (`git cat-file -e`) instead of a quietly different comparison.
 OLD_REV="${EQCHK_OLD_REV:-HEAD}"
 
-# Self-checking schema delta applied to A after the old chain, before the schema dump — the
+# Self-checking schema delta applied to A after the old chain, before the schema dump: the
 # objects a partition commit is allowed to move or change, declared by name instead of left
 # to the diff to discover. Empty by default: a no-op, which is exactly what keeps this script
-# green as the identity check it is before #1074 lands. See partition-expected-delta.sql's
-# own header for the DO-block format a future caller (the partition commit) must use.
+# green as the identity check it is until the partition commit lands. See
+# partition-expected-delta.sql's own header for the DO-block format a future caller (the
+# partition commit) must use.
 DELTA_FILE="${EQCHK_DELTA_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/partition-expected-delta.sql}"
 
-# A paid overlay changelog directory, applied second — against the SAME database as the open
+# An overlay changelog directory, applied second, against the same database as the open
 # master, after it, so the overlay floor-pin's `evals:0000-baseline` precondition sees the open
-# ledger already there. Applied to BOTH databases: this working-tree directory is B's, and A
-# gets the same overlay as OLD_REV had it (see "materialise the old chain" below). Defaults to the overlay module's resources root (found by its db.changelog-paid.yaml) when that tree
-# is present in the checkout — the same file-exists probe backend/pom.xml uses to activate the
-# paid profile (D2) — because since #1074 the paid tables live ONLY in the overlay's own
-# baseline: a checkout with the overlay present but no overlay applied to B is not the open
-# export B is supposed to model, it is just B missing tables A still has. Pass
-# EQCHK_OVERLAY_DIR= (empty) to force BOTH sides open-only regardless — the shape that ships
-# once the paid folder is filtered out of the public export.
+# ledger already there. Applied to both databases: this working-tree directory is B's, and A
+# gets the same overlay as OLD_REV had it (see "materialise the old chain" below). Defaults to
+# the overlay module's resources root (found by its db.changelog-paid.yaml) when that tree is
+# present in the checkout, the same file-exists probe backend/pom.xml uses to activate that
+# module's profile, because its tables live only in the overlay's own baseline: a checkout with the
+# overlay present but no overlay applied to B is not the open export B is supposed to model, it
+# is just B missing tables A still has. Pass EQCHK_OVERLAY_DIR= (empty) to force both sides
+# open-only regardless, the shape that ships once the overlay folder is filtered out of the public
+# export.
 DEFAULT_OVERLAY_DIR=""
 PAID_MASTER="$(find "$ROOT" \( -path '*/node_modules' -o -path '*/target' -o -path '*/.claude' -o -path '*/.crew' \) -prune -o -name 'db.changelog-paid.yaml' -print 2>/dev/null | head -1)"
 if [ -n "$PAID_MASTER" ]; then
@@ -185,16 +168,16 @@ if [ -n "$PAID_MASTER" ]; then
 fi
 OVERLAY_DIR="${EQCHK_OVERLAY_DIR-$DEFAULT_OVERLAY_DIR}"
 
-CONTAINER_A="evals-eqcheck-old"
-CONTAINER_B="evals-eqcheck-new"
-NETWORK="evals-eqcheck-net"
+CONTAINER_A="tessary-eqcheck-old"
+CONTAINER_B="tessary-eqcheck-new"
+NETWORK="tessary-eqcheck-net"
 # Deliberately not 5433 (dev stack), 55432 (check-migrations-populated.sh) or 55555
 # (restore-drill.sh): this must be runnable while any of those is up.
 PORT_A="${EQCHK_PORT_A:-55437}"
 PORT_B="${EQCHK_PORT_B:-55438}"
 PG_IMAGE="${EQCHK_PG_IMAGE:-pgvector/pgvector:pg16}"
 LB_IMAGE="${EQCHK_LB_IMAGE:-liquibase/liquibase:5.0}"
-DB="evals"
+DB="tessary"
 PASSWORD="eqcheck"
 KEEP=0
 
@@ -202,15 +185,11 @@ KEEP=0
 # Rule 4. Per seeded table: the columns this proof compares, in order. An excluded column
 # carries its reason here and nowhere else.
 #
-# It used to be three tables, then one. grading_spend_watermark and grading_breaker each
-# seeded one singleton row whose updated_at the old chain stamped now() and the baseline
-# transcribed as a literal, so that column was EXCLUDED by name and asserted NOT NULL instead;
-# Epic 8 Track A (0016, PR #1095) dropped both tables before the partition, leaving
-# embedding_space (0000's five platform rows) as the sole seeded table. 0017 (#1116) then
-# dropped embedding_space itself along with the rest of the vector substrate, so nothing is
-# platform-seeded any more — SEEDED_TABLES is empty, and rule 5's census below asserts that
-# emptiness explicitly rather than iterating zero times. The NOT_NULL_ASSERTS mechanism stays,
-# empty, for the next seed whose column has to be excluded rather than compared.
+# Nothing is platform-seeded today, so SEEDED_TABLES is empty and rule 5's census below asserts
+# that emptiness explicitly rather than iterating zero times. The NOT_NULL_ASSERTS mechanism
+# stays, empty, for the next seed whose column has to be excluded rather than compared: a column
+# excluded this way is asserted not null instead, so "not compared" never quietly means "not
+# there".
 SEEDED_TABLES=""
 # Columns excluded above, asserted present rather than compared. None today.
 NOT_NULL_ASSERTS=""
@@ -222,7 +201,7 @@ die() {
   exit 1
 }
 
-WORK="$(mktemp -d -t evals-eqcheck.XXXXXX)"
+WORK="$(mktemp -d -t tessary-eqcheck.XXXXXX)"
 cleanup() {
   if [ "$KEEP" != 1 ]; then
     rm -rf "$WORK"
@@ -252,19 +231,18 @@ DRIVER="$(find "$HOME/.m2/repository/org/postgresql/postgresql" -name 'postgresq
 git cat-file -e "${OLD_REV}^{commit}" 2>/dev/null || die "OLD_REV ${OLD_REV} is not a commit in this repo — if the branch was rebased, pass EQCHK_OLD_REV=<the pre-partition commit>"
 
 # Reads a Liquibase master changelog's own include list back out as a sorted set of the
-# repo-relative paths it declares — never a count, so an added-and-removed file that happens
+# repo-relative paths it declares, never a count, so an added-and-removed file that happens
 # to leave the total unchanged cannot hide from the comparison below.
 included_set() {
   local master="$1" prefix="$2"
-  # `|| true`: an overlay floor-pin with no includes yet (today's paid db module, before
-  # #1074) is a legitimate empty set, not a failure — grep's no-match exit code must not trip
-  # `set -e` on the assignment this feeds.
+  # `|| true`: an overlay floor-pin with no includes yet is a legitimate empty set, not a
+  # failure; grep's no-match exit code must not trip `set -e` on the assignment this feeds.
   { grep "file: ${prefix}" "$master" || true; } | sed -E "s#.*file:[[:space:]]*(${prefix}[^\"' ]+).*#\1#" | sort -u
 }
 
 # ---------------------------------------------------------------- materialise the old chain
 # git archive, not a checkout: only the changelog tree is needed and nothing in the working
-# tree — anyone's, including another agent's uncommitted work — may be touched to get it.
+# tree, anyone's, including another agent's uncommitted work, may be touched to get it.
 
 mkdir -p "$WORK/old"
 git archive "$OLD_REV" -- "$RESOURCES/db" | tar -x -C "$WORK/old"
@@ -272,7 +250,7 @@ OLD_RESOURCES="$WORK/old/$RESOURCES"
 [ -f "$OLD_RESOURCES/db/changelog/db.changelog-master.yaml" ] || die "git archive did not produce a master changelog under $OLD_RESOURCES"
 
 # A's expected file SET, derived from OLD_REV's own master changelog rather than a hardcoded
-# count — "every changeset in that tree ran" is the property under test, and a hardcoded
+# count: "every changeset in that tree ran" is the property under test, and a hardcoded
 # number only ever proves "the number I typed matches itself". Compared as a set against what
 # git actually has on disk at that rev, so a file the changelog declares but the tree lacks
 # (or vice versa) fails here, before either database exists.
@@ -282,12 +260,11 @@ OLD_ONDISK="$(git ls-tree -r --name-only "$OLD_REV" -- "$CHANGES" | grep '\.sql$
 OLD_INCLUDED_FILES="$(printf '%s\n' "$OLD_INCLUDED" | grep -c . || true)"
 
 # A's overlay, materialised from OLD_REV the same way and for the same reason. Found by its
-# changelog FILENAME in that rev's tree, never by a hardcoded path — the open boundary forbids
-# a scripts/*.sh naming the overlay's location, and the working-tree default above is found the
-# same way. A rev with no overlay in its tree, while the working tree has one, is a comparison
-# this script cannot make lane for lane, so it DIES rather than quietly applying A open-only and
-# reporting every paid table as a difference — the exact failure this whole block exists to fix.
-# Forcing EQCHK_OVERLAY_DIR= empty is how you compare two open lanes on purpose.
+# changelog filename in that rev's tree, never by a hardcoded path, the same way the working-tree
+# default above is found. A rev with no overlay in its tree, while the working tree has one, is a
+# comparison this script cannot make lane for lane, so it dies rather than quietly applying A
+# open-only and reporting every overlay-only table as a difference, the exact failure this whole block
+# exists to fix. Forcing EQCHK_OVERLAY_DIR= empty is how you compare two open lanes on purpose.
 OLD_OVERLAY_DIR=""
 OLD_OVERLAY_CHANGESETS=0
 if [ -n "$OVERLAY_DIR" ]; then
@@ -299,7 +276,7 @@ if [ -n "$OVERLAY_DIR" ]; then
   OLD_OVERLAY_DIR="$WORK/old/$OLD_OVERLAY_REL"
   [ -f "$OLD_OVERLAY_DIR/db/changelog/paid/db.changelog-paid.yaml" ] \
     || die "git archive did not produce an overlay master changelog under $OLD_OVERLAY_DIR"
-  # Cross-checked against its own directory exactly as B's overlay is below — a file the archived
+  # Cross-checked against its own directory exactly as B's overlay is below: a file the archived
   # changelog declares but the archived tree lacks (or the reverse) fails here, before either
   # database exists, rather than surfacing later as an unexplained ledger-height mismatch.
   OLD_OVERLAY_INCLUDED="$(included_set "$OLD_OVERLAY_DIR/db/changelog/paid/db.changelog-paid.yaml" 'db/changelog/paid/')"
@@ -323,7 +300,7 @@ NEW_ONDISK="$(find "$CHANGES" -name '*.sql' | sed "s#^${RESOURCES}/##" | sort -u
 [ "$NEW_INCLUDED" = "$NEW_ONDISK" ] || die "the working tree's master changelog and its changes/ directory disagree on which files exist"
 NEW_CHANGESETS="$(grep -rh '^--changeset' "$CHANGES" | wc -l | tr -d ' ')"
 
-# The overlay, when set, adds to B's expected ledger height the same derived way — never a
+# The overlay, when set, adds to B's expected ledger height the same derived way, never a
 # bare count either, and its includes are checked against its own directory just like the
 # open master's are checked against changes/.
 OVERLAY_CHANGESETS=0
@@ -364,9 +341,9 @@ start_pg "$CONTAINER_A" "$PORT_A"
 start_pg "$CONTAINER_B" "$PORT_B"
 
 # Rule 1: one function, both sides, same image, same flags. `changelog` defaults to the open
-# master's own relative path; the overlay call below passes the paid one instead, mirroring
+# master's own relative path; the overlay call below passes that one instead, mirroring
 # check-migrations-populated.sh's liquibase_update, which takes the same second argument for
-# the same reason — one function driving more than one changelog against the same container.
+# the same reason: one function driving more than one changelog against the same container.
 liquibase_update() {
   local label="$1" container="$2" resources="$3" changelog="${4:-db/changelog/db.changelog-master.yaml}"
   local log="$WORK/liquibase-${label// /-}.log"
@@ -400,8 +377,8 @@ q() {
   docker exec "$1" psql -U postgres -d "$DB" -tAc "$2" 2>/dev/null | tr -d '[:space:]'
 }
 
-# The declared schema delta — the objects the regeneration under proof is allowed to move or
-# change — applied to A after the old chain and before the schema dump. An empty file is a
+# The declared schema delta: the objects the regeneration under proof is allowed to move or
+# change, applied to A after the old chain and before the schema dump. An empty file is a
 # no-op on `psql -f` and a legitimate, stronger claim than a filled one: it tolerates no
 # difference at all. See the delta file's own header for what it declares today.
 echo "verify-baseline-equivalence: applying the expected schema delta to A ($(basename "$DELTA_FILE"))"
@@ -429,7 +406,7 @@ dump_schema() {
 # Rules 3a and 3c, in one place, used by every dump this script takes.
 normalize_dump() {
   local raw="$1" out="$2" what="$3"
-  # 3a: drop the preamble — everything through the last `SET` line before the first real
+  # 3a: drop the preamble, everything through the last `SET` line before the first real
   # object. The anchor is asserted rather than assumed, so an unrecognised preamble stops
   # the proof instead of silently landing in the diff. (This also takes `\restrict`, which
   # pg_dump emits above it; `\unrestrict` closes the file and is dropped by 3c.)
@@ -507,8 +484,8 @@ if [ "$DECLARED" != "$OBSERVED" ]; then
   diff -u <(printf '%s\n' "$DECLARED") <(printf '%s\n' "$OBSERVED") | sed 's/^/        /' || true
 elif [ -z "$SEEDED_TABLES" ]; then
   # Both empty, asserted by name rather than left as a loop that happens to iterate zero
-  # times: since 0017 (#1116) dropped embedding_space, the platform-seeded row count on a
-  # fresh install is zero, and this is the one place that fact is checked rather than assumed.
+  # times: the platform-seeded row count on a fresh install is zero, and this is the one place
+  # that fact is checked rather than assumed.
   echo "  PASS  neither database seeds any table — SEEDED_TABLES is empty and the census agrees"
 else
   echo "  PASS  the declared seeded-table list is exactly what the old chain leaves rows in"

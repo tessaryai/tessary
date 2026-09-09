@@ -23,7 +23,7 @@
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
         </dependency>
-        <!-- open/media/PdfTextExtractor (document/PDF modality, #985): sits beside the MediaStore SPI
+        <!-- open/media/PdfTextExtractor (document/PDF modality): sits beside the MediaStore SPI
              so it flows transitively to substrate (ingest-time extraction) and llm-runtime/evaluation
              (judge-time extraction) through the reactor chain. See pdfbox.version's comment in the
              aggregator pom for the license/CI note. -->
@@ -87,7 +87,7 @@
             <!-- Bare-activates spotbugs-maven-plugin from the aggregator's pluginManagement, the same
                  no-configuration pattern core/pom.xml uses. Without this the module is not analysed at
                  all: it built in 0.4s and emitted no spotbugsXml, so every class here (ErrorCode,
-                 StructuredLog, EvalsException, DetectionTableSchemaCheck) has been invisible to the
+                 StructuredLog, TessaryException, DetectionTableSchemaCheck) has been invisible to the
                  gate. maven-pmd-plugin is still NOT activated here; that is a second, separate gap. -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
@@ -129,7 +129,7 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, open module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as the enforcer plugin above. No coverage gate. -->
             <plugin>

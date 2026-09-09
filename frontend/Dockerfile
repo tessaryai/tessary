@@ -12,7 +12,7 @@ WORKDIR /app
 # corepack's registry signature check. PNPM_VERSION is supplied by the build orchestrator (the
 # Taskfile locally, the PNPM_VERSION Actions variable in CI); the default is the same pin so a bare
 # `docker build` works, and scripts/check-required-inputs.sh reds the moment it drifts from the
-# Taskfile's (#1190).
+# Taskfile's.
 ARG PNPM_VERSION=11.15.1
 RUN npm i -g pnpm@${PNPM_VERSION}
 
@@ -44,13 +44,13 @@ RUN pnpm run build
 # ---- runtime ----
 # Stock caddy:2-alpine, no custom xcaddy build. The Cloudflare DNS-01 directives that used to
 # justify a bespoke binary here were shaped for OUR OWN Cloudflare-proxied box, not for a
-# self-hosted open image (#926). The configuration is rendered at container start by
-# frontend/caddy/render.sh from SITE_DOMAIN and TLS_MODE (#1225): Let's Encrypt over TLS-ALPN-01,
+# self-hosted open image. The configuration is rendered at container start by
+# frontend/caddy/render.sh from SITE_DOMAIN and TLS_MODE: Let's Encrypt over TLS-ALPN-01,
 # an operator-mounted certificate, or plain HTTP behind the operator's own TLS terminator with
 # TRUSTED_PROXIES honoured.
 FROM caddy:2-alpine AS runtime
 
-# Non-root runtime (#926 — this was the one image of six that never dropped root). `setcap` runs in
+# Non-root runtime — this was the one image of six that never dropped root. `setcap` runs in
 # THIS stage, on the binary `caddy:2-alpine` already ships, in the same layer it's granted in —
 # capabilities set on a binary do not survive a `COPY --from=`, so this only works because there is
 # no cross-stage copy of the caddy binary any more. The grant itself is required, not optional: the
@@ -63,8 +63,8 @@ RUN apk add --no-cache libcap \
 COPY --from=build --chown=caddy:caddy /app/dist /srv
 COPY --chown=caddy:caddy frontend/caddy/ /etc/caddy/
 
-# The image's version identity (epic 5 clause 3, #1135); same convention and same "dev" fallback as
-# backend/Dockerfile, so a paid frontend layer can one day compare against it the same way.
+# The image's version identity; same convention and same "dev" fallback as
+# backend/Dockerfile, so another frontend layer can one day compare against it the same way.
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
 LABEL org.opencontainers.image.version=$IMAGE_VERSION \

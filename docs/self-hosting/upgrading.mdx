@@ -29,7 +29,7 @@ Three volumes are project-prefixed and therefore change name:
 | Caddy's certificate state | `evals-platform_caddy-data` | `tessary_caddy-data` |
 | Caddy's config state | `evals-platform_caddy-config` | `tessary_caddy-config` |
 
-`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_evals`). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
+`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_tessary` — the project prefix changed in that release, the `evals` half in this one). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
 
 Pick one of these two. Do it **before** the first `docker compose up` on the new configuration.
 
@@ -75,6 +75,101 @@ The three dashboards and the alert rules under `observability/` changed identity
 Nothing in a running Grafana renames itself when the files change. Create the `tessary` folder first — the alert-rule import fails outright if it does not already exist — then re-import all three dashboards and the alert rules. The old dashboards keep their old `uid`s and their annotation history; delete them when you are ready.
 
 Metric and log series recorded before the upgrade carry the old `service_name`, and renaming a query does not go back and rename the data. Panels will show history stopping at the upgrade and starting again under the new name. If you need continuity across your retention window, widen the selector to a regex over both names — `service_name=~"(evals-platform|tessary)-backend"` — and narrow it back once the old data has aged out. Otherwise the split is simply the cost, and is the trade this rename accepted.
+
+## One-time: `EVALS_` settings are now `TESSARY_`
+
+<Warning>
+  This applies once, to installations created before this release. There is no fallback: the backend
+  ignores every `EVALS_*` variable. A variable you do not rename reverts to its default, and
+  `TESSARY_JDBC_URL` reverting to blank stops the boot.
+</Warning>
+
+Every environment variable that started with `EVALS_` now starts with `TESSARY_`. The rest of each
+name is unchanged, so the rename is mechanical:
+
+```bash
+sed -i.bak 's/^EVALS_/TESSARY_/' .env
+```
+
+These are the ones a self-hosted install normally sets:
+
+| Before | After |
+|---|---|
+| `EVALS_JDBC_URL` | `TESSARY_JDBC_URL` |
+| `EVALS_DB_USERNAME` | `TESSARY_DB_USERNAME` |
+| `EVALS_DB_PASSWORD` | `TESSARY_DB_PASSWORD` |
+| `EVALS_SECRET_KEY` | `TESSARY_SECRET_KEY` |
+| `EVALS_AUTH_COOKIE_PASSWORD` | `TESSARY_AUTH_COOKIE_PASSWORD` |
+| `EVALS_AUTH_FRONTEND_URL` | `TESSARY_AUTH_FRONTEND_URL` |
+| `EVALS_AUTH_DISABLED` | `TESSARY_AUTH_DISABLED` |
+| `EVALS_TELEMETRY_ENABLED` | `TESSARY_TELEMETRY_ENABLED` |
+| `EVALS_REDACTION_ENABLED` | `TESSARY_REDACTION_ENABLED` |
+| `EVALS_RETENTION_TRACE_TTL_DAYS` | `TESSARY_RETENTION_TRACE_TTL_DAYS` |
+| `EVALS_RETENTION_DETECTION_TTL_DAYS` | `TESSARY_RETENTION_DETECTION_TTL_DAYS` |
+| `EVALS_INGEST_SPOOL_MODE` | `TESSARY_INGEST_SPOOL_MODE` |
+| `EVALS_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | `TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` |
+| `EVALS_RCA_AGENTIC_LAUNCHER_URL` | `TESSARY_RCA_AGENTIC_LAUNCHER_URL` |
+| `EVALS_RCA_AGENTIC_LAUNCHER_API_KEY` | `TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY` |
+| `EVALS_RCA_AGENTIC_MCP_BASE_URL` | `TESSARY_RCA_AGENTIC_MCP_BASE_URL` |
+| `EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL` | `TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL` |
+| `EVALS_OBSERVER_ENCODER_URL` | `TESSARY_OBSERVER_ENCODER_URL` |
+| `EVALS_OBSERVER_ENCODER_API_KEY` | `TESSARY_OBSERVER_ENCODER_API_KEY` |
+| `EVALS_PLATFORM_STAFF_EMAILS` | `TESSARY_PLATFORM_STAFF_EMAILS` |
+
+`SITE_DOMAIN`, `TLS_MODE` and `ACME_EMAIL` never carried the prefix and do not change.
+
+The matching YAML keys moved too, from `evals.*` to `tessary.*`, and so did the logger name:
+`logging.level.ai.tessary.evals` is now `logging.level.ai.tessary`. You only need either if you mount
+your own `application.yaml` instead of setting environment variables.
+
+The table above lists the settings a self-hosted install normally sets, not every key that exists.
+The rule is what matters: if it started with `EVALS_`, it starts with `TESSARY_` now.
+
+## One-time: the database is now named `tessary`
+
+<Warning>
+  This applies once, to installations created before this release, and only if you let
+  `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` take their defaults.
+</Warning>
+
+The three defaults changed from `evals` to `tessary`. Postgres does not rename an existing database
+to match, so a stack started on the new defaults finds nothing and initialises an empty one.
+
+**Pin the old names.** This is one edit, it cannot half-apply, and nothing else about your install
+changes. Put these in `.env`:
+
+```bash
+POSTGRES_DB=evals
+POSTGRES_USER=evals
+POSTGRES_PASSWORD=evals
+```
+
+### If you would rather rename the database and role
+
+You do not need to. Do this only if you want the names on disk to match the new defaults.
+
+Postgres refuses to rename the role you are connected as, so the rename needs a temporary superuser
+to run from. Stop the stack except for Postgres, then run all six commands:
+
+```bash
+docker compose up -d postgres
+docker compose exec -T postgres psql -U evals -d postgres -c 'ALTER DATABASE evals RENAME TO tessary;'
+docker compose exec -T postgres psql -U evals -d postgres -c 'CREATE ROLE tessary_rename SUPERUSER LOGIN;'
+docker compose exec -T postgres psql -U tessary_rename -d postgres -c 'ALTER ROLE evals RENAME TO tessary;'
+docker compose exec -T postgres psql -U tessary_rename -d postgres -c "ALTER ROLE tessary WITH PASSWORD 'tessary';"
+docker compose exec -T postgres psql -U tessary -d postgres -c 'DROP ROLE tessary_rename;'
+```
+
+Renaming a role clears its stored password, so the fifth command is required, not optional. Set a
+password of your own rather than `tessary` if the database port is published or the host is shared.
+
+## One-time: everyone is signed out once
+
+The session cookie is now `tessary-session`, so existing sessions stop resolving and everyone signs
+in again. Nothing else is affected: accounts, API tokens and org membership are untouched.
+
+API tokens do **not** change. They are minted as `tsy_<scope>_…` and always have been; that prefix
+is not part of this rename.
 
 ## How migrations work
 

@@ -19,14 +19,15 @@
     "noEmit": true,
 
     /*
-     * The paid seam's type-check half (open-core D2). `@paid` is the one specifier open source uses
-     * for surfaces a commercial build adds; here it resolves to `src/paid/index.ts`, the open stub,
-     * so the open tree type-checks against real code rather than against a missing module.
+     * The type-check half of this build's optional-surface seam. `@paid` is the one specifier
+     * this tree uses for surfaces an additional build adds; here it resolves to
+     * `src/paid/index.ts`, a stub, so this tree type-checks against real code rather than
+     * against a missing module.
      *
-     * It stays INSIDE `src` deliberately. `scripts/check-open-boundary.sh` rule 2 fails on the paid
-     * overlay's directory name appearing in this file — that block exists to close exactly this
-     * escape hatch — and now also asserts positively that this mapping still points under
-     * `frontend/src`. The paid build's own tsconfig lives in the overlay and overrides this entry.
+     * It stays INSIDE `src` deliberately. `scripts/check-open-boundary.sh` rule 2 fails on that
+     * additional build's directory name appearing in this file — that block exists to close
+     * exactly this escape hatch — and now also asserts positively that this mapping still points
+     * under `frontend/src`. That other build's own tsconfig overrides this entry.
      *
      * No `baseUrl` is needed: TypeScript resolves `paths` values against this file's directory when
      * one is absent, which is what keeps the mapping readable and relative.

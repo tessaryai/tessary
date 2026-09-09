@@ -17,19 +17,19 @@
 // for; if a snippet throws, jshell prints the trace and that line never appears, which is how a
 // failure here becomes a Python exception instead of a silently empty report.
 
-import ai.tessary.evals.classifier.metric.MetricDriftConfig;
-import ai.tessary.evals.classifier.metric.MetricDriftDetector;
-import ai.tessary.evals.classifier.metric.MetricDriftDetector.Decision;
-import ai.tessary.evals.classifier.metric.MetricDriftDetector.Reference;
-import ai.tessary.evals.classifier.metric.MetricFindingEvidence;
-import ai.tessary.evals.classifier.metric.MetricHistogram;
-import ai.tessary.evals.classifier.metric.MetricHistogram.Grid;
-import ai.tessary.evals.classifier.metric.MetricSuppression;
-import ai.tessary.evals.classifier.metric.MetricSuppression.Explanation;
-import ai.tessary.evals.classifier.metric.MetricSuppression.Shift;
-import ai.tessary.evals.classifier.substrate.ActionSymbol;
-import ai.tessary.evals.vitals.TokenPriceBook;
-import ai.tessary.evals.vitals.TokenUsage;
+import ai.tessary.classifier.metric.MetricDriftConfig;
+import ai.tessary.classifier.metric.MetricDriftDetector;
+import ai.tessary.classifier.metric.MetricDriftDetector.Decision;
+import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
+import ai.tessary.classifier.metric.MetricFindingEvidence;
+import ai.tessary.classifier.metric.MetricHistogram;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
+import ai.tessary.classifier.metric.MetricSuppression;
+import ai.tessary.classifier.metric.MetricSuppression.Explanation;
+import ai.tessary.classifier.metric.MetricSuppression.Shift;
+import ai.tessary.classifier.substrate.ActionSymbol;
+import ai.tessary.vitals.TokenPriceBook;
+import ai.tessary.vitals.TokenUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;

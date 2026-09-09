@@ -8,14 +8,14 @@ import { ApiError } from "../../api/types";
 import { Button, Field, Input, Spinner } from "../../ui";
 
 /**
- * The frontend's own {@code /signup} screen (#853) — mirrors {@link Login}'s auth plumbing exactly
+ * The frontend's own {@code /signup} screen — mirrors {@link Login}'s auth plumbing exactly
  * (see that file's header for the shared reasoning on why this sits outside ProtectedRoute/
  * TenantProvider and polls {@code GET /auth/mode}). On success, {@code TenantService#ensureDefaultOrg}
  * (backend, runs on every signup) has already minted the org and its default project, so {@code
  * RootRedirect} lands the fresh account straight on it — there is no org-creation step here any more.
  *
- * <p>Chrome is Screen 1 of the two-step first-run flow (#1227, design-spec.md): a wordmark, "Step 1
- * of 2", and "Create your account", transcribed from {@code Signup.dc.html}. Step 2 is the connect
+ * <p>Chrome is Screen 1 of the two-step first-run flow: a wordmark, "Step 1
+ * of 2", and "Create your account". Step 2 is the connect
  * gate ({@code ConnectGate.tsx}), which the newly-created default project renders in place of the
  * shell until a tagged span arrives.
  */

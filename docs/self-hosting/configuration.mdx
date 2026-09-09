@@ -19,20 +19,20 @@ The sections below group the variables most deployments need to set or understan
 
 ## Database
 
-Compose builds the Postgres connection from these values. You only set `EVALS_JDBC_URL` directly if you run the backend outside Compose, against a Postgres you manage yourself.
+Compose builds the Postgres connection from these values. You only set `TESSARY_JDBC_URL` directly if you run the backend outside Compose, against a Postgres you manage yourself.
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `POSTGRES_DB` | Name of the Postgres database. | `evals` |
-| `POSTGRES_USER` | Postgres user Tessary connects as. | `evals` |
-| `POSTGRES_PASSWORD` | Password for `POSTGRES_USER`. The database publishes no host port, so it is reachable only from the Compose network; set your own if you publish that port or share the host. | `evals` |
+| `POSTGRES_DB` | Name of the Postgres database. | `tessary` |
+| `POSTGRES_USER` | Postgres user Tessary connects as. | `tessary` |
+| `POSTGRES_PASSWORD` | Password for `POSTGRES_USER`. The database publishes no host port, so it is reachable only from the Compose network; set your own if you publish that port or share the host. | `tessary` |
 | `POSTGRES_DATA_DIR` | What backs the Postgres data volume. A bare name is a Docker named volume; a path (`/data/postgres`) is a host bind. The default keeps the database inside Docker, so a fresh install leaves nothing else on disk. | a named volume (`tessary_tessary-postgres-data`) |
 
 ## Secrets
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as source credentials and provider API keys. | A placeholder, published in `docker-compose.yml` |
+| `TESSARY_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as source credentials and provider API keys. | A placeholder, published in `docker-compose.yml` |
 
 Generate a key with:
 
@@ -44,19 +44,19 @@ openssl rand -base64 32
   The shipped default is not a secret. It is written in `docker-compose.yml` in the public repository so a first boot needs no configuration, which means anyone who reaches the database of an instance still using it can decrypt every credential in there. Replace it before the instance holds anything real: see [Secure the instance](/self-hosting/setup#secure-the-instance). Tessary warns on every boot that runs the default, and refuses to start once `SITE_DOMAIN` is set.
 </Warning>
 
-Changing this key makes everything already sealed with the old one unreadable, so pick a value per environment and keep it. That is also what a restore depends on: a `pg_dump` carries the ciphertext and not the key, so the target host needs the same `EVALS_SECRET_KEY` to read the credentials back.
+Changing this key makes everything already sealed with the old one unreadable, so pick a value per environment and keep it. That is also what a restore depends on: a `pg_dump` carries the ciphertext and not the key, so the target host needs the same `TESSARY_SECRET_KEY` to read the credentials back.
 
 ## Auth
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_AUTH_COOKIE_PASSWORD` | Key for the session cookie. Used regardless of which identity provider you use. | A placeholder, published in `docker-compose.yml` |
-| `EVALS_AUTH_FRONTEND_URL` | Where Tessary sends users after sign-in and sign-out. | Derived from `HTTP_PORT`, so it follows the port Compose actually publishes |
+| `TESSARY_AUTH_COOKIE_PASSWORD` | Key for the session cookie. Used regardless of which identity provider you use. | A placeholder, published in `docker-compose.yml` |
+| `TESSARY_AUTH_FRONTEND_URL` | Where Tessary sends users after sign-in and sign-out. | Derived from `HTTP_PORT`, so it follows the port Compose actually publishes |
 | `WORKOS_API_KEY` | WorkOS API key, for bring-your-own SSO. | Optional, ships blank |
 | `WORKOS_CLIENT_ID` | WorkOS client ID, for bring-your-own SSO. | Optional, ships blank |
 
 <Warning>
-  `EVALS_AUTH_COOKIE_PASSWORD` is the more urgent of the two placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
+  `TESSARY_AUTH_COOKIE_PASSWORD` is the most urgent of the three placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
 </Warning>
 
 <Note>
@@ -65,7 +65,7 @@ Changing this key makes everything already sealed with the old one unreadable, s
 
 ## Sign-up policy
 
-Who may create an account is a setting, not an environment variable: an owner or admin sets it under **Settings → Members → Sign-up policy**, and it is enforced by the backend on every path that creates an account, including a first sign-in through WorkOS. It is stored on the organization, which in the open edition is the whole instance.
+Who may create an account is a setting, not an environment variable: an owner or admin sets it under **Settings → Members → Sign-up policy**, and it is enforced by the backend on every path that creates an account, including a first sign-in through WorkOS. It is stored on the first organization created on the install and governs the whole instance, so a self-hoster who signs up first owns it. Anyone the policy admits later gets an organization of their own, and that organization sees the policy read-only, named with the organization that governs it.
 
 | Mode | Who gets an account |
 | --- | --- |
@@ -75,7 +75,7 @@ Who may create an account is a setting, not an environment variable: an owner or
 
 In every mode a pending invitation admits its address, so a contractor on a personal address can be let in under `domain`, and `invite` is the invitation list itself. Admission and membership are different things: someone the policy admits creates an account with an organization of their own, while an invitation from Settings → Members both admits them and joins them to yours. The policy gates account creation only: tightening it never removes a member or blocks an existing member's next sign-in, and while the instance has no account at all any mode admits the first one. A refused sign-up creates nothing and answers `403 AUTH.SIGNUP_REFUSED`; the WorkOS callback sends the visitor back to the sign-in screen with that reason. Each change is written to the audit log, and the setting is refused through the raw organization settings endpoint so it can only change through the validated route.
 
-The same setting is readable and writable over the API, for an owner or admin: `GET` and `PUT /api/orgs/{orgSlug}/signup-policy` with a body of `{"mode": "domain", "domains": ["acme.com"]}`. If you are putting the instance on a real hostname, set this before anyone else can reach it.
+The same setting is readable and writable over the API, for an owner or admin of the governing organization: `GET` and `PUT /api/orgs/{orgSlug}/signup-policy` with a body of `{"mode": "domain", "domains": ["acme.com"]}`. If you are putting the instance on a real hostname, set this before anyone else can reach it.
 
 ## Ingest buffer
 
@@ -83,15 +83,15 @@ Between the OTLP endpoint and the database sits a buffer. The default needs noth
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_INGEST_SPOOL_MODE` | `memory`: a 200 means the batch is queued in the backend process, the buffer sheds with `503 + Retry-After` when its byte budget is full, and a restart loses what was queued (stock exporters retry a 503, so a shed costs latency, not data). `kafka`: a 200 means the batch is persisted by a Kafka-API broker before the response, and nothing acknowledged is lost on restart. | `memory` |
-| `EVALS_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | The broker, in `kafka` mode. The bundled single-node Redpanda answers at the default. | `redpanda:9092` |
-| `EVALS_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to — set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
-| `EVALS_INGEST_SPOOL_KAFKA_CONSUMERS` | Drainer threads in `kafka` mode, each with its own consumer; the broker spreads the eight partitions across them, and one project's batches stay on one partition so they never run concurrently. Raise it with cores, up to the eight partitions (a ninth consumer would sit idle); `memory` mode always runs one. | `4` |
+| `TESSARY_INGEST_SPOOL_MODE` | `memory`: a 200 means the batch is queued in the backend process, the buffer sheds with `503 + Retry-After` when its byte budget is full, and a restart loses what was queued (stock exporters retry a 503, so a shed costs latency, not data). `kafka`: a 200 means the batch is persisted by a Kafka-API broker before the response, and nothing acknowledged is lost on restart. | `memory` |
+| `TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | The broker, in `kafka` mode. The bundled single-node Redpanda answers at the default. | `redpanda:9092` |
+| `TESSARY_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to — set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
+| `TESSARY_INGEST_SPOOL_KAFKA_CONSUMERS` | Drainer threads in `kafka` mode, each with its own consumer; the broker spreads the eight partitions across them, and one project's batches stay on one partition so they never run concurrently. Raise it with cores, up to the eight partitions (a ninth consumer would sit idle); `memory` mode always runs one. | `4` |
 
 To use the bundled broker, set the mode and start the stack with its profile:
 
 ```bash
-EVALS_INGEST_SPOOL_MODE=kafka
+TESSARY_INGEST_SPOOL_MODE=kafka
 ```
 
 ```bash
@@ -100,7 +100,7 @@ docker compose --profile kafka up -d
 
 Redpanda keeps its log in the `redpanda-data` volume, listens on the internal network only, takes about 512 MB, and runs with write caching off so the acknowledgement the backend waits for means the batch is on disk. Any Kafka-compatible broker you already run works instead: set the bootstrap address and leave the profile off. The topics (`tessary.ingest`, eight partitions keyed by project, and `tessary.ingest.dead-letter` for a batch that exhausted its write retries) are created the first time the backend reaches the broker.
 
-In both modes `/actuator/health` carries an `ingest` component with the buffer's depth, the age of its oldest unprocessed batch, its dead-lettered count and whether the drainer is alive; it reports DOWN when the drainer is dead or the oldest batch is older than `EVALS_INGEST_SPOOL_MAX_LAG_MS` (five minutes by default, `0` disables).
+In both modes `/actuator/health` carries an `ingest` component with the buffer's depth, the age of its oldest unprocessed batch, its dead-lettered count and whether the drainer is alive; it reports DOWN when the drainer is dead or the oldest batch is older than `TESSARY_INGEST_SPOOL_MAX_LAG_MS` (five minutes by default, `0` disables).
 
 ## Data retention
 
@@ -108,15 +108,15 @@ An hourly sweep deletes traces and classifier detections older than their retent
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_RETENTION_TRACE_TTL_DAYS` | Days a trace and its content are kept. `0` keeps them forever. | `90` |
-| `EVALS_RETENTION_DETECTION_TTL_DAYS` | Days a classifier detection is kept. `0` keeps them forever. | `90` |
-| `EVALS_RETENTION_ENABLED` | The sweep itself. `false` deletes nothing, whatever the periods say. | `true` |
+| `TESSARY_RETENTION_TRACE_TTL_DAYS` | Days a trace and its content are kept. `0` keeps them forever. | `90` |
+| `TESSARY_RETENTION_DETECTION_TTL_DAYS` | Days a classifier detection is kept. `0` keeps them forever. | `90` |
+| `TESSARY_RETENTION_ENABLED` | The sweep itself. `false` deletes nothing, whatever the periods say. | `true` |
 
 An owner or admin can override either period for one project under **Settings → Data retention**, which is also `GET` and `PUT /api/orgs/{orgSlug}/projects/{projectSlug}/retention`. The `PUT` body replaces both overrides at once: `{"traces": 30, "detections": null}` sets a 30-day override for traces and clears the detections override, so the install default applies to it again; an absent key clears too. The page shows the install default next to each override, and the sweep enforces exactly what the page shows. A trace that an open finding still cites is kept past its period until the finding closes.
 
 ## LLM providers
 
-LLM providers have no environment variables. Configure them in-app, under **Settings** then **Providers**. Tessary seals whatever you enter there with `EVALS_SECRET_KEY`.
+LLM providers have no environment variables. Configure them in-app, under **Settings** then **Providers**. Tessary seals whatever you enter there with `TESSARY_SECRET_KEY`.
 
 The one exception is an ambient region for Bedrock:
 
@@ -128,8 +128,8 @@ The one exception is an ambient region for Bedrock:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_OBSERVER_ENCODER_URL` | URL of the classify-service encoder endpoint. | Blank |
-| `EVALS_OBSERVER_ENCODER_API_KEY` | API key for the encoder endpoint. | Blank |
+| `TESSARY_OBSERVER_ENCODER_URL` | URL of the classify-service encoder endpoint. | Blank |
+| `TESSARY_OBSERVER_ENCODER_API_KEY` | API key for the encoder endpoint. | Blank |
 
 Both ship blank, and in the open edition they stay blank: the model weights classify-service loads are gated and not published, so the frustration and groundedness classifiers are unavailable rather than merely unconfigured. See [Encoder-based classifiers are unavailable in the open edition](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) in Setup, and the classifier section of [Troubleshooting](/self-hosting/troubleshooting).
 
@@ -137,10 +137,11 @@ Both ship blank, and in the open edition they stay blank: the model weights clas
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_OBSERVER_AGENTIC_LAUNCHER_URL` | URL of the sandbox-runner service that runs agentic analysis (RCA, triage, drift detection). | Auto-wired by Compose to `http://sandbox-runner:8080` |
+| `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` | URL of the sandbox-runner service that runs agentic analysis (RCA, triage, drift detection). | Auto-wired by Compose to `http://sandbox-runner:8080` |
 | `SANDBOX_BACKEND` | Where sandbox-runner launches sandboxed agent sessions: `docker` (sibling containers), `e2b` (Tessary-hosted microVMs), or `local` (the host's logged-in `claude`). | `docker` |
 | `SANDBOX_WORK_VOLUME` | Name of the Docker volume sandbox-runner shares with the sibling containers it spawns. The launcher hands this exact string to the Engine API, so it is the volume's real name and not a project-prefixed one. | `tessary-sandbox-work` |
 | `AGENT_PROVIDER` | Where the sandboxed agent runs: unset for SigV4 Bedrock, `anthropic` for the first-party Anthropic API, or `bedrock-api-key` for Bedrock over a bearer token. | Unset (SigV4 Bedrock) |
+| `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` | The bearer the backend presents to the sandbox launcher, and the launcher checks it against. Anyone holding the published default can drive the launcher into spawning containers on the host, so replace it before the instance holds anything real: see [Secure the instance](/self-hosting/setup#secure-the-instance). | A placeholder, published in `docker-compose.yml` |
 
 ## GitHub integration
 
@@ -150,10 +151,10 @@ Connecting a GitHub repository needs no environment variables. Connect one in-ap
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_TELEMETRY_ENABLED` | Sends one anonymous, opt-out heartbeat to home.tessary.ai. | `true` |
+| `TESSARY_TELEMETRY_ENABLED` | Sends one anonymous, opt-out heartbeat to home.tessary.ai. | `true` |
 
 <Tip>
-  Set `EVALS_TELEMETRY_ENABLED` to `false` for zero outbound network calls, including DNS lookups, to home.tessary.ai.
+  Set `TESSARY_TELEMETRY_ENABLED` to `false` for zero outbound network calls, including DNS lookups, to home.tessary.ai.
 </Tip>
 
 A default deployment has exactly one outbound destination: `home.tessary.ai`. There is no Google
@@ -186,13 +187,13 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 
 | Destination | When | Why it is permitted |
 | --- | --- | --- |
-| `home.tessary.ai` | Once at backend start and every 24 hours, only while `EVALS_TELEMETRY_ENABLED` is `true` | The heartbeat above. Off, the name is never even resolved. |
+| `home.tessary.ai` | Once at backend start and every 24 hours, only while `TESSARY_TELEMETRY_ENABLED` is `true` | The heartbeat above. Off, the name is never even resolved. |
 | `docker.io` | `docker compose pull`, before the stack runs; and once more at the first analysis, for the agent image the sandbox runner pulls lazily unless you pull it first | The published images. The check pulls or builds them before its observation window opens, so a pull during operation is a failure; the agent image is the one exception, named here because the check's walk stops before the first analysis. |
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
 | The provider, alert and Git endpoints you configure | Only after you enter a credential in Settings | Your own integrations. A default boot has none. |
 
-**Turning it off costs nothing functional.** `EVALS_TELEMETRY_ENABLED=false` gives Tessary no
+**Turning it off costs nothing functional.** `TESSARY_TELEMETRY_ENABLED=false` gives Tessary no
 install-count or activation visibility into your deployment — that is the entire effect. There is no
 license check, feature gate, or in-app behavior that depends on the heartbeat reaching us.
 
@@ -209,8 +210,8 @@ Tessary can receive traces directly over OTLP (OpenTelemetry Protocol) instead o
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `EVALS_INGEST_OTLP_TRANSPORT` | Transport the OTLP ingest endpoint accepts: `HTTP`, `GRPC`, or `BOTH`. | `HTTP` |
-| `EVALS_INGEST_OTLP_GRPC_PORT` | Port the gRPC transport binds, when enabled. | `4317` |
+| `TESSARY_INGEST_OTLP_TRANSPORT` | Transport the OTLP ingest endpoint accepts: `HTTP`, `GRPC`, or `BOTH`. | `HTTP` |
+| `TESSARY_INGEST_OTLP_GRPC_PORT` | Port the gRPC transport binds, when enabled. | `4317` |
 
 ## TLS and domain
 
@@ -222,13 +223,13 @@ These variables apply to the prod Docker Compose stack (`docker-compose.yml`). T
 | `TLS_MODE` | `acme` (Caddy obtains a Let's Encrypt certificate over TLS-ALPN-01), `owncert` (your certificate and key mounted at `/certs/tls.crt` and `/certs/tls.key` in the frontend container), or `upstream` (plain HTTP behind a terminator you run). | `acme` |
 | `ACME_EMAIL` | Your address for the Let's Encrypt account. Required when `SITE_DOMAIN` is set in `acme` mode; there is no default. | Blank |
 | `TRUSTED_PROXIES` | Space-separated CIDRs of the proxy in front of Tessary in `upstream` mode. Forwarded headers are honoured from these addresses only. | Blank |
-| `EVALS_AUTH_FRONTEND_URL` | Where the browser lands after sign-in and sign-out. Derived from `SITE_DOMAIN` when set; otherwise from `HTTP_PORT`. An explicit value must name the same host as `SITE_DOMAIN`. | Derived |
+| `TESSARY_AUTH_FRONTEND_URL` | Where the browser lands after sign-in and sign-out. Derived from `SITE_DOMAIN` when set; otherwise from `HTTP_PORT`. An explicit value must name the same host as `SITE_DOMAIN`. | Derived |
 | `WORKOS_REDIRECT_URI` | The WorkOS callback, registered in the WorkOS dashboard. Derived from `SITE_DOMAIN` when set. | Derived |
 | `HTTP_PORT` | Host port mapped to the frontend container's port 8000. | `80` |
 | `HTTPS_PORT` | Host port for HTTPS, when `SITE_DOMAIN` is set in `acme` or `owncert` mode. | `443` |
 
 <Note>
-  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while either sealing key is still on its shipped placeholder refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
+  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while any of the three placeholder keys is still on its shipped value refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
 </Note>
 
 ## Removed configuration
@@ -237,10 +238,10 @@ These variables apply to the prod Docker Compose stack (`docker-compose.yml`). T
   These keys and blocks belonged to features Tessary has removed entirely, not merely disabled. Spring ignores an unbound key, so setting one has no effect: it will not turn the feature back on.
 </Note>
 
-- The `EVALS_SANDBOX_*` block
-- The `EVALS_SYNTH_*` block
-- `EVALS_CI_GATE_BLOCK_ON_REGRESSION`
-- `EVALS_RISK_MODEL_ENABLED`
-- The `EVALS_GRADING_*` keys
-- `EVALS_STORAGE_EMBED_ENABLED`
-- `EVALS_EMBEDDING_BASE_URL`
+- The `TESSARY_SANDBOX_*` block
+- The `TESSARY_SYNTH_*` block
+- `TESSARY_CI_GATE_BLOCK_ON_REGRESSION`
+- `TESSARY_RISK_MODEL_ENABLED`
+- The `TESSARY_GRADING_*` keys
+- `TESSARY_STORAGE_EMBED_ENABLED`
+- `TESSARY_EMBEDDING_BASE_URL`

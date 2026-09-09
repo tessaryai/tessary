@@ -1,14 +1,12 @@
 # Repo-root .dockerignore — applies when build context is `.`. TWO images build that way: the
 # frontend prod Dockerfile, whose `build` stage COPYs frontend/ sources (tsconfig.json,
-# vite.config.ts, index.html, public/, src/) — context stays repo root for that, not for Caddy
-# config any more (#926 moved the Caddyfile it bakes in from repo-root Caddyfile.prod to
-# frontend/caddy/, which is already inside frontend/) — and sandbox-runner/agent-sandbox/
-# Dockerfile (#855), which needs the repo-root `contract/` directory alongside its own directory's
-# script files. compile-service used to be the second; #843 moved it and the engine it runs into
-# the overlay, and its context moved with them to `tessary-paid`, which reads
-# `tessary-paid/.dockerignore` instead of this file.
+# vite.config.ts, index.html, public/, src/) — context stays repo root for that, including the
+# Caddy config baked in from frontend/caddy/ — and sandbox-runner/agent-sandbox/Dockerfile, which
+# needs the repo-root `contract/` directory alongside its own directory's script files.
+# compile-service used to build from repo root too; it now builds elsewhere with its own
+# .dockerignore, so it no longer applies here.
 
-# The must-not-publish denylist (open-core D2/D4, epic 4). The root-context images are OPEN images
+# The must-not-publish denylist. The root-context images are OPEN images
 # and must carry only what the public export carries, so every `delete` row of
 # scripts/lib/export-denylist.txt is excluded here too. `scripts/check-open-boundary.sh` rule 3
 # asserts that every row is covered by a line in this file (the row itself, or a broader prefix such
@@ -16,13 +14,14 @@
 # as the declaration. It is also what forced compile-service's context out of `.`: from here every
 # one of its COPY sources is ignored.
 #
-# It is ONE line now because the denylist is one `delete` row. #1293 relocated every other denied
-# path physically under tessary-paid/, and the nineteen lines that used to sit here went with them.
+# It is ONE line now because the denylist is one `delete` row. Every other denied path was
+# relocated into that build's own directory, and the nineteen lines that used to sit here went
+# with them.
 # READ THIS BEFORE ADDING A LINE BACK: the rule-3 assertion is one-directional — denylist row ->
-# .dockerignore coverage, NEVER the reverse (that is why the pre-#1293 Caddyfile.prod lines could
-# linger here harmlessly for two epics). So an over-broad line in this block excludes OPEN source
+# .dockerignore coverage, NEVER the reverse (that is why the earlier Caddyfile.prod lines could
+# linger here harmlessly for a long time). So an over-broad line in this block excludes OPEN source
 # from the backend and frontend build contexts and EVERY GATE STAYS GREEN. The two that were live
-# traps at #1293 were `classifiers/` (the framework/tool_error/metric_drift/data_gen half stays
+# traps here were `classifiers/` (the framework/tool_error/metric_drift/data_gen half stays
 # public) and `.claude/` (launch.json stays public); both are gone from here for that reason.
 tessary-paid/
 
@@ -34,12 +33,12 @@ tessary-paid/
 **/*.tsbuildinfo
 
 # Python virtualenvs and tool caches. These are NOT covered by any denylist row and never were —
-# until #1293 they rode in on the blanket `classifiers/` line, which is gone because the open half
+# previously they rode in on the blanket `classifiers/` line, which is gone because the open half
 # of that tree publishes. `classifiers/.venv` is 1.3 GB on a machine that has run the tree's own
 # documented `cd classifiers && uv sync`, and the frontend image builds from the repo root
 # (docker-compose.yml `context: .`), so without these lines every `docker compose build frontend`
-# uploads it to the daemon. `tessary-paid/.dockerignore` carries the same three globs for the same
-# reason (compile-service/.venv alone is 229 MB).
+# uploads it to the daemon. The other build's own .dockerignore carries the same three globs for
+# the same reason (compile-service/.venv alone is 229 MB).
 **/.venv/
 **/.pytest_cache/
 **/.ruff_cache/
@@ -63,10 +62,10 @@ hs_err_pid*.log
 docker-compose*.yml
 
 # Python bytecode, and the open classifier tree's gitignored run outputs. These were listed one
-# glob at a time before epic 4, then rode in on the blanket `classifiers/` line, which #1293
-# removed because the framework/tool_error/metric_drift/data_gen half publishes. The paths below
-# mirror classifiers/.gitignore; `tessary-paid/.dockerignore` restates the experiments/ globs for
-# the half that moved into the overlay.
+# glob at a time originally, then rode in on the blanket `classifiers/` line, which was removed
+# because the framework/tool_error/metric_drift/data_gen half publishes. The paths below mirror
+# classifiers/.gitignore; the other build's own .dockerignore restates the experiments/ globs for
+# the half that moved elsewhere.
 **/__pycache__/
 **/*.pyc
 classifiers/**/data/

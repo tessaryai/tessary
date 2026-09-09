@@ -32,9 +32,9 @@ Re-capture only when you **meant** to change the prompt. Running it to make a re
 exactly the failure the pin exists to prevent — it turns an accidental whitespace edit into a
 silent change in how a lane rules.
 
-The `evaluation` module also shipped `prompt-craft/grader-judge/` — manifest-driven, composed by
-`CraftLibrary#compose` rather than read file by file. Track A deleted the module, the craft assets
-and the reference document that described the path they served.
+The `evaluation` module used to also ship `prompt-craft/grader-judge/` — manifest-driven, composed by
+`CraftLibrary#compose` rather than read file by file. The module, the craft assets, and the reference
+document that described the path they served are gone.
 
 ## Adding a purpose
 

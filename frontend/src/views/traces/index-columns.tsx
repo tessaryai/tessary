@@ -50,7 +50,7 @@ export type ColumnKey =
   | "session"
   | "sessionExpand";
 
-export type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean; width: number };
+export type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean; flex?: boolean; width: number };
 
 /**
  * Declaration order is display order — the table renders whichever of these are visible, in this
@@ -60,12 +60,14 @@ export type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean; widt
  * scanning every cell's content — which meant Input/Output (long text preview vs. a bare "—" on a
  * session rollup row) would visibly resize the whole table on every toggle between flat and
  * grouped-by-session, and again on every session expand/collapse. Fixed widths make both silent.
+ *
+ * `flex` marks the columns whose width is a floor rather than a fixed size — see `columnWidths`.
  */
 export const COLUMN_DEFS: ColumnDef[] = [
   { key: "when", label: "Start time", width: 150 },
-  { key: "name", label: "Name", width: 260 },
-  { key: "input", label: "Input", width: 280 },
-  { key: "output", label: "Output", width: 280 },
+  { key: "name", label: "Name", flex: true, width: 260 },
+  { key: "input", label: "Input", flex: true, width: 280 },
+  { key: "output", label: "Output", flex: true, width: 280 },
   // Wide enough for the longest tier ("3d 2h 15m 30s") without truncating under table-layout: fixed.
   { key: "latency", label: "Latency", numeric: true, width: 140 },
   { key: "cost", label: "Cost ($)", numeric: true, width: 90 },
@@ -84,6 +86,29 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { key: "traceId", label: "Trace ID", width: 200 },
   { key: "session", label: "Session ID", width: 200 },
 ];
+
+/**
+ * The `<colgroup>` widths, as CSS width values, for the visible columns in display order.
+ *
+ * The table is `width: 100%` with the column sum as its `min-width`: narrower than the sum it
+ * scrolls at exactly these widths, wider than the sum the surplus has to go somewhere. Left to the
+ * browser the surplus is spread across every column, which pads the numeric ones that were already
+ * sized to their longest value and leaves the text previews truncating anyway. So it goes to the
+ * `flex` columns instead, split in proportion to their declared widths — on a wide monitor the
+ * table fills the page and Input/Output show more of the payload, which is the point of them.
+ *
+ * `extraFixedPx` is width the table carries outside `columns` (the pinned expand column in grouped
+ * mode). With no flex column visible there is nothing to hand the surplus to, so the declared
+ * widths are returned as-is and the browser's own distribution is left alone.
+ */
+export function columnWidths(columns: ColumnDef[], extraFixedPx = 0): (string | number)[] {
+  const flexTotal = columns.reduce((sum, c) => (c.flex ? sum + c.width : sum), 0);
+  if (flexTotal === 0) return columns.map((c) => c.width);
+  const fixedPx = columns.reduce((sum, c) => (c.flex ? sum : sum + c.width), extraFixedPx);
+  return columns.map((c) =>
+    c.flex ? `calc((100% - ${fixedPx}px) * ${(c.width / flexTotal).toFixed(6)})` : c.width,
+  );
+}
 
 /** The pinned expand-chevron column's width, in grouped mode — shared with its TD/TH styling below. */
 export const SESSION_EXPAND_COLUMN_WIDTH = 40;

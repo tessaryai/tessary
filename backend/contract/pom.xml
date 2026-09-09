@@ -67,7 +67,7 @@
                                         <exclude>ai.tessary:app</exclude>
                                     </excludes>
                                     <message>
-                                        evals-contract is an OPEN module: it must not depend on the app
+                                        tessary-contract is an OPEN module: it must not depend on the app
                                         (`app`), which assembles the application above it. The paid
                                         overlay is banned separately, for every module, by
                                         `enforce-open-to-paid-direction` on the aggregator.
@@ -79,7 +79,7 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Coverage baseline, open module (#930): bare-activates jacoco-maven-plugin
+            <!-- Coverage baseline, this module: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
                  no-configuration pattern as the enforcer plugin above. No coverage gate. -->
             <plugin>

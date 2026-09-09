@@ -26,7 +26,36 @@
       {
         "group": "Get started",
         "pages": [
-          "index"
+          "index",
+          "open-edition"
+        ]
+      },
+      {
+        "group": "Instrument",
+        "pages": [
+          "instrument/overview",
+          "instrument/call-site-tag",
+          "instrument/span-requirements",
+          "instrument/exporters",
+          "instrument/troubleshooting"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/how-it-works",
+          "concepts/call-sites",
+          "concepts/classifiers-and-findings",
+          "concepts/cases",
+          "concepts/root-cause-analysis"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/api-keys",
+          "reference/mcp-server",
+          "reference/ingestion-contract"
         ]
       },
       {
@@ -39,13 +68,31 @@
           "self-hosting/upgrading",
           "self-hosting/troubleshooting"
         ]
-      },
-      {
-        "group": "Legal",
-        "pages": [
-          "trademarks"
-        ]
       }
     ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Releases",
+        "href": "https://github.com/tessaryai/tessary/releases",
+        "icon": "tag"
+      },
+      {
+        "label": "License",
+        "href": "https://github.com/tessaryai/tessary/blob/main/LICENSE",
+        "icon": "scale-balanced"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/tessaryai/tessary"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/tessaryai/tessary",
+      "website": "https://tessary.ai"
+    }
   }
 }

@@ -59,9 +59,9 @@
              BOM pins tomcat-embed-core to 11.0.24. Override ahead of Boot's own BOM until a
              4.1.2+ parent is released; remove this once that BOM catches up to >=11.0.25. -->
         <tomcat.version>11.0.25</tomcat.version>
-        <!-- PDF text extraction for the document/PDF modality (#985, Epic 8 Track B): pure-Java,
-             Apache-2.0, no native binaries and no network egress — safe for the open bucket per
-             D2/D4. Verified latest stable 3.x on Maven Central 2026-09-02. NOT covered by CI (
+        <!-- PDF text extraction for the document/PDF modality: pure-Java,
+             Apache-2.0, no native binaries and no network egress — safe for the open bucket.
+             Verified latest stable 3.x on Maven Central 2026-09-02. NOT covered by CI (
              scripts/check-dependency-audit.sh is on-demand-only, per its own header) — a bad license
              choice here would not be caught automatically; this note is the record that the license
              was checked by hand at introduction time. -->
@@ -80,16 +80,15 @@
              Maven Central 2026-08-07. -->
         <onnxruntime.version>1.29.0</onnxruntime.version>
         <djl-tokenizers.version>0.36.0</djl-tokenizers.version>
-        <!-- Verified latest stable on Maven Central 2026-09-01 (#930). Only the 11 open modules
-             below bare-activate this plugin (backend/test-support and every tessary-paid/*
-             module deliberately do not) — see the per-module comment at each activation site. -->
+        <!-- Verified latest stable on Maven Central 2026-09-01. Only the 11 open modules
+             below bare-activate this plugin (backend/test-support and the modules outside this
+             build deliberately do not) — see the per-module comment at each activation site. -->
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <!-- Default to empty rather than leaving argLine unset. jacoco:prepare-agent (bound only
-             in modules that bare-activate jacoco-maven-plugin, i.e. never in tessary-paid/) rebinds
-             this property to the -javaagent flag it needs surefire to fork with. Every module that
-             never runs prepare-agent — every tessary-paid module, by construction — must still
-             resolve ${argLine} to nothing rather than leave the literal unresolved token, which
-             would hard-fail the forked test JVM. -->
+             in modules that bare-activate jacoco-maven-plugin) rebinds this property to the
+             -javaagent flag it needs surefire to fork with. Every module that never runs
+             prepare-agent must still resolve ${argLine} to nothing rather than leave the literal
+             unresolved token, which would hard-fail the forked test JVM. -->
         <argLine></argLine>
     </properties>
 
@@ -129,7 +128,7 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- gRPC BOM: pins grpc-netty-shaded / grpc-protobuf / grpc-stub (the OTLP/gRPC receiver, #235)
+            <!-- gRPC BOM: pins grpc-netty-shaded / grpc-protobuf / grpc-stub (the OTLP/gRPC receiver)
                  to one version. Unmanaged by the Spring Boot 4 BOM, so imported here. -->
             <dependency>
                 <groupId>io.grpc</groupId>
@@ -208,12 +207,12 @@
                     <systemPropertyVariables>
                         <api.version>${docker.api.version}</api.version>
                     </systemPropertyVariables>
-                    <!-- jacoco:prepare-agent (open modules only, #930) rewrites the `argLine`
+                    <!-- jacoco:prepare-agent (open modules only) rewrites the `argLine`
                          property to the -javaagent flag it needs threaded into the forked test
                          JVM's command line. Without this element surefire never reads that
                          property back, and the module silently reports 0% coverage with no build
                          error — the property default above keeps it empty for every module
-                         (i.e. every tessary-paid module) that never runs prepare-agent. -->
+                         outside this build that never runs prepare-agent. -->
                     <argLine>${argLine}</argLine>
                 </configuration>
             </plugin>
@@ -229,26 +228,26 @@
                         <!-- NotJavadoc: records/DTOs document components with block comments
                              (matches the PMD DanglingJavadoc exclusion). JavaLangClash:
                              model/Runtime mirrors the synth-schema name (contract-driven).
-                             NullAway covers 25 open package prefixes plus the whole paid
-                             overlay; widen
+                             NullAway covers 25 open package prefixes plus `ai.tessary.paid`;
+                             widen
                              AnnotatedPackages one package at a time and run the gate — a package
                              that is not listed is NOT checked, and a name that matches nothing is
                              silently ignored, so keep this list honest.
-                             `ai.tessary.paid` is here rather than in an overlay
-                             maven-compiler-plugin override on purpose. The overlay re-points
+                             `ai.tessary.paid` is here rather than in that module's own
+                             maven-compiler-plugin override on purpose. That module re-points
                              SpotBugs and forbidden-apis because their filters are open-package
                              globs that would match nothing there; NullAway's is one argument
                              inside one long -Xplugin string, and overriding it one directory over
                              means restating the whole ErrorProne line. Two copies of that line
                              diverge, and the half that goes stale is the one nobody reads —
                              which is the silently-inapplicable-analyser failure
-                             tessary-paid/pom.xml's own header says it exists to close.
+                             this arrangement exists to close.
                              `scripts/check-open-boundary.sh` greps `backend/*/pom.xml` for
                              `ai.tessary.paid`, and this file is `backend/pom.xml`, which that
                              glob does not match: it already carries `<module>../tessary-paid</module>`
                              and the enforcer's `<exclude>ai.tessary.paid:*</exclude>`.
                              Still outside the set: alert, annotation, assistant, billing, ci, compile, config, experiment, gate, git, llm, llmspi, metering, model, observer, ops, plan, prediction, pricing, query, rca, redaction, regrade, review, routing, search, slack, storage, synth, tenant, traces, trend, trendstore, usage, verdict, vitals. -->
-                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.evals.open.errors,ai.tessary.evals.open.obs,ai.tessary.evals.apidoc,ai.tessary.evals.crypto,ai.tessary.evals.version,ai.tessary.evals.web,ai.tessary.evals.mcp,ai.tessary.evals.sources,ai.tessary.evals.golden,ai.tessary.evals.curation,ai.tessary.evals.dataset,ai.tessary.evals.auth,ai.tessary.evals.ingest,ai.tessary.evals.run,ai.tessary.evals.judge,ai.tessary.evals.db,ai.tessary.evals.priors,ai.tessary.evals.pipeline,ai.tessary.evals.sandbox,ai.tessary.evals.risk,ai.tessary.evals.classifier,ai.tessary.evals.analytics,ai.tessary.evals.featureflags,ai.tessary.evals.cases,ai.tessary.evals.sopcompile,ai.tessary.paid</arg>
+                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.golden,ai.tessary.curation,ai.tessary.dataset,ai.tessary.auth,ai.tessary.ingest,ai.tessary.run,ai.tessary.judge,ai.tessary.db,ai.tessary.priors,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.risk,ai.tessary.classifier,ai.tessary.analytics,ai.tessary.featureflags,ai.tessary.cases,ai.tessary.sopcompile,ai.tessary.paid</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
@@ -273,7 +272,7 @@
                     <!-- Only our own hand-written classes; scope the check to our package
                          so generated glue in target/ is never linted. -->
                     <includes>
-                        <include>ai/tessary/evals/**</include>
+                        <include>ai/tessary/**</include>
                     </includes>
                     <bundledSignatures>
                         <bundledSignature>jdk-unsafe</bundledSignature>
@@ -303,7 +302,7 @@
                     <sarifOutput>true</sarifOutput>
                     <excludeFilterFile>${project.basedir}/../config/spotbugs-exclude.xml</excludeFilterFile>
                     <!-- Our own classes only; skip any generated glue in target/. -->
-                    <onlyAnalyze>ai.tessary.evals.-</onlyAnalyze>
+                    <onlyAnalyze>ai.tessary.-</onlyAnalyze>
                     <!-- find-sec-bugs adds the security detectors core SpotBugs does not ship:
                          injection (SQL, command, LDAP), path traversal, SSRF, XXE, weak crypto and
                          hardcoded keys, insecure cookie flags. It is the only security static
@@ -372,14 +371,14 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Coverage baseline, open modules only (#930). NO GATE — this establishes a
-                 number before the epic 1 extractions continue, it does not fail a build on a
+            <!-- Coverage baseline, open modules only. NO GATE — this establishes a
+                 number before further extractions continue, it does not fail a build on a
                  threshold. pluginManagement-only, exactly like every other plugin in this block:
                  the aggregator has no sources and never runs it, and — unlike every other plugin
-                 here — tessary-paid/*/pom.xml does NOT bare-activate this one, so paid modules
-                 never run jacoco either. That omission (not a flag, not a profile) is the entire
-                 open/paid scoping mechanism: open-core decision D2 is satisfied structurally.
-                 Paid coverage tooling is epic 5's concern, where the paid integration-test
+                 here — the modules outside this build do NOT bare-activate this one, so those
+                 modules never run jacoco either. That omission (not a flag, not a profile) is the
+                 entire open/paid scoping mechanism, satisfied structurally. Coverage tooling for
+                 those modules is a separate concern, where their own integration-test
                  harness actually gets built. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
@@ -428,11 +427,11 @@
                  needs no compilation, and at `verify` it only reported after the full test suite
                  had run — paying ~3 minutes to learn about a misplaced brace. At `validate` it
                  fails in ~2s, before compile. Fix with `task backend:format`. -->
-            <!-- Open-core direction check (open-core decision D2). Declared on the AGGREGATOR
+            <!-- Dependency-direction check. Declared on the AGGREGATOR
                  so EVERY module inherits it: an open module that declares a dependency on anything
-                 in the paid overlay fails `mvn validate` before a line is compiled, which is what
+                 outside the open tree fails `mvn validate` before a line is compiled, which is what
                  makes "the open tree contains no paid code" a mechanical property rather than a
-                 review convention. `tessary-paid/pom.xml` disables this execution for its own
+                 review convention. The module outside this build disables this execution for its own
                  subtree, because paid->open and paid->paid are both allowed; only open->paid is not.
 
                  Transitive on purpose: an open module must not reach paid code through a sibling
@@ -496,19 +495,19 @@
     </build>
 
     <!--
-      The paid overlay joins THIS reactor when it is present on disk (open-core decision D2: one
-      repo now, two at cutover). File activation rather than a hand-thrown flag, because the
-      property being modelled is literally "does tessary-paid/ exist" — after the cutover the public
-      repo simply will not have it, and this pom then builds the open edition with no edit.
+      An optional module joins THIS reactor when it is present on disk: one
+      repo now, two at cutover. File activation rather than a hand-thrown flag, because the
+      property being modelled is literally "does that module exist" — after the cutover the public
+      repo simply will not have it, and this pom then builds this edition with no edit.
 
       So:
         mvn -f backend/pom.xml verify              open + paid, one reactor  (task backend:check)
-        mvn -f backend/pom.xml -P '!paid' verify   open edition only         (task backend:check:open)
+        mvn -f backend/pom.xml -P '!paid' verify   this build only           (task backend:check:open)
 
-      The module path escapes this directory because the overlay is a top-level folder, which is
+      The module path escapes this directory because that module is a top-level folder, which is
       what makes the public export a folder filter rather than a per-file sieve. Maven builds
       out-of-tree modules fine; `scripts/check-module-hygiene.sh` knows to exclude them from the
-      Docker module lists, since per D4 the open image carries no paid code.
+      Docker module lists, since the open image carries no paid code.
     -->
     <profiles>
         <profile>

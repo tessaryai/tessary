@@ -1,131 +1,107 @@
 server:
   port: 8080
-  # Servlet path stays default — Caddy strips the host-level prefix; our controllers
+  # Servlet path stays default: Caddy strips the host-level prefix, and our controllers
   # already start with /api/.
   tomcat:
-    # Tomcat 11 limits multipart parts per request to 10 by default. A real
-    # evals/ directory routinely has hundreds of grader files. Bump generously
-    # but not unlimited — keeps a backstop against pathological inputs.
+    # Tomcat 11 limits multipart parts per request to 10 by default, and a real import
+    # directory routinely has hundreds of files. Bump generously but not unlimited, to
+    # keep a backstop against pathological inputs.
     max-part-count: 2000
 
-evals:
+tessary:
   # Postgres connection (required). Set by docker-compose in dev/prod; injected from the
   # pgvector Testcontainers instance in tests. A blank value fails fast (DataSourceConfig).
-  jdbc-url:    ${EVALS_JDBC_URL:}
-  db-username: ${EVALS_DB_USERNAME:}
-  db-password: ${EVALS_DB_PASSWORD:}
+  jdbc-url:    ${TESSARY_JDBC_URL:}
+  db-username: ${TESSARY_DB_USERNAME:}
+  db-password: ${TESSARY_DB_PASSWORD:}
   # Base64-encoded 32-byte key used to seal/open ingestion-source credentials.
   # Required iff at least one ingestion source exists. Generate with:
   #   openssl rand -base64 32
-  secret-key: ${EVALS_SECRET_KEY:}
-  # The public hostname this instance is served on. Bound from the BARE name, not EVALS_SITE_DOMAIN:
-  # SITE_DOMAIN is already the one spelling docker-compose.yml, .env.example and frontend/caddy/render.sh
-  # share, and a second one would be a second thing to keep in sync. Blank means "localhost only",
-  # which is what makes PlaceholderSecretGuard inert in every non-compose boot.
+  secret-key: ${TESSARY_SECRET_KEY:}
+  # The public hostname this instance is served on. Bound from the bare name, not
+  # TESSARY_SITE_DOMAIN: SITE_DOMAIN is already the spelling docker-compose.yml, .env.example and
+  # frontend/caddy/render.sh share, and a second one would be a second thing to keep in sync. Blank
+  # means "localhost only", which is what makes PlaceholderSecretGuard inert in every non-compose boot.
   site-domain: ${SITE_DOMAIN:}
   # The TLS mode and Let's Encrypt address the frontend container runs with, bound from the same
   # bare names docker-compose.yml passes it, so PublicOriginGuard can refuse a boot whose domain
-  # setup would only fail later in Caddy (#1225).
+  # setup would only fail later in Caddy.
   tls-mode: ${TLS_MODE:acme}
   acme-email: ${ACME_EMAIL:}
-  # The home.tessary.ai heartbeat ping (#858). ON by default (opt-out, D6); set
-  # EVALS_TELEMETRY_ENABLED=false to disable. No token: the contract carries no third-party
-  # credential. See devdocs/reference/telemetry-contract.md.
+  # The home.tessary.ai heartbeat ping. On by default; set TESSARY_TELEMETRY_ENABLED=false to
+  # disable. No token: the contract carries no third-party credential. See
+  # devdocs/reference/telemetry-contract.md.
   telemetry:
-    enabled: ${EVALS_TELEMETRY_ENABLED:true}
-  # evals.judge.platform-bedrock.enabled / EVALS_PLATFORM_BEDROCK_ENABLED lived here until #939
-  # D4 — the switch, and the ChatModelFactory ambient-identity lane resolver it gated, had ZERO
-  # production callers (RCA/TRIAGE resolve their model through ProjectModelSettings +
-  # AgenticCredentialResolver, never through ChatModelFactory), so removing it changes no live
-  # behavior. Every RCA/TRIAGE run now resolves the org's own ProviderCredential unconditionally —
-  # the database is the only source, in every edition.
-  # Rate-limiter pacing for the OpenRouter/Moonshot tiers is a static constant in
-  # code (LlmPacer) — there are no model/provider Spring profiles. Every provider
-  # requires an org-provided credential (#939 D6 removed Ollama, the last exception).
-  # Prompt-cache TTL, read by LlmCaller for EVERY platform LLM call. The prefix is a historical name
-  # — it was introduced for grader dispatch, and Track A removed grading, then #1117 removed the
-  # in-app assistant — but the setting is not: the RCA and triage lanes still cache the same way.
-  # Renaming the key would move every deployment's env var for one word, so it is left for the
-  # epic-7 config pass.
+    enabled: ${TESSARY_TELEMETRY_ENABLED:true}
+  # Rate-limiter pacing for the OpenRouter/Moonshot tiers is a static constant in code (LlmPacer):
+  # there are no model/provider Spring profiles. Every provider requires an org-provided credential.
+  # Prompt-cache TTL, read by LlmCaller for every platform LLM call. `grader` is a historical name;
+  # the RCA and triage lanes are what read it now.
   grader:
     cache:
       # Prompt-cache TTL on the Bedrock cache point. Bedrock supports 5m or 1h; values
       # other than 5m/1h fall back to the 5-minute default. Default unchanged (5m).
-      ttl: ${EVALS_GRADER_CACHE_TTL:5m}
-  # `evals.embedding.base-url` was here — the deployment-level default endpoint for the bundled
-  # embedder. The durable embedding lane (TextEmbedder, EmbeddingModelFactory, the vector
-  # substrate) was removed (#1116); the key bound to nothing else, so it went with it. See
-  # `.env.example` and docs/reference/config-keys.md.
-  # `evals.sandbox.*` was here — the deterministic-grader execution sandbox (the Lambda runner and
-  # the dormant E2B one). Track A removed grading; SandboxProperties and both runners went with it,
-  # so every key under that prefix was unbound. The agent sandbox that survives is configured under
-  # `evals.rca.*` and by the launcher's own env, not here.
-  # Feature flags: nothing to configure. The open build resolves a capability from the org's own
-  # `org_feature_flag` rows (Settings -> Features) and, absent a row, from the open-edition default
-  # in CapabilityService — every capability ON except the four paid classifiers and
-  # triage_automatic. There is no SDK, no key and no `evals.launchdarkly` block: LaunchDarkly is the
-  # HOSTED adapter and lives in tessary-paid/plan, whose FeatureFlagProperties binds that prefix
-  # over there. Likewise no `evals.plan`: the open edition has no tiers and no quota caps.
+      ttl: ${TESSARY_GRADER_CACHE_TTL:5m}
+  # Feature flags: nothing to configure. This build resolves a capability from the org's own
+  # `org_feature_flag` rows (Settings -> Features) and, absent a row, from the built-in default in
+  # CapabilityService. There is no SDK, no key and no `tessary.launchdarkly` block, and no
+  # `tessary.plan`: this build has no tiers and no quota caps.
 
-  # Platform staff: the identities allowed to move another org's plan by hand (pilot upgrades; there is no
-  # self-serve purchase path). Comma-separated emails, matched against the WorkOS-verified email on the principal row.
-  # EMPTY MEANS NOBODY — an unset variable removes the affordance rather than opening it. Staff additionally
-  # need the owner or admin role in the target org, so the pilot flow is: invite staff as admin, then upgrade.
+  # Platform staff: the identities allowed to move another org's plan by hand (pilot upgrades; there is
+  # no self-serve purchase path). Comma-separated emails, matched against the WorkOS-verified email on
+  # the principal row. Empty means nobody: an unset variable removes the affordance rather than opening
+  # it. Staff additionally need the owner or admin role in the target org, so the pilot flow is: invite
+  # staff as admin, then upgrade.
   platform:
-    staff-emails: ${EVALS_PLATFORM_STAFF_EMAILS:}
+    staff-emails: ${TESSARY_PLATFORM_STAFF_EMAILS:}
 
 spring:
-  # Project Loom: run Tomcat request handling and Boot-managed task/scheduling
-  # executors on virtual threads. The backend is overwhelmingly I/O-bound (JDBC,
-  # LLM/judge HTTP, E2B, OTLP/Langfuse export), so virtual threads let each
-  # blocking call park cheaply instead of pinning a platform thread. NOTE: this
-  # flag does NOT cover the user-defined @Bean executors in AsyncConfig — those
-  # are converted explicitly there, each keeping its own concurrency bound.
+  # Project Loom: run Tomcat request handling and Boot-managed task/scheduling executors on
+  # virtual threads. The backend is overwhelmingly I/O-bound, so virtual threads let each blocking
+  # call park cheaply instead of pinning a platform thread. This flag does not cover the
+  # user-defined @Bean executors in AsyncConfig; those are converted explicitly there, each
+  # keeping its own concurrency bound.
   threads:
     virtual:
       enabled: true
-  # We provide the DataSource programmatically (DataSourceConfig) against EVALS_JDBC_URL —
-  # the pgvector/pgvector Postgres run by docker-compose in dev/prod, and a pgvector
-  # Testcontainers instance in tests. Spring Boot auto-config picks up our DataSource bean and
-  # wires Liquibase + JdbcClient against it. The master changelog includes everything in changes/.
+  # We provide the DataSource programmatically (DataSourceConfig) against TESSARY_JDBC_URL: the
+  # pgvector/pgvector Postgres run by docker-compose in dev/prod, and a pgvector Testcontainers
+  # instance in tests. Spring Boot auto-config picks up our DataSource bean and wires Liquibase +
+  # JdbcClient against it. The master changelog includes everything in changes/.
   liquibase:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
     enabled: true
-  # Multipart upload limits. The default 1MB/10MB is too tight for the
-  # /import endpoint: a large evals/ directory (a few hundred grader files)
-  # easily clears 10MB total even though every individual YAML is small.
+  # Multipart upload limits. The default 1MB/10MB is too tight for the /import endpoint: a large
+  # import directory easily clears 10MB total even though every individual file is small.
   servlet:
     multipart:
       enabled: true
-      # Per-file == per-request == 25MB. /import is now the only multipart path,
-      # and individual grader YAMLs are tiny (~200KB for a few hundred), so
-      # per-request is the limit that actually binds; per-file is held equal to it
-      # so no single file can be rejected by a cap the request as a whole clears.
-      # Higher than this is a DoS amplifier (a signed-up user could POST 200MB
-      # blobs in a loop against the single-threaded executor); 25MB is the
-      # accepted pre-prod tradeoff.
+      # Per-file == per-request == 25MB. Individual import files are tiny, so per-request is the
+      # limit that actually binds; per-file is held equal to it so no single file can be rejected
+      # by a cap the request as a whole clears. Higher than this becomes a DoS amplifier against
+      # the single-threaded executor; 25MB is the accepted tradeoff.
       max-file-size: 25MB
       max-request-size: 25MB
 
 logging:
   level:
-    # Local compose sets APP_LOG_LEVEL=DEBUG. This key must follow that env — a hard-coded INFO
+    # Local compose sets APP_LOG_LEVEL=DEBUG. This key must follow that env: a hard-coded INFO
     # here is more specific than logback's ai.tessary logger and silently ate DEBUG (including
     # encoder.classify.request.body) even when APP_LOG_LEVEL=DEBUG was set.
-    ai.tessary.evals: ${APP_LOG_LEVEL:INFO}
+    ai.tessary: ${APP_LOG_LEVEL:INFO}
     org.springframework: WARN
-  # Surface the LogContext business ids (bound per run) in the plain-text dev
-  # console — they live only in MDC, which the default console pattern doesn't
-  # render. Spring injects this into CONSOLE_LOG_PATTERN's correlation slot.
-  # The production profile ignores it (JSON encoder emits MDC as fields instead).
+  # Surface the LogContext business ids (bound per run) in the plain-text dev console: they live
+  # only in MDC, which the default console pattern doesn't render. Spring injects this into
+  # CONSOLE_LOG_PATTERN's correlation slot. The production profile ignores it, since its JSON
+  # encoder emits MDC as fields instead.
   pattern:
     correlation: "[run=%X{runId:-} grader=%X{graderId:-} trace=%X{traceId:-}] "
 
 management:
   # Exposure is left at Spring Boot's default, which is `health` alone. If you widen it, know two
-  # things (#929):
-  #   1. Every actuator path except the three health probes REQUIRES AUTHENTICATION -- including
-  #      health GROUPS and the bare /actuator index. Enforced in AuthFilter, not here, so exposing
+  # things:
+  #   1. Every actuator path except the three health probes requires authentication, including
+  #      health groups and the bare /actuator index. Enforced in AuthFilter, not here, so exposing
   #      an endpoint does not publish it.
   #   2. /actuator/prometheus leaks tenant slugs through http.server.requests{uri=...} cardinality.
   #      Our own deployment pushes metrics over OTLP to a sidecar instead of exposing a scrape
@@ -134,12 +110,11 @@ management:
   endpoint:
     health:
       group:
-        # /actuator/health/ingest (#984): the one HTTP answer to "is accepted data reaching the
-        # substrate" — spool mode, depth, bytes, oldest unprocessed age, dead-lettered count, drainer
-        # liveness. A GROUP, so the details render only there: the public top-level document carries
-        # the status and the group names only (the compose healthcheck greps it for one "status":"UP", and #929 keeps every
-        # component's detail off the unauthenticated surface), and the group path is platform-staff
-        # only like every other management path.
+        # /actuator/health/ingest: the one HTTP answer to "is accepted data reaching the
+        # substrate", covering spool mode, depth, bytes, oldest unprocessed age, dead-lettered
+        # count, drainer liveness. A group, so the details render only there: the public
+        # top-level document carries the status and the group names only, and the group path is
+        # platform-staff only like every other management path.
         ingest:
           include: ingestSpool
           show-details: always
@@ -148,12 +123,12 @@ management:
     metrics:
       export:
         enabled: false
-  # Base document, so this applies to EVERY profile -- profile-less dev boot and `production`
-  # alike -- unless a profile-specific file overrides it (see application-production.yaml, which
-  # only supplies endpoint/transport and leaves these `enabled` flags to this file). Off by
-  # default so a self-hoster with no Grafana Cloud or Langfuse account gets zero outbound
-  # OTLP traffic and zero connection-refused warning spam at boot (#864). Re-enable per-flag
-  # with no code change, Spring relaxed binding:
+  # Base document, so this applies to every profile, profile-less dev boot and `production` alike,
+  # unless a profile-specific file overrides it (see application-production.yaml, which only
+  # supplies endpoint/transport and leaves these `enabled` flags to this file). Off by default so a
+  # self-hoster with no Grafana Cloud or Langfuse account gets zero outbound OTLP traffic and zero
+  # connection-refused warning spam at boot. Re-enable per-flag with no code change, Spring relaxed
+  # binding:
   #   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true
   #   MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED=true
   #   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true

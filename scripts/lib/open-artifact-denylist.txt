@@ -1,4 +1,4 @@
-# What no OPEN-edition artifact may contain (epic 6 clause 3, #1148). Read by
+# What no published artifact may contain. Read by
 # scripts/lib/open-artifact-contents.py over an exported image filesystem. One rule per line:
 #
 #   <kind>|<pattern>|<why>
@@ -31,7 +31,7 @@ path|tessary-paid|the overlay's own directory name, in any image
 path|/app/paid|where the paid backend image mounts the overlay's jars
 entry|ai/tessary/paid/|every paid class lives under this package
 entry|db/changelog/paid/|the paid Liquibase lane
-jar|launchdarkly|LaunchDarkly is the paid edition's only flag control (epic 5 decision 3); the open edition has DbFeatureFlags
+jar|launchdarkly|LaunchDarkly is the other edition's only flag control; this one uses DbFeatureFlags
 ext|.onnx|trained model weight
 ext|.safetensors|trained model weight
 ext|.pt|trained model weight

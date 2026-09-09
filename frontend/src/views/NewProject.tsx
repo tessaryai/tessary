@@ -37,7 +37,7 @@ export function NewProject() {
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <header className="mb-8">
-          {/* #1227: this used to double as the org-creation wizard's "Step 2 of 2" — that numbering
+          {/* This used to double as the org-creation wizard's "Step 2 of 2" — that numbering
               now lives on Signup/ConnectGate. This view is reached two ways today: never as part of
               first-run (a fresh account's default project already exists by the time anyone can see
               this route), and always live from the Sidebar's "+ New project" action on an
