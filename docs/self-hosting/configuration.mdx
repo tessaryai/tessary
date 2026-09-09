@@ -229,7 +229,7 @@ These variables apply to the prod Docker Compose stack (`docker-compose.yml`). T
 | `HTTPS_PORT` | Host port for HTTPS, when `SITE_DOMAIN` is set in `acme` or `owncert` mode. | `443` |
 
 <Note>
-  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while either sealing key is still on its shipped placeholder refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
+  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while any of the three placeholder keys is still on its shipped value refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
 </Note>
 
 ## Removed configuration

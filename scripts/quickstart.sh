@@ -65,8 +65,8 @@ echo "Tessary is up: ${url}"
 echo "Create the first account there to continue -- see docs/self-hosting/setup.mdx."
 if [ ! -f .env ]; then
   echo ""
-  echo "This instance is running on the placeholder sealing keys docker-compose.yml ships."
+  echo "This instance is running on the placeholder keys docker-compose.yml ships."
   echo "They are public, so keep it on localhost until you replace them:"
-  echo "  cp .env.example .env   # then uncomment the two key blocks and set your own"
+  echo "  cp .env.example .env   # then uncomment the three key blocks and set your own"
   echo "  openssl rand -base64 32"
 fi

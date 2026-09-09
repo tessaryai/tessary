@@ -82,9 +82,9 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 ## The backend refuses to start after setting SITE_DOMAIN
 
-**Symptom:** The stack ran fine on localhost. You set `SITE_DOMAIN` and now the `backend` container exits, logging `Refusing to start: this instance is served on <your domain>` and naming `TESSARY_AUTH_COOKIE_PASSWORD`, `TESSARY_SECRET_KEY`, or both.
+**Symptom:** The stack ran fine on localhost. You set `SITE_DOMAIN` and now the `backend` container exits, logging `Refusing to start: this instance is served on <your domain>` and naming `TESSARY_AUTH_COOKIE_PASSWORD`, `TESSARY_SECRET_KEY`, `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY`, or any combination of them.
 
-**Cause:** Those keys are still on the placeholders `docker-compose.yml` ships. They are published in the public repository, so an instance reachable at a real hostname with either one in place can have its sessions forged and its stored credentials read. Tessary refuses the boot rather than let that happen quietly.
+**Cause:** The keys the message names are still on the placeholders `docker-compose.yml` ships. They are published in the public repository, so an instance reachable at a real hostname with any of them in place is exposed to anyone who reaches it: the cookie key lets sessions be forged, the sealing key lets stored credentials be read, and the launcher key lets the sandbox launcher be driven into spawning containers on the host. Tessary refuses the boot rather than let that happen quietly.
 
 **Resolution:** Generate a replacement for each key the message names and put it in `.env`, then bring the stack up again:
 
@@ -92,7 +92,7 @@ Run both operations through the `postgres` service in your compose deployment, u
 openssl rand -base64 32
 ```
 
-Full steps, including which of the two matters most and when to do it: [Secure the instance](/self-hosting/setup#secure-the-instance).
+Full steps, including which key matters most and when to do it: [Secure the instance](/self-hosting/setup#secure-the-instance).
 
 <Note>
   If the instance already stored provider API keys under the placeholder `TESSARY_SECRET_KEY`, changing it makes them unreadable and they have to be entered again. Nothing else is lost.
