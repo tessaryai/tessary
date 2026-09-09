@@ -40,7 +40,7 @@ groups:
       # ----------------------------------------------------------------------
       # 1. The primary "something is wrong" alert.
       # ----------------------------------------------------------------------
-      - uid: tessary-cpu-high
+      - uid: evals-cpu-high
         title: Host CPU saturated
         condition: threshold
         for: 10m
@@ -86,7 +86,7 @@ groups:
       # is the cause most likely to be misdiagnosed as an application regression.
       # On a burstable (t3/t4g) instance a depleted CPU credit balance presents
       # as steal, and no amount of code profiling will explain it.
-      - uid: tessary-cpu-steal
+      - uid: evals-cpu-steal
         title: CPU steal — host contention or exhausted burst credits
         condition: threshold
         for: 10m
@@ -127,7 +127,7 @@ groups:
       # ----------------------------------------------------------------------
       # 3. The JVM is collecting, not working.
       # ----------------------------------------------------------------------
-      - uid: tessary-jvm-gc-thrash
+      - uid: evals-jvm-gc-thrash
         title: Backend JVM spending >10% of wall clock in GC
         condition: threshold
         for: 10m
@@ -169,7 +169,7 @@ groups:
       # ----------------------------------------------------------------------
       # 4. Disk-bound, not CPU-bound.
       # ----------------------------------------------------------------------
-      - uid: tessary-cpu-iowait
+      - uid: evals-cpu-iowait
         title: High iowait — disk/Postgres bound
         condition: threshold
         for: 15m

@@ -27,7 +27,7 @@ spring:
       minimum-idle: 2
       connection-timeout: 10000
       leak-detection-threshold: 30000
-      pool-name: tessary-hikari
+      pool-name: evals-hikari
   liquibase:
     enabled: true
 

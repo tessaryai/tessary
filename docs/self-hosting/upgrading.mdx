@@ -29,7 +29,7 @@ Three volumes are project-prefixed and therefore change name:
 | Caddy's certificate state | `evals-platform_caddy-data` | `tessary_caddy-data` |
 | Caddy's config state | `evals-platform_caddy-config` | `tessary_caddy-config` |
 
-`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_tessary`). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
+`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_tessary` — the project prefix changed in that release, the `evals` half in this one). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
 
 Pick one of these two. Do it **before** the first `docker compose up` on the new configuration.
 
@@ -118,8 +118,12 @@ These are the ones a self-hosted install normally sets:
 
 `SITE_DOMAIN`, `TLS_MODE` and `ACME_EMAIL` never carried the prefix and do not change.
 
-The matching YAML keys moved too, from `evals.*` to `tessary.*`. You only need this if you mount your
-own `application.yaml` instead of setting environment variables.
+The matching YAML keys moved too, from `evals.*` to `tessary.*`, and so did the logger name:
+`logging.level.ai.tessary.evals` is now `logging.level.ai.tessary`. You only need either if you mount
+your own `application.yaml` instead of setting environment variables.
+
+The table above lists the settings a self-hosted install normally sets, not every key that exists.
+The rule is what matters: if it started with `EVALS_`, it starts with `TESSARY_` now.
 
 ## One-time: the database is now named `tessary`
 
@@ -131,7 +135,8 @@ own `application.yaml` instead of setting environment variables.
 The three defaults changed from `evals` to `tessary`. Postgres does not rename an existing database
 to match, so a stack started on the new defaults finds nothing and initialises an empty one.
 
-Pin the old names and nothing moves:
+**Pin the old names.** This is one edit, it cannot half-apply, and nothing else about your install
+changes. Put these in `.env`:
 
 ```bash
 POSTGRES_DB=evals
@@ -139,37 +144,32 @@ POSTGRES_USER=evals
 POSTGRES_PASSWORD=evals
 ```
 
-Or rename them in place, with the stack stopped except for Postgres:
+### If you would rather rename the database and role
+
+You do not need to. Do this only if you want the names on disk to match the new defaults.
+
+Postgres refuses to rename the role you are connected as, so the rename needs a temporary superuser
+to run from. Stop the stack except for Postgres, then run all six commands:
 
 ```bash
 docker compose up -d postgres
 docker compose exec -T postgres psql -U evals -d postgres -c 'ALTER DATABASE evals RENAME TO tessary;'
-docker compose exec -T postgres psql -U evals -d postgres -c 'ALTER ROLE evals RENAME TO tessary;'
-docker compose exec -T postgres psql -U tessary -d postgres -c "ALTER ROLE tessary WITH PASSWORD 'tessary';"
+docker compose exec -T postgres psql -U evals -d postgres -c 'CREATE ROLE tessary_rename SUPERUSER LOGIN;'
+docker compose exec -T postgres psql -U tessary_rename -d postgres -c 'ALTER ROLE evals RENAME TO tessary;'
+docker compose exec -T postgres psql -U tessary_rename -d postgres -c "ALTER ROLE tessary WITH PASSWORD 'tessary';"
+docker compose exec -T postgres psql -U tessary -d postgres -c 'DROP ROLE tessary_rename;'
 ```
 
-Renaming a role invalidates its stored password, so the third command is required, not optional.
+Renaming a role clears its stored password, so the fifth command is required, not optional. Set a
+password of your own rather than `tessary` if the database port is published or the host is shared.
 
-## One-time: sessions, tokens and webhook headers
+## One-time: everyone is signed out once
 
-Three names that leave the backend changed in the same release.
+The session cookie is now `tessary-session`, so existing sessions stop resolving and everyone signs
+in again. Nothing else is affected: accounts, API tokens and org membership are untouched.
 
-- **The session cookie** is now `tessary-session`. Everyone signed in is signed out once. They sign
-  back in normally; nothing else is affected.
-- **New API tokens** carry a `tessary_pat_` prefix. Tokens issued before the upgrade keep their
-  `evals_pat_` prefix and keep working. You do not need to reissue them.
-- **Outbound alert webhooks** send `X-Tessary-Signature-256`, `X-Tessary-Event` and
-  `X-Tessary-Delivery` in place of the `X-Evals-*` names. **A receiver that verifies the HMAC by
-  header name rejects every delivery until you update it.** The signature format is unchanged:
-  `sha256=<hex>` over the raw body. Update your receiver before you upgrade, or accept either name
-  during the transition.
-
-## One-time: Grafana alert rules
-
-The four CPU alert rules under `observability/` changed `uid` from `evals-*` to `tessary-*`
-(`tessary-cpu-high`, `tessary-cpu-steal`, `tessary-jvm-gc-thrash`, `tessary-cpu-iowait`). Grafana
-treats a changed `uid` as a new rule, so provisioning creates the four new ones and leaves the old
-four in place. Delete the `evals-*` rules after the upgrade, or they alert twice.
+API tokens do **not** change. They are minted as `tsy_<scope>_…` and always have been; that prefix
+is not part of this rename.
 
 ## How migrations work
 

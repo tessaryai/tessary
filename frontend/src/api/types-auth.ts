@@ -229,7 +229,7 @@ export interface ApiKey {
   id: string;
   name: string;
   scope: KeyScope;
-  /** Display-only prefix (e.g. "tessary_pat_…"); safe to show. */
+  /** Display-only prefix (e.g. "tsy_w_…"); safe to show. */
   token_prefix: string;
   created_at: string;
   last_used_at: string | null;

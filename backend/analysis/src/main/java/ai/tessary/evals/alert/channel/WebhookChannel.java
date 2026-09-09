@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-package ai.tessary.alert.channel;
+package ai.tessary.evals.alert.channel;
 
-import ai.tessary.alert.AlertChannelKind;
-import ai.tessary.alert.AlertEventRow;
-import ai.tessary.open.errors.AlertError;
-import ai.tessary.open.errors.TessaryException;
+import ai.tessary.evals.alert.AlertChannelKind;
+import ai.tessary.evals.alert.AlertEventRow;
+import ai.tessary.evals.open.errors.AlertError;
+import ai.tessary.evals.open.errors.EvalsException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpResponse;
@@ -28,9 +28,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class WebhookChannel implements AlertChannel {
 
-    // The three X-Evals-* names stay on the old spelling through the tessary rename: they are an
-    // outbound wire contract, and a receiver that verifies the HMAC by header name rejects every
-    // delivery the moment they change. Renaming them needs its own release with a transition window.
     public static final String SIGNATURE_HEADER = "X-Evals-Signature-256";
 
     private final ObjectMapper mapper;
@@ -51,7 +48,7 @@ public class WebhookChannel implements AlertChannel {
         try {
             body = mapper.writeValueAsString(AlertPayload.envelope(event, mapper));
         } catch (Exception e) {
-            throw new TessaryException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not serialize webhook payload");
+            throw new EvalsException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not serialize webhook payload");
         }
         Map<String, String> headers = new HashMap<>();
         headers.put("X-Evals-Event", event.ruleType());
@@ -78,7 +75,7 @@ public class WebhookChannel implements AlertChannel {
     static String requireUrl(JsonNode config) {
         String url = text(config, "url");
         if (url == null || url.isBlank()) {
-            throw new TessaryException(AlertError.INVALID_CHANNEL_CONFIG, "webhook requires a 'url'");
+            throw new EvalsException(AlertError.INVALID_CHANNEL_CONFIG, "webhook requires a 'url'");
         }
         return url;
     }
@@ -89,7 +86,7 @@ public class WebhookChannel implements AlertChannel {
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return HexFormat.of().formatHex(mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            throw new TessaryException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not sign webhook payload");
+            throw new EvalsException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not sign webhook payload");
         }
     }
 

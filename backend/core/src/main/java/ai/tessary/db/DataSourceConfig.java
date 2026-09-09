@@ -46,7 +46,7 @@ public class DataSourceConfig {
         cfg.setMaximumPoolSize(10);
         cfg.setMinimumIdle(1);
         cfg.setLeakDetectionThreshold(30_000);
-        cfg.setPoolName("tessary-hikari");
+        cfg.setPoolName("evals-hikari");
         cfg.setJdbcUrl(jdbcUrl);
         cfg.setUsername(props.getDbUsername());
         cfg.setPassword(props.getDbPassword());

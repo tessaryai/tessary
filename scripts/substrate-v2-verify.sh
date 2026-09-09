@@ -39,7 +39,7 @@
 
 set -uo pipefail
 
-PSQL="${PSQL:-docker compose -f /opt/tessary/docker-compose.yml exec -T postgres psql -U ${POSTGRES_USER:-tessary} -d ${POSTGRES_DB:-tessary}}"
+PSQL="${PSQL:-docker compose -f /opt/evals-platform/docker-compose.yml exec -T postgres psql -U ${POSTGRES_USER:-tessary} -d ${POSTGRES_DB:-tessary}}"
 PARITY_SAMPLE="${PARITY_SAMPLE:-50}"
 UNPRICED_WARN_PCT="${UNPRICED_WARN_PCT:-5}"
 

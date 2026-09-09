@@ -83,6 +83,21 @@ as an MDC key rename below, and gets the same treatment: recorded here, no dual-
 
 The `grader_id` / `grader_name` / `grader_kind` / `phase` keys went with grading in Track A.
 
+**Renaming a metadata key is an external break of the same class as an MDC key rename**, and the
+build cannot see it either. Record every rename here:
+
+| Old key | New key | Release |
+|---|---|---|
+| `evals.project.id` | `tessary.project.id` | 2026-09 namespace rename. The whole `evals.*` internal attribute namespace moved to `tessary.*` so one name spans code, config and telemetry. The customer-emitted vocabulary (`tessary.call_site.id` and the `gen_ai.*` set) was already `tessary.*` and did not move. No dual-emit window: these are platform-internal spans, not customer-ingested ones. |
+| `evals.rca.subject_id` / `evals.head_sha` | `tessary.rca.subject_id` / `tessary.head_sha` | 2026-09 namespace rename, as above (`E2bRcaSandbox`). |
+| `evals.triage.finding_id` / `evals.triage.cost_usd` / `evals.triage.spend_cap_usd` / `evals.triage.over_spend_cap` | `tessary.triage.*` | 2026-09 namespace rename, as above (`E2bTriageSandbox`). |
+| `evals.latency_ms` / `evals.agent.tools` / `evals.llm.structured_output.tool_miss` / `evals.cache.likely_expiry` | `tessary.*` | 2026-09 namespace rename, as above (`LlmCaller`, `AgentSpanTelemetry`). |
+
+Two telemetry names were deliberately **not** renamed, because they are opaque keys that carry state
+across the upgrade rather than anything an operator reads: the Hikari pool name `evals-hikari` (a
+Micrometer `pool=` tag, so renaming it splits the series) and the four Grafana CPU alert `uid`s
+(a `uid` is never displayed, and changing one makes Grafana provision a duplicate rule).
+
 ## Log fields (MDC)
 
 Structured log lines carry business ids as MDC fields, and those field names are what a

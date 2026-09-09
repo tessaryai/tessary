@@ -240,7 +240,7 @@ tasks:
       - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Dtessary.openapi.regenerate=true test
 
   contract:openapi:paid:
-    desc: "Regenerate the PAID edition's OpenAPI spec (tessary-paid/contract/openapi/tessary-api-paid.json) from the paid assembly (epic 5 #943): boots TessaryApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres)."
+    desc: "Regenerate the PAID edition's OpenAPI spec (tessary-paid/contract/openapi/evals-api-paid.json) from the paid assembly (epic 5 #943): boots TessaryApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres)."
     cmds:
       - "[ -f tessary-paid/assembly/pom.xml ] && mvn -f backend/pom.xml -pl ../tessary-paid/assembly -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PaidOpenApiSpecTest -Dtessary.openapi.regenerate=true test"
 
@@ -641,7 +641,7 @@ tasks:
   check:open:artifacts:
     desc: "Epic 6 clause 3 (#1148): builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on the paid image and on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`/`check:open`; release.yml runs the same script against the images it just built before merging any manifest."
     cmds:
-      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/tessary-api-paid.json ] && echo tessary-paid/contract/openapi/tessary-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
+      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/evals-api-paid.json ] && echo tessary-paid/contract/openapi/evals-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
 
   check:namespaces:
     desc: "Epic 6 clause 7 (#1152): every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."

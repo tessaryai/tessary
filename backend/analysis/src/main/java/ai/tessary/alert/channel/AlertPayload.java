@@ -63,7 +63,10 @@ public final class AlertPayload {
 
     /** Stable dedup key for connectors that support one (PagerDuty dedup_key, Sentry fingerprint). */
     public static String dedupKey(AlertEventRow e) {
-        return "tessary-alert-" + e.id();
+        // Stays on the old spelling through the tessary rename: this is the PagerDuty dedup_key /
+        // Sentry fingerprint, so changing it makes a re-delivered pre-upgrade event open a second
+        // incident. The token is opaque and never displayed, so the old name costs nothing.
+        return "evals-alert-" + e.id();
     }
 
     /**
