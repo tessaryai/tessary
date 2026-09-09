@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 LABEL="$1"; BASE="$2"; SPIKE_FOR="$3"; shift 3
-TOKEN="$(cat token.txt)"
+TOKEN="$(head -1 tokens.txt)"
 OUTDIR="results/$LABEL"; mkdir -p "$OUTDIR"
 SETTLE=45   # baseline seconds before the spike, so the queue is at its steady state, not empty
 TAIL=45     # baseline seconds after, to see whether it recovers

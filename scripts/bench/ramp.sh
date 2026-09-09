@@ -11,7 +11,7 @@ ROOT="$(cd ../.. && pwd)"
 
 LABEL="$1"; shift
 STEP="$1"; shift
-TOKEN="$(cat token.txt)"
+TOKEN="$(head -1 tokens.txt)"
 OUTDIR="results/$LABEL"
 mkdir -p "$OUTDIR"
 
@@ -31,7 +31,7 @@ sample_stats() {
   done
 }
 
-echo "step,offered_spans_per_s,sent,ok,refused_503,other,errors,rows_written,drain_spans_per_s,p50_ms,p95_ms,p99_ms" > "$OUTDIR/steps.csv"
+echo "step,offered_spans_per_s,sent,ok,refused_503,other,errors,skipped,rows_written,drain_spans_per_s,p50_ms,p95_ms,p99_ms" > "$OUTDIR/steps.csv"
 
 for RATE in "$@"; do
   echo "=== step: ${RATE} spans/s offered, ${STEP}s ==="
@@ -54,10 +54,11 @@ import json, sys
 s = json.load(open(sys.argv[1])); rate, written, step, csv = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
 measured = round(written / step, 1)
 row = [rate, s["measured_span_rate"], s["sent"], s["ok"], s["refused"], s["other"], s["error"],
-       written, measured, s["latency_ms"]["p50"], s["latency_ms"]["p95"], s["latency_ms"]["p99"]]
+       s["skipped"], written, measured, s["latency_ms"]["p50"], s["latency_ms"]["p95"], s["latency_ms"]["p99"]]
 open(csv, "a").write(",".join(str(x) for x in row) + "\n")
+warn = "  *** SKIPPED>0: max-inflight was hit, this step was not open-loop ***" if s["skipped"] else ""
 print(f"  offered={s['measured_span_rate']}/s  ok={s['ok']}  503={s['refused']}  other={s['other']}  "
-      f"rows={written} ({measured}/s)  p99={s['latency_ms']['p99']}ms")
+      f"rows={written} ({measured}/s)  p99={s['latency_ms']['p99']}ms{warn}")
 PY
   # The heartbeat lines that cover this step, for queue depth and shed counts.
   "${COMPOSE[@]}" logs backend --since "$((STEP + 40))s" --no-color 2>/dev/null \

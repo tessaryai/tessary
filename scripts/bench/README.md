@@ -1,9 +1,13 @@
 # Ingest load harness
 
-Reproduces the ingest capacity numbers quoted in
-[`devdocs/guides/ingest-runbook.md`](../../devdocs/guides/ingest-runbook.md) § *The objectives* and in
-the `tessary.redaction.parallelism` / `tessary.auth.token-cache.*` entries of
-[`devdocs/reference/config-keys.md`](../../devdocs/reference/config-keys.md).
+Re-derives the ingest capacity figure in the `tessary.redaction.parallelism` entry of
+[`devdocs/reference/config-keys.md`](../../devdocs/reference/config-keys.md), and gives you a way to
+measure the objectives in [`devdocs/guides/ingest-runbook.md`](../../devdocs/guides/ingest-runbook.md)
+§ *The objectives* on a box you care about.
+
+Note what it does **not** claim: O2's stated provenance is `SubstrateWriteIntegrationTest`, not this
+harness. Running a ladder here gives you a second, independent number for the same objective — useful,
+and not the same thing as reproducing the one the runbook cites.
 
 It exists because those numbers were quoted before anything here could re-derive them. A capacity
 figure with no way to re-run it is a claim, not a measurement.
@@ -54,7 +58,8 @@ SPRING_APPLICATION_JSON='{"tessary":{"redaction":{"parallelism":1}}}' \
 node otlp-load.js --token "$(head -1 tokens.txt)" --rate 1200 --spans-per-request 40 --duration 90 --warmup 15
 # then the same with parallelism 4
 
-# Token cache (the p50 61 ms -> 2.6 ms control)
+# Token cache. config-keys.md records the CPU share bcrypt held, not a latency pair, so treat any
+# latency number you get here as yours rather than as a published figure being reproduced.
 SPRING_APPLICATION_JSON='{"tessary":{"auth":{"token-cache":{"enabled":false}}}}' ...
 ```
 
@@ -65,15 +70,32 @@ forward-migrated schema, because its Liquibase changelog no longer matches. Togg
 
 The generator prints a JSON summary; `--out` also writes a per-second JSONL. What each number means:
 
-- **`accepted_span_rate`** — spans the front door took. This is the capacity figure.
+- **`accepted_span_rate`** — spans the front door took. This is the capacity figure, and it is in the
+  generator's own JSON summary; `ramp.sh`'s `steps.csv` records the offered and drained rates beside it.
 - **`drain`** (rows counted straight out of Postgres) — what actually landed. It should track accepted;
   a gap means the queue was still draining when the run ended.
 - **`refused`** — `503`s. Every one is a retryable answer the exporter will resend.
+- **`skipped`** — requests the generator did not send because `--max-inflight` was reached. **Non-zero
+  means the run stopped being open-loop** and the offered rate is no longer what you asked for; raise
+  the cap or lower the rate and re-run, and do not quote a capacity number from that step.
 - **`other`** — anything else, and **any non-zero value here is a finding**: `500` is not in OTLP's
   retryable set, so those spans are lost rather than resent.
 
 Server-side, `event="ingest.throughput"` carries `queue_bytes`, `shed_batches` and
 `spool_oldest_age_ms`; the bench overlay drops its cadence to 10 s so a ladder step is visible.
+
+## Taking the overlay back off
+
+The overlay leaves JFR recording and native memory tracking on, and `bench-tmp` is a named volume that
+survives restarts — including the HotSpot attach socket the sidecar JDK uses, which is reachable by
+anything else that mounts it and can load a JVMTI agent into the backend. Do not leave it enabled on
+anything shared:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.bench.yml down
+docker volume rm tessary_bench-tmp
+docker compose up -d          # back to the shipped stack
+```
 
 ## `mem-probe.sh` needs a sidecar JDK
 

@@ -101,3 +101,6 @@ sandbox-runner/agent-sandbox/vendor/
 .design/
 .design-sketches/
 
+# The load harness mints live write-scoped tokens and writes its runs beside itself.
+scripts/bench/tokens.txt
+scripts/bench/results/

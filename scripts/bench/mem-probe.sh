@@ -30,7 +30,8 @@ jcmd_in() {
     grep -E "^(anon|file|slab|sock) " /sys/fs/cgroup/memory.stat
     echo "cpu.max      $(cat /sys/fs/cgroup/cpu.max)"'
   echo
-  echo "--- heap, after a full GC (live set, not floating garbage)"
+  echo "--- heap as it stands (GC.heap_info does NOT collect first, so this includes floating garbage;"
+  echo "    for a live set, read GCHeapSummary after-GC events out of the JFR recording instead)"
   jcmd_in GC.heap_info 2>&1 | tail -n +2
   echo
   echo "--- native memory tracking: committed, by category"
