@@ -50,6 +50,16 @@
 #   was again NOT regenerated: the twelve pre-existing drift paths stay absent, unread and unabsorbed.
 #   Row count 1,358 -> 1,361.
 #
+# AMENDED 2026-09-09 (trademark policy leaves the site) — ONE body row RENAMED by hand:
+#   `docs/trademarks.mdx` -> `TRADEMARK.md`. The policy is no longer a published Mintlify page and
+#   is no longer in docs/docs.json's navigation; it is a plain markdown file at the repository
+#   root, reached from README.md's License section. Same text, same keep-list obligation, new
+#   path. Row count unchanged at 1,361.
+#   NOT absorbed by this amendment: the thirteen new pages under docs/instrument/, docs/concepts/
+#   and docs/reference/ are absent from the body. They are real files in the tree and they will
+#   ship; they are listed here as known drift rather than added, because adding a row asserts a
+#   person read it and no one has. They join the twelve pre-existing drift paths above.
+#
 # reviewed: NOT YET SIGNED OFF. Generated 2026-09-08 against the post-relocation tree:
 #   1,372 paths = 1,368 tracked outside this build's export-excluded directory, plus FOUR files this change adds that were
 #   still untracked when it was generated — contract/LICENSE, .gitleaks.toml,
@@ -87,8 +97,9 @@
 #   SECURITY.md                      present
 #   CONTRIBUTING.md                  present — and is now the ONLY licence declaration besides
 #                                    LICENSE itself (see the exemptions below)
-#   trademark policy                 present — docs/trademarks.mdx (was root TRADEMARKS.md; the
-#                                    policy moved into the published docs, it did not go away)
+#   trademark policy                 present — TRADEMARK.md at the repository root. It has
+#                                    moved twice (root TRADEMARKS.md, then a published docs
+#                                    page, now root again); it has never gone away
 #   dependency lockfiles             present — backend/*/pom.xml + the reactor, frontend/pnpm-lock.yaml,
 #                                    classify-service/pnpm-lock.yaml, classifiers/uv.lock,
 #                                    sandbox-runner/*/pnpm-lock.yaml
@@ -113,7 +124,7 @@
 #                                    reads it and devdocs/guides/local-dev.md documents the layout
 #                                    it configures. It ships.
 #   brand assets under the           present — frontend/public/tessary-logo.png, the one checked-in
-#   trademark policy                 mark; its use is governed by docs/trademarks.mdx
+#   trademark policy                 mark; its use is governed by TRADEMARK.md
 #
 # ---------------------------------------------------------------------------------------------
 # NAMED, REASONED EXEMPTIONS to "no AGPL or CLA string survives".
@@ -166,6 +177,7 @@ LICENSE
 NOTICE
 README.md
 SECURITY.md
+TRADEMARK.md
 Taskfile.yml
 backend/.dockerignore
 backend/.mvn/jvm.config
@@ -1210,7 +1222,6 @@ docs/self-hosting/deployment.mdx
 docs/self-hosting/setup.mdx
 docs/self-hosting/troubleshooting.mdx
 docs/self-hosting/upgrading.mdx
-docs/trademarks.mdx
 docs/vale/.vale.ini
 docs/vale/README.md
 docs/vale/check.sh

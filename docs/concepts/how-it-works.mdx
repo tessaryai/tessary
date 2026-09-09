@@ -1,0 +1,84 @@
+---
+title: "How Tessary Works"
+description: "The four stages a production trace moves through in Tessary: ingest, classifiers and findings, triage and cases, and the agentic root-cause run."
+---
+
+Tessary reads every trace your agents produce, flags the ones that moved with cheap classifiers, collapses related flags into one case, and explains that case with an agentic RCA (root-cause analysis) run. Four stages, each of which cannot run until the one before it has produced something.
+
+The stages are separate on purpose. Each answers a different question with a different instrument, and each hands the next one a record it can point at.
+
+| Stage | The question | What it needs first | What it produces |
+| --- | --- | --- | --- |
+| Ingest | What happened? | An ingest endpoint and a per-project bearer token | Sessions, traces, and spans in the store |
+| Classifiers | Did something move? | Spans tagged with `tessary.call_site.id`, and enough traffic for `duration_drift`, `cost_drift` and `tool_error` to build a reference | A finding, plus references to the traces it was seen in |
+| Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default | A case, or a closed finding |
+| Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, hypotheses with cited traces, and the checks it ruled out |
+
+## Traces arrive
+
+Your agent exports OTLP (OpenTelemetry Protocol) traces to your instance's own origin plus `/v1/traces`, authenticated with a per-project bearer token. There is no Tessary client library to install: ingest is OTLP and the call-site tag is a plain span attribute.
+
+Everything normalizes to the OpenTelemetry `gen_ai.*` conventions at the edge, so Tessary accepts OpenInference and OpenLLMetry (Traceloop) spans as they are and translates them on the way in. PII (personally identifiable information) redaction runs on the OTLP write path, before anything is stored, and its rules live under **Settings → PII redaction**.
+
+What lands is three levels, fixed:
+
+- A **session** is one continuous interaction with one user.
+- A **trace** is one turn: one thing the end user asked for and waited on.
+- A **span** is one step inside that turn: a model call, a tool call, a sub-agent.
+
+The stage's real gate is not volume, it is attribution. A span that carries no `tessary.call_site.id` is stored and browsable under **Traces**, and it still advances your project's onboarding milestone from `listening` to `fitting`, but the classifiers that watch a call site cannot see it. [Call sites](/concepts/call-sites) covers why, and [Set up Tessary](/self-hosting/setup#sign-up-and-connect-your-traces) covers the connect gate that holds a new project until one tagged span arrives.
+
+## Classifiers produce findings
+
+A classifier is a check that evaluates traces against a defined condition, and it creates a finding when that condition is met. Classifiers sweep the stored spans continuously and strictly off the ingest hot path, so a slow classifier delays a finding rather than an accepted batch.
+
+They are built to be cheap enough to run against every trace rather than a sample. None of the five costs a model call: `duration_drift`, `cost_drift` and `tool_error` are arithmetic over stored spans, and `secret_leak` and `malformed_output` are pattern and schema checks.
+
+Three of them compare a call site, or a single tool, against its own recent past, which is why a new project stays quiet for a while. There is no shipped notion of "good" latency, "good" spend, or a "good" failure rate, so each of those classifiers has to watch its population long enough to learn what that population normally does before it can say anything moved. The milestone ladder names that wait: a project sits at `fitting` until its classifiers reach `watching`.
+
+[Classifiers and findings](/concepts/classifiers-and-findings) lists exactly which classifiers the open edition runs, what fitting a baseline involves, and what a finding records.
+
+## Findings group into cases
+
+A finding is a change detected in production. It is not yet a validated issue, and Tessary does not page anyone about one.
+
+Triage is the step in between. It runs an agent in a sandbox against the finding's own claim and evidence and asks one question: does the claim hold, over enough samples, carried by the evidence it cites? A `positive` ruling opens a case. A `negative` or `unclear` ruling closes the finding.
+
+A case is the unit a person is meant to act on, and there is one live case per classifier, subject, and metric. Several findings about the same tool over several weeks collapse onto one case rather than opening a queue of near-duplicates.
+
+Triage needs three things the ingest and classifier stages do not: an LLM provider credential, configured in-app under **Settings → Providers**; a reachable `sandbox-runner` service; and automatic triage turned on for your organization, which is off by default in every edition. [Cases](/concepts/cases) covers what triage rules on, how to turn it on, how findings collapse into one case, and the states a case moves through.
+
+## A root-cause run explains a case
+
+Detection says something moved. Root-cause analysis says what changed. Pressing **Run RCA** on a case hands the finding behind it to an agent session in a fresh sandbox, with the finding's dossier as files, a live connection back to your instance's MCP (Model Context Protocol) surface for the evidence, and a clone of your repository when one is connected.
+
+The run returns a verdict, hypotheses with the traces that support each one, and an explicit assessment of every check it measured, including the ones it ruled out. Without a connected repository it still runs, with a ceiling: it can show what changed in production and not what changed in the code.
+
+[Root-cause analysis](/concepts/root-cause-analysis) covers what the agent is given, what it is deliberately not told, and how its output is validated before it becomes a report.
+
+## Where a case goes next
+
+Tessary explains and hands off. It does not open the fix.
+
+A case reaches a person through the `case_opened` alert rule every project is seeded with. [Cases](/concepts/cases#where-a-case-reaches-you) covers the destination it needs and what the notification carries.
+
+<Note>
+  Slack delivery is a capability of its own, and it is off in the open edition. The delivery route every organization has is a signed generic webhook, which is why **Settings → Notifications** leads with the webhook field.
+</Note>
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Call sites" icon="tag" href="/concepts/call-sites">
+    What a call site is, how a span is attributed to one, and why an untagged span is not usable.
+  </Card>
+  <Card title="Classifiers and findings" icon="radar" href="/concepts/classifiers-and-findings">
+    Which classifiers the open edition runs, what fitting a baseline means, and what a finding records.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How triage turns a finding into a case, and the states a case moves through.
+  </Card>
+  <Card title="Root-cause analysis" icon="magnifying-glass" href="/concepts/root-cause-analysis">
+    What the agentic run reads, what it returns, and what a connected repository adds.
+  </Card>
+</CardGroup>

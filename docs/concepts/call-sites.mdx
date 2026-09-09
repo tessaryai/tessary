@@ -1,0 +1,66 @@
+---
+title: "Call Sites"
+description: "Understand what a call site is in Tessary, how a span is attributed to one, and why spans that carry no call-site tag cannot be watched."
+---
+
+A call site is a place in your code that causes a model to run. It is the unit almost everything else in Tessary is scoped to: a baseline is fitted per call site, a duration or cost finding names one, and a case points back at one.
+
+A call site is not one line of code. It is one combination of intent, system prompt, and output schema. Where a single location picks its prompt or schema from a registry keyed on a parameter, each branch is its own call site. A parameter that varies only content, such as the end user's text or a temperature, is the same call site.
+
+## How a span is attributed to a call site
+
+Exactly one thing attributes a span: the `tessary.call_site.id` span attribute. Tessary never infers a call site from a file path, a span name, or the shape of a prompt. Guessing would mis-attribute production traffic, and a baseline fitted on mis-attributed traffic is worse than no baseline.
+
+Four properties of the tag decide whether attribution works:
+
+- **The key is `tessary.call_site.id`, dotted.** Tessary silently ignores an underscore variant, so the span looks tagged and resolves to nothing.
+- **The value is a literal**, never an f-string, a variable, or an enum lookup. A tag computed at run time cannot be traced back to code.
+- **The tag goes on the span that covers the model call**, not on a parent request or handler span. A handler making three different calls is three call sites, and one tag on the handler collapses them into one.
+- **A shipped id is frozen.** The id is the key every finding and every already-ingested span holds, so renaming one orphans all of them silently. A call site that moved in the code keeps its id.
+
+[Tag your call sites](/instrument/call-site-tag) is the procedure. It is a plain span attribute on tracing you already have, so there is nothing to install.
+
+### A trace inherits its entry point's call site
+
+Spans carry the tag; traces inherit one. When a trace's rollup runs, Tessary copies the call site off that trace's root span onto the trace itself. That copied value is what "this call site's turns" means, and both the duration and cost classifiers read that one column, so they cannot disagree about which bucket a trace belongs to.
+
+The consequence worth knowing: tagging an inner span but not the span that starts the turn leaves the trace itself unattributed, even though the trace contains a tagged span.
+
+## Why untagged spans are not usable
+
+Untagged spans are not rejected. Ingest is fail-open, so they are stored, they appear under **Traces**, and they advance a new project's onboarding milestone from `listening` to `fitting`. What they cannot do is carry a claim about a call site.
+
+Traces with no call site collect under a single unattributed pile, and that pile is deliberately not a bucket at turn grain. It is a mixture of everything the instrumentation missed, so its distribution moves whenever the mix moves. A finding drawn from it would be an artifact of instrumentation coverage rather than a statement about your agent. The actionable fact about that pile is its size, not its shape.
+
+The same gap closes other checks quietly:
+
+| Classifier | Behavior on a span with no call site |
+| --- | --- |
+| `duration_drift`, `cost_drift` at turn grain | The trace is skipped. The unattributed pile is not a bucket. |
+| `duration_drift` at tool grain | The trace still contributes. A tool's latency is that tool's latency whichever entry point dispatched it. |
+| `malformed_output` | The span is skipped: with no call site there is no declared output schema to validate against. |
+
+This is also what the connect gate in [Set up Tessary](/self-hosting/setup#sign-up-and-connect-your-traces) is testing. The gate does not open when spans arrive. It opens when a **tagged** span arrives, and until then it shows a live count of spans received against spans tagged, because the only useful fix in that state is to tag the traffic that is already arriving.
+
+<Note>
+  Tool-grain measurements are keyed on the tool, not on the tool within a call site. A shared tool called from five entry points stays one population, because splitting it per call site would shatter it into populations too thin to watch. Tessary files a tool finding under the call site that supplied the traffic in the window the finding fired on.
+</Note>
+
+## Choosing which call sites to tag
+
+The set of call sites you tag is a decision about what you want watched, and it is worth making deliberately rather than tagging everything reachable.
+
+Split a call site where the answers would be different: a summarizer and a router that share one wrapper function are two intents and belong apart, because a change in one has nothing to say about the other. Do not split where only the content varies, because two thin populations resolve smaller moves far worse than one thick one does.
+
+Calls that leave the process without a span at all, such as a shelled-out CLI agent or a raw HTTP request to a provider, are often the highest-risk calls in a repository precisely because nothing watches them. They need a span opened around them with the tracer your repository already configures.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Classifiers and findings" icon="radar" href="/concepts/classifiers-and-findings">
+    What a classifier watches per call site, and what a finding records.
+  </Card>
+  <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
+    The whole chain, from an arriving trace to an explained case.
+  </Card>
+</CardGroup>

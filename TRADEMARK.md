@@ -1,7 +1,4 @@
----
-title: "Trademarks"
-description: "What the Tessary name and logo cover, what you may do with them, and what needs permission."
----
+# Trademarks
 
 This policy is separate from the Apache License 2.0 the open edition is offered under. The license grants rights in the code; it grants no rights in the marks below, and section 6 of the license says so. This page says what the marks are, what you may do with them without asking, and what needs permission.
 

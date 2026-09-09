@@ -1,0 +1,155 @@
+---
+title: "Configure an Exporter"
+description: "Send your OpenTelemetry traces to Tessary as an additional destination, using environment variables, an in-code span processor, or a collector you already run."
+---
+
+Add Tessary as a second OpenTelemetry exporter, sending OTLP (OpenTelemetry Protocol) traces. Your existing one keeps working and traces go to both. Whichever form below you pick, add a destination rather than replacing one: replacing the exporter is the single most common way a working setup ends with the old backend still receiving traces and Tessary receiving nothing.
+
+This is half of instrumenting an agent. The other half is the `tessary.call_site.id` attribute, which the exporter cannot supply for you: see [The call-site tag](/instrument/call-site-tag).
+
+## Prerequisites
+
+- The **Endpoint** and **Bearer Token** from the connect gate. Past the gate, use **Settings** → **Sources** → **Connect a source**: select **Create a connection token**, then take the token out of the **Header** field, which shows it as `Authorization: Bearer <token>`. The endpoint is your Tessary origin plus `/v1/traces`.
+- An application that already builds OpenTelemetry spans, or a collector that already receives them. If neither exists yet, [instrument your agent](/instrument/overview) first.
+
+<Warning>
+  The token is a secret. Never hardcode it in application source and never commit a real one. Put it wherever the repository already keeps secrets: a `.env` file, a settings module, a secret store, a deployment manifest. If the repository has no convention, introduce environment-variable configuration. The endpoint is not a secret, but a deployment usually wants it configurable too.
+</Warning>
+
+## Use environment variables
+
+Reach for this form first. Every OpenTelemetry SDK reads these variables, they need no code change, and they cannot drift from an SDK's own API.
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://your-tessary-host/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <token>
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+```
+
+Replace the endpoint with your own origin and `<token>` with the value from the connect screen.
+
+<Warning>
+  Use the `_TRACES_` variables, never the unsuffixed `OTEL_EXPORTER_OTLP_*` pair. The unsuffixed variables redirect metrics and logs as well, which Tessary drops. Your metrics backend goes quiet and nothing says why.
+</Warning>
+
+Where an application already sets one of these variables for another destination, this form cannot express both. Use one of the forms below instead.
+
+## Add a span processor in code
+
+For a codebase that builds its exporter programmatically. Add a processor to the provider that already exists. Never construct a second `TracerProvider`: spans on a provider the Tessary exporter is not registered on are never exported, which looks identical to a missing tag.
+
+<CodeGroup>
+```python Python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+provider: TracerProvider = trace.get_tracer_provider()
+provider.add_span_processor(
+    BatchSpanProcessor(
+        OTLPSpanExporter(
+            endpoint=TESSARY_ENDPOINT,
+            headers={"Authorization": f"Bearer {TESSARY_TOKEN}"},
+        )
+    )
+)
+```
+
+```typescript TypeScript
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+provider.addSpanProcessor(
+  new BatchSpanProcessor(
+    new OTLPTraceExporter({
+      url: TESSARY_ENDPOINT,
+      headers: { Authorization: `Bearer ${TESSARY_TOKEN}` },
+    }),
+  ),
+);
+```
+
+```go Go
+exporter, err := otlptracehttp.New(ctx,
+    otlptracehttp.WithEndpointURL(tessaryEndpoint),
+    otlptracehttp.WithHeaders(map[string]string{
+        "Authorization": "Bearer " + tessaryToken,
+    }),
+)
+if err != nil {
+    return err
+}
+provider.RegisterSpanProcessor(sdktrace.NewBatchSpanProcessor(exporter))
+```
+</CodeGroup>
+
+`TESSARY_ENDPOINT` and `TESSARY_TOKEN` stand in for however the repository reads configuration. Read the token from the environment or a secret store, not from a literal in source.
+
+## Fan out from a collector
+
+Where an OpenTelemetry Collector already runs, add Tessary as another exporter on the traces pipeline and change nothing in the application.
+
+```yaml
+exporters:
+  otlphttp/tessary:
+    traces_endpoint: https://your-tessary-host/v1/traces
+    headers:
+      Authorization: "Bearer <token>"
+
+service:
+  pipelines:
+    traces:
+      exporters: [your_existing_exporter, otlphttp/tessary]
+```
+
+Keep the existing exporter in the list. Replacing it reroutes your traces rather than copying them.
+
+A collector is also where you tag spans that come from software you cannot edit, using a `transform` processor to set `tessary.call_site.id` one layer out.
+
+## Verify it works
+
+Run the application and watch the connect screen, which updates itself.
+
+<Check>
+  Spans arrive. The connect gate either opens, if the spans carry `tessary.call_site.id`, or replaces itself with the untagged state and a live count of spans received against spans tagged. Either outcome means the exporter is working.
+</Check>
+
+Nothing arriving is an exporter problem, not a tagging problem. [Instrumentation troubleshooting](/instrument/troubleshooting) separates the two.
+
+## Reference
+
+### Environment variables
+
+| Variable | Value | Notes |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Your Tessary origin plus `/v1/traces` | The path is part of the value. An endpoint without it does not reach the receiver. |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | `Authorization=Bearer <token>` | A project-scoped key with write or admin scope. The connect screen mints a write-scoped one. |
+| `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | `http/protobuf` | The receiver accepts `application/x-protobuf`. |
+
+### What the endpoint accepts
+
+| Property | Value |
+| --- | --- |
+| Route | `POST /v1/traces` |
+| Body | An OTLP `ExportTraceServiceRequest`, `application/x-protobuf` |
+| Success | `200`. A partial success is reported in the response when a batch was clamped. |
+| Backpressure | `503` with `Retry-After`. Nothing was persisted. Stock exporters resend on their own, and the write path is idempotent. |
+| Refusal | `401` when the token is missing or fails verification. `403` when it is not project-scoped, or is query-scoped. Write and admin keys both ingest. |
+
+[Span requirements](/instrument/span-requirements) carries every attribute the receiver reads, and [Ingestion contract](/reference/ingestion-contract#limits) carries the batch, body, and payload limits.
+
+### Transports
+
+The HTTP receiver is always on. A gRPC receiver exists and is opt-in through `TESSARY_INGEST_OTLP_TRANSPORT`, documented in [Ingest and OTLP](/self-hosting/configuration#ingest-and-otlp). The default Docker Compose configuration does not publish the gRPC port to the host, so HTTP is the reachable transport on a stock self-hosted install.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    The attribute an exporter cannot supply for you.
+  </Card>
+  <Card title="Instrumentation troubleshooting" icon="triangle-exclamation" href="/instrument/troubleshooting">
+    When nothing arrives, or the old backend still gets traces and Tessary does not.
+  </Card>
+</CardGroup>

@@ -1,0 +1,150 @@
+---
+title: "API Keys"
+description: "Look up the three API key scopes, their token prefixes, the surfaces each one reaches, and the errors a wrongly scoped key returns."
+---
+
+Every headless call into Tessary carries a project API key in an `Authorization: Bearer` header. A key belongs to exactly one project, carries exactly one scope, and acts with the role `member` no matter who minted it.
+
+There is one key store behind all of them. The keys on **Settings → API keys** and the tokens on **Settings → MCP tokens** are rows in the same table, issued and verified by the same service, and differ only in the scope they carry.
+
+## The three scopes
+
+| Scope | Wire value | Token prefix | Reaches |
+| --- | --- | --- | --- |
+| Write | `write` | `tsy_w_` | Trace ingest: `POST /v1/traces` over HTTP, and `TraceService/Export` over gRPC |
+| Query | `query` | `tsy_q_` | The aggregation-first read API: `POST /v1/query/count`, `/timeseries`, `/facets`, `/search` |
+| Admin | `admin` | `tsy_a_` | Everything above, plus tool access over `POST /mcp` |
+
+Admin is the superset family. Write and query are strictly least privilege: the query API refuses a write key, and ingest refuses a query key. Only an admin key satisfies `/mcp`, and it satisfies the other two surfaces as well, so a single `tsy_a_` key works when an application wants one credential instead of three.
+
+<Note>
+  The scope letter in the prefix is a readability aid so a write-only key is recognizable at a glance. The stored `scope` column is what the server enforces.
+</Note>
+
+## Where keys are minted
+
+<Steps>
+  <Step title="Open the project you want the key scoped to">
+    A key binds to one project at issue time. Ingest, the query API, and `/mcp` take no project argument at all: they resolve the project from the token. A key cannot be moved between projects.
+  </Step>
+  <Step title="Mint a key on Settings → API keys">
+    This page issues all three scopes. Select **New key**, enter a name, choose **Write**, **Query**, or **Admin**, then select **Create key**.
+
+    <Check>The new key appears in the list with its scope badge and its prefix, shown as `tsy_w_...`.</Check>
+  </Step>
+  <Step title="Or issue an admin token on Settings → MCP tokens">
+    This page issues admin-scoped tokens only, for wiring an MCP (Model Context Protocol) client such as Claude Code to one project. Select **New token**, name it, then select **Issue token**.
+
+    <Check>The token appears in the list with its prefix and a **Last used** column reading `Never`.</Check>
+  </Step>
+  <Step title="Copy the secret before you close the dialog">
+    Tessary stores a bcrypt hash and the lookup prefix, never the secret. Tessary shows the plaintext exactly once, at creation or rotation. Losing it means rotating the key for a fresh secret; there is no recovery.
+  </Step>
+</Steps>
+
+Both pages sit under **Security & access** in project settings, alongside **PII redaction** and **Data retention**.
+
+Two other surfaces mint a write-scoped ingest key for you. The connect gate you land on after sign-up mints a key named `OTLP ingest` as the screen loads, with no control to press, and shows it in its **Bearer Token** field; reloading that screen mints another. **Settings → Sources** offers the same key behind a **Create a connection token** button and then shows it as a ready-made `Authorization: Bearer` value in its **Header** field. [Set up Tessary](/self-hosting/setup#sign-up-and-connect-your-traces) covers the connect gate.
+
+## How a key is presented on the wire
+
+Send the key as a bearer credential. Nothing else authenticates these surfaces: `/mcp` ignores cookies entirely, and on `/api/**` Tessary prefers a cookie session and falls back to the bearer header for headless callers.
+
+```http
+Authorization: Bearer tsy_w_YOUR_KEY_HERE
+```
+
+An OpenTelemetry SDK or Collector reads the same header from its standard environment variable:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://tessary.example.com/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer tsy_w_YOUR_KEY_HERE
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+```
+
+The traces-suffixed variables are the ones the connect screen hands you, and the ones to use. The unsuffixed pair also redirects metrics and logs, which Tessary does not accept.
+
+Over OTLP gRPC the same value goes in the `authorization` request metadata entry, which is the gRPC spelling of the header.
+
+For the MCP client configuration block, see [MCP server](/reference/mcp-server#client-configuration).
+
+## Token format
+
+A token is the 6-character literal prefix plus 22 URL-safe base64 characters generated from 16 random bytes:
+
+```text
+tsy_<scope-letter>_<22 random characters>
+```
+
+| Property | Value |
+| --- | --- |
+| Literal prefix | `tsy_w_`, `tsy_q_`, or `tsy_a_` |
+| Random suffix | `22` characters, base64url, no padding |
+| Lookup prefix stored in plain text | The first `14` characters: the 6-character literal prefix plus 8 random characters |
+| Secret at rest | bcrypt at cost 10 over the full token |
+| Times the plaintext is retrievable | Once, at creation or rotation |
+
+The 8 random characters inside the lookup prefix are what stop an attacker grinding a small alphabet to find live prefixes and then confirming hits through verification timing.
+
+Verification is cached for a short interval so bcrypt stays off the per-request path. Revocation does not wait for that cache to expire: every revocation path evicts the key in the same call that writes the revocation.
+
+## Constraints
+
+- A key belongs to one project. Deleting the project revokes its whole key set immediately.
+- A key acts as role `member`, whoever minted it. It cannot carry more than a member's permissions.
+- A key cannot mint another key. Tessary refuses a create-key or issue-token request that is itself authenticated with a bearer key.
+- `scope` is required when creating a key, and must be one of `write`, `query`, or `admin`.
+- Listing keys requires the `ORG_VIEW` permission. Creating, rotating, and revoking require `ORG_MANAGE`, so a viewer cannot mint a billable ingest or query key.
+- Rotation keeps the name and the scope and issues a new secret. The old secret stops verifying immediately, so update every client that uses it.
+- Revocation is immediate and cannot be undone.
+- A revoked key cannot be rotated.
+- Every create, rotate, and revoke writes an audit row. Read the trail under **Audit** on **Settings → API keys**, or at `GET /api/orgs/{orgSlug}/projects/{projectSlug}/api-keys/audit`.
+- A key whose project no longer exists fails verification rather than resolving to an empty context.
+
+## Errors
+
+Each surface answers a missing or wrongly scoped credential in its own idiom. All of them refuse before any work runs.
+
+| Surface | Status | Message | Cause |
+| --- | --- | --- | --- |
+| Any `/api/**` path | `401` | `{"ok": false, "error": {"code": "auth.unauthorized", ...}}` | No cookie session and no valid bearer key |
+| Ingest over HTTP | `401` | A failure envelope carrying `UNAUTHORIZED` and `no tenant context` | No bearer header, or a token that fails verification |
+| Ingest over HTTP | `403` | `OTLP ingest requires a project-scoped token` | The credential is a cookie session or otherwise carries no project |
+| Ingest over HTTP | `403` | `this API key is not scoped for ingest (needs a write or mcp key)` | A query-scoped key. Use a `write` or `admin` key |
+| Ingest over HTTP | `404` | `OTLP receiver is disabled` | `TESSARY_INGEST_OTLP_TRANSPORT` is `GRPC`, so the HTTP route behaves as if it does not exist |
+| Ingest over gRPC | `UNAUTHENTICATED` | `OTLP ingest requires a valid bearer token` | No `authorization` metadata entry, or a token that fails verification |
+| Ingest over gRPC | `UNAUTHENTICATED` | `OTLP ingest requires a project-scoped token` | The credential resolves to no project |
+| Ingest over gRPC | `PERMISSION_DENIED` | `OTLP ingest requires a write-scoped token` | A query-scoped key |
+| Query API | `401` | A failure envelope carrying `UNAUTHORIZED` and `no tenant context` | No bearer header, or a token that fails verification |
+| Query API | `403` | `the query API requires a project-scoped token` | The credential is a cookie session or otherwise carries no project |
+| Query API | `403` | `this API key is not scoped for the query API (needs a query or admin key)` | A write-scoped key |
+| MCP endpoint | `401` | `{"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "unauthorized"}}`, with `WWW-Authenticate: Bearer realm="tessary-mcp"` | No bearer header, or a token that fails verification |
+| MCP endpoint | `403` | A JSON-RPC error body carrying `this API key is not scoped for MCP tool access` | A write- or query-scoped key. `/mcp` requires `admin` |
+| Key management | `400` | `unknown key scope '<value>'` | `scope` is not `write`, `query`, or `admin` |
+| Key management | `403` | `API keys cannot mint new keys` | A create request authenticated with a bearer key |
+| Key management | `403` | `MCP tokens cannot mint new tokens` | An issue request authenticated with a bearer key |
+| Key management | `404` | `key not found` | The key id does not exist, or belongs to another project |
+| Key management | `409` | `cannot rotate a revoked key` | The key is already revoked. Create a new one instead |
+
+The ingest error message says "mcp key" where the wire value is `admin`. Both name the same family.
+
+<Warning>
+  Treat a leaked write key as an open door onto the project's trace data and a leaked admin key as an open door onto everything the MCP tools read. Revoke it from **Settings → API keys** rather than rotating it if you no longer want that client to have a key at all: rotation issues a replacement, revocation does not.
+</Warning>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="MCP server" icon="plug" href="/reference/mcp-server">
+    The endpoint an admin key unlocks, its complete tool list, and client configuration.
+  </Card>
+  <Card title="Ingestion contract" icon="table-list" href="/reference/ingestion-contract">
+    Every field the platform consumes from a span a write key pushes.
+  </Card>
+  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
+    First boot, the connect gate, and the first write key it mints for you.
+  </Card>
+  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
+    The environment variables behind ingest transports, sealing keys, and retention.
+  </Card>
+</CardGroup>

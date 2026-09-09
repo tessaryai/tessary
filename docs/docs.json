@@ -30,6 +30,34 @@
         ]
       },
       {
+        "group": "Instrument",
+        "pages": [
+          "instrument/overview",
+          "instrument/call-site-tag",
+          "instrument/span-requirements",
+          "instrument/exporters",
+          "instrument/troubleshooting"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/how-it-works",
+          "concepts/call-sites",
+          "concepts/classifiers-and-findings",
+          "concepts/cases",
+          "concepts/root-cause-analysis"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/api-keys",
+          "reference/mcp-server",
+          "reference/ingestion-contract"
+        ]
+      },
+      {
         "group": "Self-hosting",
         "pages": [
           "self-hosting/setup",
@@ -38,12 +66,6 @@
           "self-hosting/deployment",
           "self-hosting/upgrading",
           "self-hosting/troubleshooting"
-        ]
-      },
-      {
-        "group": "Legal",
-        "pages": [
-          "trademarks"
         ]
       }
     ]

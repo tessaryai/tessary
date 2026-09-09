@@ -1,0 +1,86 @@
+---
+title: "Cases"
+description: "Understand how triage turns a finding into a case, how related findings collapse onto one case, and the states a case moves through."
+---
+
+A case is a validated issue that requires attention. It is the one shape in Tessary that is meant to reach a person, and it exists only after triage has ruled that the finding behind it represents a real issue.
+
+Findings are cheap and plentiful by design, because the classifiers that produce them are built to run against every trace. Putting every finding in front of someone would undo that. Triage is the gate that makes watching everything affordable to read.
+
+## What triage does
+
+Triage runs an agent in a sandbox against one finding. It is given the finding's claim as a dossier, two files: what the classifier asserts, over what population, since when, and how large each evidence set is, plus the classifier's own numbers verbatim. Everything else it needs, the traces and spans and sessions the claim is about, it fetches for itself through your instance's MCP (Model Context Protocol) surface, with a short-lived project key minted for the run and revoked when it ends. It chooses its own sample rather than being handed a pre-picked exemplar, and it states what it took.
+
+It has no repository. That is deliberate: triage rules on evidence, and reading the code is the next stage's job.
+
+The question it answers is narrow. Does the claim hold, was it measured over enough samples, and is it carried by the evidence it cites? It re-derives the classifier's numbers from the same rows and aborts if the two disagree by more than a rounding-sized margin.
+
+**Triage never judges impact.** A cost or duration drop passes its gate exactly like a rise, because "improvement" is a judgment about intent and triage has no evidence about intent.
+
+| Ruling | What happens |
+| --- | --- |
+| `positive` | The claim holds. A case opens. |
+| `negative` | The claim does not hold. The finding closes. |
+| `unclear` | The evidence does not settle it. The finding closes. |
+| No ruling | The run did not happen. Nothing is written and the job retries. |
+
+Closing on `unclear` is safe because a real cause keeps firing. The finding's cause is still live, the classifier keeps refreshing it, and a recurrence sends it back through triage rather than leaving it in a queue nobody drains.
+
+A ruling changes nothing about the classifier itself. It never moves a baseline and never resolves anything. Absorbing a shift moves the reference an entire population is judged against, and that stays a decision a person makes.
+
+### What triage needs before it can run
+
+- **An LLM (large language model) provider credential**, configured in-app under **Settings → Providers**. Triage jobs park on a missing credential and re-check later rather than burning their retries, so adding the key afterward lets them proceed.
+- **A reachable `sandbox-runner` service**, which the self-hosting configuration starts by default. See [Set up Tessary](/self-hosting/setup#prerequisites) for the Docker socket group id it needs on Linux.
+- **Automatic triage turned on for your organization.** It is off by default in every edition, because running it unattended drives model spend with no ceiling, so it is an opt-in an operator takes knowingly. An owner or admin turns it on over the API: `PUT /api/orgs/{orgSlug}/capabilities/overrides/triage_automatic_enabled` with a body of `{"enabled": true}`. With it off, findings are still filed and still visible, and nothing escalates them on its own.
+
+## How findings collapse onto one case
+
+Three things identify a case: the classifier that noticed, the subject it fired against, and the measure. There is at most one live case per that combination, which is what keeps a long-running problem readable.
+
+The subject is the population, not the finding. A tool's failure rate rising in March and falling in April are two causes to explain and one thing to page about, so both land on the same case. The same holds for a call site whose latency moved twice.
+
+Re-firing continues a story rather than starting one:
+
+- While a case is live, a fresh detection **refreshes** it, and the activity trail records an escalation only when the detection has meaningfully deepened.
+- After a case is resolved, a detection on the same key **reopens** it if it comes from a new spell, meaning Tessary watched the problem recover and break again. A detection whose onset is the one a person already closed is the same problem still running, and reopening it would undo their decision on the next pass.
+- Once the detection drops out of what the classifier currently believes, the case **closes itself** as recovered.
+
+## The states a case moves through
+
+| State | Meaning |
+| --- | --- |
+| `open` | Live. It is on **Triage** and it can notify. |
+| `muted` | Still live, and still tracked. Muting stops it from paging you; it makes no claim about whether the shift is real. |
+| `resolved` | Closed. |
+
+Muted is not a closed state. A muted case is still the live case for its key, which is why muting one does not let a second case open beside it.
+
+A resolved case records why it closed, and the difference between the reasons is load-bearing:
+
+| Resolution | What it says |
+| --- | --- |
+| `recovered` | The detection stopped firing. Closed by Tessary, with no action from anyone. |
+| `human` | A person closed it, with a required one-line reason. The classifier's reference did not move, so an unchanged population opens another case. |
+| `absorbed` | A person ruled the shift legitimate and the classifier's reference moved to include it. This level is the new baseline, and it does not open another case. |
+
+**Absorb as legitimate** is the one that ends the argument rather than this instance of it. Use **Resolve** when you have shipped a fix and the window has not caught up yet; use **Absorb as legitimate** when the new level is correct and you want it to become normal.
+
+Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, reopening, escalation, RCA (root-cause analysis) requests and completions, recovery, resolution, muting and unmuting, and absorption.
+
+## Where a case reaches you
+
+New cases are listed on **Triage**, which is also where a project reports its progress when its queue is empty.
+
+Tessary seeds each project with a `case_opened` alert rule, enabled, which notifies nobody until a destination exists. Add one under **Settings → Notifications** and cases start arriving there with no rule to compose. A case-opened notification is written to be actionable without opening the product, so it carries the case reference, what moved and by how much, the classifier and call site, why it crossed that classifier's bar, and whether a triage run or a person ruled it real. Quiet hours and cadence defer a notification and never drop it: everything that opened while the window was shut goes out when it reopens, stamped with when the case actually opened.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Root-cause analysis" icon="magnifying-glass" href="/concepts/root-cause-analysis">
+    What the agentic run does with a case, and what a connected repository adds to it.
+  </Card>
+  <Card title="Classifiers and findings" icon="radar" href="/concepts/classifiers-and-findings">
+    Where the finding under a case came from, and what it records.
+  </Card>
+</CardGroup>

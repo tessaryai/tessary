@@ -1,0 +1,238 @@
+---
+title: "Ingestion Contract"
+description: "Look up every wire field the Tessary ingestion pipeline consumes, what each one drives, the fields it accepts but ignores, and the limits it enforces."
+---
+
+Tessary reads these fields off every span you send. Anything not listed here is still carried verbatim into the attribute bag and is queryable, but it drives no ingest-time processing.
+
+The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_ai semantic-convention names wherever one exists, accepts third-party dialects for compatibility, and defines exactly one attribute of its own: `tessary.call_site.id`.
+
+<Note>
+  For the practical subset, meaning what you have to emit to get a working project, read [Span requirements](/instrument/span-requirements). This page is the exhaustive lookup behind it.
+</Note>
+
+## Where spans arrive
+
+| Property | Value |
+| --- | --- |
+| HTTP endpoint | `POST /v1/traces`, content type `application/x-protobuf` |
+| gRPC service | `TraceService/Export`, on the port `TESSARY_INGEST_OTLP_GRPC_PORT` names (default `4317`) |
+| Which transports run | `TESSARY_INGEST_OTLP_TRANSPORT`: `HTTP` (the default), `GRPC`, or `BOTH` |
+| Credential | A write- or admin-scoped project API key, as `Authorization: Bearer` |
+
+Both transports write down the same path, so a stored span is identical no matter how it arrived. See [API keys](/reference/api-keys) for the credential and its errors, and [Configuration](/self-hosting/configuration#ingest-and-otlp) for the transport variables.
+
+## How to read the tables
+
+- **Field** is the wire name. There is one spelling per field. Tessary reads exactly the names listed here, with no compatibility aliases and no deprecated-spelling fallbacks.
+- **Applies to** says which spans the field is read for. `always` means every span; otherwise it names the `gen_ai.operation.name` family or the carrier the field is only read on.
+- **Origin** says where the name comes from: `OTLP proto` for a protobuf span field rather than an attribute, `OTel semconv` for the general semantic conventions, `gen_ai semconv` for the GenAI conventions, `OpenInference` and `Traceloop` for third-party dialects accepted for compatibility, `Tessary` for the one overlay attribute, `carrier extension` for the generic `input` and `output` carriers, and `any` for the attribute bag.
+
+## Identity and timing
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `trace_id` | The trace's identity, stored verbatim as `trace.id`. One trace is one turn | always | OTLP proto |
+| `span_id` | The span's identity, stored verbatim as `span.id`. Resolvable only alongside `trace_id`, since the key is `(project_id, trace_id, id)`. Also the parent-graph node and the basis for side-table id derivation | always | OTLP proto |
+| `parent_span_id` | Span nesting, into `span.parent_span_id` and the materialized path. This is the mechanism for workflow, step, sub-workflow, and sub-agent depth | always | OTLP proto |
+| `name` (span) | `span.name` and the tool-call name. The root span names the trace | always | OTLP proto |
+| `start_time_unix_nano` | `started_at`, event ordering, turn ordering, latency start | always | OTLP proto |
+| `end_time_unix_nano` | `ended_at`, and tool-call and step latency | always | OTLP proto |
+
+There is no attribute for a turn. **The turn is the trace**: one turn per producer trace id, with no separate node.
+
+## Status and errors
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `status.code` = `ERROR`, `status.message` | `span.level=ERROR`. This is the only error source, and it gates the row below it | error spans | OTLP proto |
+| `error.type` | `span.error_type` and the tool call's `error_type` | error spans | OTel semconv |
+
+`error.type` has one precedence: the producer's own `error.type` wins, and only when it is absent does `status.message` supply the label, whitespace-collapsed and capped at 120 characters. State neither and the tool-call column keeps a placeholder, because a failure with no label is still a failure, while the span column stays null.
+
+`error_type` is a label for grouping failures. The full prose stays recoverable from the stored payload.
+
+## Session, thread, and end user
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `session.id` | The session's identity, stored verbatim as `session.id` and denormalized onto every trace and span | always | OTel semconv |
+| `gen_ai.conversation.id` | `trace.thread_id`. Sub-grouping within a session is a column, not a second tree level | always | gen_ai semconv |
+| `user.id` | The end-user handle, into `session.user_id`, denormalized onto trace and span | always | OTel semconv |
+
+## Kind
+
+`gen_ai.operation.name` is the single kind source. It is an open enum: `retrieval`, `rerank`, `guardrail`, `plan`, `reasoning`, and `handoff` are Tessary's accepted extension values, and any name containing `memory` normalizes to `memory`.
+
+| Operation name | Normalized kind |
+| --- | --- |
+| `chat`, `text_completion`, `generate_content` | `llm` |
+| `invoke_agent`, `create_agent` | `agent` |
+| `invoke_workflow` | `workflow` |
+| `execute_tool` | `tool` |
+| `embeddings` | `embedding` |
+| `retrieval` | `retrieval` |
+| `rerank` | `reranker` |
+| `guardrail` | `guardrail` |
+| `plan` | `plan` |
+| `reasoning` | `reasoning` |
+| `handoff` | `handoff` |
+| any name containing `memory` | `memory` |
+
+Three more attributes refine or stand in for the kind.
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `gen_ai.tool.type` | `extension` discriminates an `mcp` kind. Also persisted as `tool_call.tool_type` | `execute_tool` | gen_ai semconv |
+| `openinference.span.kind` | Maps to an operation name: `LLM` to `chat`, `AGENT` to `invoke_agent`, `TOOL` to `execute_tool`, `RETRIEVER` and `RERANKER` to `retrieval`, `EMBEDDING` to `embeddings`, `CHAIN` to `invoke_workflow` | OpenInference spans | OpenInference |
+| `traceloop.span.kind` | Fallback operation name when `gen_ai.operation.name` is absent | OpenLLMetry spans | Traceloop |
+
+### Handoffs are structural
+
+A handoff between agents needs no attribute. It is already wire-encoded as an `execute_tool` span for the transfer call emitted by the first agent, followed by an `invoke_agent` span for the second under the same parent, which is the shape agent-framework instrumentation already emits. Ingest marks both spans truthfully, and the relationship is derivable from the span graph at read time. A producer that wants to state it explicitly may emit `gen_ai.operation.name = handoff`.
+
+## Tool calls
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `gen_ai.tool.name` | `tool_call.name`, falling back to the span name | `execute_tool` | gen_ai semconv |
+| `gen_ai.tool.call.id` | `tool_call.tool_call_id`, the provider's correlation id | `execute_tool` | gen_ai semconv |
+
+## Model
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `gen_ai.request.model` | `span.provided_model_name`, resolved to `span.model_id` for pricing. Its presence also backstops the kind as `llm` | llm family | gen_ai semconv |
+| `llm.model_name` | The same role, in the OpenInference dialect | OpenInference spans | OpenInference |
+
+Both spellings are kept because they answer different questions. `provided_model_name` is what the producer said; `model_id` is the resolved catalog key the price book is stated in.
+
+## Content
+
+Message content is never truncated at ingest. It is bounded by count, not by size.
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `gen_ai.input.messages` / `gen_ai.output.messages` | The canonical role-tagged arrays, stored whole in the span payload's `input` and `output` | chat family | gen_ai semconv |
+| `gen_ai.prompt.<N>.role` / `.content`, `gen_ai.completion.<N>.*` | Flattened-dialect messages, reconstructed when the structured arrays are absent | OpenLLMetry spans | Traceloop |
+| `llm.input_messages` / `llm.output_messages`, plus `message.role`, `message.content`, `message.contents[]`, `message.tool_calls[]` | Dialect messages. The first tool call is lifted to `gen_ai.tool.name` and `gen_ai.tool.call.id` | OpenInference spans | OpenInference |
+| `input` / `output` | Generic verbatim carriers for tool arguments, tool results, and non-chat steps, used when messages are absent | always | carrier extension |
+| `traceloop.entity.input` / `.output` | Last-resort input and output for foreign framework spans | OpenLLMetry spans | Traceloop |
+| `llm.system` / `llm.provider` | Mapped to `gen_ai.system` and `gen_ai.provider.name`. Carried, not promoted to a column | OpenInference spans | OpenInference |
+| `gen_ai.response.id` | Carried in the span payload's attributes. It was the correlation key for explicit-feedback events; that feature is gone, and nothing resolves against it today | llm family | gen_ai semconv |
+
+<Note>
+  Payloads pass through PII redaction on the way in. The rules in force, including the built-in defaults, are on **Settings → PII redaction**.
+</Note>
+
+## Token usage
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `gen_ai.usage.input_tokens`, `output_tokens`, `total_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens` | The typed token columns on the span. `total_tokens` is generated from the buckets when the source omits it | llm family | gen_ai semconv |
+| `gen_ai.usage.reasoning_tokens` | Its own typed `reasoning_tokens` column, folded into the generated `total_tokens`, which is five buckets rather than four | llm family | gen_ai semconv |
+| `llm.token_count.prompt` / `.completion` / `.total` | Mapped to the `gen_ai.usage.*` keys above | OpenInference spans | OpenInference |
+| `llm.token_count.completion_details.reasoning` | Mapped to `gen_ai.usage.reasoning_tokens` above | OpenInference spans | OpenInference |
+
+Tessary keeps the raw usage object in the span payload as an audit record and never reads it for arithmetic. When the producer reports no cost of its own, these buckets are priced on arrival from the price book with `cost_source='inferred'`, and never repriced.
+
+## Cost
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `llm.cost.prompt`, `.completion`, `.prompt_details.cache_read`, `.prompt_details.cache_write` | The producer's own per-bucket cost in USD, stored verbatim with `cost_source='provided'` and never repriced | llm family | OpenInference |
+| `gen_ai.usage.cost`, `gen_ai.usage.total_cost`, `llm.cost.total` | The producer's own total cost, read in that precedence when no per-bucket figure is present | llm family | gen_ai semconv, Traceloop, OpenInference |
+
+Per-bucket figures win over any total. A lone total lands in `input_cost`, because the span's total cost is generated from the four buckets and splitting a total across them would be a derivation rather than a reading.
+
+## Retrieved documents
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `retrieval.documents.<N>.document.id`, `.content`, `.score`, `.metadata` | First-class retrieved-document rows, ranked from 1 | Any span carrying these indexed attributes. There is no kind gate: extraction runs on every span and is a no-op when the prefix is absent | OpenInference |
+
+## Call site
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `tessary.call_site.id` | Binds the span to its call site, and is denormalized onto its trace. Unseen call sites are materialized automatically | always | Tessary |
+
+This is the only sanctioned Tessary overlay attribute, and the dotted spelling roots a `tessary.call_site.*` namespace. Any producer can set it as a plain attribute, or a Collector `attributes` or `transform` rule can add it. No SDK is required.
+
+Without it, a span still lands and is still queryable, but it belongs to no call site, and the connect gate on a new project does not open on it. An untagged span carries a null `call_site_id`, so a filter on any call site excludes it outright.
+
+## Everything else
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| All remaining attributes, resource and span | Carried verbatim into the span payload's attributes and never clipped. Queryable, but drives no processing | always | any |
+
+## Accepted but not consumed
+
+These arrive without being rejected and survive verbatim in the attribute bag. They drive nothing. Do not build against them.
+
+| Field | Status |
+| --- | --- |
+| Span links (`links[]`) | Not read today. Cross-trace linking is the sanctioned future mechanism and is deferred. `trace.parent_trace_id` exists but nothing on the wire writes it: a detached sub-agent is linked by the platform, not declared by the producer |
+| `span.kind`, `trace_state`, `span.flags`, dropped counts, instrumentation-scope attributes | Ignored |
+| `gen_ai.system`, `gen_ai.provider.name` | Carried in the attribute bag, not promoted to a column |
+| `tessary.sdk`, `tessary.upstream.*` | Provenance markers. Written, never read by processing |
+| `gen_ai.evaluation.result` span event and the `gen_ai.evaluation.*` attributes under it | No longer read. They landed explicit user feedback as first-class rows until that feature was removed. Emitting the event is harmless and has no effect; the keys are unclaimed rather than reserved |
+| `deployment.environment.name` resource attribute | No longer read. It scoped a span to an environment row until the environment concept was removed. It is still accepted and survives verbatim, and it scopes nothing. A project is the only scope below an organization, so use separate projects for separate environments |
+
+## Attributes with no reader
+
+The consumed `tessary.*` surface is exactly one attribute. Every other `tessary.*` spelling has no reader anywhere on the platform, and its content belongs on the standard field instead.
+
+| Do not emit | Use instead |
+| --- | --- |
+| `tessary.session.id` | `session.id` |
+| `tessary.turn.index` | Nothing. Turns are positional |
+| `tessary.entity`, `tessary.entity.id` | `user.id` |
+| `tessary.environment` | Nothing reads an environment attribute at all. Use separate projects |
+| `tessary.context.path`, `tessary.context.kind` | Nothing. Nesting is derived from `parent_span_id` and is never producer-stated |
+| `tessary.kind` | `gen_ai.operation.name`, including its extension values |
+| `tessary.mcp.server` | `gen_ai.tool.type = extension` |
+| `tessary.handoff.to`, `tessary.handoff.from` | Nothing. Handoffs are structural |
+| `error` attribute | The OTLP span `status` |
+| `tessary.call_site_id` (underscore spelling) | `tessary.call_site.id` |
+| `tessary.tool.call.retries`, `tessary.feedback.*`, the `tessary.agent.self_report` event and `tessary.self_report.*`, `tessary.trajectory`, `tessary.intent`, `tessary.memory` | Nothing stores or exposes these |
+
+Ad-hoc alias spellings of canonical fields are never read either. `sessionId`, `userId`, `user_id`, `enduser.id`, and `deployment.environment` all fall in this category.
+
+## Limits
+
+| Limit | Value | What happens past it |
+| --- | --- | --- |
+| Spans per export request | `2,000` | Spans beyond the cap are dropped, and the response carries a partial-success count |
+| Decoded request body | `20 MiB` | The request is rejected with `413` and `OTLP request body exceeds <n> bytes`, checked before the protobuf is parsed |
+| Single span payload | `8,000,000` characters | The whole span is dropped rather than clipped |
+| Live buffer pressure | The ingest buffer's byte budget, `64 MiB` by default; the receiver refuses above 80% of it. See [Ingest buffer](/self-hosting/configuration#ingest-buffer) | The request is refused with `503` and a `Retry-After` header, before the body is decoded. Stock exporters retry a `503`, so a shed costs latency rather than data |
+
+How long a stored trace survives afterward is a separate setting: see [Data retention](/self-hosting/configuration#data-retention).
+
+## Invariants
+
+Four rules govern how this contract changes.
+
+1. **Standard first.** A new field uses the OTel or gen_ai name when one exists. `tessary.*` is only for genuine gaps.
+2. **Ingest fails open.** The absence of any non-structural field degrades a feature. It never drops a span.
+3. **Content is verbatim.** Message and tool content is never truncated at ingest. The one exception is the 8,000,000-character payload cap above, which drops the span rather than clipping it.
+4. **No compatibility aliases.** Only the canonical spelling of each field is read. Third-party dialects are normalized at the edge as documented product features; ad-hoc alias spellings are not.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Span requirements" icon="list-check" href="/instrument/span-requirements">
+    The practical subset: what to emit to get a working project.
+  </Card>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    The write-scoped credential ingest requires, and the errors it returns.
+  </Card>
+  <Card title="MCP server" icon="plug" href="/reference/mcp-server">
+    How an agent reads these fields back, dataset by dataset.
+  </Card>
+  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
+    The OTLP transport, ingest buffer, and retention variables.
+  </Card>
+</CardGroup>
