@@ -34,7 +34,7 @@ green. Nothing is user-visible until PR 5, and nothing reaches Triage until PR 8
 **Goal.** A pure, dependency-free summary of a set of `log(value)` samples, plus signed W₁ between
 two of them. No Spring, no database, no project concepts.
 
-**Files** — `backend/analysis/src/main/java/ai/tessary/evals/classifier/metric/`
+**Files** — `backend/analysis/src/main/java/ai/tessary/classifier/metric/`
 
 - `MetricSketch.java` — the interface. `add(double logValue)`, `merge(MetricSketch)`, `count()`,
   `quantile(double)`, `toJson()` / `fromJson()`. Exists so a t-digest can replace the histogram

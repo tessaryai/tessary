@@ -11,11 +11,11 @@ version via `packageManager`; enable corepack once so that pin is what gets used
 corepack enable
 task node:install                                        # every Node package; or `task frontend:install`
 
-# Three terminals (backend needs Postgres 16 + pgvector via EVALS_JDBC_URL — e.g.
+# Three terminals (backend needs Postgres 16 + pgvector via TESSARY_JDBC_URL — e.g.
 # `docker compose up -d postgres` for just Postgres — `task dev:up` brings up the whole
 # stack instead, including a Caddy container that collides with `task caddy` below — or
 # a local pgvector/pgvector:pg16 container):
-task backend            # :8080  (connects to EVALS_JDBC_URL)
+task backend            # :8080  (connects to TESSARY_JDBC_URL)
 task frontend           # :5173 (Vite, proxies /api → :8080 too)
 task caddy              # :8000 (canonical entry)
 ```
@@ -23,9 +23,9 @@ task caddy              # :8000 (canonical entry)
 `task node:install` / `frontend:install` self-heal a pre-pnpm checkout (clears npm's flat
 `node_modules` when the `.pnpm/` marker is missing).
 
-Auth is bypassed locally because `EVALS_AUTH_DISABLED=true` is set for you — in `docker-compose.dev.yml` for the Docker stack, and in the `backend` task itself for the bare-metal one. Unsetting WorkOS is no longer enough on its own (#924): without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated).
+Auth is bypassed locally because `TESSARY_AUTH_DISABLED=true` is set for you — in `docker-compose.dev.yml` for the Docker stack, and in the `backend` task itself for the bare-metal one. Unsetting WorkOS is no longer enough on its own (#924): without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated).
 
-To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `EVALS_AUTH_COOKIE_PASSWORD`, `WORKOS_REDIRECT_URI`, and `SPRING_PROFILES_ACTIVE=production` before `task backend` — **and also edit the `backend` task's hardcoded `EVALS_AUTH_DISABLED: "true"` to `"false"`, or unset it.** (Corrected 2026-09-01, #996 review: this used to say a configured provider always wins over the flag, so unsetting it wasn't needed — that precedence was retired by #852/#996. The flag is authoritative on its own now; a configured WorkOS provider no longer overrides it.)
+To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `TESSARY_AUTH_COOKIE_PASSWORD`, `WORKOS_REDIRECT_URI`, and `SPRING_PROFILES_ACTIVE=production` before `task backend` — **and also edit the `backend` task's hardcoded `TESSARY_AUTH_DISABLED: "true"` to `"false"`, or unset it.** (Corrected 2026-09-01, #996 review: this used to say a configured provider always wins over the flag, so unsetting it wasn't needed — that precedence was retired by #852/#996. The flag is authoritative on its own now; a configured WorkOS provider no longer overrides it.)
 
 ## Docker (dev)
 
@@ -36,12 +36,12 @@ task dev                                                   # → tmux session
 task dev:slim                                              # same, minus classify + compile (was `dev:2gb`, still aliased)
 
 task dev:up                                                # no tmux: same containers, detached, logs via `task dev:logs`
-task dev:up:slim                                           # = EVALS_SKIP_CLASSIFY=1 task dev:up
+task dev:up:slim                                           # = TESSARY_SKIP_CLASSIFY=1 task dev:up
 ```
 
 ### Slim mode — what runs
 
-`dev:slim` (and `EVALS_SKIP_CLASSIFY=1` in front of any dev task) starts everything except the two encoder services. The list is derived from compose itself in `scripts/lib/dev-services.sh`, so a new service joins slim mode automatically and both entry points agree by construction.
+`dev:slim` (and `TESSARY_SKIP_CLASSIFY=1` in front of any dev task) starts everything except the two encoder services. The list is derived from compose itself in `scripts/lib/dev-services.sh`, so a new service joins slim mode automatically and both entry points agree by construction.
 
 | Service | Slim | Notes |
 |---|---|---|

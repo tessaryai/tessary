@@ -266,16 +266,16 @@ def default_judge(allow_fake: bool = True) -> Judge:
     (rather than heuristic-labeled data masquerading as judged) when no credentials are configured.
     The offline harness self-test and eval plumbing keep the default (``True``).
     """
-    # Explicit selection wins over creds sniffing: EVALS_JUDGE = cli | bedrock | anthropic.
+    # Explicit selection wins over creds sniffing: TESSARY_JUDGE = cli | bedrock | anthropic.
     # "cli" is the Claude Code SUBSCRIPTION path (no API key, no Bedrock grants) — the owner's
     # chosen default on the dev Mac, where Bedrock creds exist but lack Fable/Opus model access.
-    choice = os.environ.get("EVALS_JUDGE", "").strip().lower()
+    choice = os.environ.get("TESSARY_JUDGE", "").strip().lower()
     if choice == "cli":
         return ClaudeCliJudge()
     if choice == "bedrock":
         from .no_bedrock import BedrockForbidden
         raise BedrockForbidden(
-            "EVALS_JUDGE=bedrock is refused: AWS Bedrock is forbidden here. Set EVALS_JUDGE=cli.")
+            "TESSARY_JUDGE=bedrock is refused: AWS Bedrock is forbidden here. Set TESSARY_JUDGE=cli.")
     if choice == "anthropic":
         return AnthropicJudge()
 
@@ -295,7 +295,7 @@ def default_judge(allow_fake: bool = True) -> Judge:
         raise SystemExit(
             "No judge credentials found — refusing to generate data with the offline FakeJudge "
             "(a keyword heuristic, NOT real labels).\n"
-            "Set EVALS_JUDGE=cli (logged-in Claude Code subscription), or AWS_REGION (+ AWS creds) "
+            "Set TESSARY_JUDGE=cli (logged-in Claude Code subscription), or AWS_REGION (+ AWS creds) "
             "for Bedrock, or ANTHROPIC_API_KEY for Anthropic.\n"
             "To label with the heuristic FakeJudge anyway (plumbing/offline only), pass --allow-fake."
         )

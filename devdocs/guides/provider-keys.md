@@ -60,7 +60,7 @@ option is itself a bug report, not something you should have to work around.
 ## What happens if you leave a lane on "no selection"
 
 The platform's old ambient-Bedrock fallback (`ChatModelFactory#resolvePlatformBedrock`, gated by
-`evals.judge.platform-bedrock.enabled`) is **gone entirely** — it had no production caller left
+`tessary.judge.platform-bedrock.enabled`) is **gone entirely** — it had no production caller left
 (RCA and TRIAGE have always resolved through `ProjectModelSettings`, never through that path), so
 removing it changed no live behavior, only deleted dead code and a stale doc claim. If a project's
 RCA or TRIAGE lane has no explicit row — a row is only ever written by an explicit choice on the
@@ -105,5 +105,5 @@ else.
 
 - [reference/principles.md](../reference/principles.md#product--positioning) for the single-tenant /
   no-shared-training guarantee that also governs how a project's own data is (and isn't) used.
-- `backend/llm-runtime/src/main/java/ai/tessary/evals/llm/ProviderCredentialController.java`,
+- `backend/llm-runtime/src/main/java/ai/tessary/llm/ProviderCredentialController.java`,
   `ChatModelFactory.java`, and `AgenticCredentialResolver.java` for the code this doc describes.

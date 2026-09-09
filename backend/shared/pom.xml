@@ -87,7 +87,7 @@
             <!-- Bare-activates spotbugs-maven-plugin from the aggregator's pluginManagement, the same
                  no-configuration pattern core/pom.xml uses. Without this the module is not analysed at
                  all: it built in 0.4s and emitted no spotbugsXml, so every class here (ErrorCode,
-                 StructuredLog, EvalsException, DetectionTableSchemaCheck) has been invisible to the
+                 StructuredLog, TessaryException, DetectionTableSchemaCheck) has been invisible to the
                  gate. maven-pmd-plugin is still NOT activated here; that is a second, separate gap. -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>

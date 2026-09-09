@@ -11,7 +11,7 @@ The field originates in the evals plugin, not here — this stack only
 *consumes* it, so confirm it's already in the vendored `contract/` (re-vendor
 with `scripts/sync-evals-contract.sh` if `contract/` predates it). Then absorb it:
 
-1. Add or update the record in `backend/core/src/main/java/ai/tessary/evals/model/`.
+1. Add or update the record in `backend/core/src/main/java/ai/tessary/model/`.
    Snake_case `@JsonProperty` if the wire form differs from the Java field name.
    (No reflection registration needed — the JVM reflects over Jackson records at
    runtime.)

@@ -34,9 +34,9 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   assert — which provider is in the path is a deployment choice, so it is the operator's to
   confirm against their own configuration.
 - **Single-tenant intelligence mode is default-on and fail-closed.**
-  `evals.intelligence-mode.single-tenant` (default `true`) is the coarse tenancy gate sitting above
-  the governed pooling pipeline's own switch (`evals.priors.enabled`, default `false`) — two
-  independent gates, the outer one in the safe state, so an accidentally enabled `evals.priors.*`
+  `tessary.intelligence-mode.single-tenant` (default `true`) is the coarse tenancy gate sitting above
+  the governed pooling pipeline's own switch (`tessary.priors.enabled`, default `false`) — two
+  independent gates, the outer one in the safe state, so an accidentally enabled `tessary.priors.*`
   can never pool across tenants. With it on, `PriorsService` refuses every cross-tenant operation
   before storage is touched: `optIn` is a no-op, `contribute` returns `false`, `derive` returns
   `Optional.empty()`. `SingleTenantModeTest` asserts it with no database — even with pooling

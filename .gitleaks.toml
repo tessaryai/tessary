@@ -42,15 +42,15 @@ path = "scripts/lib/gitleaks-self-minted.toml"
 
 [[allowlists]]
 description = "fixtures for the product's own secret_leak detector: structurally valid FAKE Google, Stripe, GitHub, Slack, Anthropic and AWS-documentation keys"
-paths = ['''^backend/app/src/test/java/ai/tessary/evals/classifier/detector/SecretLeakDetectorTest\.java$''']
+paths = ['''^backend/app/src/test/java/ai/tessary/classifier/detector/SecretLeakDetectorTest\.java$''']
 
 [[allowlists]]
 description = "the redaction rules' own regex sources for credential prefixes; no literal key, kept here so a scanner heuristic change cannot turn a control into a red run"
-paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/redaction/BuiltInRedactionRules\.java$''']
+paths = ['''^backend/substrate/src/main/java/ai/tessary/redaction/BuiltInRedactionRules\.java$''']
 
 [[allowlists]]
 description = "fixture: one random 44-char base64 value standing in for a real sealing key, so the guard's \"not the placeholder\" branch has something to compare; minted for the test, seals nothing"
-paths = ['''^backend/tenancy/src/test/java/ai/tessary/evals/auth/PlaceholderSecretGuardTest\.java$''']
+paths = ['''^backend/tenancy/src/test/java/ai/tessary/auth/PlaceholderSecretGuardTest\.java$''']
 
 [[allowlists]]
 description = "a run-scoped throwaway Postgres password literal for a stack that lives minutes and holds nothing"
@@ -58,15 +58,15 @@ paths = ['''^scripts/check\-notice\-coverage\.sh$''']
 
 [[allowlists]]
 description = "fixtures for the GitHub PAT service: ghp_ placeholders too short to be tokens"
-paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServicePatTest\.java$''']
+paths = ['''^backend/substrate/src/test/java/ai/tessary/git/github/GithubTokenServicePatTest\.java$''']
 
 [[allowlists]]
 description = "Javadoc names the PEM header it parses; no key material"
-paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/git/github/GithubTokenService\.java$''']
+paths = ['''^backend/substrate/src/main/java/ai/tessary/git/github/GithubTokenService\.java$''']
 
 [[allowlists]]
 description = "fixture PEM blocks exercising the PKCS#1 and PKCS#8 parsers; throwaway keys generated for the test"
-paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/git/github/GithubTokenServiceKeyTest\.java$''']
+paths = ['''^backend/substrate/src/test/java/ai/tessary/git/github/GithubTokenServiceKeyTest\.java$''']
 
 [[allowlists]]
 description = "placeholder local JDBC URL with no credential in it"
@@ -86,11 +86,11 @@ paths = ['''^docker\-compose\.dev\.yml$''']
 
 [[allowlists]]
 description = "documents the clone URL shape with a TOKEN placeholder"
-paths = ['''^backend/substrate/src/main/java/ai/tessary/evals/git/GitCloneUrls\.java$''']
+paths = ['''^backend/substrate/src/main/java/ai/tessary/git/GitCloneUrls\.java$''']
 
 [[allowlists]]
 description = "fixture clone URL with the placeholder token \"tok\""
-paths = ['''^backend/analysis/src/test/java/ai/tessary/evals/rca/E2bRcaSandboxTest\.java$''']
+paths = ['''^backend/analysis/src/test/java/ai/tessary/rca/E2bRcaSandboxTest\.java$''']
 
 [[allowlists]]
 description = "comments document the clone URL and API-key shapes with placeholders"
@@ -102,11 +102,11 @@ paths = ['''^sandbox\-runner/agent\-sandbox/agent\-stream\.js$''']
 
 [[allowlists]]
 description = "redaction-engine fixtures: a ghp_ placeholder and a three-segment dummy JWT fed to the redactor to prove it redacts them; no real credential"
-paths = ['''^backend/substrate/src/test/java/ai/tessary/evals/redaction/RedactionEngineTest\.java$''']
+paths = ['''^backend/substrate/src/test/java/ai/tessary/redaction/RedactionEngineTest\.java$''']
 
 [[allowlists]]
 description = "WorkOS placeholders (sk_test_placeholder, client_test_placeholder) the origin-guard test hands the stub client; not a token"
-paths = ['''^backend/tenancy/src/test/java/ai/tessary/evals/auth/PublicOriginGuardTest\.java$''']
+paths = ['''^backend/tenancy/src/test/java/ai/tessary/auth/PublicOriginGuardTest\.java$''']
 
 [[allowlists]]
 description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it, and #1044); it exists so the secret_leak detector has something to catch"

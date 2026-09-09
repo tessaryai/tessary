@@ -15,4 +15,4 @@ Helpers that run inside a Claude Code session against this platform.
   the plugin are still live, and the craft guidance is the useful half.
 - **`evals-mcp/`** — how Claude Code (or any MCP client) connects to the
   backend's remote MCP server at `POST /mcp`. The server itself lives in
-  `backend/surfaces/src/main/java/ai/tessary/evals/mcp/`.
+  `backend/surfaces/src/main/java/ai/tessary/mcp/`.

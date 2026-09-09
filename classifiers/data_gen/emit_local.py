@@ -832,7 +832,7 @@ def preflight(endpoint: str, token: str) -> bool:
             400: "body rejected before the controller — the request is not valid OTLP protobuf",
             401: "token rejected — needs a project-scoped tsy_ key",
             403: "wrong key scope — the receiver requires a WRITE (or mcp) key, not query-only",
-            404: "route absent — deployment may be evals.ingest.otlp.transport=grpc",
+            404: "route absent — deployment may be tessary.ingest.otlp.transport=grpc",
             413: "body too large — lower EXPORT_BATCH",
             415: "content type rejected — the receiver consumes application/x-protobuf only",
         }.get(e.code, "")

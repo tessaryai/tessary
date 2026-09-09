@@ -64,7 +64,7 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 **Symptom:** Every classifier except frustration and groundedness produces findings. Those two specific classifiers never fire, even on projects with active traffic.
 
-**Cause:** Frustration and groundedness are served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `EVALS_OBSERVER_ENCODER_URL` and `EVALS_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for these two classifiers to call.
+**Cause:** Frustration and groundedness are served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `TESSARY_OBSERVER_ENCODER_URL` and `TESSARY_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for these two classifiers to call.
 
 **Resolution:** None in the open edition. The model weights `classify-service` loads are gated and not published, so there is no self-host path to these two classifiers. This is expected behaviour, not a misconfiguration: every other classifier runs without them. See the encoder section of [configuration](/self-hosting/configuration) for the variables involved.
 
@@ -82,7 +82,7 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 ## The backend refuses to start after setting SITE_DOMAIN
 
-**Symptom:** The stack ran fine on localhost. You set `SITE_DOMAIN` and now the `backend` container exits, logging `Refusing to start: this instance is served on <your domain>` and naming `EVALS_AUTH_COOKIE_PASSWORD`, `EVALS_SECRET_KEY`, or both.
+**Symptom:** The stack ran fine on localhost. You set `SITE_DOMAIN` and now the `backend` container exits, logging `Refusing to start: this instance is served on <your domain>` and naming `TESSARY_AUTH_COOKIE_PASSWORD`, `TESSARY_SECRET_KEY`, or both.
 
 **Cause:** Those keys are still on the placeholders `docker-compose.yml` ships. They are published in the public repository, so an instance reachable at a real hostname with either one in place can have its sessions forged and its stored credentials read. Tessary refuses the boot rather than let that happen quietly.
 
@@ -95,7 +95,7 @@ openssl rand -base64 32
 Full steps, including which of the two matters most and when to do it: [Secure the instance](/self-hosting/setup#secure-the-instance).
 
 <Note>
-  If the instance already stored provider API keys under the placeholder `EVALS_SECRET_KEY`, changing it makes them unreadable and they have to be entered again. Nothing else is lost.
+  If the instance already stored provider API keys under the placeholder `TESSARY_SECRET_KEY`, changing it makes them unreadable and they have to be entered again. Nothing else is lost.
 </Note>
 
 ## TLS certificates aren't issuing
@@ -122,7 +122,7 @@ Unset `SITE_DOMAIN` to fall back to plain HTTP on `HTTP_PORT` (default 80). If T
 
 **Cause:** By default, Tessary sends one anonymous opt-out heartbeat to `home.tessary.ai`.
 
-**Resolution:** Set `EVALS_TELEMETRY_ENABLED=false`. With telemetry disabled, Tessary makes no outbound calls, including DNS lookups, to that host. The full list of destinations an instance may reach, and the check that holds the stack to it, is [What leaves your network](/self-hosting/configuration#what-leaves-your-network).
+**Resolution:** Set `TESSARY_TELEMETRY_ENABLED=false`. With telemetry disabled, Tessary makes no outbound calls, including DNS lookups, to that host. The full list of destinations an instance may reach, and the check that holds the stack to it, is [What leaves your network](/self-hosting/configuration#what-leaves-your-network).
 
 ## Something else
 

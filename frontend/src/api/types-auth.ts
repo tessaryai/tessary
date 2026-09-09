@@ -229,7 +229,7 @@ export interface ApiKey {
   id: string;
   name: string;
   scope: KeyScope;
-  /** Display-only prefix (e.g. "evals_pat_…"); safe to show. */
+  /** Display-only prefix (e.g. "tessary_pat_…"); safe to show. */
   token_prefix: string;
   created_at: string;
   last_used_at: string | null;
@@ -280,7 +280,7 @@ export interface ApiKeyAudit {
 // tier and uncapped ingest, so there is no tier to name and no cap to report.
 
 /**
- * Every capability key — the mirror of the backend `ai.tessary.evals.plan.Capability` enum's `wire()` values,
+ * Every capability key — the mirror of the backend `ai.tessary.plan.Capability` enum's `wire()` values,
  * which are also the LaunchDarkly flag keys. Keep in sync with that enum.
  *
  * The browser has no LaunchDarkly client and no plan logic: the backend resolves all of this per session and

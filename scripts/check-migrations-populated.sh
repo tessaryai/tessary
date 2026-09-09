@@ -145,14 +145,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESOURCES="backend/core/src/main/resources"
 MASTER="$RESOURCES/db/changelog/db.changelog-master.yaml"
 
-CONTAINER="evals-migrations-populated"
-NETWORK="evals-migrations-populated-net"
+CONTAINER="tessary-migrations-populated"
+NETWORK="tessary-migrations-populated-net"
 # Deliberately not 5433 (the dev stack) or 55555 (restore-drill.sh): this must be
 # runnable while either of those is up.
 PORT="${MIGPOP_PORT:-55432}"
 PG_IMAGE="${MIGPOP_PG_IMAGE:-pgvector/pgvector:pg16}"
 LB_IMAGE="${MIGPOP_LB_IMAGE:-liquibase/liquibase:5.0}"
-DB="evals"
+DB="tessary"
 PASSWORD="migpop"
 KEEP=0
 
@@ -189,7 +189,7 @@ die() {
   exit 1
 }
 
-WORK="$(mktemp -d -t evals-migpop.XXXXXX)"
+WORK="$(mktemp -d -t tessary-migpop.XXXXXX)"
 cleanup() {
   rm -rf "$WORK"
   if [ "$KEEP" != 1 ]; then

@@ -59,7 +59,7 @@ import manifest from "./routeManifest.generated.json";
 // Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT. Since #1133 the
 // backend applies UNAVAILABLE_IN_OPEN_EDITION only when its Edition bean reads open; this table is the OPEN
 // edition's answer, which is the edition this smoke test renders.
-// (backend/product/src/main/java/ai/tessary/evals/plan/CapabilityService.java:68,76) literally:
+// (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java:68,76) literally:
 // every wire key true EXCEPT these five, which the open edition reports unavailable/off.
 const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
   "triage_automatic_enabled",

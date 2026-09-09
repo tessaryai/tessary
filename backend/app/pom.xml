@@ -13,7 +13,7 @@
 
     <artifactId>app</artifactId>
     <description>
-        The assembly module: EvalsApplication, the Spring configuration that boots it, and every
+        The assembly module: TessaryApplication, the Spring configuration that boots it, and every
         @SpringBootTest integration test (they need the @SpringBootConfiguration only this module
         has). It declares the runtime starters the application needs and no library APIs of its own
         - the layers below own those. See docs/modules.md.
@@ -229,7 +229,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <!-- `evals.plan.default-key=enterprise` used to live here, so the suite ran with
+                <!-- `tessary.plan.default-key=enterprise` used to live here, so the suite ran with
                      every capability on. It is gone with the plan tiers (open-core epic 1 issue 1):
                      the open edition has no tiers, and the open default is already every capability
                      ON except behavior_drift, sop_conformance and triage_automatic. Removing it in

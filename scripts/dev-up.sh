@@ -4,10 +4,10 @@
 #
 # The non-interactive counterpart to scripts/dev.sh: same containers, no log windows and no
 # cheat-sheet, so it works where tmux does not (CI, agents, a plain `ssh`). It honours
-# EVALS_SKIP_CLASSIFY=1 exactly as `task dev:slim` does, sharing the derivation in
+# TESSARY_SKIP_CLASSIFY=1 exactly as `task dev:slim` does, sharing the derivation in
 # scripts/lib/dev-services.sh.
 #
-# Deliberately NOT the profiling overlay, even under EVALS_PROFILING=1: the overlay attaches a
+# Deliberately NOT the profiling overlay, even under TESSARY_PROFILING=1: the overlay attaches a
 # -javaagent to the backend, and a detached `up` with no log window is the last place you want a
 # profiler nobody asked for. Use `task dev:profiling` for that.
 

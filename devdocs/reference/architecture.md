@@ -10,17 +10,17 @@ not a convention — enforces it. The full module table is in [Module inventory]
 below and the layering rationale in [`../modules.md`](../modules.md). Three of them frame
 everything else:
 
-- **`backend/app`** — assembly only: `EvalsApplication`, `application.yaml`, and every
+- **`backend/app`** — assembly only: `TessaryApplication`, `application.yaml`, and every
   `@SpringBootTest` integration test (they need the `@SpringBootConfiguration` only this
   module has). Feature slices live in the modules *below* it, not here.
 - **`backend/shared`** — the open-core cross-cutting primitives with no
-  app dependencies, under `ai.tessary.evals.open.*`: `open/errors` (the error catalog + every
+  app dependencies, under `ai.tessary.open.*`: `open/errors` (the error catalog + every
   domain enum), `open/obs` (log/MDC plumbing), `open/jobqueue` (the generic `LeasedJobQueue`
   seam), `open/media` (the `MediaStore` SPI).
-- **`backend/contract`** (`evals-contract`) — the code-first OpenAPI surface: the checked-in
-  `src/main/resources/openapi/evals-api.json` (see *The API contract* below).
+- **`backend/contract`** (`contract`) — the code-first OpenAPI surface: the checked-in
+  `src/main/resources/openapi/tessary-api.json` (see *The API contract* below).
 
-The package tree this doc describes is `backend/<module>/src/main/java/ai/tessary/evals/`.
+The package tree this doc describes is `backend/<module>/src/main/java/ai/tessary/`.
 
 ## Principle: package-by-feature, not package-by-layer
 
@@ -43,14 +43,14 @@ Role is signalled by **naming suffix** (below), not by directory.
 
 ### Feature slices
 
-Every vertical product area under `ai.tessary.evals.*` — full list in
+Every vertical product area under `ai.tessary.*` — full list in
 [Module inventory](#module-inventory) below. Two SPI-seam slices are expanded
 under that heading (`storage/`, `priors/`).
 
 One of these is an **SPI-seam slice** — a feature whose core is a swappable provider
 interface with implementations selected by `@ConditionalOnProperty`:
 
-- `priors/` — cross-customer priors: aggregated, anonymized statistics. Posture is governed by `evals.intelligence-mode.single-tenant` (default
+- `priors/` — cross-customer priors: aggregated, anonymized statistics. Posture is governed by `tessary.intelligence-mode.single-tenant` (default
   `true`), enforced in `PriorsService` itself.
 
 `storage/` — the streaming trace substrate — used to carry two SPI seams beside its plain
@@ -68,13 +68,13 @@ any records that exist only to serve that feature.
 | Package | Holds |
 |---|---|
 | `config` | `@ConfigurationProperties`, async/OTel config (virtual-thread task executors) |
-| `db` | DataSource (HikariCP against `EVALS_JDBC_URL`) + Liquibase wiring |
+| `db` | DataSource (HikariCP against `TESSARY_JDBC_URL`) + Liquibase wiring |
 | `crypto` | `SecretBox` (AES-GCM seal/open) |
 | `apidoc` | springdoc/OpenAPI config (`OpenApiConfig`, `JSpecifyNullabilityConverter`) — the code-first spec generator |
 | `web` | Shared HTTP plumbing **only**: `ApiResponse`, `ResponseMeta`, `ErrorBody`, `GlobalExceptionHandler` |
 
-Two cross-cutting concerns live in the **`shared` module** (`ai.tessary.evals.open.*`), not in
-`core`: `open/errors` — `ErrorCode`, `EvalsException`, `ErrorCatalog`, and **every** per-domain
+Two cross-cutting concerns live in the **`shared` module** (`ai.tessary.open.*`), not in
+`core`: `open/errors` — `ErrorCode`, `TessaryException`, `ErrorCatalog`, and **every** per-domain
 error enum; and `open/obs` — `LogContext`, `Markers`, MDC plumbing, log filters. The generic
 leased-queue seam (`open/jobqueue`) and the `MediaStore` SPI (`open/media`) live there too.
 
@@ -266,16 +266,16 @@ bundle un-importable to buy nothing.
 
 The wire API is **code-first**: springdoc (wired in `core`'s `apidoc/OpenApiConfig`) generates
 an OpenAPI spec from the controllers and DTOs at build time, and it is **checked in** to the
-`contract` module at `backend/contract/src/main/resources/openapi/evals-api.json`. A drift test
+`contract` module at `backend/contract/src/main/resources/openapi/tessary-api.json`. A drift test
 (`apidoc/OpenApiSpecDriftTest`) fails the build if the generated spec diverges from the committed
 one, so the checked-in JSON is always current. The frontend's TypeScript types are **generated
 from that spec** — `frontend`'s `pnpm run generate:api` runs `openapi-typescript` over
-`evals-api.json` into `src/api/generated/schema.d.ts`. Regenerate and commit the spec whenever a
+`tessary-api.json` into `src/api/generated/schema.d.ts`. Regenerate and commit the spec whenever a
 controller or DTO changes; the frontend types follow from it.
 
 ## Module inventory
 
-Keep in sync with `backend/*/src/main/java/ai/tessary/evals/*/`. The package tree is the
+Keep in sync with `backend/*/src/main/java/ai/tessary/*/`. The package tree is the
 source of truth — recount with `ls` when the set changes; **do not date-stamp** this section.
 Class lists live in code (and ArchUnit); this table is purpose + entry pointer only.
 
@@ -288,7 +288,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 
 | module | holds |
 |---|---|
-| `app` | `EvalsApplication`, `application.yaml`, every `@SpringBootTest` integration test |
+| `app` | `TessaryApplication`, `application.yaml`, every `@SpringBootTest` integration test |
 | `surfaces` | `query`, `search`, `mcp`, `ci`, `slack` (the wire surface only), `metering`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
 | `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt` |
 | `llm-runtime` | `llm`, `priors`, `sandbox` (agent-span telemetry only) — the only module that declares a model-provider SDK |
@@ -320,7 +320,7 @@ holds. A package appears in exactly one module.
 | `classifier/` | `analysis` | async classifier-detection engine (Layer 1), plus the Layer-2 triage lane that rules on what it files. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `config/` | `core` | cross-cutting `@ConfigurationProperties` (~25 per-feature classes) + `AsyncConfig` (bounded virtual-thread executors),… | [config-keys.md](./config-keys.md) |
 | `crypto/` | `core` | `SecretBox` (AES-GCM seal/open for at-rest secrets), `CryptoConstants`. | — |
-| `db/` | `core` | `DataSourceConfig` (HikariCP against `EVALS_JDBC_URL`), `LiquibaseConfig`, SQL helpers (`SqlFilter`, `Upsert`). | — |
+| `db/` | `core` | `DataSourceConfig` (HikariCP against `TESSARY_JDBC_URL`), `LiquibaseConfig`, SQL helpers (`SqlFilter`, `Upsert`). | — |
 | `edition/` | `tenancy` | which edition (open vs. paid-overlay) this JVM is running, derived from the classpath, no property/env var behind it — `Edition`, `EditionConfig`, `EditionBanner`. | — |
 | `featureflags/` | `tenancy` | the flag-override seam under the capability layer; holds no defaults of its own. Open adapter reads `org_feature_flag`; the LaunchDarkly adapter is paid. | — |
 | `gate/` | `product` | the pre-deploy gate's finding store (`PreDeployCheck*`), read by the `surfaces/ci` controller. | — |
@@ -337,7 +337,7 @@ holds. A package appears in exactly one module.
 | `sop/` | `product` (seam) + `tessary-paid/sop` | verbatim intake of plugin-authored SOP policy files (`.tessary/sops/*.yaml`): digest-idempotent `sop_document` store + the `sop_compile` job enqueue and its worker, all paid since #842. What stays open is the `SopIntake` port both import paths call through `SopIntakeDispatch`, and `SopCompileException`, which the open `SopCompiler` port declares. | — |
 | `sopcompile/` | `product` | the `SopCompiler` SPI alone, in a package of its own. It sits here rather than in `sop/` because #842 took `sop/`'s queue half paid while the interface has to stay open. Both ends are now paid and in DIFFERENT overlay modules (`tessary-paid/sop`'s worker calls it, `tessary-paid/conformance` implements it), so this package is the neutral ground that keeps them from needing an edge to each other. | — |
 | `plan/` | `product` | capabilities (the single gating axis). Plan tiers and quotas moved to `tessary-paid/plan`; the open edition is uncapped. | — |
-| `priors/` | `llm-runtime` | cross-customer aggregated/anonymized priors, governed by `evals.intelligence-mode.single-tenant`. | — |
+| `priors/` | `llm-runtime` | cross-customer aggregated/anonymized priors, governed by `tessary.intelligence-mode.single-tenant`. | — |
 | `query/` | `surfaces` | aggregation-first query API over the substrate with allow-list validation. | `/v1/query` |
 | `rca/` | `analysis` | root-cause analysis: pressed on a case, reads the finding's CLAIM (never any triage ruling — the context firewall) and its evidence over MCP → grounded hypotheses + ruled-out checks. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `redaction/` | `substrate` | PII redaction: rule authoring/testing + write-path guard (`RedactionService.redactBatch` called by the `SubstrateWriter` drainer, immediately before the write). | [pii-redaction.md](../concepts/pii-redaction.md) |

@@ -165,7 +165,7 @@ self-diagnostics requires a standard (or newly documented) carrier and an
 A native `gen_ai.*` span and an OpenInference `llm.*` span carrying the same content **produce the same
 canonical `RawEntry`** (same `operationKind`, `model`, message structure), which re-emits via
 `TraceSpanMapper` to the same `gen_ai.*` span. Proven by `OpenInferenceNormalizerTest` (round-trip
-parity) — see `backend/substrate/src/test/java/ai/tessary/evals/ingest/`.
+parity) — see `backend/substrate/src/test/java/ai/tessary/ingest/`.
 
 ## Conformance map (code ↔ schema)
 

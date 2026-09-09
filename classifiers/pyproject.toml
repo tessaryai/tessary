@@ -1,7 +1,7 @@
 [project]
-name = "evals-classifiers"
+name = "tessary-classifiers"
 version = "0.1.0"
-description = "Default-classifier modules for the evals platform: local-first training, judge-labeling, and the shared eval harness."
+description = "Default-classifier modules for the Tessary platform: local-first training, judge-labeling, and the shared eval harness."
 requires-python = ">=3.11"
 # Core deps are light so the harness + data scripts run without the training stack.
 # The training stack (torch/transformers/onnx) is an optional extra — install it on the

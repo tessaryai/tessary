@@ -25,12 +25,12 @@ classify-service `node --test`, and live ITs (`*LiveIT.java`).
 
 `task check` is the only entry point. With no argument it is the full gate. With an argument it
 narrows to a comma-separated list of **slices**, where a slice is a backend product area (a
-package under `ai.tessary.evals`) or the literal `frontend`.
+package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
 | `task check` | The full gate: 27 named checks (docs links, module/open-boundary/license/export-denylist hygiene, pipeline vocabulary, contract + vendored-plugin, Caddyfile, version/required-inputs/compose-artifact/selfhost-health/connect-route/readme self-host doc gates, classify, slack, sandbox-runner, compile-service, overlay-schema, classifier parity, no-bedrock, frontend, paid-image, paid-frontend, backend verify) — see the manifest in `scripts/check.sh` for the authoritative, edition-aware list; it is NOT the identical set CI runs (see that script's header) | yes |
-| `task check -- rca` | spotless, compile, every test in `ai.tessary.evals.rca.**` | yes |
+| `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |

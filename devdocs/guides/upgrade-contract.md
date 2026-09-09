@@ -69,17 +69,17 @@ the change). Categorise each change:
 
 For every layout-level change, touch each of these in order:
 
-1. **Java model** — `backend/core/src/main/java/ai/tessary/evals/model/`. Add or
+1. **Java model** — `backend/core/src/main/java/ai/tessary/model/`. Add or
    update the record. (Running on the standard JVM, Jackson reflects over
    records at runtime — no reflection-hint registration step.)
 2. **DB migration** — new Liquibase changeset under
    `backend/core/src/main/resources/db/changelog/changes/`. Compound fields go in a
    TEXT/JSON column on `pipeline_meta`; relational entities get their own
    table. Add the `<NNN>-…sql` line to `db.changelog-master.yaml`.
-3. **Repository** — `backend/product/src/main/java/ai/tessary/evals/pipeline/PipelineRepository.java`.
+3. **Repository** — `backend/product/src/main/java/ai/tessary/pipeline/PipelineRepository.java`.
    Extend the `load` / `upsert` / `replace` paths with the new column or table. JSON
    blobs go through `writeJson` / `readJson`.
-4. **Bundle assembly** — `backend/product/src/main/java/ai/tessary/evals/pipeline/BundleAssembler.java`
+4. **Bundle assembly** — `backend/product/src/main/java/ai/tessary/pipeline/BundleAssembler.java`
    (the upload path `ImportController` is its only caller now — the observer's server-side import
    path went with the observer). Add the
    `Shard` enum case, the `classify` branch, the `applyShard` switch arm, and
@@ -99,7 +99,7 @@ For every layout-level change, touch each of these in order:
 7. **Import UI summary** — `frontend/src/views/Settings/Import.tsx`. If you
    added a new top-level path, extend `summariseDirSelection` so users see
    it counted in the picker preview.
-8. **Tests** — `backend/app/src/test/java/ai/tessary/evals/pipeline/ImportControllerTest.java`.
+8. **Tests** — `backend/app/src/test/java/ai/tessary/pipeline/ImportControllerTest.java`.
    Update the shard fixtures (`META_YAML`, `CALL_SITE_YAML`, …) to use the new
    schema version, add a fixture for any new shard, and add a happy-path
    assertion that the new field round-trips through the DB.

@@ -420,7 +420,7 @@ function truncate(s: string, n = 32): string {
 /* Media extraction + XSS guard (image + document)                            */
 /* -------------------------------------------------------------------------- */
 //
-// Mirrors the backend ai.tessary.evals.model.ContentExtractor content-block
+// Mirrors the backend ai.tessary.model.ContentExtractor content-block
 // shapes: OpenAI `image_url` / `input_image` / `output_image` / `input_file` / `file`, and Anthropic
 // `image` / `document` with `source.{base64,url}`. The platform's own first-class blocks
 // `{type:"image_url",url}` / `{type:"image_b64",data,mediaType}` and their document counterparts

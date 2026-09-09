@@ -12,11 +12,11 @@
 dev_up_services() {
     local compose="$1"
 
-    # Slim mode (task dev:slim, or EVALS_SKIP_CLASSIFY=1 in front of any dev task): bring up
+    # Slim mode (task dev:slim, or TESSARY_SKIP_CLASSIFY=1 in front of any dev task): bring up
     # every service EXCEPT `classify` (and `compile`, see below), whose first build downloads
     # the encoder weights from a gated HF repo (BAKE_EMBEDDERS bakes ~1.7 GB of them into the
     # dev image) and whose container is capped at 8 GB (mem_limit). The backend itself has no
-    # `depends_on: classify` — it only reaches it via EVALS_OBSERVER_ENCODER_URL — so omitting
+    # `depends_on: classify` — it only reaches it via TESSARY_OBSERVER_ENCODER_URL — so omitting
     # classify from the `up` list used to be sufficient on its own.
     #
     # `compile` (the SOP-conformance compile service) changed that: it has `depends_on: classify`,
@@ -32,7 +32,7 @@ dev_up_services() {
     # `-f` set it later runs `up` with (both entry points build it from scripts/lib/dev-compose.sh).
     # If those two ever diverge, `config --services` stops seeing `compile`, this grep stops
     # matching it, and its `depends_on` drags the 8 GB HF-gated classify container into a slim boot.
-    if [ "${EVALS_SKIP_CLASSIFY:-0}" != "1" ]; then
+    if [ "${TESSARY_SKIP_CLASSIFY:-0}" != "1" ]; then
         return 0
     fi
 

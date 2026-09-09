@@ -5,7 +5,7 @@
 > `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`, `TelemetryBuckets`) implement §1, §3 and
 > §5 of this contract. No service exists at `home.tessary.ai` today, so the client's POSTs fail —
 > harmlessly; see §1's error handling — until that service (owner: §6) is stood up. The
-> Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.evals.analytics`,
+> Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.analytics`,
 > `frontend/src/lib/mixpanel.ts`) is gone outright, not superseded gradually — deleted in the same
 > change that added this client. §2's license-check endpoint remains spec-only, consumed by epic 9,
 > not this issue.
@@ -22,7 +22,7 @@ payload may carry (see §5, Versioning).
 |---|---|---|---|
 | `contract_version` | int | `1` | Schema version of this payload; see §5. |
 | `install_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Generated once at first boot, persisted locally. Identifies an install, never a person or org — never derived from org name, user email, or license key. |
-| `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live since epic 5 (#1133): the backend derives it from the classpath (`ai.tessary.evals.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
+| `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live since epic 5 (#1133): the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
 | `app_version` | string (semver) | `"2026.9.1"` | The running app's version. |
 | `os` | string | `"linux"` | Host OS family. |
 | `arch` | string | `"arm64"` | Host CPU architecture. |
@@ -88,8 +88,8 @@ wins).
 
 ## 3. Opt-out env var
 
-`EVALS_TELEMETRY_ENABLED`, default `true`, following the existing
-`EVALS_ANALYTICS_ENABLED` truthy-parsing convention
+`TESSARY_TELEMETRY_ENABLED`, default `true`, following the existing
+`TESSARY_ANALYTICS_ENABLED` truthy-parsing convention
 ([`config-keys.md`](./config-keys.md)).
 
 When set `false`: zero outbound network calls — including DNS resolution to
@@ -98,7 +98,7 @@ ping (§1) and the license-check call (§2). This is written precisely enough fo
 #1197's `check-zero-egress.sh` (epic 7 clause 9, shipped) to assert
 mechanically: with the var off, no attempt to resolve or reach
 `home.tessary.ai` may occur anywhere in a boot-to-triage run — proven via a
-DNS-sink network, with `EVALS_TELEMETRY_ENABLED=true` run as the positive
+DNS-sink network, with `TESSARY_TELEMETRY_ENABLED=true` run as the positive
 control that must log exactly `home.tessary.ai`.
 
 ## 4. Scope note: backend-only

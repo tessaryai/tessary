@@ -13,14 +13,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/frontend"
 
 # Contract drift guard: the generated API types (src/api/generated/schema.d.ts) are
-# derived from the checked-in OpenAPI spec (backend/contract/.../evals-api.json). Regenerate into a temp
+# derived from the checked-in OpenAPI spec (backend/contract/.../tessary-api.json). Regenerate into a temp
 # file and diff against the working-tree copy — fail if it is stale — the frontend-side twin of the backend
 # OpenApiSpecDriftTest, so a spec change that isn't regenerated on the FE can't silently drift. Git-
 # independent (no git state needed). Regenerate with `pnpm run generate:api` and commit the result.
 _gen_tmp="$(mktemp)"
 _routes_tmp="$(mktemp)"
 trap 'rm -f "$_gen_tmp" "$_routes_tmp"' EXIT
-node_modules/.bin/openapi-typescript ../backend/contract/src/main/resources/openapi/evals-api.json -o "$_gen_tmp" >/dev/null
+node_modules/.bin/openapi-typescript ../backend/contract/src/main/resources/openapi/tessary-api.json -o "$_gen_tmp" >/dev/null
 if ! diff -q "$_gen_tmp" src/api/generated/schema.d.ts >/dev/null; then
   echo "ERROR: frontend/src/api/generated/schema.d.ts is out of date with the OpenAPI spec." >&2
   echo "Run 'pnpm run generate:api' in frontend/ (after regenerating the spec with 'task contract:openapi'" >&2

@@ -261,11 +261,11 @@ while IFS=$'\t' read -r -u 3 kind title payload; do
         fi
         if [ "$title" = "Generate a value for each and put them in .env" ]; then
             # Failure class 2, asserted: .env is .env.example plus exactly what the page's block adds
-            # (two EVALS_ lines), plus the prerequisite line when the host needed it. Asserted BEFORE
+            # (two TESSARY_ lines), plus the prerequisite line when the host needed it. Asserted BEFORE
             # any enumerated --env-line is appended, so the page's own block is what is measured.
             extra="$(diff "$TMP/.env.example" "$TMP/.env" | grep '^>' | sed 's/^> //' || true)"
-            unexpected="$(printf '%s\n' "$extra" | grep -vE '^EVALS_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
-            n_keys="$(printf '%s\n' "$extra" | grep -cE '^EVALS_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' || true)"
+            unexpected="$(printf '%s\n' "$extra" | grep -vE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' | grep -vE "^DOCKER_SOCK_GID=${SOCK_GID:-NONE}\$" | grep -vxF -f <(printf '%s' "$ENV_LINES"; echo '#none#') | grep . || true)"
+            n_keys="$(printf '%s\n' "$extra" | grep -cE '^TESSARY_(AUTH_COOKIE_PASSWORD|SECRET_KEY)=' || true)"
             if [ -n "$unexpected" ] || [ "$n_keys" -ne 2 ]; then
                 echo "$P: FAIL, after the page's .env block the file is not .env.example plus its two keys; extra lines: $(printf '%s' "$unexpected" | tr '\n' ' ') (keys added: $n_keys)" >&2; exit 1
             fi

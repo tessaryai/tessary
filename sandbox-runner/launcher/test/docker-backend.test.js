@@ -41,7 +41,7 @@ const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_a
 // (ensureSandboxNetwork/reapOrphanSandboxContainers) for the launcher to boot cleanly.
 function startFakeDaemon(
   socketPath,
-  { waitDelayMs = 0, imageMissing = false, waitStatusCode = 0, selfNetworks = ['evals-platform_evals'] } = {},
+  { waitDelayMs = 0, imageMissing = false, waitStatusCode = 0, selfNetworks = ['tessary_tessary'] } = {},
 ) {
   const createBodies = [];
   const networkCreates = [];
@@ -381,7 +381,7 @@ test('docker backend: two agentic routes share the SAME semaphore under concurre
 });
 
 // ---- SANDBOX_NETWORK_ISOLATION -------------------------------------------------------------
-// #855 put every sibling on a dedicated bridge, "never the evals service network". That is now
+// #855 put every sibling on a dedicated bridge, "never the tessary service network". That is now
 // opt-in, because the cut-off was not reachability-neutral: the agent reads its evidence through
 // the backend's MCP door, and off the service network its only route there is the public origin,
 // which a localhost `docker compose up` does not have. These three pin the inversion — the default
@@ -421,8 +421,8 @@ async function runOneAgentJob(env, daemonOpts) {
 }
 
 test('sandbox network: the DEFAULT joins the network the launcher itself is on', async () => {
-  const { create, networkCreates } = await runOneAgentJob({}, { selfNetworks: ['evals-platform_evals'] });
-  assert.equal(create.HostConfig.NetworkMode, 'evals-platform_evals',
+  const { create, networkCreates } = await runOneAgentJob({}, { selfNetworks: ['tessary_tessary'] });
+  assert.equal(create.HostConfig.NetworkMode, 'tessary_tessary',
     'without isolation the sibling must land on the service network, so `backend` resolves for MCP');
   assert.equal(networkCreates.length, 0,
     'the dedicated bridge must not be created when nothing is going to run on it');
@@ -430,7 +430,7 @@ test('sandbox network: the DEFAULT joins the network the launcher itself is on',
 
 test('sandbox network: SANDBOX_NETWORK_ISOLATION=1 restores the dedicated bridge', async () => {
   const { create, networkCreates } = await runOneAgentJob(
-    { SANDBOX_NETWORK_ISOLATION: '1' }, { selfNetworks: ['evals-platform_evals'] });
+    { SANDBOX_NETWORK_ISOLATION: '1' }, { selfNetworks: ['tessary_tessary'] });
   assert.equal(create.HostConfig.NetworkMode, 'tessary-sandbox',
     'with isolation on the sibling must be cut off from the service network');
   assert.deepEqual(networkCreates.map((n) => n.Name), ['tessary-sandbox'],

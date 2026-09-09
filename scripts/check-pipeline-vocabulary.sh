@@ -247,7 +247,7 @@ done
 # on it silently matches nothing. This asserts the javadoc's claim, which is the half a build can see.
 # (An external dashboard is the half it cannot — record a key rename in docs/reference/telemetry-naming.md.)
 LOGBACK='backend/app/src/main/resources/logback-spring.xml'
-LOGCTX='backend/shared/src/main/java/ai/tessary/evals/open/obs/LogContext.java'
+LOGCTX='backend/shared/src/main/java/ai/tessary/open/obs/LogContext.java'
 unknown_mdc=""
 while IFS= read -r key; do
     [ -n "$key" ] || continue

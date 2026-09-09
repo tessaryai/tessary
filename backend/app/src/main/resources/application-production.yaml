@@ -27,17 +27,17 @@ spring:
       minimum-idle: 2
       connection-timeout: 10000
       leak-detection-threshold: 30000
-      pool-name: evals-hikari
+      pool-name: tessary-hikari
   liquibase:
     enabled: true
 
 # Cookie is sent over HTTPS only in prod (Caddy terminates TLS, X-Forwarded-Proto
 # is honoured via server.forward-headers-strategy). Without this flag the cookie
 # would ship without `Secure` and could be exfiltrated by any plain-HTTP request
-# to a sibling subdomain. Lives under evals.auth (not workos), same as the rest
+# to a sibling subdomain. Lives under tessary.auth (not workos), same as the rest
 # of the session/cookie config since #851 moved it off the WorkOS-specific
 # properties onto the provider-agnostic AuthProperties.
-evals:
+tessary:
   auth:
     cookie-secure: true
 

@@ -334,7 +334,7 @@ discovery.relabel "container_logs" {
 }
 
 // One tailer per discovered container (discovery.docker emits one target per
-// container network — every service here is on the single `evals` network, so
+// container network — every service here is on the single `tessary` network, so
 // that is one target each). Lines are forwarded verbatim, with no loki.process
 // in between: the launcher writes free-form console output, unlike the OTLP
 // branch whose exporter wraps records in a JSON envelope that must be unwrapped.

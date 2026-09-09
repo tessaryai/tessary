@@ -79,7 +79,7 @@ docker info >/dev/null 2>&1 || { echo "$P: the docker daemon is not reachable" >
 . "$ROOT/scripts/lib/open-boot-lib.sh"
 
 BASELINE="$ROOT/scripts/lib/exposure-sweep-baseline.txt"
-SPEC="$ROOT/backend/contract/src/main/resources/openapi/evals-api.json"
+SPEC="$ROOT/backend/contract/src/main/resources/openapi/tessary-api.json"
 TMP="$(mktemp -d)"
 export COMPOSE_PROJECT_NAME="exposure-sweep-$$"
 COMPOSE=""
@@ -168,7 +168,7 @@ _explain_5xx() {
     esac
 }
 _is_2xx() { case "$1" in 2[0-9][0-9]) return 0 ;; *) return 1 ;; esac; }
-_psql() { (cd "$TMP" && $COMPOSE exec -T postgres psql -U "${POSTGRES_USER:-evals}" -d "${POSTGRES_DB:-evals}" -tAc "$1") 2>/dev/null | tr -d '[:space:]'; }
+_psql() { (cd "$TMP" && $COMPOSE exec -T postgres psql -U "${POSTGRES_USER:-tessary}" -d "${POSTGRES_DB:-tessary}" -tAc "$1") 2>/dev/null | tr -d '[:space:]'; }
 
 # Path variables get plausible, well-formed values so a probe reaches the handler's auth check
 # rather than a 400 from a malformed segment.

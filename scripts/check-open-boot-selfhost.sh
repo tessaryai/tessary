@@ -45,12 +45,12 @@
 #   bash scripts/check-open-boot-selfhost.sh --domain  boot with SITE_DOMAIN set (#1225): the
 #       sign-in origin and the WorkOS callback derive from it, the frontend serves the hostname on
 #       :HTTPS_PORT with an operator-mounted certificate and no ACME attempt, a scheme-prefixed
-#       SITE_DOMAIN and a disagreeing EVALS_AUTH_FRONTEND_URL each refuse the boot naming the key,
+#       SITE_DOMAIN and a disagreeing TESSARY_AUTH_FRONTEND_URL each refuse the boot naming the key,
 #       and in upstream mode a forwarded client address is honoured from TRUSTED_PROXIES only.
 #       This leg DOES write two generated sealing keys, because PlaceholderSecretGuard refuses a
 #       domain on the shipped placeholders; the keyless assertion belongs to the default leg.
 #   bash scripts/check-open-boot-selfhost.sh --kafka  boot with the `kafka` profile and
-#       EVALS_INGEST_SPOOL_MODE=kafka (#984): the bundled Redpanda is in the healthy set, its
+#       TESSARY_INGEST_SPOOL_MODE=kafka (#984): the bundled Redpanda is in the healthy set, its
 #       binary runs with --unsafe-bypass-fsync=false (the durability the docs promise), the
 #       backend creates both ingest topics on its own, and the consumer group holds one member per
 #       configured drainer, each with partitions assigned — the parallel drain is real, not a knob.
@@ -186,12 +186,12 @@ DOCKER_SOCK_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock 
     if [ "$DOMAIN_LEG" = 1 ]; then
         echo "SITE_DOMAIN=$DOMAIN"
         echo "TLS_MODE=owncert"
-        echo "EVALS_AUTH_COOKIE_PASSWORD=$(openssl rand -base64 32)"
-        echo "EVALS_SECRET_KEY=$(openssl rand -base64 32)"
+        echo "TESSARY_AUTH_COOKIE_PASSWORD=$(openssl rand -base64 32)"
+        echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)"
     fi
     if [ "$KAFKA_LEG" = 1 ]; then
-        echo "EVALS_INGEST_SPOOL_MODE=kafka"
-        echo "EVALS_INGEST_SPOOL_KAFKA_CONSUMERS=$KAFKA_CONSUMERS"
+        echo "TESSARY_INGEST_SPOOL_MODE=kafka"
+        echo "TESSARY_INGEST_SPOOL_KAFKA_CONSUMERS=$KAFKA_CONSUMERS"
     fi
 } > "$TMP/.env"
 chmod 600 "$TMP/.env"
@@ -305,7 +305,7 @@ done
 open_boot_check_denied_credentials "$P" "$TMP" "$COMPOSE" "${SERVICES[@]}" || fail=1
 
 if [ "$KAFKA_LEG" = 1 ]; then
-    echo "$P: KAFKA: profile kafka, EVALS_INGEST_SPOOL_MODE=kafka, $KAFKA_CONSUMERS consumers (#984)…"
+    echo "$P: KAFKA: profile kafka, TESSARY_INGEST_SPOOL_MODE=kafka, $KAFKA_CONSUMERS consumers (#984)…"
     # 1. Durability is the whole reason to opt in, so the broker's own process line must carry the
     # explicit fsync flag docker-compose.yml passes (the image's developer_mode would otherwise
     # bypass fsync). Read from /proc rather than the log: the flag is the binary's argument.
@@ -353,7 +353,7 @@ if [ "$DOMAIN_LEG" = 1 ]; then
 
     # 1. The derived origins, as the backend resolved and logged them.
     _origin_line="$(printf '%s\n' "$_backend_log" | grep -F 'public origin' | head -1 || true)"
-    _want="public origin https://$DOMAIN/ from SITE_DOMAIN=$DOMAIN (TLS_MODE=owncert, EVALS_AUTH_FRONTEND_URL=https://$DOMAIN/, WORKOS_REDIRECT_URI=https://$DOMAIN/auth/callback)"
+    _want="public origin https://$DOMAIN/ from SITE_DOMAIN=$DOMAIN (TLS_MODE=owncert, TESSARY_AUTH_FRONTEND_URL=https://$DOMAIN/, WORKOS_REDIRECT_URI=https://$DOMAIN/auth/callback)"
     if printf '%s\n' "$_origin_line" | grep -qF "$_want"; then
         echo "$P: backend derived every origin from SITE_DOMAIN alone (ok)"
     else
@@ -414,7 +414,7 @@ if [ "$DOMAIN_LEG" = 1 ]; then
         fi
     }
     _refusal "a scheme-prefixed SITE_DOMAIN" "SITE_DOMAIN must be a bare hostname" "SITE_DOMAIN=https://$DOMAIN"
-    _refusal "a disagreeing EVALS_AUTH_FRONTEND_URL" "EVALS_AUTH_FRONTEND_URL is https://other.test/" "EVALS_AUTH_FRONTEND_URL=https://other.test/"
+    _refusal "a disagreeing TESSARY_AUTH_FRONTEND_URL" "TESSARY_AUTH_FRONTEND_URL is https://other.test/" "TESSARY_AUTH_FRONTEND_URL=https://other.test/"
     # Back to the good configuration; the frontend waits on the backend being healthy again.
     (cd "$TMP" && env "${_empty_cred_assignments[@]}" $COMPOSE up -d --no-deps backend >/dev/null 2>&1) || true
     open_boot_wait_healthy "$P" "$TMP" "$COMPOSE" 320 backend || fail=1

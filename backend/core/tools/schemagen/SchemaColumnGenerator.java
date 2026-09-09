@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
  */
 public final class SchemaColumnGenerator {
 
-    private static final String DEFAULT_PACKAGE = "ai.tessary.evals.db.schema";
+    private static final String DEFAULT_PACKAGE = "ai.tessary.db.schema";
 
     public static void main(String[] args) throws IOException {
         if (args.length != 2 && args.length != 3) {
@@ -42,7 +42,7 @@ public final class SchemaColumnGenerator {
         // Third argument is optional so backend/core/pom.xml's existing two-arg invocation is
         // byte-identical: the paid db module is the first caller to ever pass a third argument
         // (its own output package, ai.tessary.paid.db.schema), and every other caller keeps
-        // emitting into the open ai.tessary.evals.db.schema package it always has.
+        // emitting into the open ai.tessary.db.schema package it always has.
         String outPackage = args.length == 3 ? args[2] : DEFAULT_PACKAGE;
 
         Map<String, LinkedHashSet<String>> tables = parseAll(changesDir);

@@ -1,8 +1,8 @@
 {
-  "name": "evals-sandbox-runner-launcher",
+  "name": "tessary-sandbox-runner-launcher",
   "version": "0.1.0",
   "private": true,
-  "description": "HTTP sidecar that launches E2B microVMs to run deterministic grader code for the evals platform.",
+  "description": "HTTP sidecar that launches E2B microVMs to run deterministic grader code for the Tessary platform.",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {

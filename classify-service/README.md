@@ -91,8 +91,8 @@ fixture's `pooling_cases` at 1e-9, and `embed.smoke.test.js` (opt-in via
 against a real model and asserts cosine ≥ 0.999 versus the Python engine's reference
 vectors. The backend's `HttpConformanceEncoder` is the only caller.
 
-The backend reaches this service via `evals.observer.encoder.url` / `.api-key`
-(`EVALS_OBSERVER_ENCODER_URL` / `EVALS_OBSERVER_ENCODER_API_KEY`). This is the ONLY
+The backend reaches this service via `tessary.observer.encoder.url` / `.api-key`
+(`TESSARY_OBSERVER_ENCODER_URL` / `TESSARY_OBSERVER_ENCODER_API_KEY`). This is the ONLY
 `/classify` implementation — the sandbox-runner launcher does not serve it, and there is no
 fallback endpoint. Locally the same image runs as the `classify` service in
 `docker-compose.dev.yml`; `classify.js` here is the single head registry for every
@@ -169,12 +169,12 @@ and only then shrink the task, or the running image will not fit the smaller one
 # private HF repo (tessaryai/MiniCheck-RoBERTa-Large-onnx) — HF_TOKEN must be passed as a
 # BuildKit secret, never a build ARG (that would land in image history).
 HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-  --platform linux/arm64 -t evals-classify:dev .
+  --platform linux/arm64 -t tessary-classify:dev .
 
 # same, plus the SOP-conformance encoder (~1.4 GB larger, needs a >= 6 GB task to boot and 8 GB for arena headroom —
 # read "Enabling the conformance encoder in production" first). This is what `task dev` builds.
 HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-  --build-arg BAKE_EMBEDDERS=1 --platform linux/arm64 -t evals-classify:dev .
+  --build-arg BAKE_EMBEDDERS=1 --platform linux/arm64 -t tessary-classify:dev .
 
 # local
 CLASSIFY_API_KEY=dev pnpm start

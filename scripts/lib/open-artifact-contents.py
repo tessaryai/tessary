@@ -90,7 +90,7 @@ def main() -> int:
                     findings.append(f"jar {path}: not a readable zip")
                     continue
                 jar_entries += len(names)
-                if any(n.startswith("ai/tessary/evals/") for n in names):
+                if any(n.startswith("ai/tessary/") for n in names):
                     stem = jar_stem(path)
                     own_jars.append(stem)
                     if open_modules and stem not in open_modules:

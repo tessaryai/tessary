@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # The egress-capture harness for epic 6 clause 9, condition 2 (#1154): proves the self-hosted open
 # edition's default deployment reaches exactly one outbound destination, home.tessary.ai, and that
-# EVALS_TELEMETRY_ENABLED=false actually suppresses it rather than merely documenting that it should.
+# TESSARY_TELEMETRY_ENABLED=false actually suppresses it rather than merely documenting that it should.
 #
 # WHY A NEW FILE AND NOT check-open-boot-selfhost.sh. That script boots docker-compose.yml and
 # proves the stack comes up behind the auth guard with no denied CREDENTIAL present — a static
@@ -40,8 +40,8 @@
 # to tessary-paid/OPEN-CORE.md itself and no separate dated sign-off artifact should exist elsewhere for this.
 #
 # WHAT IT PROVES, PER PASS. Two passes, same export, same compose file, only
-# EVALS_TELEMETRY_ENABLED flipped between them:
-#   pass 1 (EVALS_TELEMETRY_ENABLED=true, the shipped default per D6): boot the stack, wait for it
+# TESSARY_TELEMETRY_ENABLED flipped between them:
+#   pass 1 (TESSARY_TELEMETRY_ENABLED=true, the shipped default per D6): boot the stack, wait for it
 #     to come up, let one heartbeat window elapse (TelemetryHeartbeat's own initialDelay is 5s plus
 #     up to 25s of jitter — see backend/surfaces/.../telemetry/TelemetryHeartbeat.java — so this
 #     pass waits comfortably past that), then read back every DNS query name and every outbound TCP
@@ -49,7 +49,7 @@
 #     one distinct destination hostname: home.tessary.ai. Anything else is a real finding, not
 #     something this script papers over — it prints every distinct destination it saw and fails
 #     the pass if the set is not exactly {home.tessary.ai}.
-#   pass 2 (EVALS_TELEMETRY_ENABLED=false): same boot, same wait, same capture window. Expect ZERO
+#   pass 2 (TESSARY_TELEMETRY_ENABLED=false): same boot, same wait, same capture window. Expect ZERO
 #     destinations of any kind — the contract's own wording is "zero outbound calls including DNS
 #     resolution" (devdocs/reference/telemetry-contract.md §1, docs/self-hosting/configuration.mdx's
 #     Telemetry <Tip>), so even a DNS-only, connection-refused attempt at home.tessary.ai is a
@@ -134,7 +134,7 @@ done
 
 # capture_pass <label> <telemetry-enabled true|false> <window-seconds>
 #   1. writes a fresh .env into the export (same minimum set check-open-boot-selfhost.sh generates
-#      — run-scoped, generated, never reused — plus EVALS_TELEMETRY_ENABLED for this pass)
+#      — run-scoped, generated, never reused — plus TESSARY_TELEMETRY_ENABLED for this pass)
 #   2. boots docker-compose.yml
 #   3. resolves this project's bridge interface off the compose network's real Docker network ID
 #   4. tcpdump's that interface for <window-seconds>, filtering to DNS (udp port 53) and outbound
@@ -166,27 +166,27 @@ capture_pass() {
     fi
 
     {
-        echo "POSTGRES_USER=evals"
+        echo "POSTGRES_USER=tessary"
         echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
-        echo "EVALS_SECRET_KEY=$(openssl rand -base64 32)"
-        echo "EVALS_AUTH_COOKIE_PASSWORD=$(openssl rand -base64 32)"
+        echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)"
+        echo "TESSARY_AUTH_COOKIE_PASSWORD=$(openssl rand -base64 32)"
         echo "HTTP_PORT=$HTTP_PORT"
         echo "HTTPS_PORT=$HTTPS_PORT"
         echo "POSTGRES_DATA_DIR=$TMP/.local/postgres"
-        echo "EVALS_TELEMETRY_ENABLED=$telemetry_enabled"
+        echo "TESSARY_TELEMETRY_ENABLED=$telemetry_enabled"
     } > "$TMP/.env"
     chmod 600 "$TMP/.env"
 
-    echo "$P: [$label] booting docker-compose.yml (EVALS_TELEMETRY_ENABLED=$telemetry_enabled)…" >&2
+    echo "$P: [$label] booting docker-compose.yml (TESSARY_TELEMETRY_ENABLED=$telemetry_enabled)…" >&2
     (cd "$TMP" && $COMPOSE up -d --build) >&2
     open_boot_wait_for "$P" "[$label] GET / (frontend, via caddy :$HTTP_PORT)" "$BASE/" 200 45 >&2 \
         || echo "$P: [$label] (note) frontend never answered 200 — capturing anyway; a stack that never came up cannot ping anyone, which is its own kind of finding." >&2
 
     # The compose network's real ID, not its human name — the bridge device name Docker assigns
     # is derived from the ID, never the `name:` label docker-compose.yml gives it.
-    net_id="$(docker network ls --filter "name=${COMPOSE_PROJECT_NAME}_evals" --format '{{.ID}}' | head -1)"
+    net_id="$(docker network ls --filter "name=${COMPOSE_PROJECT_NAME}_tessary" --format '{{.ID}}' | head -1)"
     if [ -z "$net_id" ]; then
-        echo "$P: [$label] could not find the compose network '${COMPOSE_PROJECT_NAME}_evals' — nothing to capture." >&2
+        echo "$P: [$label] could not find the compose network '${COMPOSE_PROJECT_NAME}_tessary' — nothing to capture." >&2
         return 1
     fi
     bridge_if="br-${net_id:0:12}"
@@ -247,7 +247,7 @@ fail=0
 capture_pass "telemetry-on" "true" "$WINDOW" || fail=1
 pass1_destinations="$CAPTURE_DESTINATIONS"
 if [ "$pass1_destinations" != "$ALLOWED_HOST_WHEN_ON" ]; then
-    echo "$P: FAIL — with EVALS_TELEMETRY_ENABLED=true, expected exactly one destination" >&2
+    echo "$P: FAIL — with TESSARY_TELEMETRY_ENABLED=true, expected exactly one destination" >&2
     echo "    ($ALLOWED_HOST_WHEN_ON) and saw: '${pass1_destinations:-none}'" >&2
     fail=1
 fi
@@ -255,7 +255,7 @@ fi
 capture_pass "telemetry-off" "false" "$WINDOW" || fail=1
 pass2_destinations="$CAPTURE_DESTINATIONS"
 if [ -n "$pass2_destinations" ]; then
-    echo "$P: FAIL — with EVALS_TELEMETRY_ENABLED=false, expected ZERO destinations (the contract's" >&2
+    echo "$P: FAIL — with TESSARY_TELEMETRY_ENABLED=false, expected ZERO destinations (the contract's" >&2
     echo "    own claim is zero outbound calls including DNS) and saw: '$pass2_destinations'" >&2
     fail=1
 fi

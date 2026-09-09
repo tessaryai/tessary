@@ -6,11 +6,11 @@ depends on, and each depends on exactly one module below it.
 
 ## The layering
 
-Artifact ids are the bare module name: the groupId is already `ai.tessary`, so an `evals-` prefix
+Artifact ids are the bare module name: the groupId is already `ai.tessary`, so a `tessary-` prefix
 said it twice.
 
 ```
-app          EvalsApplication, application.yaml, integration tests, ArchitectureRulesTest
+app          TessaryApplication, application.yaml, integration tests, ArchitectureRulesTest
 surfaces     query, search, mcp, ci, metering, billing, telemetry  (slack's wire surface left for tessary-paid/ in #920)
 analysis     classifier, rca, cases, alert, onboarding, prompt
 llm-runtime  llm, priors, sandbox      (the ONLY module declaring a provider SDK or AWS client)
@@ -312,7 +312,7 @@ version-property shadowing silently confined a round of dependency upgrades to a
 
 ### The scan guard
 
-Every ArchUnit rule scans `ai.tessary.evals`, which now arrives in `app` as module JARs rather than
+Every ArchUnit rule scans `ai.tessary`, which now arrives in `app` as module JARs rather than
 local sources. A classpath that stopped carrying them would make all sixteen rules vacuously true and
 the file a green no-op. `the_scan_reaches_every_module` asserts the scan's own reach (~1261 classes
 today, floor 1100 — moved down from 1500 by Track A, which deleted a whole Maven module and 213 main

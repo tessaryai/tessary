@@ -112,7 +112,7 @@ COMPOSE="$(cd "$TMP" && bash scripts/lib/dev-compose.sh)"
 
 # --- the two boot-recipe knobs #878 deliberately changes from the plain dev:up:slim recipe above ---
 #
-# 1. EVALS_SKIP_CLASSIFY is DROPPED entirely (not exported, not even =0) — the epic-1 version of
+# 1. TESSARY_SKIP_CLASSIFY is DROPPED entirely (not exported, not even =0) — the epic-1 version of
 #    this script set it to 1, which filters `classify` (and `compile`) out of the `up` list before
 #    compose ever sees them (scripts/lib/dev-services.sh). This gate exists to prove the classify
 #    service ITSELF builds and boots KEYLESS — #877's UNAVAILABLE_IN_OPEN_EDITION fallback (no
@@ -133,7 +133,7 @@ COMPOSE="$(cd "$TMP" && bash scripts/lib/dev-compose.sh)"
 #    `launcher` compose profile stays OFF here anyway (see the SCOPE BOUNDARY note further down),
 #    so E2B_API_KEY is never read either way. The self-host leg (check-open-boot-selfhost.sh)
 #    deliberately does NOT set this, proving the code default is what a fresh `.env` gets.
-# 3. EVALS_AUTH_DISABLED=false is exported explicitly, overriding docker-compose.dev.yml's own
+# 3. TESSARY_AUTH_DISABLED=false is exported explicitly, overriding docker-compose.dev.yml's own
 #    default (which is "true" — `task dev`'s deliberate unauthenticated convenience, #924's own
 #    comment on that line). AuthFilter.shouldNotFilter bypasses itself for EVERY path when this is
 #    set, meaning NO request would ever get a resolved TenantContext — GET /auth/me would 401
@@ -156,13 +156,13 @@ echo "check-open-boot: booting the slim stack WITH classify (keyless), SANDBOX_B
 # Two RUN-SCOPED, GENERATED values, minted fresh here and never stored or reused — not credentials
 # (crew review, PR #1033). The clean-room export has no .env, so without them: (1) the BYO-provider
 # credential PUT in step (e) 412s (SECRET_KEY_NOT_CONFIGURED — SecretBox has nothing to seal with),
-# which means that step could never have passed since #878, real key or fake; (2) EVALS_AUTH_DISABLED
+# which means that step could never have passed since #878, real key or fake; (2) TESSARY_AUTH_DISABLED
 # =false makes signup seal a session cookie, which needs a cookie password. Both are AES-grade random
 # bytes that exist only for this process's lifetime.
 _run_secret_key="$(openssl rand -base64 32)"
 _run_cookie_password="$(openssl rand -base64 32)"
-(cd "$TMP" && env "${_empty_cred_assignments[@]}" SANDBOX_BACKEND=docker EVALS_AUTH_DISABLED=false \
-    EVALS_SECRET_KEY="$_run_secret_key" EVALS_AUTH_COOKIE_PASSWORD="$_run_cookie_password" bash scripts/dev-up.sh) || {
+(cd "$TMP" && env "${_empty_cred_assignments[@]}" SANDBOX_BACKEND=docker TESSARY_AUTH_DISABLED=false \
+    TESSARY_SECRET_KEY="$_run_secret_key" TESSARY_AUTH_COOKIE_PASSWORD="$_run_cookie_password" bash scripts/dev-up.sh) || {
     # A stack that never comes up is torn down by the trap before anyone can read why. Print the
     # backend's own log on the way out, the same courtesy the triage step below extends, because
     # compose only says "dependency failed to start" and, with DevTools on the classpath, a failed
@@ -207,7 +207,7 @@ fail=0
 # classify's own readiness, checked DIRECTLY (its host-published port, docker-compose.dev.yml's
 # `127.0.0.1:18080:8080`), before anything that depends on it: /healthz answers 503 until
 # `warmAll()`/`warmAllEmbedders()` resolve (classify-service/server.js) and only 200 once every
-# baked head/embedder is resident. Since #878 drops EVALS_SKIP_CLASSIFY=1 this is now a real cold
+# baked head/embedder is resident. Since #878 drops TESSARY_SKIP_CLASSIFY=1 this is now a real cold
 # start on every run of this check, and it is a heavier container than the rest of the stack
 # (BAKE_EMBEDDERS bakes ~1.7 GB into the image at BUILD time, which `--build` above already paid
 # for — this loop is purely the RUNTIME load-into-memory cost) — hence its own, wider budget
@@ -276,7 +276,7 @@ if [ -n "$OPEN_BOOT_OVERLAY_DIR" ]; then
             # clean'" and fails loud on, rather than letting it read as "not found, therefore
             # passing."
             _overlay_hit="$( (cd "$TMP" && $COMPOSE exec -T postgres \
-                psql -U evals -d evals -tAc \
+                psql -U tessary -d tessary -tAc \
                 "select to_regclass('public.${_overlay_table}') is not null" 2>/dev/null) \
                 | tr -d '[:space:]' || true)"
             if [ "$_overlay_hit" = "t" ]; then
@@ -323,7 +323,7 @@ fi
 # Both passes live in scripts/lib/open-boot-lib.sh since #1052 (shared with the self-host leg;
 # the `|| true` that #1043 added to the rendered-config grep went with them). The service list is
 # ALL services this boot's `dev_up_services` (scripts/lib/dev-services.sh) starts — dropping
-# EVALS_SKIP_CLASSIFY=1 (see the boot-recipe comment above) means every declared service comes
+# TESSARY_SKIP_CLASSIFY=1 (see the boot-recipe comment above) means every declared service comes
 # up, not just the original four. postgres currently carries no denylisted var and no env_file:,
 # so its inclusion is a defense-in-depth completeness fix, not a live-bug fix (crew review, PR
 # #1014) — but the check's own stated intent is "every running container", and a denylisted value
@@ -506,7 +506,7 @@ echo "check-open-boot: emitting one canary trace through the ingest pipeline…"
 # SubstrateObservation rows — the actual OTLP-trace-triggered triage pipeline — NOT
 # ObserverController's /observer/classifications (git-diff-driven, a different mechanism) and NOT
 # FindingController's /findings (the behavior-drift correction loop, also diff-based). The worker
-# runs on a heartbeat (`evals.classifier.heartbeat-ms`, default 60000ms via
+# runs on a heartbeat (`tessary.classifier.heartbeat-ms`, default 60000ms via
 # `@Scheduled(fixedDelayString=...)`) that this script does NOT override — doing so needs a new
 # compose env passthrough line (docker-compose.dev.yml only forwards vars it names explicitly),
 # which is a bigger footprint than this check's job; instead the poll budget below (10 tries x 20s

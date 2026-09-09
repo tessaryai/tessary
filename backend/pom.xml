@@ -248,7 +248,7 @@
                              glob does not match: it already carries `<module>../tessary-paid</module>`
                              and the enforcer's `<exclude>ai.tessary.paid:*</exclude>`.
                              Still outside the set: alert, annotation, assistant, billing, ci, compile, config, experiment, gate, git, llm, llmspi, metering, model, observer, ops, plan, prediction, pricing, query, rca, redaction, regrade, review, routing, search, slack, storage, synth, tenant, traces, trend, trendstore, usage, verdict, vitals. -->
-                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.evals.open.errors,ai.tessary.evals.open.obs,ai.tessary.evals.apidoc,ai.tessary.evals.crypto,ai.tessary.evals.version,ai.tessary.evals.web,ai.tessary.evals.mcp,ai.tessary.evals.sources,ai.tessary.evals.golden,ai.tessary.evals.curation,ai.tessary.evals.dataset,ai.tessary.evals.auth,ai.tessary.evals.ingest,ai.tessary.evals.run,ai.tessary.evals.judge,ai.tessary.evals.db,ai.tessary.evals.priors,ai.tessary.evals.pipeline,ai.tessary.evals.sandbox,ai.tessary.evals.risk,ai.tessary.evals.classifier,ai.tessary.evals.analytics,ai.tessary.evals.featureflags,ai.tessary.evals.cases,ai.tessary.evals.sopcompile,ai.tessary.paid</arg>
+                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.golden,ai.tessary.curation,ai.tessary.dataset,ai.tessary.auth,ai.tessary.ingest,ai.tessary.run,ai.tessary.judge,ai.tessary.db,ai.tessary.priors,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.risk,ai.tessary.classifier,ai.tessary.analytics,ai.tessary.featureflags,ai.tessary.cases,ai.tessary.sopcompile,ai.tessary.paid</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
@@ -273,7 +273,7 @@
                     <!-- Only our own hand-written classes; scope the check to our package
                          so generated glue in target/ is never linted. -->
                     <includes>
-                        <include>ai/tessary/evals/**</include>
+                        <include>ai/tessary/**</include>
                     </includes>
                     <bundledSignatures>
                         <bundledSignature>jdk-unsafe</bundledSignature>
@@ -303,7 +303,7 @@
                     <sarifOutput>true</sarifOutput>
                     <excludeFilterFile>${project.basedir}/../config/spotbugs-exclude.xml</excludeFilterFile>
                     <!-- Our own classes only; skip any generated glue in target/. -->
-                    <onlyAnalyze>ai.tessary.evals.-</onlyAnalyze>
+                    <onlyAnalyze>ai.tessary.-</onlyAnalyze>
                     <!-- find-sec-bugs adds the security detectors core SpotBugs does not ship:
                          injection (SQL, command, LDAP), path traversal, SSRF, XXE, weak crypto and
                          hardcoded keys, insecure cookie flags. It is the only security static

@@ -4,7 +4,7 @@ Nobody should have to be looking at the app to find out something regressed. Thi
 fires, what it carries, and the two decisions in the design that are easy to get wrong.
 
 Schema: [`data-model.md`](../reference/data-model.md) § *Alerts*. Config keys:
-[`config-keys.md`](../reference/config-keys.md) § `evals.alert.*`. Capability gate:
+[`config-keys.md`](../reference/config-keys.md) § `tessary.alert.*`. Capability gate:
 `alerts_enabled`, on by default.
 
 > **Slack is not part of the launch.** `slack_enabled` is off, so the launch delivery route is a signed
@@ -83,7 +83,7 @@ several-line message rather than a title (`AlertPayload.caseMessage`):
   cases from different detectors comparable to a reader;
 - **who ruled it real**: an evidence-only Layer-2 run, or a person. Those are claims of different
   strength and the message says which, for the same reason the case page does;
-- a link back, when `evals.alert.app-base-url` is set. When it is not, the message carries no link
+- a link back, when `tessary.alert.app-base-url` is set. When it is not, the message carries no link
   rather than a broken one.
 
 The payload is resolved once, at fire time, and stored on the row. Delivery is retried; a retry an
@@ -141,7 +141,7 @@ adapter's `/deliver`, and the adapter calls back to `/internal/slack/mention` fo
 answer. Every gate above is still evaluated on this side, before the adapter is ever called — the adapter
 makes no product decisions, which is what lets it be deleted whole if Slack never ships.
 
-**A second, unrelated switch.** Whether the adapter is deployed and reachable (`evals.slack.base-url` +
+**A second, unrelated switch.** Whether the adapter is deployed and reachable (`tessary.slack.base-url` +
 `service-key` on this side, `SLACK_SIGNING_SECRET` + `SLACK_BOT_TOKEN` on its side) is deploy-level.
 `slack_enabled` is per-org. Both must be on, each fails closed independently, and they are kept apart on
 purpose — an unconfigured deploy is not the same fact as an org that is not entitled, and one switch would

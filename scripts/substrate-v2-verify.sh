@@ -9,7 +9,7 @@
 # below is one the runbook would otherwise ask someone to eyeball at 2am.
 #
 #   ./scripts/substrate-v2-verify.sh                 # against the deployed stack
-#   PSQL="psql -h localhost -p 5433 -U evals -d evals" ./scripts/substrate-v2-verify.sh
+#   PSQL="psql -h localhost -p 5433 -U tessary -d tessary" ./scripts/substrate-v2-verify.sh
 #   PARITY_SAMPLE=200 ./scripts/substrate-v2-verify.sh
 #
 # Exit codes: 0 = every check passed. 1 = at least one FAILED. A check can also
@@ -39,7 +39,7 @@
 
 set -uo pipefail
 
-PSQL="${PSQL:-docker compose -f /opt/evals-platform/docker-compose.yml exec -T postgres psql -U ${POSTGRES_USER:-evals} -d ${POSTGRES_DB:-evals}}"
+PSQL="${PSQL:-docker compose -f /opt/tessary/docker-compose.yml exec -T postgres psql -U ${POSTGRES_USER:-tessary} -d ${POSTGRES_DB:-tessary}}"
 PARITY_SAMPLE="${PARITY_SAMPLE:-50}"
 UNPRICED_WARN_PCT="${UNPRICED_WARN_PCT:-5}"
 

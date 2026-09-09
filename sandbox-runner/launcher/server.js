@@ -78,7 +78,7 @@
  *                         hard resource limits stamped on every spawned container (defaults
  *                         2048, 2, 256). Docker backend only.
  *   SANDBOX_NETWORK_ISOLATION
- *                         cut sibling containers off from the evals service network (default OFF).
+ *                         cut sibling containers off from the tessary service network (default OFF).
  *                         Off, a sibling joins the network this launcher is on and reaches the
  *                         backend's MCP door by service name — what makes agentic RCA/Triage work
  *                         on a localhost install with no public hostname. On, siblings run on
@@ -86,7 +86,7 @@
  *                         the SITE_DOMAIN public origin, which that install must then set.
  *   DOCKER_SANDBOX_NETWORK  dedicated bridge network the docker backend creates (if absent) and
  *                         runs every sibling container on WHEN SANDBOX_NETWORK_ISOLATION is set —
- *                         never host networking, never the evals service network (default
+ *                         never host networking, never the tessary service network (default
  *                         tessary-sandbox). Unused, and not created, while isolation is off.
  *                         Network stays ON either way (never `--network none`): the agent needs
  *                         egress for the repo clone and the model-provider call, same as the E2B
@@ -178,10 +178,10 @@ const SANDBOX_DOCKER_MEMORY_MB = Number(process.env.SANDBOX_DOCKER_MEMORY_MB || 
 const SANDBOX_DOCKER_CPUS = Number(process.env.SANDBOX_DOCKER_CPUS || 2);
 const SANDBOX_DOCKER_PIDS_LIMIT = Number(process.env.SANDBOX_DOCKER_PIDS_LIMIT || 256);
 const DOCKER_SANDBOX_NETWORK = process.env.DOCKER_SANDBOX_NETWORK || 'tessary-sandbox';
-// Whether a sibling agent container is CUT OFF from the evals service network. Opt-in, default off.
+// Whether a sibling agent container is CUT OFF from the tessary service network. Opt-in, default off.
 //
 // #855 made the cut-off unconditional: every sibling ran on DOCKER_SANDBOX_NETWORK, "never the
-// evals service network this launcher itself runs on". That is the right posture for an install
+// tessary service network this launcher itself runs on". That is the right posture for an install
 // whose operator treats agent runs as untrusted — but it is not reachability-neutral, and the cost
 // landed on the default install. The agent reads every trace and span it reasons about through the
 // backend's MCP door; cut off from the service network, its only remaining route to that door is
@@ -301,7 +301,7 @@ const REQUEST_PROVIDER_TO_MODE = {
 
 /**
  * The default base URL for one OpenAI-compat mode when `credential.base_url` is blank — mirrors
- * PlatformCatalog's own defaults (backend/llm-runtime/src/main/java/ai/tessary/evals/llm/PlatformCatalog.java)
+ * PlatformCatalog's own defaults (backend/llm-runtime/src/main/java/ai/tessary/llm/PlatformCatalog.java)
  * so a launcher and the backend agree on where each provider lives absent an override. `mode` is
  * the lowercase mode string (OPENCODE_PROVIDER_NAME's keys); CUSTOM has none to assume — it is
  * "any other OpenAI-compatible endpoint" — so a blank `base_url` on that credential is a config
@@ -1043,7 +1043,7 @@ const dockerSemaphore = new Semaphore(SANDBOX_DOCKER_CONCURRENCY);
 //
 // With isolation OFF (the default) this is the network THIS launcher is on, read back from the
 // daemon rather than named in config: the launcher's own container id is its hostname, and the
-// compose project prefixes the network name ('evals-platform_evals'), so a hard-coded default or a
+// compose project prefixes the network name ('tessary_tessary'), so a hard-coded default or a
 // second env var would be wrong on any install that renamed its project. A launcher attached to
 // more than one network takes the first, which for the compose file in this repo is the only one.
 //
@@ -1200,7 +1200,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
         NanoCpus: Math.round(SANDBOX_DOCKER_CPUS * 1e9),
         PidsLimit: SANDBOX_DOCKER_PIDS_LIMIT,
         // Never host networking. Which network an agent-posture sibling lands on is
-        // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the evals service network
+        // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the tessary service network
         // by default so the agent can reach the backend's MCP door by service name, the dedicated
         // bridge when an operator has opted into cutting it off. Either way the network stays ON
         // (not `--network none`): the agent needs egress for the repo clone and the model-provider
@@ -1360,7 +1360,7 @@ async function runAgenticScript(scriptName, rawPayload) {
     if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
       const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
         + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
-        + 'evals.rca.agentic.mcp-base-url / evals.classifier.triage-mcp-base-url, or switch '
+        + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
         + 'SANDBOX_BACKEND to docker/local for development');
       e.launcherKind = 'bad_request';
       throw e;

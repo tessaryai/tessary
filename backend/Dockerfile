@@ -6,8 +6,8 @@
 # (dependencies / spring-boot-loader / snapshot-dependencies / application) so a
 # code-only change reuses the cached dependency layers across deploys.
 #
-# Build:  docker build -t evals ./backend
-# Run:    docker run --rm -p 8080:8080 evals
+# Build:  docker build -t tessary ./backend
+# Run:    docker run --rm -p 8080:8080 tessary
 
 # ---- builder ----
 FROM maven:3.9-eclipse-temurin-25 AS build
@@ -108,7 +108,7 @@ EXPOSE 8080
 # OTLP receive ports (image metadata only — EXPOSE does not itself publish; the
 # orchestrator decides external exposure via compose/Caddy). The gRPC OTLP transport
 # (#235) binds 4317 and the HTTP transport 4318, both default-off behind
-# `evals.ingest.otlp.enabled` + `transport=grpc|http|both`.
+# `tessary.ingest.otlp.enabled` + `transport=grpc|http|both`.
 EXPOSE 4317 4318
 
 # `-jar app.jar` runs the extracted application jar, whose manifest enumerates lib/ on its

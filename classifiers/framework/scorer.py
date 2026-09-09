@@ -25,7 +25,7 @@ class Scorer(Protocol):
 
 class ClassifyServiceScorer:
     """POST /classify on the standalone classify-service. ``head`` is a name in its ``models.json``
-    (e.g. 'refusal'). Config mirrors the backend's ``evals.observer.encoder.*``:
+    (e.g. 'refusal'). Config mirrors the backend's ``tessary.observer.encoder.*``:
 
     - URL  from ``CLASSIFY_URL`` (default ``http://localhost:8080``). Note the dev compose service is
       ``expose``-only, so from the host you need it published/port-forwarded, or point at the ECS URL.

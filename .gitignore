@@ -86,7 +86,7 @@ caddy_config/
 .dev-tools/agent-loop/state/
 .dev-tools/agent-loop/PAUSED
 .dev-tools/agent-loop/__pycache__/
-evals-migration-*.sql.gz
+tessary-migration-*.sql.gz
 *.sql.gz
 
 # GTM / go-to-market working files (leads, outreach drafts, scraped threads) — never committed

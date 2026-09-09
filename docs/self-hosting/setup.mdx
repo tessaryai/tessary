@@ -109,8 +109,8 @@ Tessary ships with two sealing keys already set, which is why the steps above ne
 
 | Variable | What the placeholder exposes |
 | --- | --- |
-| `EVALS_AUTH_COOKIE_PASSWORD` | Seals the session cookie. Anyone can forge a session against an instance still using the default, with no prior access to anything. |
-| `EVALS_SECRET_KEY` | Seals what Tessary stores for you: provider API keys, ingestion-source credentials, the GitHub install-state token. Anyone who reaches your database can decrypt all of it. |
+| `TESSARY_AUTH_COOKIE_PASSWORD` | Seals the session cookie. Anyone can forge a session against an instance still using the default, with no prior access to anything. |
+| `TESSARY_SECRET_KEY` | Seals what Tessary stores for you: provider API keys, ingestion-source credentials, the GitHub install-state token. Anyone who reaches your database can decrypt all of it. |
 
 The backend logs a warning on every boot that runs either default (`docker compose logs backend` shows `Running on the shipped placeholder value`), and refuses to start once `SITE_DOMAIN` names a real host, so an instance cannot go public on a published key by accident. Replace them:
 
@@ -118,10 +118,10 @@ The backend logs a warning on every boot that runs either default (`docker compo
   <Step title="Generate a value for each and put them in .env">
     ```bash
     [ -f .env ] || cp .env.example .env
-    printf 'EVALS_AUTH_COOKIE_PASSWORD=%s\nEVALS_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" >> .env
+    printf 'TESSARY_AUTH_COOKIE_PASSWORD=%s\nTESSARY_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" >> .env
     ```
 
-    The copy of `.env.example` carries both keys commented out with the same `openssl` recipe beside them (the first line keeps a `.env` you already have, such as one carrying `DOCKER_SOCK_GID`); the second line appends one generated value for each, and a later assignment wins. Set `POSTGRES_PASSWORD` to your own too if you publish the database port or share the host; it defaults to `evals` and is otherwise reachable only from the Compose network.
+    The copy of `.env.example` carries both keys commented out with the same `openssl` recipe beside them (the first line keeps a `.env` you already have, such as one carrying `DOCKER_SOCK_GID`); the second line appends one generated value for each, and a later assignment wins. Set `POSTGRES_PASSWORD` to your own too if you publish the database port or share the host; it defaults to `tessary` and is otherwise reachable only from the Compose network.
 
     Without a clone, write the two keys straight into a `.env` in the directory you run the install command from. Compose reads it from there.
   </Step>
@@ -137,7 +137,7 @@ The backend logs a warning on every boot that runs either default (`docker compo
 </Steps>
 
 <Warning>
-  Do this before you store a provider API key, not after. `EVALS_SECRET_KEY` is what already-stored credentials were sealed with, so changing it makes them unreadable and they have to be entered again. Keep the value you settle on: a `pg_dump` restored onto a host with a different key cannot read the credentials in it.
+  Do this before you store a provider API key, not after. `TESSARY_SECRET_KEY` is what already-stored credentials were sealed with, so changing it makes them unreadable and they have to be entered again. Keep the value you settle on: a `pg_dump` restored onto a host with a different key cannot read the credentials in it.
 </Warning>
 
 ## Sign up and connect your traces

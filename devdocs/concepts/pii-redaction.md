@@ -26,7 +26,7 @@ one as a control.
      has exactly one production caller, `OtlpIngestService`. Three other paths write customer content
      without passing through it — see *The redaction boundary* below, which is the section to read
      before treating redaction as a control.
-   - Master switch: `evals.redaction.enabled` (default on; the kill switch).
+   - Master switch: `tessary.redaction.enabled` (default on; the kill switch).
    - Engine: `redaction/RedactionEngine` (pure regex apply) + `redaction/RedactionService`
      (per-project compiled-rule cache, applied on the boundary).
    - A rule whose regex fails to compile is skipped at compile time — never applied, never fatal to a

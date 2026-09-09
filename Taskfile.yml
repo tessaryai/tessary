@@ -9,7 +9,7 @@ version: '3'
 # Open http://localhost:8000 in the browser.
 
 vars:
-  SESSION: evals-dev
+  SESSION: tessary-dev
   # The dev stack, both editions. Same file-exists shape as DC_PROD below, for the same reason —
   # see scripts/lib/dev-compose.sh, which is the ONE derivation all five dev compose strings (this,
   # DC_DEV_ALL, scripts/dev.sh, scripts/dev-up.sh, the agent loop's verify.start_cmd) now call, and
@@ -28,7 +28,7 @@ vars:
   # It is deliberately NOT reused for `up`/`--force-recreate`, because the overlay also attaches
   # -javaagent to the backend — a plain `task rb` would then start a profiler nobody asked for and
   # fail outright when the agent jar was never fetched (dev.sh only fetches it under
-  # EVALS_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
+  # TESSARY_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
   # Extra `-f` is harmless for `down`: absent services are simply nothing to remove.
   #
   # Since #886 that reasoning has a second half, and `dev:stop` carries `--remove-orphans` for it:
@@ -38,7 +38,7 @@ vars:
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
   # The prod stack, both editions. The open stack is the base file alone; the paid overlay adds the
-  # SOP compile service and the four EVALS_SOP_COMPILE_* keys the backend needs to reach it, so its
+  # SOP compile service and the four TESSARY_SOP_COMPILE_* keys the backend needs to reach it, so its
   # fragment is merged in when — and only when — tessary-paid/docker-compose.yml is on disk.
   #
   # A file-exists probe, never an env var and never a flag someone has to remember: the open tree has
@@ -84,25 +84,25 @@ tasks:
   dev:local:
     desc: Dev stack + a HOST launcher running your local `opencode` (no E2B) for the agentic paths (/analyze, /rca, /triage, /synthesize, /codegen). Needs `opencode` + git on PATH.
     env:
-      EVALS_LOCAL_AGENT: "1"
+      TESSARY_LOCAL_AGENT: "1"
     cmds:
       - bash scripts/dev.sh
 
-  # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads EVALS_PROFILING and
-  # self-heals the agent jar, so `EVALS_PROFILING=1 task dev:slim` (or any other dev mode) works
+  # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads TESSARY_PROFILING and
+  # self-heals the agent jar, so `TESSARY_PROFILING=1 task dev:slim` (or any other dev mode) works
   # too. These two tasks are just the common combinations spelled out.
   dev:profiling:
     desc: Dev stack + continuous CPU profiling. Flame graphs at http://localhost:4040 (local Pyroscope, no cloud account needed).
     env:
-      EVALS_PROFILING: "1"
+      TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
 
   dev:local:profiling:
     desc: Like `dev:local` (HOST launcher on your local `opencode`, no E2B) plus continuous CPU profiling at http://localhost:4040.
     env:
-      EVALS_LOCAL_AGENT: "1"
-      EVALS_PROFILING: "1"
+      TESSARY_LOCAL_AGENT: "1"
+      TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
 
@@ -118,7 +118,7 @@ tasks:
     aliases: [dev:2gb]
     desc: 'Like `dev` minus the classify + compile services: no gated encoder-weight download, no 8 GB container. Runs postgres, backend, frontend, caddy, alloy — only encoder classifier heads and SOP-conformance fits stay dormant.'
     env:
-      EVALS_SKIP_CLASSIFY: "1"
+      TESSARY_SKIP_CLASSIFY: "1"
     cmds:
       - bash scripts/dev.sh
 
@@ -179,7 +179,7 @@ tasks:
 
   # ---- backend ----
   backend:
-    desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via EVALS_JDBC_URL (e.g. `task dev:up`).
+    desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via TESSARY_JDBC_URL (e.g. `task dev:up`).
     dir: backend
     env:
       # The bare-metal dev path, like the Docker one, runs unauthenticated -- and since #924 it has
@@ -194,7 +194,7 @@ tasks:
       # CORRECTED 2026-09-01 (#996 review): this used to say exporting WORKOS_API_KEY before
       # `task backend` gets you enforced auth instead -- that relied on the retired "a configured
       # provider always wins over the flag" precedence (see AuthFilter#shouldNotFilter's own
-      # comment). Since #852/#996 decoupled the flag from provider state, EVALS_AUTH_DISABLED=true
+      # comment). Since #852/#996 decoupled the flag from provider state, TESSARY_AUTH_DISABLED=true
       # here is authoritative on its own: exporting a WorkOS key changes NOTHING about this task's
       # posture, it stays unauthenticated. To actually test enforced auth locally, edit this line
       # to "false" (or unset it) rather than relying on WorkOS config to override it.
@@ -202,8 +202,8 @@ tasks:
       # Since #852, "the real auth flow" no longer means WorkOS specifically: PasswordAuthProvider
       # (dependency-free email/password) is the open edition's always-on default and wins this same
       # AuthProviderConfig selection whenever WORKOS_API_KEY/WORKOS_CLIENT_ID aren't exported --
-      # EVALS_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
-      EVALS_AUTH_DISABLED: "true"
+      # TESSARY_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
+      TESSARY_AUTH_DISABLED: "true"
     cmds:
       # Install app's whole dependency chain first, then run ONLY the app module. spring-boot:run
       # can't run reactor-wide (it dies on the non-executable parent pom), and app-only can't
@@ -235,14 +235,14 @@ tasks:
       - bash scripts/check-backend.sh
 
   contract:openapi:
-    desc: "Regenerate the checked-in canonical OpenAPI spec (backend/contract/src/main/resources/openapi/evals-api.json) from the controllers via springdoc. Run after any controller/DTO change that shifts the wire contract, then commit the regenerated spec (OpenApiSpecDriftTest fails backend:check until you do)."
+    desc: "Regenerate the checked-in canonical OpenAPI spec (backend/contract/src/main/resources/openapi/tessary-api.json) from the controllers via springdoc. Run after any controller/DTO change that shifts the wire contract, then commit the regenerated spec (OpenApiSpecDriftTest fails backend:check until you do)."
     cmds:
-      - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Devals.openapi.regenerate=true test
+      - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Dtessary.openapi.regenerate=true test
 
   contract:openapi:paid:
-    desc: "Regenerate the PAID edition's OpenAPI spec (tessary-paid/contract/openapi/evals-api-paid.json) from the paid assembly (epic 5 #943): boots EvalsApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres)."
+    desc: "Regenerate the PAID edition's OpenAPI spec (tessary-paid/contract/openapi/tessary-api-paid.json) from the paid assembly (epic 5 #943): boots TessaryApplication with every overlay module on the classpath and pins /v3/api-docs. Needs Docker (Testcontainers Postgres)."
     cmds:
-      - "[ -f tessary-paid/assembly/pom.xml ] && mvn -f backend/pom.xml -pl ../tessary-paid/assembly -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PaidOpenApiSpecTest -Devals.openapi.regenerate=true test"
+      - "[ -f tessary-paid/assembly/pom.xml ] && mvn -f backend/pom.xml -pl ../tessary-paid/assembly -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PaidOpenApiSpecTest -Dtessary.openapi.regenerate=true test"
 
   backend:check:open:
     desc: "OPEN-EDITION backend build (open-core decision D2): the whole reactor with the `paid` profile off, i.e. exactly what builds after `tessary-paid/` is filtered out of the public export. Green here = the open tree stands on its own with zero paid code. This supersedes the old shared+contract-only invariant, which the per-module bannedDependencies rules still enforce on their own."
@@ -641,7 +641,7 @@ tasks:
   check:open:artifacts:
     desc: "Epic 6 clause 3 (#1148): builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on the paid image and on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`/`check:open`; release.yml runs the same script against the images it just built before merging any manifest."
     cmds:
-      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/evals-api-paid.json ] && echo tessary-paid/contract/openapi/evals-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
+      - OPEN_ARTIFACTS_PAID_SPEC="$([ -f tessary-paid/contract/openapi/tessary-api-paid.json ] && echo tessary-paid/contract/openapi/tessary-api-paid.json)" bash scripts/check-open-artifacts.sh --derive {{.CLI_ARGS}}
 
   check:namespaces:
     desc: "Epic 6 clause 7 (#1152): every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."
@@ -663,7 +663,7 @@ tasks:
       - bash scripts/check-selfhost-quickstart.sh {{.CLI_ARGS}}
 
   check:zero:egress:
-    desc: "Epic 7 clause 9 (#1197): opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and EVALS_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
+    desc: "Epic 7 clause 9 (#1197): opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and TESSARY_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
     cmds:
       - bash scripts/check-zero-egress.sh {{.CLI_ARGS}}
 
@@ -682,24 +682,24 @@ tasks:
     cmds:
       - bash scripts/publish-compose-artifact.sh {{.CLI_ARGS}}
   egress:capture:
-    desc: "Epic 6 clause 9, condition 2 (#1154): boots docker-compose.yml twice (EVALS_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why). Record the result — date, destinations seen, kill-switch outcome — as a line near clause 9's evidence in tessary-paid/OPEN-CORE.md; no separate dated sign-off artifact."
+    desc: "Epic 6 clause 9, condition 2 (#1154): boots docker-compose.yml twice (TESSARY_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why). Record the result — date, destinations seen, kill-switch outcome — as a line near clause 9's evidence in tessary-paid/OPEN-CORE.md; no separate dated sign-off artifact."
     cmds:
       - bash scripts/lib/egress-capture.sh
 
   # ---- docker (dev) ----
   # No tmux, so this is the only `up` available to CI, agents, and a plain ssh. It goes through a
-  # script rather than inlining `{{.DC_DEV}} up -d --build` so that EVALS_SKIP_CLASSIFY reaches
+  # script rather than inlining `{{.DC_DEV}} up -d --build` so that TESSARY_SKIP_CLASSIFY reaches
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: Start the dev stack detached, no tmux (build on demand). `EVALS_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
+    desc: Start the dev stack detached, no tmux (build on demand). `TESSARY_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
     cmds:
       - bash scripts/dev-up.sh
 
   dev:up:slim:
     desc: 'Like `dev:up` minus the classify + compile services — the non-tmux `dev:slim`. Runs postgres, backend, frontend, caddy, alloy.'
     env:
-      EVALS_SKIP_CLASSIFY: "1"
+      TESSARY_SKIP_CLASSIFY: "1"
     cmds:
       - bash scripts/dev-up.sh
 

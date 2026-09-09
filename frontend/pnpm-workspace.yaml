@@ -17,7 +17,7 @@ overrides:
   #
   # Carried deliberately because the advisory is unreachable here, and by a wider margin than
   # "build-time only" suggests: openapi-typescript is a devDependency, so it never reaches the
-  # browser bundle at all -- and `generate:api` feeds it evals-api.json, a checked-in JSON file.
+  # browser bundle at all -- and `generate:api` feeds it tessary-api.json, a checked-in JSON file.
   # The `!!omap` path this advisory is about parses no YAML in this repo, from any source, ever.
   # Revisit when redocly moves off 4.3.0.
   # es-toolkit 1.46.0 pin: 1.47.0 (recharts' transitive dep) emits require_-prefixed CJS vars that

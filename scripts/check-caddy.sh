@@ -61,7 +61,7 @@ echo "$P: every rendered configuration validates and every bad combination is re
 # `task dev` serves; both carry the same @backend matcher, and both are checked so a route added to
 # one alone cannot pass. The acme render is included because its site block repeats the matcher.
 python3 scripts/lib/caddy-proxies-spec.py \
-    backend/contract/src/main/resources/openapi/evals-api.json \
+    backend/contract/src/main/resources/openapi/tessary-api.json \
     Caddyfile "$TMP/localhost.caddy" "$TMP/acme.caddy" \
     || { echo "$P: RED  the proxy config does not match the open spec (see above)" >&2; exit 1; }
 echo "$P: ok   every operation in the open spec reaches the backend"

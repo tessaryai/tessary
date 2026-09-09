@@ -5,7 +5,7 @@
 #
 # With no argument it runs every check CI runs, cheapest first. With a comma-separated list of
 # SLICES it narrows to those: a slice is a backend product area (a package under
-# `ai.tessary.evals` in the test tree) or the literal `frontend`.
+# `ai.tessary` in the test tree) or the literal `frontend`.
 #
 #   bash scripts/check.sh                         # everything
 #   bash scripts/check.sh rca,metering            # those two backend areas, unit AND integration
@@ -504,13 +504,13 @@ _summary() {
 }
 
 
-# A slice is a package under ai.tessary.evals, and since the module split those packages are spread
+# A slice is a package under ai.tessary, and since the module split those packages are spread
 # across the reactor's modules — `rca` lives in analysis/, `storage` in substrate/, and every
 # @SpringBootTest for both lives in app/. So the areas are collected across ALL modules rather than
 # from one directory; a slice that resolved against only one module would silently miss most of its
 # tests. Adding a module needs no change here.
 _slice_dirs() {
-    find backend/*/src/test/java/ai/tessary/evals -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+    find backend/*/src/test/java/ai/tessary -mindepth 1 -maxdepth 1 -type d 2>/dev/null
 }
 
 # Every backend area that actually holds tests, one per line, summed across modules.
@@ -582,7 +582,7 @@ for slice in $(echo "$SLICES" | tr ',' ' '); do
     elif [ "$slice" = compile-service ]; then
         want_compile_service=1
     elif _slice_exists "$slice"; then
-        patterns="${patterns:+$patterns,}ai.tessary.evals.$slice.**"
+        patterns="${patterns:+$patterns,}ai.tessary.$slice.**"
     else
         bad="${bad:+$bad }$slice"
     fi

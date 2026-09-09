@@ -15,7 +15,7 @@
 #      stays `ai.tessary:*`, and the ban then does not match it — the guard passes while the
 #      property it exists to enforce is false. Rule 0 below is what makes the group id true.
 #   1. Java source text. A reference to a class that MOVED to the overlay does not compile, but it
-#      also does not mention `ai.tessary.paid` — Java packages here are `ai.tessary.evals.*` and the
+#      also does not mention `ai.tessary.paid` — Java packages here are `ai.tessary.*` and the
 #      group id never appears in source. So the text check has to be derived from what the overlay
 #      actually contains, not from the group id.
 #   2. The frontend, which has no Maven at all, and whose build aliases can point outside frontend/.
@@ -144,7 +144,7 @@ else
     if [ -n "$hardcoded" ]; then
         echo "ERROR: a dev-stack compose invocation names docker-compose.dev.yml directly instead of" >&2
         echo "       going through scripts/lib/dev-compose.sh. That is the base file ALONE, so in a" >&2
-        echo "       paid checkout it drops the eleven paid module mounts and both EVALS_SOP_COMPILE_*" >&2
+        echo "       paid checkout it drops the eleven paid module mounts and both TESSARY_SOP_COMPILE_*" >&2
         echo "       keys — and docker-compose.dev.yml pins 'name: tessary', so it targets the" >&2
         echo "       SAME project a running 'task dev' owns: compose sees a changed config hash and" >&2
         echo "       RECREATES the backend without the overlay, deactivating the in-container 'paid'" >&2
@@ -662,8 +662,8 @@ done
 # bean (open default in EditionConfig, displaced by tessary-paid/plan's PaidEdition). A literal "open"
 # or "paid" reappearing in either file is the regression that makes a paid build lie about itself
 # while every other gate stays green, so it reds here by name.
-for f in backend/product/src/main/java/ai/tessary/evals/plan/CapabilityService.java \
-         backend/surfaces/src/main/java/ai/tessary/evals/telemetry/TelemetryHeartbeat.java; do
+for f in backend/product/src/main/java/ai/tessary/plan/CapabilityService.java \
+         backend/surfaces/src/main/java/ai/tessary/telemetry/TelemetryHeartbeat.java; do
     [ -f "$f" ] || continue
     hits=$(grep -nE '"(open|paid)"' "$f" || true)
     if [ -n "$hits" ]; then

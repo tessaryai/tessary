@@ -42,7 +42,7 @@ the triggers below fires; until then, the answer is "tune Postgres."
 
 ## Configuration keys (this seam)
 
-**None.** There is no store-selection key and no interface behind one — `evals.storage.trace-store`
+**None.** There is no store-selection key and no interface behind one — `tessary.storage.trace-store`
 was reserved for a gate that never landed, and the `TraceStore` SPI it would have selected is gone.
 A key here is something the ClickHouse work would introduce along with the seam it selects, not
 something a deployment can set today.

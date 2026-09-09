@@ -109,7 +109,7 @@ jobs:
 
       - name: Run the detached self-host boot check
         # No secret here either — same #852/#996 rule as the job above. The four values the script
-        # mints (postgres user/password, EVALS_SECRET_KEY, EVALS_AUTH_COOKIE_PASSWORD) are
+        # mints (postgres user/password, TESSARY_SECRET_KEY, TESSARY_AUTH_COOKIE_PASSWORD) are
         # openssl-random and die with the job.
         run: bash scripts/check-open-boot-selfhost.sh
       - name: Prove the readiness signal can fail (epic 7 clause 4, #1189)

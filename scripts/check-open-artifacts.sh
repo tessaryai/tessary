@@ -51,7 +51,7 @@ if [ "$DERIVE" = 1 ]; then
     # The paid spec's location is the overlay's to know, not this script's: the Taskfile in a
     # checkout that has the overlay passes it in; a checkout without one has nothing to derive.
     PAID_SPEC="${OPEN_ARTIFACTS_PAID_SPEC:-}"
-    OPEN_SPEC="$ROOT/backend/contract/src/main/resources/openapi/evals-api.json"
+    OPEN_SPEC="$ROOT/backend/contract/src/main/resources/openapi/tessary-api.json"
     if [ -z "$PAID_SPEC" ] || [ ! -f "$PAID_SPEC" ]; then echo "$P: --derive needs OPEN_ARTIFACTS_PAID_SPEC to name the paid OpenAPI spec; none given, nothing to derive"; [ "$NEGATIVE" = 1 ] || [ "${#REFS[@]}" -gt 0 ] || exit 0; DERIVE=0; fi
   if [ "$DERIVE" = 1 ]; then
     fail=0
@@ -150,30 +150,30 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
     z.writestr("BOOT-INF/lib/launchdarkly-java-server-sdk-7.0.0.jar", b"PK")
 PY
         printf 'FROM %s\nUSER root\nCOPY planted.jar /app/lib/planted.jar\n' "$(_img backend)" \
-            | docker build -q -t "evals-planted-backend:$VERSION" -f - "$TMP" >/dev/null
-        PLANTED+=("evals-planted-backend:$VERSION")
-        if _diff backend "evals-planted-backend:$VERSION" >/dev/null; then echo "$P: FAIL, a planted fat jar with a nested paid class and LaunchDarkly jar passed" >&2; exit 1; fi
+            | docker build -q -t "tessary-planted-backend:$VERSION" -f - "$TMP" >/dev/null
+        PLANTED+=("tessary-planted-backend:$VERSION")
+        if _diff backend "tessary-planted-backend:$VERSION" >/dev/null; then echo "$P: FAIL, a planted fat jar with a nested paid class and LaunchDarkly jar passed" >&2; exit 1; fi
         echo "$P: negative ok: a planted fat jar (nested paid class + LaunchDarkly jar) in the backend image is red"
     fi
     if _has frontend; then
         printf 'FROM %s\nUSER root\nRUN printf "fetch(\\"/conformance/fit-report\\")" > /srv/planted.js\n' "$(_img frontend)" \
-            | docker build -q -t "evals-planted-frontend:$VERSION" -f - . >/dev/null
-        PLANTED+=("evals-planted-frontend:$VERSION")
-        if _diff frontend "evals-planted-frontend:$VERSION" >/dev/null; then echo "$P: FAIL, a planted paid route in the bundle passed" >&2; exit 1; fi
+            | docker build -q -t "tessary-planted-frontend:$VERSION" -f - . >/dev/null
+        PLANTED+=("tessary-planted-frontend:$VERSION")
+        if _diff frontend "tessary-planted-frontend:$VERSION" >/dev/null; then echo "$P: FAIL, a planted paid route in the bundle passed" >&2; exit 1; fi
         echo "$P: negative ok: a planted paid route in the frontend bundle is red"
     fi
     if _has sandbox-runner; then
         printf 'FROM %s\nUSER root\nRUN mkdir -p /app/paid && touch /app/paid/plan.jar\n' "$(_img sandbox-runner)" \
-            | docker build -q -t "evals-planted-sandbox-runner:$VERSION" -f - . >/dev/null
-        PLANTED+=("evals-planted-sandbox-runner:$VERSION")
-        if _diff sandbox-runner "evals-planted-sandbox-runner:$VERSION" >/dev/null; then echo "$P: FAIL, a planted overlay directory passed" >&2; exit 1; fi
+            | docker build -q -t "tessary-planted-sandbox-runner:$VERSION" -f - . >/dev/null
+        PLANTED+=("tessary-planted-sandbox-runner:$VERSION")
+        if _diff sandbox-runner "tessary-planted-sandbox-runner:$VERSION" >/dev/null; then echo "$P: FAIL, a planted overlay directory passed" >&2; exit 1; fi
         echo "$P: negative ok: a planted /app/paid directory in sandbox-runner is red"
     fi
     if _has agent-sandbox; then
         printf 'FROM %s\nUSER root\nRUN touch /home/user/frustration.onnx\n' "$(_img agent-sandbox)" \
-            | docker build -q -t "evals-planted-agent-sandbox:$VERSION" -f - . >/dev/null
-        PLANTED+=("evals-planted-agent-sandbox:$VERSION")
-        if _diff agent-sandbox "evals-planted-agent-sandbox:$VERSION" >/dev/null; then echo "$P: FAIL, a planted model weight passed" >&2; exit 1; fi
+            | docker build -q -t "tessary-planted-agent-sandbox:$VERSION" -f - . >/dev/null
+        PLANTED+=("tessary-planted-agent-sandbox:$VERSION")
+        if _diff agent-sandbox "tessary-planted-agent-sandbox:$VERSION" >/dev/null; then echo "$P: FAIL, a planted model weight passed" >&2; exit 1; fi
         echo "$P: negative ok: a planted model weight in agent-sandbox is red"
     fi
 fi

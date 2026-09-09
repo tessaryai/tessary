@@ -67,7 +67,7 @@
                                         <exclude>ai.tessary:app</exclude>
                                     </excludes>
                                     <message>
-                                        evals-contract is an OPEN module: it must not depend on the app
+                                        tessary-contract is an OPEN module: it must not depend on the app
                                         (`app`), which assembles the application above it. The paid
                                         overlay is banned separately, for every module, by
                                         `enforce-open-to-paid-direction` on the aggregator.

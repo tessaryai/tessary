@@ -9,11 +9,11 @@
 #   [3] caddy      caddy logs
 #
 # Open http://localhost:8000 once Spring Boot has booted (watch window 1
-# for "Started EvalsApplication"). The status bar at the bottom of tmux
+# for "Started TessaryApplication"). The status bar at the bottom of tmux
 # shows all four window names; the active one is highlighted.
 #
 # Session-local no-prefix shortcuts (defined in .tmux.conf at the repo root;
-# they only fire inside the evals-dev session and fall back to normal key
+# they only fire inside the tessary-dev session and fall back to normal key
 # behavior everywhere else):
 #   0 / 1 / 2 / 3   jump to window 0/1/2/3
 #   Tab / S-Tab     next / previous window
@@ -28,22 +28,22 @@
 # Mouse mode is enabled — click a window name in the bottom status bar to
 # switch windows, and drag-select to copy to the system clipboard.
 #
-# Re-attach later:    tmux attach -t evals-dev
+# Re-attach later:    tmux attach -t tessary-dev
 # Stop the stack:     C-e   (or `task dev:stop` from any shell)
 
 set -euo pipefail
 
-SESSION="evals-dev"
-# EVALS_PROFILING=1 (set by `task dev:profiling`) layers the continuous-profiling
+SESSION="tessary-dev"
+# TESSARY_PROFILING=1 (set by `task dev:profiling`) layers the continuous-profiling
 # overlay on top: a local Pyroscope container plus a -javaagent on the backend.
 # Unset, the compose invocation is byte-identical to what it has always been, so
 # the normal dev loop cannot regress from this.
-# Must use the SAME test as the jar fetch below (= "1"), not ${EVALS_PROFILING:+...}:
-# `:+` expands on any non-empty value, so EVALS_PROFILING=0 would mount the overlay
+# Must use the SAME test as the jar fetch below (= "1"), not ${TESSARY_PROFILING:+...}:
+# `:+` expands on any non-empty value, so TESSARY_PROFILING=0 would mount the overlay
 # (attaching -javaagent) while the fetch guard skipped the download — the backend JVM
 # then dies on a missing agent jar.
 PROFILING_COMPOSE=""
-if [ "${EVALS_PROFILING:-0}" = "1" ]; then PROFILING_COMPOSE=" -f docker-compose.profiling.yml"; fi
+if [ "${TESSARY_PROFILING:-0}" = "1" ]; then PROFILING_COMPOSE=" -f docker-compose.profiling.yml"; fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -65,10 +65,10 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-# Local agent backend (task dev:local → EVALS_LOCAL_AGENT=1): run the launcher on the HOST
+# Local agent backend (task dev:local → TESSARY_LOCAL_AGENT=1): run the launcher on the HOST
 # (against a locally installed `opencode`) instead of E2B, and auto-point the backend container
 # at it. Default OFF — when unset/0 everything below is skipped and plain `task dev` is unchanged.
-LOCAL_AGENT="${EVALS_LOCAL_AGENT:-0}"
+LOCAL_AGENT="${TESSARY_LOCAL_AGENT:-0}"
 if [ "$LOCAL_AGENT" = "1" ]; then
     # (a) Preflight: the host launcher starts `opencode` and shells out to `git`.
     if ! command -v opencode >/dev/null 2>&1; then
@@ -90,22 +90,22 @@ if [ "$LOCAL_AGENT" = "1" ]; then
     fi
     # (c) Auto-wire: export BEFORE `$COMPOSE up` so the backend container's compose-interpolated
     # environment picks these up (they outrank .env). The launcher window below uses the same key.
-    export EVALS_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080
+    export TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080
     # Key agreement: a container recreated OUTSIDE this wrapper (task rb, plain `docker compose
     # up -d backend`) interpolates the key from .env alone — so when .env declares one, use it as
     # the default here too, or the host launcher and any recreated backend silently disagree
     # (backend gets 401s). 'devkey' remains the last resort when neither the shell nor .env sets it.
-    if [ -z "${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}" ]; then
-        EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(sed -n 's/^EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1)"
+    if [ -z "${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}" ]; then
+        TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(sed -n 's/^TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1)"
     fi
-    export EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY="${EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-devkey}"
+    export TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-devkey}"
     # RCA rides the same host launcher (compose defaults its URL/key onto the observer's).
     # The analyzer runs on the HOST here, so the dev API origin is reachable for live MCP.
-    export EVALS_RCA_AGENTIC_MCP_BASE_URL="${EVALS_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}"
-    echo "dev:local — host launcher mode (local opencode, no E2B); backend → $EVALS_OBSERVER_AGENTIC_LAUNCHER_URL"
+    export TESSARY_RCA_AGENTIC_MCP_BASE_URL="${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}"
+    echo "dev:local — host launcher mode (local opencode, no E2B); backend → $TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL"
 fi
 
-# Continuous profiling (EVALS_PROFILING=1 → task dev:profiling / dev:local:profiling, or set it
+# Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling / dev:local:profiling, or set it
 # yourself in front of any dev task). The agent jar is fetched HERE rather than in the Taskfile so
 # profiling composes with every mode — dev, dev:local, dev:slim — instead of only the one task that
 # happened to carry the download step. Idempotent: re-running is a no-op once the jar exists.
@@ -113,7 +113,7 @@ fi
 # Version must match the agent pinned in backend/Dockerfile and the io.pyroscope:agent dependency
 # in backend/shared/pom.xml. The labels API is shared static state between the javaagent and the
 # app, so a skew makes the tessary_pool label silently vanish with no error.
-if [ "${EVALS_PROFILING:-0}" = "1" ]; then
+if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
     PYROSCOPE_AGENT_VERSION="2.8.0"
     PROFILER_DIR="$REPO_ROOT/.local/pyroscope"
     if [ ! -f "$PROFILER_DIR/pyroscope.jar" ]; then
@@ -124,14 +124,14 @@ if [ "${EVALS_PROFILING:-0}" = "1" ]; then
         if ! curl -fsSL -o "$PROFILER_DIR/pyroscope.jar.tmp" \
             "https://github.com/grafana/pyroscope-java/releases/download/v${PYROSCOPE_AGENT_VERSION}/pyroscope.jar"; then
             rm -f "$PROFILER_DIR/pyroscope.jar.tmp"
-            echo "error: could not download the pyroscope agent (network?). Re-run, or unset EVALS_PROFILING to start without profiling." >&2
+            echo "error: could not download the pyroscope agent (network?). Re-run, or unset TESSARY_PROFILING to start without profiling." >&2
             exit 1
         fi
         mv "$PROFILER_DIR/pyroscope.jar.tmp" "$PROFILER_DIR/pyroscope.jar"
     fi
     # Alloy is opt-in by default (#864, `profiles: ["observability"]` in docker-compose.dev.yml) —
     # profiling needs it up regardless (it's the relay to the local Pyroscope container, see
-    # docker-compose.profiling.yml), so an explicit EVALS_PROFILING=1 forces the profile on. Append
+    # docker-compose.profiling.yml), so an explicit TESSARY_PROFILING=1 forces the profile on. Append
     # rather than overwrite: a caller who already set COMPOSE_PROFILES (e.g. `launcher`) keeps it.
     case ",${COMPOSE_PROFILES:-}," in
         *,observability,*) ;;
@@ -146,7 +146,7 @@ if [ "${EVALS_PROFILING:-0}" = "1" ]; then
     echo "profiling ON — flame graphs at http://localhost:4040 once the backend has served some traffic."
 fi
 
-# Slim mode (task dev:slim → EVALS_SKIP_CLASSIFY=1). The derivation lives in the shared
+# Slim mode (task dev:slim → TESSARY_SKIP_CLASSIFY=1). The derivation lives in the shared
 # lib so `task dev:up`, which has no tmux session and so no scripts/dev.sh, skips the same
 # services rather than carrying a second copy of the list.
 # shellcheck source=lib/dev-services.sh
@@ -204,7 +204,7 @@ cat >> "$CHEATSHEET" <<EOF
                driving your local \`opencode\` (no E2B). Look for
                "listening on :8080 (backend=local)".
   Backend is auto-pointed at http://host.docker.internal:8080 (key
-  '$EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY'), so /analyze, /rca, /synthesize and
+  '$TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY'), so /analyze, /rca, /synthesize and
   /codegen run your local opencode. Jump to it with no-prefix '4'.
 EOF
 fi
@@ -242,7 +242,7 @@ tmux send-keys  -t "$SESSION:caddy" "$COMPOSE logs -f --no-log-prefix caddy" C-m
 if [ "$LOCAL_AGENT" = "1" ]; then
     tmux new-window -t "$SESSION" -n "launcher"
     tmux send-keys  -t "$SESSION:launcher" \
-        "cd '$REPO_ROOT/sandbox-runner/launcher' && SANDBOX_BACKEND=local SANDBOX_API_KEY='$EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY' PORT=8080 node server.js" C-m
+        "cd '$REPO_ROOT/sandbox-runner/launcher' && SANDBOX_BACKEND=local SANDBOX_API_KEY='$TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY' PORT=8080 node server.js" C-m
 fi
 
 # Session-local no-prefix bindings live in the project's .tmux.conf (repo root):

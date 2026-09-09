@@ -6,7 +6,7 @@ Imperative rules for any agent touching `backend/`. The backend is Spring Boot
 The reactor is eleven modules; dependencies flow downward only and Maven enforces it, so a module
 can only import what sits below it. Full rationale in [`devdocs/modules.md`](../devdocs/modules.md).
 
-- `shared/`, `contract/` — open foundation: `ai.tessary.evals.open.{errors,jobqueue,media,obs}` and
+- `shared/`, `contract/` — open foundation: `ai.tessary.open.{errors,jobqueue,media,obs}` and
   the checked-in canonical OpenAPI spec.
 - `test-support/` — `TestPostgres` + its context initializer. Test scope everywhere; holds only
   fixtures that depend on nothing in the platform, plus `OpenApiCanonicalizer`, the one canonical form both
@@ -26,7 +26,7 @@ can only import what sits below it. Full rationale in [`devdocs/modules.md`](../
 - There is no `evaluation/`. It held judge, run, compile, synth, regrade, experiment, review and
   annotation, and Track A deleted all of them; the reactor is eleven modules.
 - `surfaces/` — `query`, `search`, `mcp`, `ci`, `metering`, `billing`, `telemetry` (`slack`'s wire surface left for `tessary-paid/` in #920).
-- `app/` — `EvalsApplication`, `application.yaml`, and every `@SpringBootTest` integration test
+- `app/` — `TessaryApplication`, `application.yaml`, and every `@SpringBootTest` integration test
   (they need the `@SpringBootConfiguration` only this module has). A PAID `@SpringBootTest` lives in
   `tessary-paid/assembly`, which depends on this module's plain jar.
 
@@ -51,15 +51,15 @@ adding a package or a controller. Config-key map:
 ## Java rules
 
 - **NEVER use raw `Object` / `var` at API boundaries.** Strong types on records, controllers, services. The only place `Object` is acceptable is the `applies_to` field on `ImplicitInvariant` (polymorphic by design: string or list).
-- **Never throw raw `RuntimeException`** from services or controllers. Wrap with `EvalsException(ErrorCode, args)` so the wire response stays consistent.
+- **Never throw raw `RuntimeException`** from services or controllers. Wrap with `TessaryException(ErrorCode, args)` so the wire response stays consistent.
 - **Snake_case on the wire, camelCase in Java.** `@JsonProperty("snake_case")` on every record field that doesn't already match Jackson defaults. This is YAML-format compat — the `.tessary/` bundle and `curation.yaml` are the binding artifacts.
 - **JVM runtime + Project Loom (no native image).** Reflection and dynamic class loading just work — Jackson-bound records need no registration. Bias I/O-bound fan-out toward virtual threads, but keep a concurrency bound (a `SimpleAsyncTaskExecutor` concurrency limit or a `Semaphore`) on anything that hits a rate-limited upstream (Bedrock/Anthropic/GitHub) or the bounded JDBC pool — see `config/AsyncConfig`. Use only stable Loom APIs (`Executors.newVirtualThreadPerTaskExecutor()` / `SimpleAsyncTaskExecutor.setVirtualThreads(true)`); no preview `StructuredTaskScope`, no `--enable-preview`.
-- **All config via `@ConfigurationProperties`** (env-var prefix `EVALS_*` through relaxed binding). No hardcoded paths; no `@Value` outside narrow per-bean cases. The documented exceptions and the full prefix → class map live in [`docs/reference/config-keys.md`](../devdocs/reference/config-keys.md).
+- **All config via `@ConfigurationProperties`** (env-var prefix `TESSARY_*` through relaxed binding). No hardcoded paths; no `@Value` outside narrow per-bean cases. The documented exceptions and the full prefix → class map live in [`docs/reference/config-keys.md`](../devdocs/reference/config-keys.md).
 
 ## Error handling
 
-- **Every error path returns the `ApiResponse` envelope.** Never return `ResponseEntity.notFound()` / `.badRequest()` / bare HTTP statuses from a controller. Throw `EvalsException(ErrorCode, args)` and let `web/GlobalExceptionHandler` build the response.
-- **Hierarchical error codes**: per-domain enum implementing `ErrorCode`. Wire form is `<DOMAIN>.<NAME>` — the domain is auto-derived from the enum's declaring class (`PipelineError` → `PIPELINE`). The system lives in the **shared module**: `backend/shared/src/main/java/ai/tessary/evals/open/errors/` (`ErrorCode`, `EvalsException`, `ErrorCatalog`, all per-domain enums).
+- **Every error path returns the `ApiResponse` envelope.** Never return `ResponseEntity.notFound()` / `.badRequest()` / bare HTTP statuses from a controller. Throw `TessaryException(ErrorCode, args)` and let `web/GlobalExceptionHandler` build the response.
+- **Hierarchical error codes**: per-domain enum implementing `ErrorCode`. Wire form is `<DOMAIN>.<NAME>` — the domain is auto-derived from the enum's declaring class (`PipelineError` → `PIPELINE`). The system lives in the **shared module**: `backend/shared/src/main/java/ai/tessary/open/errors/` (`ErrorCode`, `TessaryException`, `ErrorCatalog`, all per-domain enums).
 - **Adding a new error domain**: create the enum in `open/errors/` (each constant: `(HttpStatus, "message template with %s")`), register it in `ErrorCatalog.REGISTERED`. Compiler enforces within-domain uniqueness; `ErrorCatalog`'s `@PostConstruct` enforces cross-domain uniqueness at boot.
 - **`@Valid @RequestBody`** at the controller boundary only. Services receive validated records and assume invariants — drop manual null/blank checks once a field has Jakarta constraints. The handler turns `MethodArgumentNotValidException` into `COMMON.VALIDATION_FAILED` with `details: { field: message }`.
 
@@ -79,7 +79,7 @@ Traces carry media through the whole pipeline (ingest → store → display → 
 
 - **There is no model-facing media boundary left.** Track A removed grading, and with it the judge's request build — the one place a `ContentBlock` was mapped into an LLM message, and the one place an unsupported block type was rejected (`JUDGE.UNSUPPORTED_CONTENT_TYPE` → 422) rather than silently flattened. `llm/ContentBlocks`, which did that mapping, had no caller afterwards and is deleted; `JudgeError.UNSUPPORTED_CONTENT_TYPE` / `MEDIA_NOT_FOUND` stay in the wire catalogue with nothing raising them. What survives is the ingest-and-read half: a new modality arrives by adding a routed case in `ContentExtractor`, never an unrouted `ContentBlock` constant. `ContentBlock.isMedia()` is the single source of truth for "is this a media block" (`isImage()`/`isDocument()` narrow to a specific modality — see their own doc for why they stay separate predicates).
 - **Producers emit media inline** (`data:` URI, raw base64 content block, or an `https://` URL) in `RawEntry`; `ingest/MediaResolver` resolves out-of-band provider media refs that still appear in some dialect payloads (e.g. legacy Langfuse/Braintrust token shapes) — always on, cheap no-op when a payload has no media. Large payloads externalize through the `MediaStore` SPI (`shared` `open/media/`, default `storage/PostgresMediaStore`) via `ingest/MediaExternalizer`, which also runs `open/media/PdfTextExtractor` once per document at ingest so the persisted `document_ref` node carries pre-extracted text.
-- **Every outbound media fetch passes `ingest/UrlGuard.requirePublicHttp`** (SSRF guard: rejects RFC1918, link-local, IMDS) and a streaming byte cap (`evals.ingest.*` bounds). `spring.servlet.multipart.max-file-size` is 25 MB (== `max-request-size`) so a JSONL row carrying a base64 image/document clears Tomcat before the parser runs.
+- **Every outbound media fetch passes `ingest/UrlGuard.requirePublicHttp`** (SSRF guard: rejects RFC1918, link-local, IMDS) and a streaming byte cap (`tessary.ingest.*` bounds). `spring.servlet.multipart.max-file-size` is 25 MB (== `max-request-size`) so a JSONL row carrying a base64 image/document clears Tomcat before the parser runs.
 - **Export fidelity (`ingest/export/TraceSpanMapper`)**: real bytes are inlined as a base64 `data:` URI in the existing plain-string content field for both images and documents where recoverable (inline base64 needs no store; a `_ref` block rehydrates via `MediaStore`), falling back to a labeled placeholder (`[image: <url>]` / `[document omitted: <mediaType>]`) + a `has_media:true` flag when they cannot be — lossless-or-labeled, never a silent collapse.
 
 ## Logging + observability conventions
@@ -112,10 +112,10 @@ SLF4J + Logback; the `production` profile ships JSON to Grafana Alloy → Loki. 
 
 Factual inventory: [`../devdocs/reference/auth-and-mcp.md`](../devdocs/reference/auth-and-mcp.md).
 
-- **WorkOS AuthKit** drives sign-in. Local AES-GCM sealed cookie session (`SessionCipher`, name `evals-session`, SameSite=Lax); no JWKS fetch on the request path — refresh against WorkOS only past expiry.
+- **WorkOS AuthKit** drives sign-in. Local AES-GCM sealed cookie session (`SessionCipher`, name `tessary-session`, SameSite=Lax); no JWKS fetch on the request path — refresh against WorkOS only past expiry.
 - **Tenancy model**: `app_user → org_membership → organization → project`. There is no scope below a project — Track A removed the `environment` concept outright. Every domain table carries `project_id NOT NULL`. Cross-project leaks are guarded by `TenantPathResolver` at the controller boundary — a controller resolves `resolver.requireProject(...)` before touching data.
 - **MCP + headless API** share one `api_key` store via `tenant/ApiKeyService` (`tsy_w_` / `tsy_q_` / `tsy_a_…`). Settings → MCP tokens and the plugin device-link mint admin-scoped keys; Settings → API keys mint scoped keys. `AuthFilter` populates `TenantContext`; every MCP tool reads `ctx.projectId()`.
-- **`AuthFilter.shouldNotFilter`** bypasses `/auth/login|callback|logout`, `/auth/link/start|poll` (plugin device handshake; the secret `device_code` is the credential), and `/actuator/health` plus its two probes, enumerated exactly — **not** the rest of `/actuator/`, **not** health groups/components (`show-details: always` must not publish `/actuator/health/db`), and **not** the bare `/actuator` index, which Spring Boot serves as a HAL listing of every exposed endpoint and which `startsWith("/actuator/")` does not match (#929). Widening `management.endpoints.web.exposure` therefore cannot widen the unauthenticated surface. `/mcp` is bearer-only (cookies ignored). Since #924 an unconfigured WorkOS does NOT by itself bypass anything: the filter additionally requires `EVALS_AUTH_DISABLED=true`, and without it every guarded path answers 401. Absent configuration is the normal state of an open-edition self-host, so it is not read as consent. In the `production` profile `AuthRequiredInProdGuard` still refuses to boot with no provider at all.
+- **`AuthFilter.shouldNotFilter`** bypasses `/auth/login|callback|logout`, `/auth/link/start|poll` (plugin device handshake; the secret `device_code` is the credential), and `/actuator/health` plus its two probes, enumerated exactly — **not** the rest of `/actuator/`, **not** health groups/components (`show-details: always` must not publish `/actuator/health/db`), and **not** the bare `/actuator` index, which Spring Boot serves as a HAL listing of every exposed endpoint and which `startsWith("/actuator/")` does not match (#929). Widening `management.endpoints.web.exposure` therefore cannot widen the unauthenticated surface. `/mcp` is bearer-only (cookies ignored). Since #924 an unconfigured WorkOS does NOT by itself bypass anything: the filter additionally requires `TESSARY_AUTH_DISABLED=true`, and without it every guarded path answers 401. Absent configuration is the normal state of an open-edition self-host, so it is not read as consent. In the `production` profile `AuthRequiredInProdGuard` still refuses to boot with no provider at all.
 - **Org membership** CRUD lives in `OrganizationController` (owner-gated; last-owner demotion/removal blocked). Inviting an email that has never authenticated creates a pending `org_invitation`, consumed into a membership on that address's first sign-in (`TenantService#consumePendingInvitations`, matched case-insensitively).
 - **Sign-up policy** (#1226): `SignupPolicyService#admit` runs after a provider has authenticated someone and before any principal, org or project exists for them, on all three creation paths (`POST /auth/signup` ahead of the password provider's insert, `POST /auth/login`'s first-time path, `GET /auth/callback`). Invariants: an existing principal is never refused; the first account is always admitted; a pending invitation admits in every mode; the policy is instance-wide and lives on the install's first organization's `settings.signupPolicy`, written only through `PUT /api/orgs/{slug}/signup-policy` (the raw settings PATCH refuses it). A refusal is `AUTH.SIGNUP_REFUSED` and writes nothing.
 
@@ -168,13 +168,13 @@ Record constructors/getters; controllers that are pure glue; framework wiring (`
 
 1. Add the method to the controller **in its feature slice** — never in `web/`. Return `ApiResponse<T>`; keep the handler thin, delegate to a service.
 2. Request-body record gets Jakarta constraints; the parameter takes `@Valid @RequestBody`.
-3. Throw `EvalsException(SomeError, args)` on failure — never error `ResponseEntity` shapes.
+3. Throw `TessaryException(SomeError, args)` on failure — never error `ResponseEntity` shapes.
 4. Snake_case field names via `@JsonProperty`.
 5. Regenerate the contract: `task contract:openapi`, then in `frontend/`: `pnpm run generate:api`; add the client method in `frontend/src/api/client.ts`.
 
 ### New error domain
 
-1. Create `backend/shared/src/main/java/ai/tessary/evals/open/errors/<Name>Error.java` — enum implementing `ErrorCode`; each constant `(HttpStatus, "template with %s")`.
+1. Create `backend/shared/src/main/java/ai/tessary/open/errors/<Name>Error.java` — enum implementing `ErrorCode`; each constant `(HttpStatus, "template with %s")`.
 2. Add `<Name>Error.class` to `ErrorCatalog.REGISTERED`.
 3. Throw at the call site — `GlobalExceptionHandler` maps it to the envelope automatically.
 

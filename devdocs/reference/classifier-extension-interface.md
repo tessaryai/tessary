@@ -58,7 +58,7 @@ route, into `tessary-paid/behavior-drift` — it is now an internal wiring detai
 classifier, not a cross-boundary extension point, so it is not in this table. See §8.
 
 The last three are #839's work and their contract is stated once, in
-`backend/analysis/src/main/java/ai/tessary/evals/classifier/finding/package-info.java`. This page does
+`backend/analysis/src/main/java/ai/tessary/classifier/finding/package-info.java`. This page does
 not restate those four rules in different words; it extends them to the write side. Read that file
 first.
 
@@ -144,7 +144,7 @@ with the windows it rotated, which describes progress there and means nothing an
 `@AutoConfiguration` class that `@ComponentScan`s its own package.
 
 This is the only mechanism that fits, and the constraint that forces it is worth stating plainly: the
-backend's scan root is `ai.tessary.evals`, so a bean in any other package is invisible to component
+backend's scan root is `ai.tessary`, so a bean in any other package is invisible to component
 scan, and the open build can never take a Maven dependency on an extension in order to see it. Boot's
 auto-configuration import is keyed on the **classpath** rather than on a package name or a build
 dependency — Boot reads that file out of every jar it can see — so neither side has to name the other.
@@ -164,7 +164,7 @@ during the parse phase and is present in time. `tessary-paid/plan`'s
 `PaidPlanAutoConfiguration` is the worked example and `PaidPlanAutoConfigurationTest` is the proof.
 
 **`@ConfigurationProperties` binds without help, but is not scanned without it.** A properties class
-outside `ai.tessary.evals` is not found by the host's `@ConfigurationPropertiesScan` — but once the
+outside `ai.tessary` is not found by the host's `@ConfigurationPropertiesScan` — but once the
 extension's own component scan registers it, the host's binding post-processor (which every Spring
 Boot application has) binds it. Do **not** add `@EnableConfigurationProperties` for a class the scan
 already registers: that is a second definition under a generated name and turns by-type injection
@@ -218,7 +218,7 @@ is, and what an extension inherits for free:
 - **A per-job lease.** A sweep runs inside a claimed `classifier_job` row with a lease owner and
   expiry, so a crashed process does not strand the job.
 - **An attempt budget and a dead-letter transition.** A sweep that throws is retried under
-  `evals.classifier.max-attempts`; exhausting it moves the job to `DEAD` with a cooldown, and that
+  `tessary.classifier.max-attempts`; exhausting it moves the job to `DEAD` with a cooldown, and that
   transition is the one ERROR-level log in the path. Below-cap failures are WARN and dedup to one
   stacktrace per streak.
 - **Kind isolation.** One classifier's failing job does not touch another's; each has its own row,
@@ -320,13 +320,13 @@ observation-grain dispatch.
 | `ClassifierSweep` for `sop_conformance` (WINDOW) | `ConformanceSweep` |
 | `TriageSource`, `@Order(10)` | `ConformanceTriageSource` |
 | `CaseSource` | `ConformanceCaseSource` (moved from the open `cases/` package with the classifier) |
-| `SopCompiler` (open, `ai.tessary.evals.sopcompile`; its caller is `tessary-paid/sop` since #842, so the port has two paid ends and open ground between them) | `compile/ConformanceCompileService` |
+| `SopCompiler` (open, `ai.tessary.sopcompile`; its caller is `tessary-paid/sop` since #842, so the port has two paid ends and open ground between them) | `compile/ConformanceCompileService` |
 | `FitReportSource` (paid, `tessary-paid/conformance`) | `ConformanceRulebookService` |
 
 **The asymmetry that used to be worth copying, and no longer applies.** Conformance was once the only
 whole-directory extraction whose package could not move entirely, and the reason was the wire, not the
 feature: `ConformanceController`, `ConformanceDtos` and the `FitReportSource` port stayed in the open
-`ai.tessary.evals.classifier.conformance`, because the checked-in OpenAPI spec was one document
+`ai.tessary.classifier.conformance`, because the checked-in OpenAPI spec was one document
 generated from the open application context and a route behind the boundary was a route deleted from
 that document. #917/#944 replaced that rule with a per-edition spec, and #918 rejoined all three with
 the rest of the classifier in `tessary-paid/conformance` — today there is no open/paid wire split left
@@ -382,7 +382,7 @@ mvn -B -f backend/pom.xml install -DskipTests
 mvn -f backend/pom.xml -pl app dependency:build-classpath -Dmdep.outputFile=/tmp/app.cp
 mvn -f /path/to/my-classifier/pom.xml dependency:build-classpath -Dmdep.outputFile=/tmp/mine.cp
 java -cp "backend/app/target/classes:$(cat /tmp/app.cp):my-classifier.jar:$(cat /tmp/mine.cp)" \
-     ai.tessary.evals.EvalsApplication
+     ai.tessary.TessaryApplication
 ```
 
 Boot reads the imports file out of `my-classifier.jar`, your auto-configuration scans your package,
@@ -478,12 +478,12 @@ that already has a home.
 ## 10. Configuration
 
 **Paid classifier configuration stays bound in the open `core` module, deliberately, and #841 left it
-there.** `ClassifierProperties` carries the whole `evals.classifier.conformance.*` block — encoder mode,
+there.** `ClassifierProperties` carries the whole `tessary.classifier.conformance.*` block — encoder mode,
 encoder concurrency, max turns per sweep, minimum confirmations — and `@ConfigurationPropertiesScan`
 binds it at boot in the open edition whether or not the classifier exists.
 
 The alternative is to move those keys into a paid `@ConfigurationProperties` class, which would make
-every existing deployment's `evals.classifier.conformance.*` value an unbound property the moment the
+every existing deployment's `tessary.classifier.conformance.*` value an unbound property the moment the
 open image shipped. Recorded as a deliberate exception: unused keys in the open image are inert, and
 silently unbound keys in a hosted one are not. Revisit at epic 5, where the two-edition build makes
 "which image binds which keys" a question with a mechanism behind it.
@@ -510,13 +510,13 @@ Two consequences the compiler will not warn you about:
 
   The direction matters and #841 proved it. The grep arms on the packages the OVERLAY holds, so it
   catches a reference written as the NEW name and never sees one written as the OLD name. Every
-  `ai.tessary.evals.classifier.conformance.*` string left in open prose survived that extraction
+  `ai.tessary.classifier.conformance.*` string left in open prose survived that extraction
   silently, pointing at a package that no longer exists, with the build green. `BuiltInDetector`'s own
   javadoc had claimed the grep would catch exactly that case; it now says the opposite, because a prose
   reference to a moved package is caught by nothing but a person reading the file.
 - **FQN-pinned ArchUnit rules are deleted by the extraction that moves their package, not
   re-pointed.** `ArchitectureRulesTest` pins class names as strings, and `backend/app` scans
-  `ai.tessary.evals` only, so a rule pointing at a moved class matches nothing and passes green
+  `ai.tessary` only, so a rule pointing at a moved class matches nothing and passes green
   guarding nothing. `every_pinned_class_name_resolves` exists because that already happened once. Its
   job transfers to the boundary grep, which arms itself on the new prefix.
 

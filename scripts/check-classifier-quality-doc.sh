@@ -60,7 +60,7 @@ for block in re.findall(r'<!--\s*pinned:(.*?)-->', doc, re.S):
 
 models = json.load(open(os.environ['CQ_MODELS'], encoding='utf-8'))
 catalog = open(
-    'backend/analysis/src/main/java/ai/tessary/evals/classifier/catalog/BuiltInClassifierCatalog.java',
+    'backend/analysis/src/main/java/ai/tessary/classifier/catalog/BuiltInClassifierCatalog.java',
     encoding='utf-8').read()
 
 

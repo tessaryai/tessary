@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Opt-out means silent (epic 7 clause 9, #1197): with EVALS_TELEMETRY_ENABLED=false and no operator
+# Opt-out means silent (epic 7 clause 9, #1197): with TESSARY_TELEMETRY_ENABLED=false and no operator
 # credential, a booted stack plus a full clause-2 rehearsal resolves and connects to nothing outside
 # the published permitted set, observed at three vantage points, and the instrument is proven able to
 # fail by a positive control and a planted call.
@@ -22,7 +22,7 @@
 #              assumption, that Docker's embedded DNS forwards only what it cannot answer itself to
 #              the `dns:` servers on the container's own networks, is the one the control arm and
 #              the plant re-prove on every run.
-#   --env-line EVALS_TELEMETRY_ENABLED=false, the opt-out the configuration page documents.
+#   --env-line TESSARY_TELEMETRY_ENABLED=false, the opt-out the configuration page documents.
 #   --after    the vantage assertions, run in the export after every documented step:
 #              1. compose network: the sink's log holds no name outside the permitted set;
 #              2. host daemon: `docker events` shows no image pull since the window opened;
@@ -31,7 +31,7 @@
 #                 either the page's own or on scripts/lib/served-page-named-hosts.txt (hosts the
 #                 bundle names without fetching, each with why), so a new origin anywhere in the
 #                 bundle is red whether or not a grep can prove a fetch;
-#              then the POSITIVE CONTROL: EVALS_TELEMETRY_ENABLED=true appended to .env, the backend
+#              then the POSITIVE CONTROL: TESSARY_TELEMETRY_ENABLED=true appended to .env, the backend
 #              recreated, and the sink must log home.tessary.ai (and nothing else new);
 #              then the PLANT: one outbound call from inside the backend, which the sink must see.
 #
@@ -67,7 +67,7 @@ echo "$P: permitted set, from the configuration page: $(printf '%s' "$PERMITTED"
 cp scripts/lib/dns-sink.js "$W/dns-sink.js"
 cat > "$W/docker-compose.override.yml" <<YAML
 networks:
-  evals:
+  tessary:
     internal: true
     ipam:
       config:
@@ -84,7 +84,7 @@ services:
     volumes:
       - $W/dns-sink.js:/dns-sink.js:ro
     networks:
-      evals:
+      tessary:
         ipv4_address: $SINK_IP
   postgres:
     dns: [$SINK_IP]
@@ -94,7 +94,7 @@ services:
     dns: [$SINK_IP]
   frontend:
     dns: [$SINK_IP]
-    networks: [evals, ingress]
+    networks: [tessary, ingress]
 YAML
 
 cat > "$W/after.sh" <<'AFTER'
@@ -112,7 +112,7 @@ names="$(_sink_names)"
 echo "$P: the sink was asked for: ${names:-nothing}" | tr '\n' ' '; echo
 bad="$(_unpermitted)"
 if [ -n "$bad" ]; then echo "$P: RED  names outside the permitted set were looked up with the opt-out set: $(printf '%s' "$bad" | tr '\n' ' ')" >&2; fail=1; else echo "$P: ok   nothing outside the permitted set was looked up during the boot and the rehearsal"; fi
-if printf '%s\n' "$names" | grep -qx 'home.tessary.ai'; then echo "$P: RED  home.tessary.ai was looked up although EVALS_TELEMETRY_ENABLED=false" >&2; fail=1; else echo "$P: ok   home.tessary.ai was never looked up with the opt-out set"; fi
+if printf '%s\n' "$names" | grep -qx 'home.tessary.ai'; then echo "$P: RED  home.tessary.ai was looked up although TESSARY_TELEMETRY_ENABLED=false" >&2; fail=1; else echo "$P: ok   home.tessary.ai was never looked up with the opt-out set"; fi
 
 echo "$P: --- vantage 2, the host daemon: no image pull since the window opened"
 since="$(cat "$TMP/.window-start")"
@@ -139,7 +139,7 @@ fi
 
 echo "$P: --- positive control: telemetry on, the sink must see home.tessary.ai"
 before="$(_sink_names)"
-printf 'EVALS_TELEMETRY_ENABLED=true\n' >> .env
+printf 'TESSARY_TELEMETRY_ENABLED=true\n' >> .env
 docker compose up -d >/dev/null 2>&1
 # The heartbeat fires 5 to 30 s after the scheduler starts, so the budget starts at backend healthy.
 . scripts/lib/open-boot-lib.sh
@@ -165,5 +165,5 @@ chmod +x "$W/after.sh"
 printf '%s\n' "$PERMITTED" > "$W/permitted.txt"
 export PERMITTED_FILE="$W/permitted.txt"
 
-bash scripts/check-selfhost-quickstart.sh $BUILD --overlay "$W/docker-compose.override.yml" --env-line EVALS_TELEMETRY_ENABLED=false --after "$W/after.sh"
+bash scripts/check-selfhost-quickstart.sh $BUILD --overlay "$W/docker-compose.override.yml" --env-line TESSARY_TELEMETRY_ENABLED=false --after "$W/after.sh"
 echo "$P: ok, opt-out means silent: no name outside the permitted set at any vantage point, and the instrument saw both the control and the plant"

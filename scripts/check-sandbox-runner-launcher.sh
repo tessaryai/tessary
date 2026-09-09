@@ -49,7 +49,7 @@ node --test
 node - "$ROOT" <<'PARITY'
 const fs = require('fs');
 const root = process.argv[2];
-const java = fs.readFileSync(root + '/backend/llm-runtime/src/main/java/ai/tessary/evals/llm/PlatformCatalog.java', 'utf8');
+const java = fs.readFileSync(root + '/backend/llm-runtime/src/main/java/ai/tessary/llm/PlatformCatalog.java', 'utf8');
 const js = fs.readFileSync(root + '/sandbox-runner/launcher/server.js', 'utf8');
 
 const MODE_CONST = { OPENAI: 'OPENAI_COMPAT_MODE', ANTHROPIC: 'ANTHROPIC_MODE', OPENROUTER: 'OPENROUTER_MODE',

@@ -130,15 +130,15 @@ task dev:local
 
 This runs the normal Docker stack **plus** a 5th tmux window (`launcher`) running the
 host launcher in local mode, and auto-points the backend container at it
-(`EVALS_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080`, key `devkey`
-unless `EVALS_OBSERVER_AGENTIC_LAUNCHER_API_KEY` is set). It installs the host analyzer
+(`TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080`, key `devkey`
+unless `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` is set). It installs the host analyzer
 deps (`sandbox-runner/agent-sandbox/node_modules`) on first run. Plain `task dev` is unchanged (E2B path, no launcher window).
 
 > **Note (Linux):** the backend container reaches the host launcher via
 > `host.docker.internal`, which resolves out-of-the-box on Docker Desktop (macOS/Windows) —
 > the platform the documented `task dev:local` workflow targets. On a **native Linux** Docker
 > engine that hostname may not resolve; add an `extra_hosts: ["host.docker.internal:host-gateway"]`
-> mapping to the backend service (or point `EVALS_OBSERVER_AGENTIC_LAUNCHER_URL` at the host's
+> mapping to the backend service (or point `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` at the host's
 > IP) for it to work there.
 
 ## Docker sandbox driver (D7, `SANDBOX_BACKEND=docker`, the default) — #855
@@ -160,8 +160,8 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   it reasons about through that door, and #855's original unconditional cut-off left it no route
   there except the public origin, which a localhost `docker compose up` does not have. Set
   `SANDBOX_NETWORK_ISOLATION=1` to restore that cut-off: siblings then run on a dedicated bridge
-  (`DOCKER_SANDBOX_NETWORK`, never the `evals` service network), and such an install must set
-  `SITE_DOMAIN` and point `EVALS_RCA_AGENTIC_MCP_BASE_URL` at that public origin, because there is
+  (`DOCKER_SANDBOX_NETWORK`, never the `tessary` service network), and such an install must set
+  `SITE_DOMAIN` and point `TESSARY_RCA_AGENTIC_MCP_BASE_URL` at that public origin, because there is
   no longer an internal route. The trade is explicit both ways: isolation off means a sibling can
   address `postgres` and the other internal services directly, not only the MCP port.
 - **Concurrency:** `SANDBOX_DOCKER_CONCURRENCY` (default `1`, per D7) — an in-process semaphore

@@ -760,9 +760,9 @@ Windowed distribution drift on duration and cost. Same signal-slice convention �
 | Table | Purpose |
 |---|---|
 
-| `retention_policy` | Per-class TTLs: `data_class` (traces/detections — `0016` narrowed the CHECK when the verdict class lost its table, `0017`/#1116 narrowed it again when the embeddings class lost its), `ttl_days`, `cold_after_days`. **Enforced hourly by `RetentionSweeper`**, overriding the `evals.retention.*` platform defaults (90 days each); `ttl_days = 0` keeps forever. |
+| `retention_policy` | Per-class TTLs: `data_class` (traces/detections — `0016` narrowed the CHECK when the verdict class lost its table, `0017`/#1116 narrowed it again when the embeddings class lost its), `ttl_days`, `cold_after_days`. **Enforced hourly by `RetentionSweeper`**, overriding the `tessary.retention.*` platform defaults (90 days each); `ttl_days = 0` keeps forever. |
 
-> **Sampling is gone.** `0016` dropped `sampling_policy` with `SamplingGate` and `evals.ingest.sampling.*`. Every span a producer sends is ingested; a customer who wants less sends less.
+> **Sampling is gone.** `0016` dropped `sampling_policy` with `SamplingGate` and `tessary.ingest.sampling.*`. Every span a producer sends is ingested; a customer who wants less sends less.
 
 ### Unified job queue
 | Table | Purpose |

@@ -65,7 +65,7 @@ From a clone, `docker compose up -d` runs the same stack from the file in this r
 A default install sends one anonymous heartbeat to `home.tessary.ai`, once when the backend starts and then every 24 hours. It carries a schema version and a timestamp, an install id (a random UUID minted at first boot and kept in the database), the edition, the app version, the host OS family and CPU architecture, and coarse bucketed counts of orgs, projects and daily trace volume. It never carries trace or prompt content, an email address, an org or project name, a hostname, or a retained IP address. That heartbeat is the only outbound destination a default install has.
 
 ```bash
-EVALS_TELEMETRY_ENABLED=false
+TESSARY_TELEMETRY_ENABLED=false
 ```
 
 Set that in `.env` and the instance makes no outbound call to that host, DNS lookups included, and loses nothing: no feature, license check or in-app behaviour depends on the heartbeat reaching us. Because the install id lives in the database, a reinstall on a fresh volume counts as a new install on our side; that is the extent of what we can tell apart. The field-by-field contract is [`devdocs/reference/telemetry-contract.md`](./devdocs/reference/telemetry-contract.md), and the self-hoster's explanation is the Telemetry section of [Configuration](./docs/self-hosting/configuration.mdx).
@@ -108,14 +108,14 @@ corepack enable
 
 task node:install     # every Node package; `task frontend:install` for just the frontend
 
-# The backend needs a Postgres 16 with pgvector reachable via EVALS_JDBC_URL, e.g. a local
+# The backend needs a Postgres 16 with pgvector reachable via TESSARY_JDBC_URL, e.g. a local
 # `pgvector/pgvector:pg16` container, or `task dev:up` to run just the compose Postgres.
 # (The backend test suite always requires Docker: it uses a pgvector Testcontainers database.)
-export EVALS_JDBC_URL=jdbc:postgresql://localhost:5433/evals
-export EVALS_DB_USERNAME=evals EVALS_DB_PASSWORD=evals
+export TESSARY_JDBC_URL=jdbc:postgresql://localhost:5433/tessary
+export TESSARY_DB_USERNAME=tessary TESSARY_DB_PASSWORD=tessary
 
 # three terminals:
-task backend       # :8080 (connects to EVALS_JDBC_URL)
+task backend       # :8080 (connects to TESSARY_JDBC_URL)
 task frontend      # :5173
 task caddy         # :8000
 ```

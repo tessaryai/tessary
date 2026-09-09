@@ -16,7 +16,7 @@
 # (Xenova/bart-large-mnli) is public and always bakes. A build that supplies the token
 # gets all 3 heads, exactly as before:
 #   HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-#     --platform linux/arm64 -t <ecr>/evals-classify:<sha> .
+#     --platform linux/arm64 -t <ecr>/tessary-classify:<sha> .
 #
 # Omitting --secret id=hf_token entirely is a SUPPORTED keyless build (#877, for the
 # open-core edition): the mount below has no `required=true`, so it already tolerates a

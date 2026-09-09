@@ -29,7 +29,7 @@ deliberately defers (see §3).
 
 `PostgresMediaStore` stays the only storage-backing `MediaStore` implementation (`CachingMediaStore` is a
 decorator — an in-memory read cache in front of it, not an alternate backend; see §3). A 2026-09-02 comment on #987 proposed a
-storage-backend selector (`evals.media.store`: `filesystem` default, `postgres`, `s3`) with Range-serving
+storage-backend selector (`tessary.media.store`: `filesystem` default, `postgres`, `s3`) with Range-serving
 and per-modality caps — **not adopted**. The `MediaStore` interface already isolates this choice behind a
 seam an object store could fill later without touching callers or the schema; PDF sizes don't force that
 now the way audio/video would, and building a filesystem/S3 backend for a modality that fits comfortably
@@ -37,7 +37,7 @@ in a `bytea` column is scope the gate doesn't require (Rule 6).
 
 ## 3. Size limit: one shared 8 MiB cap, not an inherited one
 
-`evals.ingest.max-media-bytes` (default 8 MiB, tuned for images) now bounds documents too. No new config
+`tessary.ingest.max-media-bytes` (default 8 MiB, tuned for images) now bounds documents too. No new config
 key was added — Decision 3 asked to state the resulting limit, not build a new one, and Rule 6 disfavors
 config surface the gate doesn't require.
 
@@ -51,7 +51,7 @@ by this contract. When audio/video needs headroom beyond a `bytea`-friendly size
 object-store `MediaStore` implementation is due, not a reason to raise this cap past what Postgres should
 carry.
 
-`CachingMediaStore`'s in-memory read cache (`evals.media.cache.max-bytes`, 64 MiB default) sits in front
+`CachingMediaStore`'s in-memory read cache (`tessary.media.cache.max-bytes`, 64 MiB default) sits in front
 of storage and was previously undocumented — see [`config-keys.md`](./config-keys.md). It was sized for
 image-scale objects (a handful of images per grader call); a document up to the 8 MiB ingest cap fits the
 same budget without resizing it.

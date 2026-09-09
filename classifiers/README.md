@@ -104,7 +104,7 @@ loopback once:
 
 Then `task dev:up` (or `docker compose -f docker-compose.dev.yml up -d classify` to recreate just
 that container) and point scripts at it with `CLASSIFY_URL=http://localhost:18080` and
-`CLASSIFY_API_KEY=dev-classify-key` (which must match `EVALS_OBSERVER_ENCODER_API_KEY` /
+`CLASSIFY_API_KEY=dev-classify-key` (which must match `TESSARY_OBSERVER_ENCODER_API_KEY` /
 compose's dev default). This mapping is dev-only and loopback-bound — never add it to the prod
 compose or the ECS task definition.
 

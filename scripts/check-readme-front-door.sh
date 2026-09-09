@@ -44,7 +44,7 @@ README=README.md
 DOC=docs/self-hosting/setup.mdx
 ENV_EXAMPLE=.env.example
 APP_YAML=backend/app/src/main/resources/application.yaml
-CLIENT=backend/core/src/main/java/ai/tessary/evals/telemetry/HomeTessaryClient.java
+CLIENT=backend/core/src/main/java/ai/tessary/telemetry/HomeTessaryClient.java
 fail=0
 # The command the marketing site publishes verbatim, and therefore the one the front door must
 # lead with. Kept as one literal so this file and scripts/check-compose-artifact.sh cannot disagree
@@ -86,7 +86,7 @@ while IFS= read -r line; do
 done < <(_fences "$README" | grep -E '^docker compose ' || true)
 
 echo "$P: --- 2. the opt-out key and the heartbeat host resolve"
-key="$(grep -oE 'EVALS_TELEMETRY_[A-Z_]+' "$README" | sort -u || true)"
+key="$(grep -oE 'TESSARY_TELEMETRY_[A-Z_]+' "$README" | sort -u || true)"
 if [ "$(printf '%s\n' "$key" | grep -c .)" -ne 1 ]; then echo "$P: RED  the README names $(printf '%s\n' "$key" | grep -c .) telemetry keys, wanted exactly one" >&2; fail=1; fi
 for k in $key; do
     if grep -qE "^#? ?$k=" "$ENV_EXAMPLE"; then echo "$P: ok   $k is in $ENV_EXAMPLE"; else echo "$P: RED  $k is not in $ENV_EXAMPLE" >&2; fail=1; fi
@@ -123,7 +123,7 @@ if [ "$NEGATIVE" = 1 ]; then
     echo "$P: --- negative: three planted faults must each be red"
     T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
     for f in "$README" "$DOC" "$ENV_EXAMPLE" "$APP_YAML" "$CLIENT" frontend/src/shell/nav.tsx; do mkdir -p "$T/$(dirname "$f")"; cp "$f" "$T/$f"; done
-    sed -i.bak 's/EVALS_TELEMETRY_ENABLED/EVALS_TELEMETRY_RENAMED/g' "$T/$README"
+    sed -i.bak 's/TESSARY_TELEMETRY_ENABLED/TESSARY_TELEMETRY_RENAMED/g' "$T/$README"
     if bash "$SELF" --root="$T" >/dev/null 2>&1; then echo "$P: FAIL, a renamed opt-out key passed" >&2; exit 1; fi
     echo "$P: negative ok: a renamed opt-out key is red"; cp "$README" "$T/$README"
     python3 - "$T/$README" <<'PY'

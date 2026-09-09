@@ -35,16 +35,16 @@ id = "tessary-sealing-key"
 description = "A session or secret-box sealing key assigned to its environment name (44-char base64); the two shipped placeholders are public by design and excluded"
 # The value may sit directly after the name, or inside a compose default (`NAME: ${NAME:-value}`),
 # which is exactly how docker-compose.yml carries these keys.
-regex = '''(?i)\b(EVALS_AUTH_COOKIE_PASSWORD|EVALS_SECRET_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9+/]{43}=)'''
+regex = '''(?i)\b(TESSARY_AUTH_COOKIE_PASSWORD|TESSARY_SECRET_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9+/]{43}=)'''
 secretGroup = 2
-keywords = ["EVALS_AUTH_COOKIE_PASSWORD", "EVALS_SECRET_KEY"]
+keywords = ["TESSARY_AUTH_COOKIE_PASSWORD", "TESSARY_SECRET_KEY"]
 [rules.allowlist]
 regexes = ['''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=''', '''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtc2VhbCE=''']
 
 [[rules]]
 id = "tessary-service-key"
 description = "A service-to-service bearer (classify, compile, slack, sandbox launcher), either side of each symmetric pair, assigned to its environment name: 32+ hex or 40+ base64 characters; the shipped launcher placeholder is public by design and excluded"
-regex = '''(?i)\b(CLASSIFY_API_KEY|COMPILE_SERVICE_KEY|SLACK_SERVICE_KEY|SANDBOX_API_KEY|EMBED_API_KEY|EVALS_COMPILE_SERVICE_KEY|EVALS_SOP_COMPILE_API_KEY|EVALS_OBSERVER_ENCODER_API_KEY|EVALS_(?:OBSERVER|RCA)_AGENTIC_LAUNCHER_API_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Fa-f0-9]{32,}|[A-Za-z0-9+/=_-]{40,})'''
+regex = '''(?i)\b(CLASSIFY_API_KEY|COMPILE_SERVICE_KEY|SLACK_SERVICE_KEY|SANDBOX_API_KEY|EMBED_API_KEY|TESSARY_COMPILE_SERVICE_KEY|TESSARY_SOP_COMPILE_API_KEY|TESSARY_OBSERVER_ENCODER_API_KEY|TESSARY_(?:OBSERVER|RCA)_AGENTIC_LAUNCHER_API_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Fa-f0-9]{32,}|[A-Za-z0-9+/=_-]{40,})'''
 secretGroup = 2
 keywords = ["CLASSIFY_API_KEY", "COMPILE_SERVICE_KEY", "SLACK_SERVICE_KEY", "SANDBOX_API_KEY", "EMBED_API_KEY", "LAUNCHER_API_KEY", "ENCODER_API_KEY", "SOP_COMPILE_API_KEY"]
 
@@ -59,10 +59,10 @@ regexes = ['''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo''']
 id = "tessary-db-password"
 description = "The database password assigned to its environment name with any value but the public compose placeholder"
 # The value may not begin with `$`: `${VAR}`, `$$VAR` and `$(command)` are references, not values.
-regex = '''(?i)\b(POSTGRES_PASSWORD|EVALS_DB_PASSWORD)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9!@#%^&*_+=\-./]{8,})'''
+regex = '''(?i)\b(POSTGRES_PASSWORD|TESSARY_DB_PASSWORD)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9!@#%^&*_+=\-./]{8,})'''
 secretGroup = 2
-keywords = ["POSTGRES_PASSWORD", "EVALS_DB_PASSWORD"]
-# Allowlist regexes are matched against the secret group alone. The public placeholder `evals` is
+keywords = ["POSTGRES_PASSWORD", "TESSARY_DB_PASSWORD"]
+# Allowlist regexes are matched against the secret group alone. The public placeholder `tessary` is
 # already shorter than the eight characters a value needs, so this row is a statement, not a filter.
 [rules.allowlist]
-regexes = ['''^evals$''']
+regexes = ['''^tessary$''']

@@ -8,7 +8,7 @@ import { Button, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, u
 
 /**
  * Settings → Data retention (#1205). How long this project keeps traces and classifier detections.
- * The install default comes from the deployment's environment (`EVALS_RETENTION_*_TTL_DAYS`); each
+ * The install default comes from the deployment's environment (`TESSARY_RETENTION_*_TTL_DAYS`); each
  * class here can override it, and clearing the override returns to the default. 0 keeps forever.
  */
 

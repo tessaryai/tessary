@@ -9,13 +9,13 @@ Code lives in [`../../claude-skill/evals-mcp/README.md`](../../claude-skill/eval
 
 | Surface | Credential | Notes |
 |---|---|---|
-| Browser UI | WorkOS AuthKit (BYO) or built-in email/password (open-edition default, `PasswordAuthProvider`) → local AES-GCM sealed cookie (`evals-session`) | Cookie preferred on `/api/**`; no JWKS on the hot path |
+| Browser UI | WorkOS AuthKit (BYO) or built-in email/password (open-edition default, `PasswordAuthProvider`) → local AES-GCM sealed cookie (`tessary-session`) | Cookie preferred on `/api/**`; no JWKS on the hot path |
 | Headless REST | `Authorization: Bearer` API key | Managed in Settings → API keys; scopes `write` / `query` / `admin` |
 | MCP (`POST /mcp`) | Same bearer store; cookies ignored | Minted in Settings → MCP tokens (admin-scoped) or plugin device-link |
 | Device-link | `/auth/link/start\|poll` + browser confirm | Bypasses cookie auth; the `device_code` is the credential until exchange |
 | Actuator | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` | Exactly these three, so orchestrators can poll before anything holds a credential. Every other actuator path requires auth (#929) — health groups, the bare `/actuator` index, and anything added to `management.endpoints.web.exposure`. Exposing an endpoint does not publish it |
 
-`AuthFilter` bypasses every request **only when `EVALS_AUTH_DISABLED=true` is set** (#924,
+`AuthFilter` bypasses every request **only when `TESSARY_AUTH_DISABLED=true` is set** (#924,
 re-decided by #852) — unconditionally, regardless of which `AuthProvider` (WorkOS or the
 always-enabled `PasswordAuthProvider`) is active. Absent that flag, every guarded path fails
 CLOSED and answers 401: an unconfigured WorkOS is the normal state of a self-hosted open-edition

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "generate:api": "openapi-typescript ../backend/contract/src/main/resources/openapi/evals-api.json -o src/api/generated/schema.d.ts",
+    "generate:api": "openapi-typescript ../backend/contract/src/main/resources/openapi/tessary-api.json -o src/api/generated/schema.d.ts",
     "generate:routes": "node scripts/generate-route-manifest.mjs"
   },
   "dependencies": {

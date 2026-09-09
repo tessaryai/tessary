@@ -15,9 +15,9 @@ which is why "is ingest healthy?" had no answer that was not a shrug.
 | # | Objective | Number | Where it comes from |
 |---|---|---|---|
 | O1 | **Accepted-write latency** — `POST /v1/traces` returns without writing to the substrate | p99 < 250 ms | in `memory` mode `enqueue` is a non-blocking hand-off; in `kafka` mode it waits for the broker's acknowledgement, bounded by `publish-timeout-ms`. The request thread never writes to Postgres, never redacts |
-| O2 | **Sustained drain rate** — spans persisted per second, single instance | ≥ 200 spans/s | the write path's stated drain budget, exercised by `SubstrateWriteIntegrationTest` against the reference Postgres; in `kafka` mode the drain runs `evals.ingest.spool.kafka.consumers` drainers, so it scales with cores |
+| O2 | **Sustained drain rate** — spans persisted per second, single instance | ≥ 200 spans/s | the write path's stated drain budget, exercised by `SubstrateWriteIntegrationTest` against the reference Postgres; in `kafka` mode the drain runs `tessary.ingest.spool.kafka.consumers` drainers, so it scales with cores |
 | O3 | **Shed rate** — batches dropped because the queue was full | 0 over any 5-minute window under normal load | `ingest.throughput` field `shed_batches` |
-| O4 | **Spool lag** — accepted data is reaching the substrate | `spool_oldest_age_ms` under `evals.ingest.spool.max-lag-ms` | `ingest.throughput` fields `spool_oldest_age_ms`, `queue_bytes`, `queue_max_bytes`; `oldestAgeMs` on the `/actuator/health/ingest` group (platform staff) |
+| O4 | **Spool lag** — accepted data is reaching the substrate | `spool_oldest_age_ms` under `tessary.ingest.spool.max-lag-ms` | `ingest.throughput` fields `spool_oldest_age_ms`, `queue_bytes`, `queue_max_bytes`; `oldestAgeMs` on the `/actuator/health/ingest` group (platform staff) |
 | O5 | **Write failures** — batches that exhausted their retries | 0 | `ingest.throughput` field `failed_batches` |
 | O6 | **Ingest availability** — the front door answers | ≥ 99.5% non-5xx on `/v1/traces` | `http_server_requests_seconds_count{uri="/v1/traces"}` |
 
@@ -34,21 +34,21 @@ regression behind a detector's normal slowness.
 ### The degradation contract
 
 Ingest buffers accepted batches in an `IngestSpool` (#984): the in-process spool by default, or the
-Kafka-API spool (`KafkaSpool`, #1299) when `evals.ingest.spool.mode=kafka` names a broker, the bundled
+Kafka-API spool (`KafkaSpool`, #1299) when `tessary.ingest.spool.mode=kafka` names a broker, the bundled
 Redpanda under `docker compose --profile kafka` being the shipped one. The contract differs by mode, so
 the first thing to know about an install is which one it runs
-(`evals.ingest.spool.mode`, `spool_mode` on the throughput line, `spool` on the
+(`tessary.ingest.spool.mode`, `spool_mode` on the throughput line, `spool` on the
 `/actuator/health/ingest` group, which is platform-staff only like every management path):
 
 | Mode | Accepted (200) means | On restart | Shed means |
 |---|---|---|---|
 | `memory` (default) | queued in this process, bounded by `queue-max-bytes` | what was queued is lost; the producer was told 200 and is not told again | the byte budget is full; `503 + Retry-After` |
-| `kafka` (opt-in, a Kafka-API broker) | persisted by the broker before the response, on as many disks as `evals.ingest.spool.kafka.replication-factor` asks for | nothing acknowledged is lost; the consumer resumes from the last ack | the broker refused the publish (down, or at its storage cap); `503 + Retry-After` |
+| `kafka` (opt-in, a Kafka-API broker) | persisted by the broker before the response, on as many disks as `tessary.ingest.spool.kafka.replication-factor` asks for | nothing acknowledged is lost; the consumer resumes from the last ack | the broker refused the publish (down, or at its storage cap); `503 + Retry-After` |
 
 The bundled Redpanda is one node, so the spool creates its topics at `replication-factor` 1 — an
 acknowledged batch is on one disk, and that node's loss is data loss even though the producer was told
 200. Pointing `bootstrap-servers` at a real multi-broker cluster is the case the key exists for: set
-`evals.ingest.spool.kafka.replication-factor=3` there BEFORE the first boot, because the value is
+`tessary.ingest.spool.kafka.replication-factor=3` there BEFORE the first boot, because the value is
 applied at topic creation and an existing topic keeps whatever it was made with (`rpk topic alter-config`
 and a partition reassignment are what change one after the fact). Above 1 the spool also sets
 `min.insync.replicas=2`, so `acks=all` means two copies rather than a leader acknowledging alone while
@@ -56,7 +56,7 @@ its followers lag.
 
 In both modes a drainer does the same work: claim, redact, write, ack. `memory` mode runs one
 drainer (same-project batches must not race each other); `kafka` mode runs
-`evals.ingest.spool.kafka.consumers` of them (default 4), each a member of the consumer group, so
+`tessary.ingest.spool.kafka.consumers` of them (default 4), each a member of the consumer group, so
 the broker spreads the partitions across them and one project's partition is drained by exactly one
 at a time. Measured (`KafkaSpoolIntegrationTest`, 2,000 spans over 8 projects, laptop Postgres): 4
 drainers drained the same burst 2.2x faster than 1 (the test only gates that 4 is not slower than 1 by
@@ -66,7 +66,7 @@ drainer count, is what caps the ratio, so raise `consumers` with cores, never pa
 `/actuator/health/ingest` group is the one number that answers "is accepted data reaching the substrate":
 `oldestAgeMs` is the age of the oldest unprocessed batch, `deadLettered` counts batches that
 exhausted their retries, and the component is DOWN when any drainer is dead (`drainersAlive` of `drainers` says which count) or `oldestAgeMs`
-passes `evals.ingest.spool.max-lag-ms`.
+passes `tessary.ingest.spool.max-lag-ms`.
 
 In `memory` mode ingest is designed to **shed rather than block, and to say so on the wire**. When the hand-off queue
 fills, the batch is dropped, the counter moves, and a WARN names the project and span count:
@@ -148,7 +148,7 @@ Both are part of the write path, not optional extras, and both are on by default
   otherwise invisible: every trace surface keeps serving the last numbers written, with no gap and no
   error.
 
-Both have kill switches (`evals.ingest.substrate.rollup-enabled`, and the reaper's own cadence keys —
+Both have kill switches (`tessary.ingest.substrate.rollup-enabled`, and the reaper's own cadence keys —
 see [config-keys.md](../reference/config-keys.md)). Turning the worker off leaves the deadlines armed on
 the rows, so turning it back on drains the backlog rather than losing it.
 
@@ -166,7 +166,7 @@ Start here. Each branch ends in an action, not an observation.
      `docs/self-hosting/setup.mdx` § *Confirm traces are arriving*; the three usual causes are the wrong
      endpoint suffix, `X-Api-Key` instead of `Authorization: Bearer`, and the gRPC port.
    - `401` → revoked token or a token for a different project.
-   - `404` → the deployment is `evals.ingest.otlp.transport=grpc` and the HTTP route is off. Check the
+   - `404` → the deployment is `tessary.ingest.otlp.transport=grpc` and the HTTP route is off. Check the
      config, not the customer.
    - `2xx` but nothing visible in the product → the writes are being accepted and lost downstream. Go
      to the next question.
@@ -179,7 +179,7 @@ Start here. Each branch ends in an action, not an observation.
 3. **Were they written and then deleted?** Loki: `event="retention.deleted"` for that project. A TTL
    shorter than the window someone is looking at will do this and look exactly like ingest loss. Check
    the effective policy: `SELECT * FROM retention_policy WHERE project_id = '…';` — no row means the
-   platform default from `evals.retention.*`. Settings → Data retention (or
+   platform default from `tessary.retention.*`. Settings → Data retention (or
    `GET /api/orgs/{org}/projects/{project}/retention`) shows the same answer per class, with the
    install default beside any override (#1205).
 
@@ -197,7 +197,7 @@ Start here. Each branch ends in an action, not an observation.
    pressure surfaces as back-pressure rather than thread starvation.
 3. **Is it genuine volume?** If drain rate is at O2 and the queue is still full, the instance is at
    capacity. Short-term levers, in order of preference:
-   - raise `evals.ingest.substrate.queue-max-bytes` (default 64 MiB) — buys burst headroom only, and
+   - raise `tessary.ingest.substrate.queue-max-bytes` (default 64 MiB) — buys burst headroom only, and
      spends it directly on heap, since a queued batch holds its payloads inline. It is the only
      admission bound: a batch can be 10 spans or 825, so there is no count to tune;
    - shorten that project's trace retention to relieve table and index size;
@@ -215,7 +215,7 @@ at 5x, the point where a quadratic rule shows), so a ratio well above 1 points a
 cause was a rule with unbounded quantifiers scanning megabyte bodies. Check for a recently added
 **custom** rule (`SELECT * FROM pii_redaction_rule WHERE project_id = '…' AND built_in = false;`).
 Disable it (`enabled = false`) and the compiled-rule cache invalidates on the next mutation. The kill
-switch for the whole guard is `evals.redaction.enabled=false`, which is a data-protection decision and
+switch for the whole guard is `tessary.redaction.enabled=false`, which is a data-protection decision and
 not one to take alone.
 
 ### "A partner says data disappeared"
@@ -241,13 +241,13 @@ rather than an outage.
 
 | Lever | Key | Default | Effect |
 |---|---|---|---|
-| Write retries | `evals.ingest.substrate.max-attempts` | 3 | Attempts per batch before it counts as failed |
-| Throughput heartbeat | `evals.ingest.substrate.report-ms` | 60000 | How often `ingest.throughput` is emitted |
-| Retention kill switch | `evals.retention.enabled` | true | `false` deletes nothing |
-| Retention cadence | `evals.retention.interval-ms` | 3600000 | Sweep interval |
-| Retention work bound | `evals.retention.batch-size` / `.max-batches-per-sweep` | 5000 / 20 | Rows per statement / statements per project-class per sweep |
-| Default TTLs | `evals.retention.trace-ttl-days` / `.detection-` | 90 / 90 | Platform defaults; a `retention_policy` row overrides per project. `0` keeps forever. (`.embedding-ttl-days` was retired with the vector substrate, #1116) |
-| Redaction kill switch | `evals.redaction.enabled` | true | `false` persists content unredacted |
+| Write retries | `tessary.ingest.substrate.max-attempts` | 3 | Attempts per batch before it counts as failed |
+| Throughput heartbeat | `tessary.ingest.substrate.report-ms` | 60000 | How often `ingest.throughput` is emitted |
+| Retention kill switch | `tessary.retention.enabled` | true | `false` deletes nothing |
+| Retention cadence | `tessary.retention.interval-ms` | 3600000 | Sweep interval |
+| Retention work bound | `tessary.retention.batch-size` / `.max-batches-per-sweep` | 5000 / 20 | Rows per statement / statements per project-class per sweep |
+| Default TTLs | `tessary.retention.trace-ttl-days` / `.detection-` | 90 / 90 | Platform defaults; a `retention_policy` row overrides per project. `0` keeps forever. (`.embedding-ttl-days` was retired with the vector substrate, #1116) |
+| Redaction kill switch | `tessary.redaction.enabled` | true | `false` persists content unredacted |
 
 Every key is also listed in [config-keys.md](../reference/config-keys.md).
 
@@ -270,7 +270,7 @@ deleted — a live case whose evidence links are dead is worse than a slightly l
 to warn and ignore them, because a *biased* sampler would make a detector fire on our own sampling
 policy. The default was no sampling at all, which is what "we watch every trace" has to mean to be
 true — so Track A removed the remaining knob rather than keep a lever whose only honest setting was
-off. `SamplingGate`, `sampling_policy` and `evals.ingest.sampling.*` are all deleted; a customer who
+off. `SamplingGate`, `sampling_policy` and `tessary.ingest.sampling.*` are all deleted; a customer who
 wants less ingested sends less.
 
 ---

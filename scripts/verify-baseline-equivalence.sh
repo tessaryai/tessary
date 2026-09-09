@@ -185,16 +185,16 @@ if [ -n "$PAID_MASTER" ]; then
 fi
 OVERLAY_DIR="${EQCHK_OVERLAY_DIR-$DEFAULT_OVERLAY_DIR}"
 
-CONTAINER_A="evals-eqcheck-old"
-CONTAINER_B="evals-eqcheck-new"
-NETWORK="evals-eqcheck-net"
+CONTAINER_A="tessary-eqcheck-old"
+CONTAINER_B="tessary-eqcheck-new"
+NETWORK="tessary-eqcheck-net"
 # Deliberately not 5433 (dev stack), 55432 (check-migrations-populated.sh) or 55555
 # (restore-drill.sh): this must be runnable while any of those is up.
 PORT_A="${EQCHK_PORT_A:-55437}"
 PORT_B="${EQCHK_PORT_B:-55438}"
 PG_IMAGE="${EQCHK_PG_IMAGE:-pgvector/pgvector:pg16}"
 LB_IMAGE="${EQCHK_LB_IMAGE:-liquibase/liquibase:5.0}"
-DB="evals"
+DB="tessary"
 PASSWORD="eqcheck"
 KEEP=0
 
@@ -222,7 +222,7 @@ die() {
   exit 1
 }
 
-WORK="$(mktemp -d -t evals-eqcheck.XXXXXX)"
+WORK="$(mktemp -d -t tessary-eqcheck.XXXXXX)"
 cleanup() {
   if [ "$KEEP" != 1 ]; then
     rm -rf "$WORK"
