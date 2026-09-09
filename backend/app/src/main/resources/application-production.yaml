@@ -15,6 +15,9 @@ springdoc:
 spring:
   datasource:
     hikari:
+      # These bind onto the programmatically built pool in db/DataSourceConfig (which carries
+      # @ConfigurationProperties for this prefix). Before that they were inert — the bean replaces
+      # Boot's auto-configured DataSource, so nothing read them.
       # Under Project Loom (spring.threads.virtual.enabled), virtual threads are
       # effectively unbounded, but the JDBC pool is NOT — so pool size, not thread
       # count, is the throughput ceiling on the write path. Connections that can't
@@ -27,7 +30,7 @@ spring:
       minimum-idle: 2
       connection-timeout: 10000
       leak-detection-threshold: 30000
-      pool-name: evals-hikari
+      pool-name: tessary-hikari
   liquibase:
     enabled: true
 
