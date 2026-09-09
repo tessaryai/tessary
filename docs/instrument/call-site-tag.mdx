@@ -1,0 +1,117 @@
+---
+title: "The Call-Site Tag"
+description: "Understand what a call site is, why the tessary.call_site.id attribute is required rather than optional, how to choose ids that survive, and where the attribute goes in code."
+---
+
+A **call site** is a place in your code that causes a model to run. `tessary.call_site.id` is the span attribute that names which one a span belongs to.
+
+It is the only thing Tessary attributes a span to a call site from. There is no inference from file path, span name, model id, or prompt shape, because guessing would mis-attribute production traffic and every mis-attribution is silent.
+
+## Why the tag is required rather than optional
+
+Classifiers work by comparison. A classifier fits a baseline for a call site and then evaluates new traces against it, so it needs to know which traffic is comparable to which. Two model calls in one service can differ by an order of magnitude in length, cost, and failure rate and still both be healthy; pooled together they produce a baseline that describes neither.
+
+The tag is how Tessary knows which is which. That has three consequences you can observe:
+
+- A span with no `tessary.call_site.id` is ingested, stored, and queryable, and nothing scoped to a call site reads it.
+- The connect gate opens on a tagged span, not on any span. A project can have thousands of spans and still be stuck on the gate.
+- The broader milestone ladder does advance on untagged traffic, which is why a project can read `fitting` while the gate is still closed. [Confirm traces are arriving](/self-hosting/setup#confirm-traces-are-arriving) covers the difference.
+
+Ingest itself is fail-open: a missing attribute degrades a feature and never drops a span. That is why an untagged span costs you silence rather than an error.
+
+## What counts as one call site
+
+[Call sites](/concepts/call-sites) defines the unit: one combination of intent, system prompt, and output schema, rather than one line of code or one file. Two rules follow from that definition when you decide what to tag:
+
+- **Follow the dispatch.** Where a single location selects its prompt or schema from a registry keyed on a parameter, emit one call site per branch. A handler that makes three different model calls is three call sites, and one tag on the handler collapses them into a baseline that describes none of them.
+- **Do not over-split.** A parameter that varies only content, such as the end user's text or a temperature, is the same call site.
+
+A call leaves a process in one of four ways, and all four are call sites:
+
+| Form | What it looks like |
+| --- | --- |
+| SDK | In-process provider or framework calls: `messages.create`, `chat.completions.create`, `responses.create`, `generate_content`, `generateText`, or a LangChain, LangGraph, LlamaIndex, or LiteLLM call object. |
+| CLI agent | The repository shells out to a coding agent binary, through `subprocess.run`, `child_process.spawn`, `execa`, or `sh -c`. |
+| HTTP | Raw requests through `requests`, `httpx`, `fetch`, or `axios` to a provider host, a model path such as `/v1/messages` or `/v1/chat/completions`, or a local gateway. |
+| Sandboxed agent | An agent started inside a remote runner, whose command carries a prompt or one of the CLI binaries above. |
+
+The last three usually have no span around them already, and they are often the highest-risk calls in a repository precisely because nothing watches them. Wrapping one is more work than tagging an existing span. Skipping it is how a failure mode stays invisible.
+
+## Choosing an id that survives
+
+The id names what the call produces. Keep it short and factual, and leave transport descriptors such as `streaming`, `async`, or `cached` out of it: they describe how the call runs, not what it is for.
+
+A dotted namespace groups a feature's calls and is the default worth taking:
+
+```text
+support.answer
+support.summarize_thread
+billing.dunning_notice
+```
+
+Flat `snake_case` is fine for a handful of call sites. Do not mix both shapes in one repository.
+
+<Warning>
+  A shipped id is frozen. It is the key every finding and every already-ingested span holds, so renaming one orphans all of them silently. Tessary materializes a call site the first time it sees an id, so a rename reads as a brand new call site with no history rather than as an error. A call site that moves in the code keeps its id.
+</Warning>
+
+If your repository already carries an instrumentation manifest at `.tessary/pipeline/instrumentation.yaml`, read it first and treat the ids in it as fixed.
+
+## Where the attribute goes in code
+
+Set it on the span that covers the model call, with a literal value.
+
+<Steps>
+  <Step title="Find or open the span that covers the call">
+    If the call already runs inside a span, use that one. If it does not, open a span with the tracer the repository already configures. Never construct a second `TracerProvider`: a span on a provider the Tessary exporter is not registered on is never exported, so the tag looks correct in code and nothing arrives.
+  </Step>
+  <Step title="Set the attribute">
+    <CodeGroup>
+    ```python Python
+    with tracer.start_as_current_span("support.answer") as span:
+        span.set_attribute("tessary.call_site.id", "support.answer")
+        response = client.messages.create(model=MODEL, messages=messages)
+    ```
+
+    ```typescript TypeScript
+    span.setAttribute("tessary.call_site.id", "support.answer");
+    ```
+    </CodeGroup>
+
+    Change nothing else about the call: not the prompt text, not the model parameters, not the control flow.
+  </Step>
+  <Step title="Run the code and check the connect screen">
+    A tag becomes telemetry only when the code runs.
+
+    <Check>
+      The connect gate opens on its own once the first tagged span lands. On a project already past the gate, the call site appears once traffic carrying its id arrives.
+    </Check>
+  </Step>
+</Steps>
+
+## Four rules that are not negotiable
+
+- **The key is `tessary.call_site.id`, dotted.** An underscore variant such as `tessary.call_site_id` is never read. The span looks tagged and resolves to nothing.
+- **The value is a literal.** Never an f-string, a variable, or an enum lookup. A tag computed at runtime cannot be traced back to the code that produced it.
+- **Tag the span that covers the model call**, not a parent request or handler span.
+- **Tag only the call sites you meant to tag.** An unwanted call site is easier to leave out than to retire.
+
+`tessary.call_site.id` is also the only `tessary.*` attribute Tessary reads. Session identity goes in `session.id`, the end user in `user.id`, nesting is derived from the span's parent, the call's kind goes in `gen_ai.operation.name`, and a failure goes in the span status. [Span requirements](/instrument/span-requirements) lists the full vocabulary and the names that have no reader.
+
+## When you cannot edit the code
+
+Spans that come from software you do not control can still be tagged one layer out, in an OpenTelemetry Collector `transform` processor. The rules above do not change: the call site is still named explicitly, with a literal, on the span that covers the model call.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Call sites" icon="crosshairs" href="/concepts/call-sites">
+    What a call site is, how a span is attributed to one, and what an untagged span still contributes.
+  </Card>
+  <Card title="Instrument your agent" icon="play" href="/instrument/overview">
+    The whole task, from the connect screen to a tagged span landing.
+  </Card>
+  <Card title="Instrumentation troubleshooting" icon="triangle-exclamation" href="/instrument/troubleshooting">
+    What to do when spans arrive untagged, or the tag is in and nothing changes.
+  </Card>
+</CardGroup>

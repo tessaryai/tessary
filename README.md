@@ -83,7 +83,7 @@ The full topology is in [the architecture reference](./devdocs/reference/archite
 
 ## License
 
-Tessary is licensed under the [Apache License 2.0](./LICENSE). The Tessary name and logo are trademarks; see the [trademark policy](./docs/trademarks.mdx).
+Tessary is licensed under the [Apache License 2.0](./LICENSE). The Tessary name and logo are trademarks; see the [trademark policy](./TRADEMARK.md).
 
 Traces are never used to train a shared model, for any customer. Every classifier threshold is human-readable, runs on your own provider tokens, and is yours to take if you leave. [Principles](./devdocs/reference/principles.md#product--positioning) states how that guarantee is enforced.
 

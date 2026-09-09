@@ -1,0 +1,229 @@
+---
+title: "MCP Server"
+description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 19 tools with their arguments, and how to configure a client."
+---
+
+Tessary speaks MCP (Model Context Protocol) at `POST /mcp` on the same service that serves the web UI and the REST API. It ships with the backend, so there is no separate server to install or version.
+
+The tools read the project the token is bound to: its cases, its findings, the evidence behind them, and the traces and spans underneath.
+
+## The endpoint
+
+| Property | Value |
+| --- | --- |
+| Path | `POST /mcp`, on your own origin (`https://<your SITE_DOMAIN>/mcp`, or `http://localhost/mcp` on a default local install) |
+| Transport | MCP Streamable HTTP |
+| Protocol | JSON-RPC 2.0, protocol version `2025-06-18` |
+| Request content type | `application/json` |
+| Response content type | `application/json`. Every tool is synchronous, so there is no SSE (server-sent events) stream |
+| Methods | `initialize`, `ping`, `tools/list`, `tools/call` |
+| Server name and version | `tessary-mcp`, `0.1.0` |
+| Capabilities advertised | `tools`, with `listChanged: false`. The tool list is fixed per deployment |
+
+The endpoint is always live. It has no environment variable of its own, and nothing turns it off.
+
+The endpoint accepts batched requests: send an array of envelopes and receive an array of responses. Notifications, meaning envelopes with a null `id`, are accepted and dropped. A batch made entirely of notifications answers `204 No Content`.
+
+`initialize` returns an `instructions` string that Tessary builds from the tools offered to this token, so the prose a client reads can never describe a tool its `tools/list` does not contain.
+
+## Authentication
+
+`/mcp` is bearer only. It ignores cookies even when a valid browser session is present.
+
+The credential is an **admin-scoped project API key**, prefix `tsy_a_`. Tessary rejects a write- or query-scoped key before any tool runs. See [API keys](/reference/api-keys) for the scope model and how keys are minted.
+
+| Situation | Answer |
+| --- | --- |
+| No `Authorization` header, or a token that fails verification | `401` with `{"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "unauthorized"}}` and a `WWW-Authenticate: Bearer realm="tessary-mcp"` header |
+| A `tsy_w_` or `tsy_q_` key | `403` with a JSON-RPC error carrying `this API key is not scoped for MCP tool access` |
+| An admin key whose project has been deleted | `401`, the same as a token that fails verification |
+| Authentication disabled through `TESSARY_AUTH_DISABLED` | `404`. With no credential there is no project to bind, so `/mcp` has nothing to serve |
+
+The token binds the session to exactly one project. Every tool reads the project from the token, and **no tool takes a project argument**. To read a second project, mint a second token.
+
+## Read-only guarantee
+
+**No tool on this surface writes a row, spends a token, or starts an agent run.** `initialize` states that to every client on connect, as a property of the surface rather than of any one tool.
+
+The writes the product has stay on REST and in the UI, because each one either records a human judgment or spends money:
+
+- Resolving, absorbing, and muting a case
+- Triggering a root-cause analysis run
+
+That holds for the whole surface, not only for the tool list you happen to see: `tools/list` never returns a write-shaped tool name, and a name retired in an earlier release is never reused. A client that wants to check rather than assume reads the `instructions` string `initialize` returns, not this page.
+
+## What the surface withholds
+
+Three tools strip the triage ruling before their response leaves the server. [Root-cause analysis](/concepts/root-cause-analysis) reaches this surface with a project-scoped admin key like any other caller, and it must receive a finding id and nothing else, because "nothing happened here" is a supported conclusion and the only check on the triage gate.
+
+| Tool | Fields removed |
+| --- | --- |
+| `get_finding` | `triageVerdict`, `triageAction`, `triageSummary`, `triageCitations`, `triagedAt` |
+| `list_findings` | The same five fields on every row |
+| `get_case` | `ruling` |
+
+Two fields deliberately survive: `triageStatus`, which says only whether a ruling exists and which the findings list needs to render, and a case's inline `rca`, which is the analysis lane's own prior work rather than the gate the redaction exists to protect. The redaction applies to every MCP caller, not only to keys minted for analysis. The full ruling is one click away in the UI, which reads these fields over REST and is untouched.
+
+## Conventions the tools share
+
+- **Read-only.** Nothing writes, spends, or starts an agent run.
+- **Project-scoped by the token.** No tool takes a project argument.
+- **Paging** on `list_cases`, `list_traces`, `list_spans`, and `list_sessions`: `limit` in, default 50 and capped at 100, plus `cursor` in and `next_cursor` out. An unreadable or stale cursor restarts at the newest page rather than returning an error. `query_search` and `get_finding_evidence` page at a wider bound: `limit` default 100, capped at 1,000.
+- **Lists find, gets read.** List rows carry typed columns plus the stored `input_preview` and `output_preview` and a `payload_available` flag, never the full payload. Raw text comes from `get_span`, or from `get_trace` and `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or to a window of at most 24 hours.
+- **Every input schema sets `additionalProperties: false`.** An argument that is not listed is rejected.
+- **Timestamps are ISO-8601.** The snake_case wire shape is identical to REST.
+
+## The tools
+
+Tessary offers all 19 tools to every organization. The per-tool capability mechanism still exists in the code but no tool declares one today, so `tools/list` returns the whole catalog for any valid token.
+
+`tools/list` is the authoritative schema. The tables below name each tool's arguments so you can see the shape of the surface; they are not a schema copy.
+
+### Project and taxonomy
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `get_project` | none | none | The bound project: id, slug, name, org, pipeline version, entity counts, engaged packs, judge runtime, and a `watching` block carrying enabled classifiers, call sites swept, and `traces_last_day` |
+| `list_call_sites` | none | none | The project's LLM call sites, each with id, intent, shape, model and provider, and `sample_count` |
+| `list_failure_modes` | none | `call_site_id`, `chain_id`, `scope` (`single_call` \| `chain` \| `trace`), `severity` (`low` \| `medium` \| `high`), `layer` (`A` \| `B` \| `C`), `pack_id`, `compliance_tag` | Taxonomy rows |
+
+Start with `get_project`. An empty case list is not an all-clear on its own: `traces_last_day = 0` means nothing is arriving, which is a different answer from nothing being wrong.
+
+### Cases
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `list_cases` | none | `state` (`open` \| `muted` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open and muted pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
+| `get_case` | `id` | none | The case, its activity trail, `finding_id`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
+
+`get_case` accepts either the stored id or the human reference a person would quote, such as `C-118`. `rca` is null while a report is still running, in which case `rca_report_id` names it so you can poll, and null when none has been run; `rca_available` says whether one could be.
+
+### Findings and evidence
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob, plus a withheld count |
+| `get_finding` | `id` | none | One finding with its parsed evidence |
+| `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
+
+A finding is the aggregated cause behind many classifier firings, distinct from a single firing in the `classifier_events` dataset.
+
+`get_finding_evidence` pages the population a detector actually measured, one ref per measured row, uncapped at write time. Refs are ids rather than bodies: follow one with `get_trace`, `get_span`, or `list_spans`. Call it with `count_only=true` first for the per-role sizes with no rows.
+
+Two details worth knowing before you read the counts. `counts` is what survives and can still be opened; `recorded_counts` is what the detector wrote at finding-open, so `counts` below `recorded_counts` means substrate aged out rather than a lost write. A zero under a role is a real answer, not missing evidence: several detectors compare against a fitted model and therefore have no baseline rows to point at.
+
+There is deliberately no server-side sampling mode. An agent that wants a stride or a random draw takes it and says so in its citation.
+
+### Traces, spans, and sessions
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `list_traces` | none | `model`, `kind`, `call_site_id`, `status` (`ok` \| `error`), `range` (`{from, to}`, both bounds inclusive on `started_at`), `q`, `limit`, `cursor` | Paged trace rollup rows, newest first, with previews |
+| `get_trace` | `trace_id` | `fields` | The trace's rollup row plus its spans, oldest first, capped at 200 with `spans_truncated` saying when there were more |
+| `list_spans` | none | `trace_id`, `call_site_id`, `kind`, `name`, `status`, `model_id`, `session_id`, `range`, `q`, `mode` (`keyword`), `fields`, `limit`, `cursor` | Paged compact span rows, newest first |
+| `get_span` | `trace_id` **and** `span_id` | none | One span with its full raw payload |
+| `list_sessions` | none | `limit`, `cursor` | Paged sessions, most recently active first, identity only |
+| `get_session` | `id` | none | The session, totals summed from its traces, and those traces oldest first, capped at 1,000 with `traces_truncated` saying so |
+
+`get_span` needs both ids because a producer span id is unique only within its trace. A call with no `trace_id` returns a tool error naming the argument to add.
+
+`fields` takes one value, `["payload"]`, and adds each row's full input, output, attributes, and provided usage instead of the previews. On `list_spans` it is allowed only on a page already scoped to one `trace_id` or to a range at most 24 hours wide; an unscoped request is an error rather than a quietly compact page. `get_trace` is always scoped to one trace, so the rule is always satisfied there.
+
+Read the null columns carefully. On a trace row, `is_settled=false` means the trace is still receiving spans, settled with a null token or cost column means no span reported usage, and `unpriced_spans > 0` means the total is real but incomplete. On a session, `unsettled_traces` counts traces still receiving spans, so a non-zero value makes every total below it a lower bound.
+
+`payload_available` on a span row says whether the full text still exists. Payloads age out ahead of spans, so a row with no preview and `payload_available=false` is text Tessary no longer holds, not a call that had no input.
+
+### Aggregate queries
+
+The four query tools read four datasets: `spans`, `tool_calls`, `classifier_events`, and `metric_rollups`.
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `describe_dataset` | none | `dataset` | Per dataset: facetable fields, filterable fields, whether it supports search, its time column, and its measure |
+| `query_count` | `dataset` | `range`, `filters` | A count, or the summed measure on `metric_rollups` |
+| `query_timeseries` | `dataset`, `interval` (`hour` \| `day` \| `week` \| `month`), `range` | `filters` | Buckets |
+| `query_facets` | `dataset`, `field` | `range`, `filters`, `top_n` (default 20, capped at 100) | A top-N breakdown, most frequent first |
+| `query_search` | `dataset` (`tool_calls` \| `classifier_events`) | `q`, `mode` (`keyword`), `range`, `filters`, `limit`, `cursor` | Paged rows, newest first |
+
+Call `describe_dataset` before the other four. Facetable and filterable fields differ per dataset, and an unknown field returns an error naming the dataset rather than an empty result.
+
+Four things constrain these tools:
+
+- **Both `range` bounds are required on `query_timeseries`.** An unbounded timeseries is a full scan.
+- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `created_at`, or `bucket_start` on `metric_rollups`.
+- **`metric_rollups` rows are already aggregated,** so the answer is the sum of the rollup's `value` rather than a row count. Always filter `granularity` there, or the hour and day grains are summed together.
+- **`query_search` does not accept the `spans` dataset.** `list_spans` searches the same rows with a richer filter set and returns full payloads on a scoped page, so spans are excluded from `query_search` by decision rather than by capability. `metric_rollups` is not searchable at all: a rollup row has no text.
+
+`filters` is a flat map of allow-listed field to value, applied as equality.
+
+## Client configuration
+
+<Steps>
+  <Step title="Mint an admin-scoped token">
+    In the UI, open the project you want, then **Settings → MCP tokens** → **New token**. Name it and select **Issue token**. Copy the `tsy_a_` string it shows once.
+
+    <Check>The token appears in the list with its prefix and a **Last used** column reading `Never`.</Check>
+  </Step>
+  <Step title="Add the server to your client">
+    The **MCP config** section on that same page renders the block below with your own origin already filled in. Copy it into `~/.claude/mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "tessary": {
+          "type": "http",
+          "url": "https://tessary.example.com/mcp",
+          "headers": {
+            "Authorization": "Bearer $TESSARY_TOKEN"
+          }
+        }
+      }
+    }
+    ```
+
+    Set `TESSARY_TOKEN` to the secret you copied. On a default local install the URL is `http://localhost/mcp`.
+  </Step>
+  <Step title="Restart the client">
+    Restart Claude Code so it reads the new configuration.
+
+    <Check>`tools/list` returns 19 tools, and `get_project` names the project the token is bound to.</Check>
+  </Step>
+</Steps>
+
+## Errors
+
+Tessary reports tool failures and protocol failures differently, which matters when you write a client.
+
+| Kind | Shape |
+| --- | --- |
+| Tool failure, including an unknown or withheld tool name | A successful JSON-RPC `result` carrying `isError: true` and `content[0].text` with the message |
+| Malformed JSON body | JSON-RPC error `-32700` |
+| A JSON body that is not a JSON-RPC envelope | JSON-RPC error `-32700`, `malformed JSON-RPC envelope: <detail>` |
+| `jsonrpc` is not `"2.0"`, or the body is empty | JSON-RPC error `-32600`, `jsonrpc must be "2.0"` or `empty body` |
+| Unknown method | JSON-RPC error `-32601`, `method not found: <name>` |
+| Bad or missing arguments, such as `tools/call` with no `params.name` | JSON-RPC error `-32602` |
+| Unhandled server failure | JSON-RPC error `-32603` |
+
+A successful `tools/call` returns `content` as a single text block carrying the JSON-encoded payload, `structuredContent` with the same payload typed, and `isError: false`.
+
+An unknown tool name and a tool withheld from your organization return the same message. That is deliberate: a client holding a stale tool list must not be able to tell the two apart.
+
+## Known limits
+
+These are current behaviors, stated so you do not read around them.
+
+- **`list_findings` truncates without saying so.** Each triage source caps its own page at 200 rows and has no `limit` or `cursor` argument, and the service concatenates every source's page. Nothing in the response marks the list as partial, so a project with more confirmed findings than the effective cap gets that many back with no signal.
+- **`get_trace` reports one span count.** The response carries the rollup's `span_count` as the true total even when `spans_truncated` is set. There is no separate total field. For a trace past the 200-span cap, page the rest with `list_spans` and a `trace_id`.
+- **A resolved case page sorts rather than seeks.** Open and muted pages read an index; `state=resolved` sorts at query time.
+- **`list_spans` pages on a column with no matching index.** Its keyset predicate runs on `span.created_at`, and the only time index on the span table is on `started_at`.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    The scope model behind the admin key this endpoint requires, and its errors.
+  </Card>
+  <Card title="Ingestion contract" icon="table-list" href="/reference/ingestion-contract">
+    The fields the platform consumes, which is what these tools read back.
+  </Card>
+</CardGroup>

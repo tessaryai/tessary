@@ -1,0 +1,128 @@
+---
+title: "Instrument Your Agent"
+description: "Send an agent's traces to Tessary and tag every model call with a call site, either by handing the connect screen's prompt to a coding agent or by wiring the exporter yourself."
+---
+
+Instrumenting an agent for Tessary means making two things true, and only these two:
+
+- Traces reach Tessary's OTLP (OpenTelemetry Protocol) endpoint.
+- Every span that covers a model call carries a `tessary.call_site.id` attribute.
+
+The repository you are instrumenting decides everything else: which OpenTelemetry SDK it uses, where it builds the exporter, and where the endpoint and token live. A span without the call-site attribute drives no call-site-scoped processing, and it does not open the connect gate.
+
+<Note>
+  There is no Tessary client library to install. Ingest is plain OTLP and the call-site tag is a plain span attribute, so a tracer is the only dependency you need.
+</Note>
+
+## Prerequisites
+
+- A running Tessary instance you can reach from wherever your agent runs, with an account and a project. [Set up Tessary](/self-hosting/setup) covers first boot.
+- The **Endpoint** and **Bearer Token** shown on the connect gate. For a project already past the gate, open **Settings** → **Sources** → **Connect a source**, select **Create a connection token**, and copy **Endpoint** and **Header**, which carries the whole `Authorization: Bearer <token>` line.
+- Write access to the code that makes the model calls, and a way to run it. A tag becomes telemetry only when the code runs, so you need to exercise the application to finish.
+- For the recommended path, a coding agent that can read the repository, edit files, and fetch a URL.
+
+The token is a project-scoped API key with write scope, minted by the gate. Treat it as a secret: never hardcode it in application source and never commit a real one.
+
+## Hand the prompt to a coding agent
+
+This is the path Tessary recommends, because the work is mostly reading: which agents this repository has, where each model call leaves the process, what tracing already exists, and where the repository keeps its secrets. An agent with the repository open answers those faster than a documentation page can guess at them.
+
+<Steps>
+  <Step title="Copy the prompt from the connect screen">
+    The gate shows it under **Paste into your coding agent**:
+
+    ```text
+    Update the instrumentation using https://github.com/tessaryai/tessary/blob/main/instrument.md to send traces to Tessary.
+    ```
+
+    The prompt is one sentence pointing at [`instrument.md`](https://github.com/tessaryai/tessary/blob/main/instrument.md), the workflow your agent follows. It deliberately carries neither the endpoint nor the token, so nothing secret rides along in a string that gets pasted into an issue tracker.
+  </Step>
+  <Step title="Paste it into a coding agent with your repository open">
+    Keep the connect screen open while the agent works. It asks you for the endpoint and the token, and it comes back with questions before it edits anything.
+
+    <Check>
+      The agent reports what it found: the agents and model-powered workflows in the repository, the tracing that already exists, and where traces currently go.
+    </Check>
+  </Step>
+  <Step title="Confirm the call sites it proposes">
+    The workflow stops here on purpose. The agent presents each candidate call site, why that location is the right boundary for a span, anything it excluded, and a proposed id for each. It does not instrument a call site you decline.
+
+    Read the list against your own understanding of the product. Ids are hard to change later, so this is the cheapest moment to correct one. [The call-site tag](/instrument/call-site-tag) explains what counts as one call site and how to choose an id that survives.
+  </Step>
+  <Step title="Give it the endpoint and the token">
+    Copy both fields from the connect screen when the agent asks. It follows whatever secret and configuration convention the repository already uses, and introduces environment variables only when the repository has no convention of its own.
+
+    <Check>
+      The agent finishes by naming the exact environment variables, config keys, or secrets it introduced, and the exact file or secret store each one goes in.
+    </Check>
+  </Step>
+  <Step title="Run the application">
+    Exercise the instrumented paths. The test suite is usually enough.
+
+    <Check>
+      The connect screen updates itself and opens on its own when the first tagged span lands.
+    </Check>
+  </Step>
+</Steps>
+
+## Wire it up by hand
+
+The same two requirements, done yourself. Both fields are on the connect screen, and the screen also carries working exporter configuration for several runtimes.
+
+<Steps>
+  <Step title="Add Tessary as a second exporter">
+    Keep every destination you already have. Tessary is one more OTLP destination on the tracer provider or collector you already run, never a second instrumentation stack beside it.
+
+    Environment variables are the form to reach for first, because every OpenTelemetry SDK reads them and they need no code change. [Configure an exporter](/instrument/exporters) covers that form and the in-code and collector forms.
+  </Step>
+  <Step title="Tag every model call's span">
+    Set `tessary.call_site.id` on the span that covers each model call, with a literal value:
+
+    ```python
+    span.set_attribute("tessary.call_site.id", "support.answer")
+    ```
+
+    Where no span covers the call, open one with the tracer the repository already configures. [The call-site tag](/instrument/call-site-tag) covers the naming rules and the mistakes that make a span look tagged when it is not.
+  </Step>
+  <Step title="Check what your spans already carry">
+    A tracing stack built for latency and errors often records nothing about the model call itself. Tessary reads the OpenTelemetry GenAI semantic conventions, and an LLM auto-instrumentation such as OpenLLMetry or OpenInference emits them for you.
+
+    [Span requirements](/instrument/span-requirements) lists every field Tessary consumes and what each one turns on.
+  </Step>
+  <Step title="Run the application">
+    <Check>
+      The connect screen opens on its own once a tagged span arrives.
+    </Check>
+  </Step>
+</Steps>
+
+## What done looks like
+
+The connect gate stands in place of the whole product until the project lands a span carrying `tessary.call_site.id`. It opens on a tagged span, not on any span. [Sign up and connect your traces](/self-hosting/setup#sign-up-and-connect-your-traces) describes the three states it moves through.
+
+Which half of the work is left is a question the screen's own counts answer: no spans at all is an exporter problem, and spans arriving without the tag is a tagging problem. [Instrumentation troubleshooting](/instrument/troubleshooting) works through both.
+
+There is no other way past the gate, and no way to skip it for a project you intend to use. The only exit from the untagged state is tagging the spans that are already arriving.
+
+Once you are through, Tessary tracks the project against a broader milestone ladder, which advances on any span rather than only a tagged one. [Confirm traces are arriving](/self-hosting/setup#confirm-traces-are-arriving) explains each rung and why a new project sits at `fitting` for a while.
+
+## No application to instrument yet
+
+You can send one tagged span from the stack itself, with nothing installed and no SDK, and watch the gate open on it. The command and the token it needs are in [Sign up and connect your traces](/self-hosting/setup#sign-up-and-connect-your-traces).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    What a call site is, how to choose an id that survives, and where the attribute goes in code.
+  </Card>
+  <Card title="Span requirements" icon="table-list" href="/instrument/span-requirements">
+    Every field Tessary reads off a span, with accepted values and constraints.
+  </Card>
+  <Card title="Configure an exporter" icon="share-nodes" href="/instrument/exporters">
+    The exporter forms, recommended one first, with the smallest working example of each.
+  </Card>
+  <Card title="Instrumentation troubleshooting" icon="triangle-exclamation" href="/instrument/troubleshooting">
+    Nothing arriving, spans arriving untagged, and a gate that will not open.
+  </Card>
+</CardGroup>
