@@ -15,15 +15,24 @@ which is why "is ingest healthy?" had no answer that was not a shrug.
 | # | Objective | Number | Where it comes from |
 |---|---|---|---|
 | O1 | **Accepted-write latency** — `POST /v1/traces` returns without writing to the substrate | p99 < 250 ms | in `memory` mode `enqueue` is a non-blocking hand-off; in `kafka` mode it waits for the broker's acknowledgement, bounded by `publish-timeout-ms`. The request thread never writes to Postgres, never redacts |
-| O2 | **Sustained drain rate** — spans persisted per second, single instance | ≥ 200 spans/s | the write path's stated drain budget, exercised by `SubstrateWriteIntegrationTest` against the reference Postgres; in `kafka` mode the drain runs `tessary.ingest.spool.kafka.consumers` drainers, so it scales with cores |
+| O2 | **Sustained drain rate** — spans persisted per second, single instance | ≥ 200 spans/s | a floor asserted in CI, not the measured capacity — see below for which is which. In `kafka` mode the drain runs `tessary.ingest.spool.kafka.consumers` drainers, so it scales with cores |
 | O3 | **Shed rate** — batches dropped because the queue was full | 0 over any 5-minute window under normal load | `ingest.throughput` field `shed_batches` |
 | O4 | **Spool lag** — accepted data is reaching the substrate | `spool_oldest_age_ms` under `tessary.ingest.spool.max-lag-ms` | `ingest.throughput` fields `spool_oldest_age_ms`, `queue_bytes`, `queue_max_bytes`; `oldestAgeMs` on the `/actuator/health/ingest` group (platform staff) |
 | O5 | **Write failures** — batches that exhausted their retries | 0 | `ingest.throughput` field `failed_batches` |
 | O6 | **Ingest availability** — the front door answers | ≥ 99.5% non-5xx on `/v1/traces` | `http_server_requests_seconds_count{uri="/v1/traces"}` |
 
-**Measuring these yourself.** `scripts/bench/` is an open-loop OTLP load harness and the compose
-overlay that pins a reference box; it is how the drain and redaction figures below were taken, and it
-is the way to get the same numbers for a box you actually run. It is not part of `task check`.
+**O2 is a floor, not the capacity — and the two have different sources.** The objective is a
+regression tripwire: `SubstrateWriteIntegrationTest` asserts the write path clears 200 spans/s against
+the reference Postgres, and that assertion is what keeps it honest in CI. What the path actually
+sustains is a separate number, and it is measured rather than asserted: on the self-host reference box
+(4 vCPU / 8 GiB, backend 2 vCPU) a single project sustains **~1,020 spans/s** accepted, and did ~476
+before redaction was parallelised (`tessary.redaction.parallelism`). Both figures come from
+`scripts/bench/`, which is an open-loop OTLP load harness plus the compose overlay that pins that box;
+it is not part of `task check`.
+
+Keep the two apart when you change either. Raising the objective without re-measuring turns a tripwire
+into a guess; quoting the measured ceiling as though it were the objective loses the headroom the
+tripwire exists to protect.
 
 **O2 is a single-instance number and the deployment is single-replica** (Tessary's
 hosted deployment runs one backend replica). 200 spans/s is roughly 17 million spans a day, which
