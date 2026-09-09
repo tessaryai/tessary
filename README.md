@@ -6,8 +6,8 @@
 <p align="center">Stop AI agents from failing silently in production.</p>
 
 <p align="center">
-  <a href="./docs/index.mdx">Docs</a> ·
-  <a href="./docs/self-hosting/setup.mdx">Self-host</a> ·
+  <a href="https://tessary.ai/docs">Docs</a> ·
+  <a href="#get-running">Self-host</a> ·
   <a href="https://github.com/tessaryai/tessary/issues">Report an issue</a>
 </p>
 
