@@ -72,6 +72,12 @@
 # for every service carrying a `build:` block — from this runner, logged in to Docker Hub, that
 # would push local images over the manifests merge-and-tag just created.
 #
+# THE GITHUB RELEASE IS LAST, after the compose artifact, not beside the tag push in merge-and-tag.
+# The tag is the source of truth and merge-and-tag pushes it; the Release is the ANNOUNCEMENT, and
+# what it announces is the install command. Created next to the tag it could go out while
+# publish-compose was still to fail, leaving a published release whose one-liner resolves to
+# nothing. Notes are generated server-side by `gh release create --generate-notes`.
+#
 # NO SIGNING. Cosign / SLSA provenance / SBOM attachment are #1155's (epic 6 clause 4), which is
 # CLOSED as NOT_PLANNED (verified 2026-09-05) — this workflow adds none of it and carries no
 # `id-token: write`.
@@ -80,10 +86,16 @@
 #   DOCKER_USERNAME  - Docker Hub username (for image push from runner)
 #   DOCKER_TOKEN     - Docker Hub access token (for image push from runner)
 # GHCR uses the built-in GITHUB_TOKEN (permissions.packages: write below).
-# Required repo variable:
-#   PNPM_VERSION     - same Actions variable every other workflow already reads (Taskfile mirrors
-#                      it locally); sandbox-runner/launcher/Dockerfile's ARG PNPM_VERSION has NO
-#                      default by design, so a build that fails to pass this fails outright.
+#
+# NO REPO VARIABLE, AND NO SECOND INPUT OF ANY KIND: the dispatch semver is the only thing a human
+# supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
+# of a number the tree already states twice — and the only workflow that read it, so nothing else
+# going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
+# the same source every other workflow's pnpm/action-setup reads and the rule ci.yml's `frontend`
+# job states in as many words: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
+# ARG default covers the launcher build, and scripts/check-required-inputs.sh already holds every
+# such default equal to the Taskfile's pin, so dropping the build-arg removed a source rather than
+# adding one.
 
 name: Release
 
@@ -116,6 +128,14 @@ on:
         description: "Version to publish, SEMVER (e.g. 1.2.0) — becomes the git tag v<version>"
         required: true
         type: string
+
+# ONE RELEASE AT A TIME. Two dispatches in flight would interleave their `imagetools create` calls
+# and could leave `<service>-latest` pointing at the older of the two. `cancel-in-progress: false`
+# deliberately: a cancelled run has already pushed image tags, and the jobs that verify them are
+# the ones that would be cancelled.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -202,29 +222,48 @@ jobs:
       - name: Build frontend artifact (Vite bundle)
         run: |
           set -euo pipefail
+          # The pin comes from the tree, never from a workflow input: `packageManager` is what
+          # pnpm/action-setup reads in every other workflow, so this build and CI's cannot drift.
+          PNPM="$(jq -r .packageManager frontend/package.json)"
+          echo "Building with $PNPM (from frontend/package.json)"
           mkdir -p artifacts/frontend-build-context/app
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e PNPM \
             node:24-alpine \
             sh -c '
               set -eu
-              npm i -g pnpm@${{ vars.PNPM_VERSION }}
+              npm i -g "$PNPM"
               cd frontend
               pnpm install --frozen-lockfile
               pnpm run build
             '
           cp -r frontend/dist artifacts/frontend-build-context/app/dist
 
+      # THE CONTEXTS TRAVEL AS TARBALLS, and that is load-bearing rather than tidiness:
+      # actions/upload-artifact uploads a file list and so DROPS EMPTY DIRECTORIES. backend's
+      # runtime stage does `COPY --from=build /app/extracted/spring-boot-loader/ ./` against a
+      # directory that IS empty — `extract --layers` ran without `--launcher`, see
+      # backend/Dockerfile's own comment on the ENTRYPOINT — so uploaded loose, that directory
+      # never comes back down and the COPY fails the build with "not found" on BOTH arches. A tar
+      # round-trips the tree exactly: empty directories, modes and all. Unpacked by each build-*
+      # job below into the directory its `--build-context build=...` names.
+      - name: Pack the build contexts
+        run: |
+          set -euo pipefail
+          tar -C artifacts/backend-build-context -cf backend-build-context.tar .
+          tar -C artifacts/frontend-build-context -cf frontend-build-context.tar .
+
       - uses: actions/upload-artifact@v7
         with:
           name: backend-build-context
-          path: artifacts/backend-build-context
+          path: backend-build-context.tar
           retention-days: 1
 
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-build-context
-          path: artifacts/frontend-build-context
+          path: frontend-build-context.tar
           retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
@@ -244,7 +283,14 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: backend-build-context
-          path: backend-build-context
+          path: _artifact
+
+      # See build-artifacts' pack step for why this is a tarball and not a directory.
+      - name: Unpack the build context
+        run: |
+          set -euo pipefail
+          mkdir -p backend-build-context
+          tar -C backend-build-context -xf _artifact/backend-build-context.tar
 
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -290,7 +336,14 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: frontend-build-context
-          path: frontend-build-context
+          path: _artifact
+
+      # See build-artifacts' pack step for why this is a tarball and not a directory.
+      - name: Unpack the build context
+        run: |
+          set -euo pipefail
+          mkdir -p frontend-build-context
+          tar -C frontend-build-context -xf _artifact/frontend-build-context.tar
 
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -343,8 +396,10 @@ jobs:
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
           platforms: linux/${{ matrix.arch }}
+          # No PNPM_VERSION build-arg: this Dockerfile's ARG default IS the pin, and
+          # scripts/check-required-inputs.sh holds it equal to the Taskfile's. Passing one here
+          # would put a third copy of the number in a workflow input.
           build-args: |
-            PNPM_VERSION=${{ vars.PNPM_VERSION }}
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
           push: true
@@ -567,3 +622,35 @@ jobs:
               echo "OK: ${repo}:${tag} renders, pins ${VERSION}, mounts no host path"
             done
           done
+
+  # ---------------------------------------------------------------------------------------------
+  # The announcement, and deliberately the LAST thing that happens — see the header. Runs on its own
+  # once every job it needs is green; a red anywhere upstream leaves the Release uncreated, which is
+  # the right failure: a tag and some images with no Release is a recoverable state, a Release
+  # pointing at a broken install is not.
+  github-release:
+    name: Publish the GitHub Release
+    runs-on: ubuntu-24.04
+    needs: [preflight, publish-compose]
+    steps:
+      # NO CHECKOUT. `gh release create` works over the API against --repo, the tag it names is
+      # already on the remote (merge-and-tag pushed it), and --generate-notes builds the changelog
+      # server-side from the commits and pull requests since the previous tag — so there is nothing
+      # for a clone here to do.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.preflight.outputs.version }}"
+          # A prerelease must not take the `Latest` badge on the repository front page. preflight's
+          # regex accepts `1.2.0-rc.1`, so this has to handle it. Build metadata (`1.2.0+abc`) is
+          # NOT a prerelease and deliberately does not match.
+          PRERELEASE=""
+          case "$VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            $PRERELEASE
+          echo "Release v${VERSION} published${PRERELEASE:+ (prerelease)}"
