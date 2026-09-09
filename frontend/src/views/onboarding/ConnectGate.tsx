@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, CodeXml } from "lucide-react";
+import { ChevronRight, CodeXml, Copy } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import { auth } from "../../api/client";
@@ -16,7 +16,7 @@ import {
   ListeningBanner,
   useIngestToken,
 } from "../components/SourceConnect";
-import { CopyButton, Spinner, useToast } from "../../ui";
+import { Button, CopyButton, Spinner, useToast, writeClipboard } from "../../ui";
 
 /**
  * The first-run gate: stands in place of the whole shell
@@ -38,10 +38,11 @@ import { CopyButton, Spinner, useToast } from "../../ui";
  *   3. a tagged span arrives — no screen; the parent's poll (in App.tsx) sees `has_tagged_span` flip
  *                               and stops rendering this component at all, in favor of the real shell.
  *
- * The gate mints its own ingest token on mount (`useIngestToken`, auto-issue) rather than showing a
- * "Create a connection token" button — the design has no such control; the header field is always
- * populated. A hard reload of this screen therefore mints a fresh write-scoped key each time, an
- * accepted cost for a first-run screen with no button to avoid it (see `useIngestToken`'s own doc).
+ * The gate mints its ingest token from the Bearer Token field's own copy control, on the click that
+ * takes the value — not on mount. Minting on mount cost one live write-scoped key per render, so a
+ * few reloads of a screen nobody had used yet left a project holding keys it never issued on
+ * purpose and nothing revoked. Every key that now exists was deliberately taken, and a token
+ * already copied stays valid, which superseding the unused ones on each mint could not promise.
  */
 export function ConnectGate() {
   const { orgSlug, projectSlug } = useTenant();
@@ -61,15 +62,26 @@ export function ConnectGate() {
   });
   const hasTaggedSpan = status.data?.has_tagged_span ?? false;
 
-  const { token, issue } = useIngestToken();
-  useEffect(() => {
-    // Auto-issue: this screen's design has no "Create a connection token" button, so the token has
-    // to exist before the user ever looks at the Header field. Runs once, on mount — `token`/`issue`
-    // deliberately excluded from the deps array, since including them would re-fire this on every
-    // token-state change instead of exactly once.
-    issue();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { token, issueAsync, issuing } = useIngestToken();
+  // Set when a mint succeeded but the clipboard write did not, which is the one state where the
+  // elision would strand the user: the key exists, it is unrecoverable after this render, and the
+  // only way to reach it is to read it off the screen.
+  const [revealed, setRevealed] = useState(false);
+
+  async function mintAndCopy() {
+    let plaintext: string;
+    try {
+      plaintext = await issueAsync();
+    } catch {
+      return; // useIngestToken toasts the reason
+    }
+    if (await writeClipboard(plaintext)) {
+      toast.success("Copied");
+      return;
+    }
+    setRevealed(true);
+    toast.error("Could not copy the token", "It is on screen in full. Select it to copy it by hand.");
+  }
 
   useEffect(() => {
     if (hasTaggedSpan) nav(`/orgs/${orgSlug}/projects/${projectSlug}/traces`, { replace: true });
@@ -130,12 +142,16 @@ export function ConnectGate() {
 
       <div className="flex flex-col gap-3">
         <CopyField label="Endpoint" value={endpoint} onCopy={() => toast.success("Copied")} />
-        <CopyField
-          label="Bearer Token"
-          value={token ? elide(token) : "…"}
-          copyValue={token ?? null}
-          onCopy={() => toast.success("Copied")}
-        />
+        {token ? (
+          <CopyField
+            label="Bearer Token"
+            value={revealed ? token : elide(token)}
+            copyValue={token}
+            onCopy={() => toast.success("Copied")}
+          />
+        ) : (
+          <MintTokenField pending={issuing} onMint={mintAndCopy} />
+        )}
       </div>
 
       <ListeningBanner label="Listening on /v1/traces. Nothing has arrived yet." />
@@ -325,6 +341,38 @@ function Stat({ label, value, tone, mono }: { label: string; value: string; tone
         }`}
       >
         {value}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Bearer Token field before a token exists: the same read-only-plus-control shape as
+ * {@link CopyField}, with the control doing the minting.
+ *
+ * The placeholder is the real key prefix, so the field reads as the thing it is about to hold
+ * rather than as an empty box, and the button says what the click does — it writes a key that
+ * cannot be shown again, which is not what a bare "Copy" promises.
+ */
+function MintTokenField({ pending, onMint }: { pending: boolean; onMint: () => void }) {
+  return (
+    <div>
+      <div className="text-label uppercase text-muted mb-1.5">Bearer Token</div>
+      <div className="flex items-center gap-2 rounded-control border border-border-strong bg-surface px-2.5 py-2">
+        <code className="flex-1 font-mono text-small text-subtle overflow-hidden text-ellipsis whitespace-nowrap">
+          tsy_w_…
+        </code>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          loading={pending}
+          onClick={onMint}
+          leadingIcon={<Copy size={13} strokeWidth={1.8} aria-hidden="true" />}
+          className="font-medium flex-none"
+        >
+          {pending ? "Creating" : "Create and copy"}
+        </Button>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ There is nothing to configure first. Every credential the stack needs has a work
 docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 ```
 
-That reference is the Compose configuration itself, published to the registry as an artifact beside the images, so this works with nothing cloned and no `.env`. Two of the defaults it ships are placeholders published in the repository, which is fine for the localhost test drive this page walks through and not fine for anything else. [Secure the instance](#secure-the-instance) is where you replace them; Tessary warns on every boot until you do, and refuses to start the moment you point a real domain at it.
+That reference is the Compose configuration itself, published to the registry as an artifact beside the images, so this works with nothing cloned and no `.env`. Three of the defaults it ships are placeholders published in the repository, which is fine for the localhost test drive this page walks through and not fine for anything else. [Secure the instance](#secure-the-instance) is where you replace them; Tessary warns on every boot until you do, and refuses to start the moment you point a real domain at it.
 
 <Note>
   Handing this to a coding agent instead? [`setup.md`](https://github.com/tessaryai/tessary/blob/main/setup.md) in the repository root is written as instructions to one, and stops at the URL — everything from creating an account onward is this page.
@@ -103,27 +103,28 @@ Nothing but what Docker manages: the images, Compose's cached copy of the config
 
 Do this before the instance holds anything you care about, and before anything but your own machine can reach it.
 
-Sign-up is open by default: anyone who can reach the instance can create an account. That is what lets the first run need no admin bootstrap, and it is also why the instance must stay on your own machine or inside your own network until you have set the sign-up policy. Once your own account exists, go to **Settings → Members → Sign-up policy** and choose listed email domains or invitation only; the change takes effect immediately and never removes a member. Colleagues you invite from that page join your organization; anyone the policy merely admits gets an organization of their own. Both are described in [Configuration](/self-hosting/configuration#sign-up-policy). The repository's exposure sweep (`scripts/check-exposure-sweep.sh`, which probes a fresh boot from outside) records the open sign-up endpoint on a fresh boot as by design for exactly this reason, and this paragraph is its documented posture.
+Sign-up is open by default: anyone who can reach the instance can create an account. That is what lets the first run need no admin bootstrap, and it is also why the instance must stay on your own machine or inside your own network until you have set the sign-up policy. Once your own account exists, go to **Settings → Members → Sign-up policy** and choose listed email domains or invitation only; the change takes effect immediately and never removes a member. The policy is one setting for the whole instance, and it belongs to the first organization created on it, which on a fresh install is yours. A later organization sees the same policy on that page read-only, named with the organization that governs it. Colleagues you invite from that page join your organization; anyone the policy merely admits gets an organization of their own. Both are described in [Configuration](/self-hosting/configuration#sign-up-policy). The repository's exposure sweep (`scripts/check-exposure-sweep.sh`, which probes a fresh boot from outside) records the open sign-up endpoint on a fresh boot as by design for exactly this reason, and this paragraph is its documented posture.
 
-Tessary ships with two sealing keys already set, which is why the steps above needed no configuration. They are placeholders, written in `docker-compose.yml` in the public repository, so they are not secrets and anyone can read them:
+Tessary ships with three secrets already set, which is why the steps above needed no configuration. They are placeholders, written in `docker-compose.yml` in the public repository, so they are not secrets and anyone can read them:
 
 | Variable | What the placeholder exposes |
 | --- | --- |
 | `TESSARY_AUTH_COOKIE_PASSWORD` | Seals the session cookie. Anyone can forge a session against an instance still using the default, with no prior access to anything. |
 | `TESSARY_SECRET_KEY` | Seals what Tessary stores for you: provider API keys, ingestion-source credentials, the GitHub install-state token. Anyone who reaches your database can decrypt all of it. |
+| `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` | The bearer the backend presents to the sandbox launcher. Anyone holding the default can drive the launcher into spawning containers on your host. |
 
-The backend logs a warning on every boot that runs either default (`docker compose logs backend` shows `Running on the shipped placeholder value`), and refuses to start once `SITE_DOMAIN` names a real host, so an instance cannot go public on a published key by accident. Replace them:
+The backend logs a warning on every boot that runs any of them (`docker compose logs backend` shows `Running on the shipped placeholder value`), and refuses to start once `SITE_DOMAIN` names a real host, so an instance cannot go public on a published key by accident. Replace them:
 
 <Steps>
   <Step title="Generate a value for each and put them in .env">
     ```bash
     [ -f .env ] || cp .env.example .env
-    printf 'TESSARY_AUTH_COOKIE_PASSWORD=%s\nTESSARY_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" >> .env
+    printf 'TESSARY_AUTH_COOKIE_PASSWORD=%s\nTESSARY_SECRET_KEY=%s\nTESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" >> .env
     ```
 
-    The copy of `.env.example` carries both keys commented out with the same `openssl` recipe beside them (the first line keeps a `.env` you already have, such as one carrying `DOCKER_SOCK_GID`); the second line appends one generated value for each, and a later assignment wins. Set `POSTGRES_PASSWORD` to your own too if you publish the database port or share the host; it defaults to `tessary` and is otherwise reachable only from the Compose network.
+    The copy of `.env.example` carries all three commented out with the same `openssl` recipe beside them (the first line keeps a `.env` you already have, such as one carrying `DOCKER_SOCK_GID`); the second line appends one generated value for each, and a later assignment wins. Set `POSTGRES_PASSWORD` to your own too if you publish the database port or share the host; it defaults to `tessary` and is otherwise reachable only from the Compose network.
 
-    Without a clone, write the two keys straight into a `.env` in the directory you run the install command from. Compose reads it from there.
+    Without a clone, write the three keys straight into a `.env` in the directory you run the install command from. Compose reads it from there.
   </Step>
   <Step title="Restart">
     ```bash
@@ -149,7 +150,7 @@ Signing up and connecting a source is a two-step, gated flow: step 2 has exactly
     Create the first account with an email and password. The open edition authenticates through `PasswordAuthProvider` by default, so no WorkOS or SSO configuration is required. Tessary creates your organization and a `Default` project during sign-up, so there is nothing to fill in for either.
   </Step>
   <Step title="Connect your traces">
-    You land directly on the connect gate — a full screen with no sidebar, since nothing else in the product is reachable yet. It shows the ingest endpoint (your own origin plus `/v1/traces`), a `Bearer` token already minted, and a one-line prompt written for a coding agent. The prompt points at [`instrument.md`](https://github.com/tessaryai/tessary/blob/main/instrument.md), which is the workflow your agent follows: read your repository and its own contributor instructions, show you the agent call sites it found and wait for you to confirm them, extend whatever tracing you already have rather than adding a second stack, stamp every model call's span with a `tessary.call_site.id` attribute, and finish by telling you exactly which files and variables the endpoint and token go in. Expect it to come back with questions, so keep this screen open while it works. Wiring the exporter by hand works too — both fields are right there — but you still need that attribute, since it is how Tessary attributes a span to a call site (a place in your code that invokes a model) at all.
+    You land directly on the connect gate — a full screen with no sidebar, since nothing else in the product is reachable yet. It shows the ingest endpoint (your own origin plus `/v1/traces`), a `Bearer` token field whose **Create and copy** button mints the token and puts it on your clipboard, and a one-line prompt written for a coding agent. The token is minted by that click and shown once, elided on the copy, in full if the copy is refused, so a gate you only looked at leaves no key behind. The prompt points at [`instrument.md`](https://github.com/tessaryai/tessary/blob/main/instrument.md), which is the workflow your agent follows: read your repository and its own contributor instructions, show you the agent call sites it found and wait for you to confirm them, extend whatever tracing you already have rather than adding a second stack, stamp every model call's span with a `tessary.call_site.id` attribute, and finish by telling you exactly which files and variables the endpoint and token go in. Expect it to come back with questions, so keep this screen open while it works. Wiring the exporter by hand works too — both fields are right there — but you still need that attribute, since it is how Tessary attributes a span to a call site (a place in your code that invokes a model) at all.
 
     The gate does not open on any span landing. It opens on a **tagged** one:
 
@@ -157,7 +158,7 @@ Signing up and connecting a source is a two-step, gated flow: step 2 has exactly
     - Spans arrive but none carry `tessary.call_site.id`: the screen replaces itself with a narrower repair prompt — the same guide, deep-linked to its tagging section only, so your agent adds the attribute and leaves the working exporter alone — with a live count of spans received versus spans tagged. There is no other exit from this state — the fix is always to tag the spans that are already arriving.
     - A tagged span lands: the gate opens on its own and the project drops you on Triage.
 
-    No application to instrument yet? Send one tagged span from the stack itself, with nothing installed. Copy the **Bearer Token** field on the gate and run this from the repository root:
+    No application to instrument yet? Send one tagged span from the stack itself, with nothing installed. Click **Create and copy** on the gate's Bearer Token field and run this from the repository root:
 
     ```bash
     docker compose exec -T sandbox-runner node - <token> < scripts/emit-span.js

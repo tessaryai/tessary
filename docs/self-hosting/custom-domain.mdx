@@ -17,7 +17,7 @@ In `.env` beside `docker-compose.yml`:
 SITE_DOMAIN=tessary.acme-corp.com
 ```
 
-A bare hostname: no `https://`, no port, no path. A scheme-prefixed value is refused at boot with the key named, because the stack builds the full origin itself wherever it needs one. Setting `SITE_DOMAIN` also arms the placeholder-key guard: both sealing keys must be your own before the instance answers on a real hostname, as [Secure the instance](/self-hosting/setup#secure-the-instance) describes.
+A bare hostname: no `https://`, no port, no path. A scheme-prefixed value is refused at boot with the key named, because the stack builds the full origin itself wherever it needs one. Setting `SITE_DOMAIN` also arms the placeholder-key guard: all three placeholder keys must be your own before the instance answers on a real hostname, as [Secure the instance](/self-hosting/setup#secure-the-instance) describes.
 
 From `SITE_DOMAIN`, the backend derives:
 

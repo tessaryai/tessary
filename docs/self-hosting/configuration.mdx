@@ -56,7 +56,7 @@ Changing this key makes everything already sealed with the old one unreadable, s
 | `WORKOS_CLIENT_ID` | WorkOS client ID, for bring-your-own SSO. | Optional, ships blank |
 
 <Warning>
-  `TESSARY_AUTH_COOKIE_PASSWORD` is the more urgent of the two placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
+  `TESSARY_AUTH_COOKIE_PASSWORD` is the most urgent of the three placeholders. The sealing key above needs database access to exploit; this one does not. Anyone can forge a session cookie against an instance still running the published default. Replace it before anything but your own machine can reach the instance: see [Secure the instance](/self-hosting/setup#secure-the-instance).
 </Warning>
 
 <Note>
@@ -65,7 +65,7 @@ Changing this key makes everything already sealed with the old one unreadable, s
 
 ## Sign-up policy
 
-Who may create an account is a setting, not an environment variable: an owner or admin sets it under **Settings → Members → Sign-up policy**, and it is enforced by the backend on every path that creates an account, including a first sign-in through WorkOS. It is stored on the organization, which in the open edition is the whole instance.
+Who may create an account is a setting, not an environment variable: an owner or admin sets it under **Settings → Members → Sign-up policy**, and it is enforced by the backend on every path that creates an account, including a first sign-in through WorkOS. It is stored on the first organization created on the install and governs the whole instance, so a self-hoster who signs up first owns it. Anyone the policy admits later gets an organization of their own, and that organization sees the policy read-only, named with the organization that governs it.
 
 | Mode | Who gets an account |
 | --- | --- |
@@ -75,7 +75,7 @@ Who may create an account is a setting, not an environment variable: an owner or
 
 In every mode a pending invitation admits its address, so a contractor on a personal address can be let in under `domain`, and `invite` is the invitation list itself. Admission and membership are different things: someone the policy admits creates an account with an organization of their own, while an invitation from Settings → Members both admits them and joins them to yours. The policy gates account creation only: tightening it never removes a member or blocks an existing member's next sign-in, and while the instance has no account at all any mode admits the first one. A refused sign-up creates nothing and answers `403 AUTH.SIGNUP_REFUSED`; the WorkOS callback sends the visitor back to the sign-in screen with that reason. Each change is written to the audit log, and the setting is refused through the raw organization settings endpoint so it can only change through the validated route.
 
-The same setting is readable and writable over the API, for an owner or admin: `GET` and `PUT /api/orgs/{orgSlug}/signup-policy` with a body of `{"mode": "domain", "domains": ["acme.com"]}`. If you are putting the instance on a real hostname, set this before anyone else can reach it.
+The same setting is readable and writable over the API, for an owner or admin of the governing organization: `GET` and `PUT /api/orgs/{orgSlug}/signup-policy` with a body of `{"mode": "domain", "domains": ["acme.com"]}`. If you are putting the instance on a real hostname, set this before anyone else can reach it.
 
 ## Ingest buffer
 
@@ -141,6 +141,7 @@ Both ship blank, and in the open edition they stay blank: the model weights clas
 | `SANDBOX_BACKEND` | Where sandbox-runner launches sandboxed agent sessions: `docker` (sibling containers), `e2b` (Tessary-hosted microVMs), or `local` (the host's logged-in `claude`). | `docker` |
 | `SANDBOX_WORK_VOLUME` | Name of the Docker volume sandbox-runner shares with the sibling containers it spawns. The launcher hands this exact string to the Engine API, so it is the volume's real name and not a project-prefixed one. | `tessary-sandbox-work` |
 | `AGENT_PROVIDER` | Where the sandboxed agent runs: unset for SigV4 Bedrock, `anthropic` for the first-party Anthropic API, or `bedrock-api-key` for Bedrock over a bearer token. | Unset (SigV4 Bedrock) |
+| `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` | The bearer the backend presents to the sandbox launcher, and the launcher checks it against. Anyone holding the published default can drive the launcher into spawning containers on the host, so replace it before the instance holds anything real: see [Secure the instance](/self-hosting/setup#secure-the-instance). | A placeholder, published in `docker-compose.yml` |
 
 ## GitHub integration
 
@@ -228,7 +229,7 @@ These variables apply to the prod Docker Compose stack (`docker-compose.yml`). T
 | `HTTPS_PORT` | Host port for HTTPS, when `SITE_DOMAIN` is set in `acme` or `owncert` mode. | `443` |
 
 <Note>
-  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while either sealing key is still on its shipped placeholder refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
+  `SITE_DOMAIN` is also how Tessary knows this instance is reachable from outside the host. Setting it while any of the three placeholder keys is still on its shipped value refuses the boot, naming the key. That is what makes the placeholders safe to ship: they cannot follow you onto a public host.
 </Note>
 
 ## Removed configuration
