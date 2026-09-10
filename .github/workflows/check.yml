@@ -23,12 +23,69 @@ on:
   # was always written to be. If the minutes bill bites, the revert is deleting the `pull_request:`
   # line; nothing else in this file depends on it.
   pull_request:
+    # DOC-ONLY PRS DO NOT RUN THIS. Safe because scripts/check.sh's own header carries a standing
+    # rule that no gate in that pipeline is keyed on prose, and the four that were are EXCLUDED
+    # rows in its manifest. Prose is checked by Mintlify's own PR check over docs/, which is where
+    # that job belongs; nothing here duplicates it.
+    # secret-scan.yml deliberately keeps no filter: a credential can land in a README.
+    #
+    # ONE KNOWN GAP, ACCEPTED ON PURPOSE, so nobody re-derives it as a bug later.
+    # check-version-consistency.sh does not read prose but it does scan every path `git ls-files`
+    # returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>` literal, which
+    # is the shape an install block pastes. On a doc-only PR that gate no longer runs. It is not
+    # lost: the scan is over the whole tree rather than the diff, so the next PR that touches code
+    # still fails on it. The cost of the trade is that the failure surfaces on a diff that does not
+    # contain the offending file, and the fix is `git log -S` on the literal. If that bites more
+    # than once, the answer is a docs-triggered workflow running that one gate, not deleting the
+    # filter below.
+    #
+    # A DENYLIST, NOT AN ALLOWLIST, on purpose. With `paths:` a new top-level code directory would
+    # be silently ungated until someone remembered to add it; with `paths-ignore:` it is gated by
+    # default and only prose has to be named. Filters apply to `pull_request:` only — a
+    # workflow_dispatch run is never filtered, so the manual escape hatch below still runs the gate
+    # over any diff.
+    #
+    # NOT `**/*.md`, and that is the whole subtlety. Eight markdown files in this repo are build
+    # inputs rather than prose: backend/analysis/src/main/resources/prompt-craft/**/*.md are loaded
+    # by PromptCraft.text() and asserted by PromptResourceParityTest inside `mvn verify`. A blanket
+    # markdown ignore would skip the gate on exactly the prompt edit it should catch. Every glob
+    # below is anchored so those keep triggering: `*.md` is root-level only, and the two `**` globs
+    # name files no gate reads.
+    #
+    # Branch protection is plan-gated here (see the top of this file), so a skipped run costs
+    # nothing today. Once it is armed, a required check that never reports blocks the merge
+    # forever, and the fix is a second workflow of the same name with the inverse filter that does
+    # nothing but pass.
+    paths-ignore:
+      - '*.md'
+      - '**/README.md'
+      - '**/AGENTS.md'
+      - 'docs/**'
+      - 'devdocs/**'
+      - 'handbook/**'
+    # THE DEFAULT SET IS opened + synchronize + reopened. Naming it explicitly costs the two below,
+    # and both are load-bearing:
+    #
+    #   ready_for_review — the other half of the draft guard on the job. A PR opened as a draft and
+    #     later marked ready fires ONLY this event; without it that PR sits with no run until
+    #     somebody pushes again, which is the failure mode where a green tick never appears and
+    #     nobody notices the gate did not run.
+    #   closed — not because anything should run on a close. The run it starts skips every job (see
+    #     the job's `if:`); what it is for is entering this workflow's concurrency group, which
+    #     cancels whatever is still in flight for the same PR. Merging with the gate half-finished
+    #     used to leave a ten-minute job running against a ref nobody will act on.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   workflow_dispatch:
 
 # One run per PR at a time. Without this, every push to an open PR starts a fresh run while the
 # previous one keeps going to completion; on a stacked branch that is most of the minutes bill.
 # cancel-in-progress is the opposite of release.yml's setting, deliberately: a superseded check is
 # waste, a superseded release is a half-published registry.
+#
+# THIS IS ALSO WHAT KILLS A RUN ON MERGE. `github.ref` is refs/pull/<n>/merge for every
+# pull_request activity type, close included, so the do-nothing run that a close starts lands in
+# this same group and cancels the in-flight one. Nothing polls and nothing needs `actions: write`.
+# The consequence of it ever breaking is a wasted job, not a missed check, so it fails safe.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -37,6 +94,20 @@ jobs:
   open-edition:
     name: check.sh (the full gate manifest, --edition open)
     runs-on: ubuntu-latest
+
+    # DRAFT PRS DO NOT RUN THE GATE, and a close runs nothing at all.
+    #
+    # A draft is work in progress by declaration; running a ten-minute gate on every push to one
+    # is the single largest avoidable line on the bill. Marking it ready fires ready_for_review,
+    # which is in the types list above, so the gate runs before anybody can review it and nothing
+    # reaches a mergeable state ungated.
+    #
+    # THE FIRST CLAUSE IS NOT DECORATION. On workflow_dispatch there is no pull_request payload, so
+    # `github.event.pull_request.draft` is null, and `null == false` is false: without the guard
+    # around it, the manual escape hatch this file advertises would silently skip every job.
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.action != 'closed' && github.event.pull_request.draft == false)
 
     # -----------------------------------------------------------------------------------------
     # AUTHORED BUT NOT ARMED — the toolchain image, .github/toolchain/Dockerfile.

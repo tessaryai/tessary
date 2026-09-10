@@ -92,10 +92,12 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
 ## Validation
 
 Run the slices your change touches (`task check -- rca,metering` or `task check -- frontend`),
-and the bare `task check` before merging. **CI runs the same gate on every pull request** —
-`.github/workflows/check.yml` calls `scripts/check.sh`, the same manifest `task check` runs, so local
-green means CI green by construction; `secret-scan.yml` is armed alongside it. Those two are the only
-workflows that run on their own; everything else is `workflow_dispatch:` only, with no cron anywhere.
+and the bare `task check` before merging. **CI runs the same gate on every pull request that touches
+code** — `.github/workflows/check.yml` calls `scripts/check.sh`, the same manifest `task check` runs,
+so local green means CI green by construction. A prose-only diff is filtered out by that file's
+`paths-ignore` (prose is Mintlify's check to run, not this pipeline's), and a draft PR is skipped
+until it is marked ready. `secret-scan.yml` is armed alongside it. Those two are the only workflows
+that run on their own; everything else is `workflow_dispatch:` only, with no cron anywhere.
 Nothing is merge-blocking (branch protection is plan-gated on this tier), so a red check still has to
 be respected by a human. Docker is required for any backend slice. Full cost model and recount commands:
 [`devdocs/reference/test-suite.md`](./devdocs/reference/test-suite.md).
