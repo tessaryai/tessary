@@ -15,6 +15,30 @@ public enum GitError implements ErrorCode {
     TOKEN_MINT_FAILED(HttpStatus.BAD_GATEWAY, "Could not mint a %s access token"),
     PROVIDER_CALL_FAILED(HttpStatus.BAD_GATEWAY, "%s API call failed: %s"),
     MISSING_APP_CONFIG(HttpStatus.FAILED_DEPENDENCY, "Git provider %s is not configured on this server"),
+    /**
+     * The deployment has no {@code TESSARY_SECRET_KEY}, so no credential can be sealed at rest.
+     * Distinct from {@link #MISSING_APP_CONFIG}: a personal access token needs no App, and telling
+     * someone to configure an App is the one instruction that cannot fix this.
+     */
+    SECRET_KEY_MISSING(
+            HttpStatus.FAILED_DEPENDENCY,
+            "This deployment has no encryption key configured, so Tessary cannot store an access token."
+                    + " Set TESSARY_SECRET_KEY on the deployment and restart it"),
+    CREDENTIALS_REJECTED(
+            HttpStatus.BAD_REQUEST, "%s rejected these credentials. Check the token has not expired or been revoked"),
+    /**
+     * GitHub answers 404 both for a repo that does not exist and for a private one the credential
+     * cannot see, and does not say which. The message has to carry both readings rather than assert
+     * the wrong one.
+     */
+    REPO_UNREACHABLE(
+            HttpStatus.BAD_REQUEST,
+            "No repository at %s that these credentials can read. Check the owner and repository name,"
+                    + " and that the token grants Contents: read on it"),
+    REPO_ACCESS_DENIED(
+            HttpStatus.BAD_REQUEST,
+            "These credentials cannot read %s. Grant the token Contents: read on this repository,"
+                    + " or enter a repository it already covers"),
     INSTALL_STATE_INVALID(HttpStatus.BAD_REQUEST, "GitHub install state is invalid or expired"),
     NO_INSTALLED_REPOS(HttpStatus.BAD_REQUEST, "The GitHub App installation grants no repositories"),
     NO_ADMIN_INSTALLATIONS(

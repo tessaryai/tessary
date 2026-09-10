@@ -35,6 +35,7 @@ public record RcaReportRow(
         @Nullable String hypotheses,
         @Nullable String detailedReport,
         String engine,
+        @Nullable Boolean repoAvailable,
         String createdAt,
         @Nullable String completedAt) {
 

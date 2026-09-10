@@ -49,6 +49,8 @@ import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, timeAgo, truncateId } from "./bits";
+import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
+import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
 
 /** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
@@ -90,6 +92,8 @@ export function CasePage() {
 
 
   const rcaEnabled = useCapabilities().isEnabled("rca_enabled");
+  const { canPrompt: canPromptRepo } = useRepoPrompt();
+  const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [absorbOpen, setAbsorbOpen] = useState(false);
@@ -205,7 +209,16 @@ export function CasePage() {
               of a story, not offered at the top of it; they moved to the closing bar with Mute.
               What stays is the one thing the reader can do before they have read anything. */}
           {live && detail.detector_available && rcaEnabled && detail.rca_available && (
-            <div className="ml-auto flex shrink-0 items-center">
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {/* The second control here is deliberate and temporary: an RCA with no repo rules on
+                  trace evidence alone, and the moment before someone presses Run is the only one
+                  where that is still fixable. It is owner-gated and disappears for good once a
+                  repository is connected, so the page returns to its one-control rule by itself. */}
+              {canPromptRepo && (
+                <Button size="sm" variant="secondary" onClick={() => setConnectRepoOpen(true)}>
+                  Connect repository
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant={analysed ? "secondary" : "primary"}
@@ -387,6 +400,8 @@ export function CasePage() {
           </Button>
         </div>
       </Modal>
+
+      <ConnectRepositoryDialog open={connectRepoOpen} onClose={() => setConnectRepoOpen(false)} />
     </div>
   );
 }

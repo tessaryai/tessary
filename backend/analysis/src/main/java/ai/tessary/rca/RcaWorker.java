@@ -125,7 +125,7 @@ public class RcaWorker {
             log.debug("rca job failed job={} detail", job.id(), e);
             jobs.markFailed(job.id(), e.getMessage(), props.getMaxAttempts());
             try {
-                reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null);
+                reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
             } catch (RuntimeException stampFailure) {
                 log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
             }

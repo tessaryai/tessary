@@ -48,7 +48,7 @@ public class GitIntegrationController {
             @Valid @RequestBody ConnectRequest req) {
         Resolved r = requireOwner(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(
-                GitIntegrationView.from(service.connect(r.project().id(), req)));
+                GitIntegrationView.from(service.connectVerified(r.project().id(), req)));
     }
 
     @DeleteMapping

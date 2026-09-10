@@ -124,7 +124,8 @@ public class RcaAnalysisService {
                 result.summary(),
                 merge(measurements, result.checklist()),
                 result.hypotheses(),
-                result.detailedReport());
+                result.detailedReport(),
+                result.repoAvailable());
     }
 
     /**
@@ -207,8 +208,17 @@ public class RcaAnalysisService {
             String summary,
             List<RuledOutCheck> checks,
             List<Hypothesis> hypotheses,
-            @Nullable String detailedReport) {
-        reports.complete(job.id(), "done", verdict, summary, writeJson(checks), writeJson(hypotheses), detailedReport);
+            @Nullable String detailedReport,
+            boolean repoAvailable) {
+        reports.complete(
+                job.id(),
+                "done",
+                verdict,
+                summary,
+                writeJson(checks),
+                writeJson(hypotheses),
+                detailedReport,
+                repoAvailable);
         log.info(
                 "rca done project={} subject={}:{} metric={} verdict={} hypotheses={}",
                 job.projectId(),

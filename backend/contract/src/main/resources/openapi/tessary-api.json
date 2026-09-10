@@ -6884,6 +6884,12 @@
             "format" : "double",
             "type" : "number"
           },
+          "repo_available" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
           "ruled_out" : {
             "items" : {
               "$ref" : "#/components/schemas/RuledOutCheck"
@@ -6937,6 +6943,7 @@
           "job_id",
           "metric",
           "prior_value",
+          "repo_available",
           "ruled_out",
           "status",
           "subject_id",

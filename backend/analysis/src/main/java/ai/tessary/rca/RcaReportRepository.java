@@ -25,7 +25,8 @@ public class RcaReportRepository {
     private static final String COLS = "r.id, r.project_id, r.job_id, r.subject_kind, r.subject_id, "
             + "r.subject_label, r.call_site_id, r.metric, r.window_from, r.window_split, r.window_to, "
             + "r.current_value, r.prior_value, r.delta, j.status AS status, r.verdict, r.summary, "
-            + "r.ruled_out, r.hypotheses, r.detailed_report, r.engine, r.created_at, r.completed_at";
+            + "r.ruled_out, r.hypotheses, r.detailed_report, r.engine, r.repo_available, "
+            + "r.created_at, r.completed_at";
 
     private static final String FROM = "FROM rca_report r JOIN job j ON j.id = r.job_id";
 
@@ -200,11 +201,13 @@ public class RcaReportRepository {
             @Nullable String summary,
             @Nullable String ruledOutJson,
             @Nullable String hypothesesJson,
-            @Nullable String detailedReport) {
+            @Nullable String detailedReport,
+            @Nullable Boolean repoAvailable) {
         jdbc.sql("""
                 UPDATE rca_report SET status = :status, verdict = :verdict, summary = :summary,
                     ruled_out = :ruledOut::jsonb, hypotheses = :hypotheses::jsonb,
-                    detailed_report = :detailedReport, completed_at = :now
+                    detailed_report = :detailedReport, repo_available = :repoAvailable,
+                    completed_at = :now
                 WHERE job_id = :jobId
                 """)
                 .param("status", status)
@@ -213,9 +216,17 @@ public class RcaReportRepository {
                 .param("ruledOut", ruledOutJson)
                 .param("hypotheses", hypothesesJson)
                 .param("detailedReport", detailedReport)
+                .param("repoAvailable", repoAvailable)
                 .param("now", Instant.now().toString())
                 .param("jobId", jobId)
                 .update();
+    }
+
+    /** {@code getBoolean} reads SQL NULL as false, which is the one answer this column must not
+     *  invent: a report written before the column existed does not know whether it had a repo. */
+    private static @Nullable Boolean readNullableBoolean(ResultSet rs, String column) throws SQLException {
+        boolean value = rs.getBoolean(column);
+        return rs.wasNull() ? null : value;
     }
 
     private static RcaReportRow map(ResultSet rs) throws SQLException {
@@ -241,6 +252,7 @@ public class RcaReportRepository {
                 rs.getString("hypotheses"),
                 rs.getString("detailed_report"),
                 rs.getString("engine"),
+                readNullableBoolean(rs, "repo_available"),
                 rs.getString("created_at"),
                 rs.getString("completed_at"));
     }

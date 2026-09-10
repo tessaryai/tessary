@@ -3446,6 +3446,7 @@ export interface components {
             metric: string;
             /** Format: double */
             prior_value: number;
+            repo_available: boolean | null;
             ruled_out: components["schemas"]["RuledOutCheck"][];
             status: string;
             subject_id: string;
