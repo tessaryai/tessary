@@ -87,6 +87,27 @@ LABEL org.opencontainers.image.version=$IMAGE_VERSION \
 WORKDIR /app
 RUN printf '%s\n' "$IMAGE_VERSION" > /app/IMAGE_VERSION
 
+# Delete Canonical's Pebble service manager. eclipse-temurin:25-jre is built on Ubuntu 26.04, which
+# bakes /usr/bin/pebble into the rootfs, and that binary was compiled with Go 1.26.5 — inside the
+# range of CVE-2026-39821 (>=1.26.0, <1.26.6). It is the only critical this image carries, and
+# nothing here starts it: the entrypoint below is java, straight through.
+#
+# THIS LINE DOES NOT MOVE THE SCANNER NUMBER, AND IS STILL WORTH KEEPING. Measured on the image
+# built from this file: every ELF on the filesystem was checked for a `go1.x` build stamp and NONE
+# carries one — there is no Go binary left to execute — yet `docker scout cves` still reports
+# `pkg:golang/stdlib@1.26.5` and lists `github.com/canonical/pebble` in the SBOM. Scout attributes
+# findings from the base image it detects (here `oisupport/staging-arm64v8:25-jre`, auto-detected
+# because a local build carries no provenance attestation) rather than from the flattened
+# filesystem alone. Which of those two paths produces this specific entry was not isolated, and it
+# does not change what to do: the reachable risk is gone, the reported count stays at 1C until
+# Temurin rebuilds on Go >=1.26.6.
+#
+# Do NOT try to win the number back by flattening the image (export/import, --squash). That would
+# discard the layered-jar COPY order below, whose whole purpose is that a code-only rebuild
+# invalidates just the small `application` layer, and it would drop the OCI labels and USER with
+# it. A phantom finding is not worth that trade.
+RUN rm -f /usr/bin/pebble
+
 # Run as an unprivileged user (the JRE base ships root by default).
 RUN groupadd --system spring && useradd --system --gid spring spring
 USER spring:spring

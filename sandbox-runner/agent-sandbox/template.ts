@@ -65,7 +65,13 @@ export const template = Template()
   // opencode-ai's and re2's install scripts below and ships an re2 that throws MODULE_NOT_FOUND
   // at require time.
   //
-  // git + the agent's clone; python3/py3-pip run the baked bundle validator;
+  // `apk upgrade` first, for the reason the sibling Dockerfile gives on this line: node:24-alpine3.24
+  // is rebuilt on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only
+  // critical this recipe carries. NOTHING IS DELETED HERE, unlike launcher/Dockerfile, which drops
+  // npm and pnpm — this is a sandbox for agent code, so npm, python3, pip, git and the compilers
+  // are its runtime working surface rather than build-time bootstraps.
+  //
+  // Then the packages: git + the agent's clone; python3/py3-pip run the baked bundle validator;
   // make/g++/linux-headers build re2 FROM SOURCE (no prebuild for Node 24's ABI — see the header);
   // bash because THIS SDK execs /bin/bash and Alpine has none (see the header).
   // A raw runCmd, not `.aptInstall`, because the builder has no apkInstall — see the header.
@@ -73,7 +79,7 @@ export const template = Template()
   // (validate.py + pipeline_io.py, both of which `import yaml`) was previously a hard crash
   // in-VM, silently killing the observer's remediate+validate path. Install pip here and
   // PyYAML below.
-  .runCmd('apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers', { user: 'root' })
+  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers', { user: 'root' })
   // PyYAML is the validator's only required third-party Python dep. Bake it at build time (no
   // per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
   // system environment PEP 668 externally-managed; PIP_BREAK_SYSTEM_PACKAGES below lets the agent

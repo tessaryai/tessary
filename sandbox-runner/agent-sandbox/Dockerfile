@@ -78,7 +78,16 @@ FROM node:24-alpine3.24
 # apkInstall. The base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
 # (validate.py + pipeline_io.py, both of which `import yaml`) is a hard in-container crash without
 # this.
-RUN apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers
+#
+# `apk upgrade` first, for the same reason as launcher/Dockerfile's: node:24-alpine3.24 is rebuilt
+# on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only critical this
+# image carries. NOTE THE ASYMMETRY WITH THE LAUNCHER, which also DELETES npm and pnpm: nothing may
+# be deleted here. This image is a sandbox for agent code, and npm, python3, pip, git and the
+# compilers are its working surface at runtime, not build-time bootstraps —
+# PIP_BREAK_SYSTEM_PACKAGES below exists precisely so the agent can `pip install` mid-run. "Delete
+# what you don't run" is the right rule and it simply does not reach anything here.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers
 
 # PyYAML is the validator's only required third-party Python dep, baked at build time (no
 # per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
