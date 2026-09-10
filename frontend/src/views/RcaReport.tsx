@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Info } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useProjectApi, useTenant } from "../tenant/TenantContext";
 import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn, type BadgeTone } from "../ui";
 import { Markdown } from "./components/PayloadViewer";
 import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning } from "./rcaLabels";
+import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
+import { useRepoPrompt } from "./components/useRepoPrompt";
 import type { RcaHypothesis, RcaRuledOutCheck } from "../api/types";
 
 /**
@@ -124,6 +128,8 @@ export function RcaReport() {
   const { orgSlug, projectSlug } = useTenant();
   const api = useProjectApi();
   const navigate = useNavigate();
+  const { canPrompt: canPromptRepo } = useRepoPrompt();
+  const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
   const report = useQuery({
     queryKey: ["rca-report", api.base, reportId],
@@ -230,6 +236,32 @@ export function RcaReport() {
         </div>
       )}
 
+      {/* A run that had no repository could show what changed in production and not what changed in
+          the code. That ceiling belongs above the verdict, because it qualifies the verdict — until
+          now it existed only as a sentence the agent wrote into the markdown body, where it reads as
+          part of the analysis rather than as a limit on it. `repo_available` is null on reports
+          written before it was recorded: unknown, which must not render as "no repository". */}
+      {!running && r.status === "done" && r.repo_available === false && (
+        <div
+          className="rounded-card border border-[color:var(--color-info)] px-3 py-2 mb-6 flex items-center justify-between gap-4"
+          style={{ backgroundColor: "var(--color-info-subtle)" }}
+        >
+          <div className="flex items-start gap-2">
+            <Info size={13} strokeWidth={1.75} aria-hidden="true" className="text-info shrink-0 mt-0.5" />
+            <span className="text-small text-fg-secondary">
+              <span className="font-medium text-fg">Analyzed without repository access.</span> Tessary analyzed trace
+              evidence only and could not check code changes. Connect a repository to include code in the next
+              analysis.
+            </span>
+          </div>
+          {canPromptRepo && (
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={() => setConnectRepoOpen(true)}>
+              Connect repository
+            </Button>
+          )}
+        </div>
+      )}
+
       {!running && r.status === "done" && (
         <div className="flex flex-col gap-5">
           {r.verdict && (
@@ -271,6 +303,8 @@ export function RcaReport() {
           )}
         </div>
       )}
+
+      <ConnectRepositoryDialog open={connectRepoOpen} onClose={() => setConnectRepoOpen(false)} />
     </PageBody>
   );
 }

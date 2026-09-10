@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,8 @@ public class GithubClient implements GitProviderClient {
 
     private static final Logger log = LoggerFactory.getLogger(GithubClient.class);
     private static final String LABEL = "github";
+    /** The provider's own spelling, for messages a person reads rather than log lines. */
+    private static final String LABEL_TITLE = "GitHub";
 
     /** Bounded concurrency for fetching bundle blob contents (kept low to avoid GitHub secondary limits). */
     private static final int BLOB_FETCH_CONCURRENCY = 8;
@@ -61,6 +64,40 @@ public class GithubClient implements GitProviderClient {
     @Override
     public GitProvider provider() {
         return GitProvider.GITHUB;
+    }
+
+    /**
+     * {@code GET /repos/{owner}/{repo}} with the integration's own credentials. The status mapping is
+     * the point of the method: GitHub returns 404 (not 403) for a private repo a fine-grained token
+     * has not been granted, so a 404 cannot be reported as "no such repository" without frequently
+     * being wrong. 401 is unambiguous, 403 is an explicit refusal (SSO or an org policy), and every
+     * other non-2xx stays a plain provider failure rather than being read as a verdict about access.
+     */
+    @Override
+    public RepoAccess verifyAccess(GitIntegrationRow integ) {
+        String slug = integ.repoOwner() + "/" + integ.repoName();
+        URI uri = UrlGuard.requirePublicHttp(
+                baseUrl(integ) + "/repos/" + enc(integ.repoOwner()) + "/" + enc(integ.repoName()));
+        HttpResponse<String> res = exchange(baseRequest(integ, uri).GET().build());
+        TessaryException refusal = verifyRefusal(res.statusCode(), slug);
+        if (refusal != null) throw refusal;
+        JsonNode repo = validateAndParse(res);
+        String branch = repo.path("default_branch").asText("");
+        return new RepoAccess(branch.isBlank() ? "main" : branch);
+    }
+
+    /**
+     * The status-to-error mapping for {@link #verifyAccess}, split out so it can be pinned without
+     * an HTTP round trip ({@code UrlGuard} refuses to aim this client at a local test server).
+     * Null means the status is not a refusal and the body should be parsed.
+     */
+    static @Nullable TessaryException verifyRefusal(int status, String slug) {
+        return switch (status) {
+            case 401 -> new TessaryException(GitError.CREDENTIALS_REJECTED, LABEL_TITLE);
+            case 403 -> new TessaryException(GitError.REPO_ACCESS_DENIED, slug);
+            case 404 -> new TessaryException(GitError.REPO_UNREACHABLE, slug);
+            default -> null;
+        };
     }
 
     @Override

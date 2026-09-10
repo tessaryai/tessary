@@ -259,7 +259,8 @@ class CaseServiceTest {
                 "The judge model changed mid-window.",
                 null,
                 null,
-                "## Why\nThe provider rotated the default.");
+                "## Why\nThe provider rotated the default.",
+                true);
         // The wire status is the JOB's, so the queue is what has to say "finished" — the report's own column
         // alone would leave an exhaustion-swept job reading as claimed forever.
         rcaJobs.markDone(jobId);

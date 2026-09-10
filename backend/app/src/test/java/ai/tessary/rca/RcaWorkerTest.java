@@ -193,7 +193,8 @@ class RcaWorkerTest {
                         List.of(new Hypothesis("stricter prompt", "high", "because", List.of(failingTrace))),
                         List.of(new ChecklistAssessment(
                                 "serving_model", "explains", "commit abc123 moved the call site to a new model")),
-                        "## Investigation"));
+                        "## Investigation",
+                        true));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(passingTrace), List.of(failingTrace)));
         worker.runForTest(job);
@@ -316,7 +317,7 @@ class RcaWorkerTest {
 
     private void stubEngine(String verdict, List<ChecklistAssessment> checklist) {
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet()))
-                .thenReturn(new AgenticRcaEngine.Result(verdict, "summary", List.of(), checklist, "## report"));
+                .thenReturn(new AgenticRcaEngine.Result(verdict, "summary", List.of(), checklist, "## report", true));
     }
 
     /** The persisted checklist, by check id. */

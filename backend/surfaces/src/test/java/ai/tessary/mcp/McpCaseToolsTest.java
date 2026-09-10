@@ -336,6 +336,7 @@ class McpCaseToolsTest {
                         "Model swap on 2026-08-14", "high", "The provider rotated the default.", List.of("tr-1"))),
                 "## Why\nThe judge model changed.",
                 "agentic",
+                true,
                 "2026-08-15T01:00:00Z",
                 "2026-08-15T01:20:00Z");
     }

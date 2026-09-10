@@ -97,7 +97,10 @@ public class AgenticRcaEngine {
             String summary,
             List<Hypothesis> hypotheses,
             List<ChecklistAssessment> checklist,
-            String detailedReport) {}
+            String detailedReport,
+            /** Whether this run actually had the repo to read. Recorded per report, because the
+             *  ceiling belongs to the run, not to whether a repo is connected when someone reads it. */
+            boolean repoAvailable) {}
 
     private final RcaProperties props;
     private final Map<String, RcaSandbox> sandboxes;
@@ -240,7 +243,13 @@ public class AgenticRcaEngine {
                 // The downgrade must be visible where the engineer reads, not only in a log line.
                 detailed = parsed.verdictNote() + "\n\n" + detailed;
             }
-            return new Result(parsed.verdict(), parsed.summary(), parsed.hypotheses(), parsed.checklist(), detailed);
+            return new Result(
+                    parsed.verdict(),
+                    parsed.summary(),
+                    parsed.hypotheses(),
+                    parsed.checklist(),
+                    detailed,
+                    clone.isPresent());
         } finally {
             revokeQuietly(issued.token().id(), keyPrincipal, job);
         }

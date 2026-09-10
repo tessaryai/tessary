@@ -36,7 +36,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useProjectApi } from "../../tenant/TenantContext";
 import type { InstallationOption } from "../../api/types";
-import { Button, ErrorNote, Field, Input, Modal, PageBody, PageHeader, Skeleton, useToast } from "../../ui";
+import { Button, ErrorNote, Modal, PageBody, PageHeader, Skeleton, useToast } from "../../ui";
+import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 
 export function GitIntegration() {
   const api = useProjectApi();
@@ -101,10 +102,10 @@ export function GitIntegration() {
     enabled: selectToken != null,
   });
 
-  const [owner, setOwner] = useState("");
-  const [name, setName] = useState("");
-  const [token, setToken] = useState("");
-  const [manualOpen, setManualOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  // The App routes stay one disclosure back. A token works on every deployment; an App needs one
+  // registered first, so leading with it is what sent self-hosters through three dead buttons.
+  const [appOpen, setAppOpen] = useState(false);
 
   const installRedirect = useMutation({
     mutationFn: api.getGithubInstallUrl,
@@ -113,7 +114,7 @@ export function GitIntegration() {
     },
     // No hosted app configured (self-hosted, or the app isn't set up): fall back
     // to binding a repo by name rather than dead-ending.
-    onError: () => setManualOpen(true),
+    onError: () => setConnectOpen(true),
   });
 
   const authorizeRedirect = useMutation({
@@ -121,7 +122,7 @@ export function GitIntegration() {
     onSuccess: (res) => {
       window.location.href = res.url;
     },
-    onError: () => setManualOpen(true),
+    onError: () => setConnectOpen(true),
   });
 
   // GitHub's manifest flow needs a POSTed `manifest` form field — too large for a query string —
@@ -142,28 +143,7 @@ export function GitIntegration() {
       document.body.appendChild(form);
       form.submit();
     },
-    onError: () => toast.error("Could not start GitHub App setup", 'Try again, or select "Enter a repository by name".'),
-  });
-
-  const connect = useMutation({
-    mutationFn: () =>
-      api.connectGit({
-        provider: "github",
-        repoOwner: owner.trim(),
-        repoName: name.trim(),
-        // A blank token binds a repo the hosted/BYO App already reaches, same as before. A non-blank
-        // one is a personal-access-token fallback for a repo no App installation covers — the backend
-        // seals it and GithubTokenService tries it before ever touching App credentials.
-        token: token.trim() === "" ? undefined : token.trim(),
-      }),
-    onSuccess: () => {
-      setOwner("");
-      setName("");
-      setToken("");
-      setManualOpen(false);
-      invalidate();
-      toast.success("Repository connected");
-    },
+    onError: () => toast.error("Could not start GitHub App setup", "Try again, or connect with an access token."),
   });
 
   const select = useMutation({
@@ -195,12 +175,12 @@ export function GitIntegration() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Data & ingestion"
-        title="Git integration"
-        subtitle="The repository Tessary reads when it runs RCA (root-cause analysis). Without one, RCA still runs, but it rules on trace evidence alone and cannot say what changed in your code."
-      />
-      <PageBody>
+      <PageBody size="narrow">
+        <PageHeader
+          eyebrow="Data & ingestion"
+          title="Git integration"
+          subtitle="The repository Tessary reads when it runs RCA (root-cause analysis). Without one, RCA still runs, but it rules on trace evidence alone and cannot say what changed in your code."
+        />
         {integrationQ.isLoading && <Skeleton className="h-16 w-full" />}
         {integrationQ.isError && <ErrorNote error={integrationQ.error} />}
 
@@ -238,72 +218,56 @@ export function GitIntegration() {
               Until one is connected, RCA can still run but rules on trace evidence alone and cannot check your code.
             </p>
             <div className="flex items-center gap-2 mt-4" style={{ flexWrap: "wrap" }}>
-              <Button size="sm" onClick={() => installRedirect.mutate()} disabled={installRedirect.isPending}>
-                {installRedirect.isPending ? "Opening GitHub…" : "Install the GitHub App"}
+              <Button size="sm" variant="primary" onClick={() => setConnectOpen(true)}>
+                Connect repository
               </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => authorizeRedirect.mutate()}
-                disabled={authorizeRedirect.isPending}
-              >
-                Use an existing installation
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setManualOpen(true)}>
-                Enter a repository by name
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => manifestSetup.mutate()}
-                disabled={manifestSetup.isPending}
-              >
-                {manifestSetup.isPending ? "Opening GitHub…" : "Set up your own GitHub App"}
-              </Button>
+              {!appOpen && (
+                <Button size="sm" variant="ghost" onClick={() => setAppOpen(true)}>
+                  Use a GitHub App instead
+                </Button>
+              )}
             </div>
+
+            {appOpen && (
+              <div className="border-t border-border mt-4 pt-4">
+                <div className="text-label uppercase text-subtle">GitHub App</div>
+                <div className="flex items-center gap-2 mt-2.5" style={{ flexWrap: "wrap" }}>
+                  <Button size="sm" onClick={() => installRedirect.mutate()} disabled={installRedirect.isPending}>
+                    {installRedirect.isPending ? "Opening GitHub…" : "Install the GitHub App"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => authorizeRedirect.mutate()}
+                    disabled={authorizeRedirect.isPending}
+                  >
+                    Use an existing installation
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => manifestSetup.mutate()}
+                    disabled={manifestSetup.isPending}
+                  >
+                    {manifestSetup.isPending ? "Opening GitHub…" : "Set up your own GitHub App"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {disconnect.isError && <ErrorNote error={disconnect.error} />}
       </PageBody>
 
-      <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Connect a repository">
-        <p className="text-muted mt-0 mx-0 mb-4 text-body">
-          Either the GitHub App already has access to this repository, or paste a personal access
-          token below for a repository no App installation reaches. The token needs read access to
-          code and metadata. Leave it blank to connect through the App instead.
-        </p>
-        <Field label="Owner">
-          {(p) => <Input {...p} value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="tessaryai" autoFocus />}
-        </Field>
-        <Field label="Repository">
-          {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} placeholder="tessary" />}
-        </Field>
-        <Field label="Personal access token (optional)">
-          {(p) => (
-            <Input
-              {...p}
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="ghp_… or github_pat_…"
-            />
-          )}
-        </Field>
-        {connect.isError && <ErrorNote error={connect.error} />}
-        <div className="flex justify-end gap-2 mt-4.5">
-          <Button variant="ghost" size="sm" onClick={() => setManualOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => connect.mutate()}
-            disabled={connect.isPending || owner.trim() === "" || name.trim() === ""}
-          >
-            {connect.isPending ? "Connecting…" : "Connect repository"}
-          </Button>
-        </div>
-      </Modal>
+      <ConnectRepositoryDialog
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        onUseGithubApp={() => {
+          setConnectOpen(false);
+          setAppOpen(true);
+        }}
+      />
 
       <Modal
         open={selectToken != null}

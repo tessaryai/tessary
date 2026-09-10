@@ -352,6 +352,9 @@ const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
 const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   "cases/:caseId": {
     getCase: NOT_FOUND("case"),
+    // The header offers "Connect repository" beside Run RCA when the project has none, so the
+    // case page now reads the integration too (useRepoPrompt).
+    getGitIntegration: () => Promise.resolve(null),
   },
   sources: {
     listSources: EMPTY,
@@ -398,6 +401,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   },
   "rca/:reportId": {
     getRcaReport: NOT_FOUND("rca report"),
+    // Same read as the case page: the "analyzed without repository access" notice offers to fix it.
+    getGitIntegration: () => Promise.resolve(null),
   },
   // ---- Settings sections -----------------------------------------------------------------------
   // Every one of these mounts a view that reads at least one project endpoint on mount, and each

@@ -96,6 +96,8 @@ public final class RcaDtos {
             List<Hypothesis> hypotheses,
             @JsonProperty("detailed_report") @Nullable String detailedReport,
             String engine,
+            /** Null on reports written before the column existed: unknown, not "no repository". */
+            @JsonProperty("repo_available") @Nullable Boolean repoAvailable,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("completed_at") @Nullable String completedAt) {
 
@@ -121,6 +123,7 @@ public final class RcaDtos {
                     readList(mapper, r.hypotheses(), new TypeReference<List<Hypothesis>>() {}),
                     r.detailedReport(),
                     r.engine(),
+                    r.repoAvailable(),
                     r.createdAt(),
                     r.completedAt());
         }

@@ -162,6 +162,7 @@ class AgenticRcaPromptTest {
                 null,
                 null,
                 RcaReportRow.Engine.AGENTIC,
+                null,
                 "2026-05-08T01:00:00Z",
                 null);
     }
