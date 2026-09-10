@@ -423,7 +423,7 @@ services:
   # from the OBSERVER_LAUNCHER_-prefixed SSM vars so they never override the backend container's
   # instance-profile creds.
   # One-shot init: Docker creates a fresh named volume as root:root mode 0755, unwritable by
-  # sandbox-runner's non-root `node` user (uid 1000, the default in node:22-slim; see
+  # sandbox-runner's non-root `node` user (uid 1000, the default in node:24-alpine3.24; see
   # sandbox-runner/launcher/Dockerfile's final `USER node`). This runs as root and chowns it to
   # 1000:1000 so the launcher's mkdtempSync calls (server.js's LAUNCHER_WORK_DIR) succeed. Exits
   # immediately; sandbox-runner waits on it via `condition: service_completed_successfully` below.
@@ -465,7 +465,7 @@ services:
     expose:
       - "8080"
     # The launcher's own GET /healthz (sandbox-runner/launcher/server.js), unauthenticated by
-    # design; node:22-alpine carries busybox wget. Same 5 s interval as the others, so a
+    # design; node:24-alpine carries busybox wget. Same 5 s interval as the others, so a
     # launcher that exits on a config it rejects shows as unhealthy, not merely restarting.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "-T", "3", "http://127.0.0.1:8080/healthz"]

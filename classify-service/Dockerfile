@@ -31,7 +31,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: model bake — downloads pinned revisions, assembles localModelPath layout
 # ---------------------------------------------------------------------------
-FROM node:22-slim AS models
+FROM node:24-slim AS models
 
 WORKDIR /app
 # pnpm by explicit global install rather than corepack, so image builds never depend on corepack's
@@ -70,7 +70,7 @@ RUN --mount=type=secret,id=hf_token \
 # ---------------------------------------------------------------------------
 # Stage 2: runtime — code + baked weights + offline validation
 # ---------------------------------------------------------------------------
-FROM node:22-slim
+FROM node:24-slim
 
 WORKDIR /app
 ARG PNPM_VERSION
