@@ -21,11 +21,21 @@
 # No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per invocation
 # (see runScriptInDocker), never a long-lived process.
 #
-# BASE IMAGE: node:22-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
-# Why not 20: `re2@1.26.1` — pinned by every recipe, unchanged — declares
-# `engines.node: "^22.22.2 || ^24.15.0 || >=26.0.0"`, and npm's own resolved node-gyp fails to even
-# configure under Node 20 with an unrelated undici crash (`TypeError:
-# webidl.util.markAsUncloneable is not a function`), verified on both linux/amd64 and linux/arm64.
+# BASE IMAGE: node:24-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
+# Why 24 and not 22: 22 has been maintenance-only since 2025-10-21 and is EOL 2027-04-30; 24 runs
+# to 2028-04-30. `re2@1.26.1` — pinned by every recipe, unchanged — declares
+# `engines.node: "^22.22.2 || ^24.15.0 || >=26.0.0"`, so 24 is in range where 20 never was (under
+# 20, npm's own resolved node-gyp fails to even configure with an unrelated undici crash,
+# `TypeError: webidl.util.markAsUncloneable is not a function`, verified on both linux/amd64 and
+# linux/arm64).
+#
+# WHAT THE 22->24 MOVE COSTS, and why `linux-headers` is in the apk list below: re2 publishes
+# prebuilt binaries per Node ABI, and its install script tries those before compiling. Node 22 is
+# ABI 127 and has a musl prebuild; Node 24 is ABI 137 and does NOT, so `npm install re2` now falls
+# through to a from-source node-gyp build — which needs kernel headers for abseil's
+# direct_mmap.h (`fatal error: linux/unistd.h: No such file or directory`, hit on the first
+# 24 build). Keep linux-headers as long as re2 is in the install list below, whatever the Node
+# major: the source path is ABI-agnostic and is now the path this image always takes.
 # The launcher's own Dockerfile is on the same base for the same reasons.
 #
 # Why ALPINE and not Debian: every remaining CRITICAL on the Debian recipe was an unfixable Debian
@@ -50,28 +60,34 @@
 #
 # The musl swap itself is verified, not assumed: re2@1.26.1 compiles under Alpine's g++ and matches
 # correctly, opencode-ai 1.18.30 installs and runs, PyYAML imports, and @opencode-ai/sdk loads.
-FROM node:22-alpine3.24
+FROM node:24-alpine3.24
 
-# The `tar` module npm vendors (usr/local/lib/node_modules/npm/node_modules/tar) ships at 7.5.11 on
-# this base — the distro choice above doesn't touch npm's payload — and carries CRITICAL
-# CVE-2026-59873 (gzip-bomb DoS), fixed at tar@7.5.19. Patch the vendored copy in place rather than
-# bumping npm itself: npm>=12 (the first release vendoring a fixed tar) flips `allowScripts` off by
-# default, so `npm install re2@^1.26.1` below would complete with only a WARNING, never run
-# node-gyp, and ship an re2 that throws MODULE_NOT_FOUND at require time. Verified directly.
-# (launcher/Dockerfile fixes the same CVE with npm@12 instead — it installs with pnpm and builds no
-# native addon, so the allowScripts default is harmless there. Do not copy that line into here.)
-RUN npm install -g tar@7.5.19 --prefix /tmp/tarfix \
-    && cp -r /tmp/tarfix/lib/node_modules/tar/* /usr/local/lib/node_modules/npm/node_modules/tar/ \
-    && rm -rf /tmp/tarfix \
-    && npm cache clean --force
+# NO TAR PATCH HERE ANY MORE, and it should not come back. This used to copy tar@7.5.19 over the
+# copy npm vendors at usr/local/lib/node_modules/npm/node_modules/tar, because node:22-alpine3.24's
+# npm 10.9.8 vendored tar 7.5.11 and carried CRITICAL CVE-2026-59873 (gzip-bomb DoS).
+# node:24-alpine3.24 ships npm 11.19.0, whose vendored tar is ALREADY 7.5.19 — verified on the
+# base, not assumed — so the patch was a no-op the moment the base moved. Bumping npm itself is
+# still the wrong fix if this ever recurs: npm>=12 flips `allowScripts` off by default, so
+# `npm install re2@^1.26.1` below would complete with only a WARNING, never run node-gyp, and ship
+# an re2 that throws MODULE_NOT_FOUND at require time. Patch the vendored copy, don't bump npm.
 
-# git + the agent's clone; python3/py3-pip run the baked bundle validator; make/g++ build re2 (a
-# native addon); bash because the e2b SDK execs /bin/bash (see the header). Mirrored by
+# git + the agent's clone; python3/py3-pip run the baked bundle validator; make/g++/linux-headers
+# build re2 from source (a native addon with no Node 24 prebuild — see the header); bash because
+# the e2b SDK execs /bin/bash (see the header). Mirrored by
 # template.ts's `.runCmd('apk add ...')` — which is a raw runCmd because the builder has no
 # apkInstall. The base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
 # (validate.py + pipeline_io.py, both of which `import yaml`) is a hard in-container crash without
 # this.
-RUN apk add --no-cache bash git ca-certificates python3 py3-pip make g++
+#
+# `apk upgrade` first, for the same reason as launcher/Dockerfile's: node:24-alpine3.24 is rebuilt
+# on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only critical this
+# image carries. NOTE THE ASYMMETRY WITH THE LAUNCHER, which also DELETES npm and pnpm: nothing may
+# be deleted here. This image is a sandbox for agent code, and npm, python3, pip, git and the
+# compilers are its working surface at runtime, not build-time bootstraps —
+# PIP_BREAK_SYSTEM_PACKAGES below exists precisely so the agent can `pip install` mid-run. "Delete
+# what you don't run" is the right rule and it simply does not reach anything here.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers
 
 # PyYAML is the validator's only required third-party Python dep, baked at build time (no
 # per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
@@ -136,7 +152,8 @@ WORKDIR /home/user
 # DELIBERATELY npm though the repo is otherwise on pnpm — see template.ts's own comment;
 # the same reasoning applies unchanged here (no lockfile to honor, the container is disposable, npm
 # is already in the base image). undici pins to ^6 so this line stays byte-identical to
-# template.ts's (bump every recipe together; undici 8 needs node >=22.19, fine on node:22-alpine3.24).
+# template.ts's (bump every recipe together; undici 8 needs node >=22.19, comfortably clear on
+# node:24-alpine3.24).
 # The cache clean is size only: npm leaves ~38 MB in $HOME/.npm that nothing at runtime reads.
 RUN npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force

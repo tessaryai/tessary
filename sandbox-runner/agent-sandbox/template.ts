@@ -12,8 +12,10 @@ import { Template } from 'e2b';
  * Build/publish with the sibling build.ts (see README): `pnpm exec tsx build.ts`.
  *
  * BASE IMAGE PARITY: this template and the sibling Dockerfile (the Docker-backend agent
- * image) both compile re2@1.26.1, whose engines range starts at node 22.22.2. Both are
- * node:22-alpine3.24 for that one reason. Do not bump one without the other.
+ * image) both compile re2@1.26.1, whose engines range is "^22.22.2 || ^24.15.0 || >=26.0.0". Both
+ * are node:24-alpine3.24. Do not bump one without the other — and note that on 24 re2 has no
+ * prebuild for its ABI and builds from source, which is why `linux-headers` is in the apk line
+ * below and in the sibling's. See the sibling Dockerfile's header for the full account.
  *
  * ALPINE, AND THE TWO THINGS IT FORCES. E2B supports Alpine as a base (their docs list
  * Debian/Ubuntu, Fedora/RHEL, Arch and Alpine; only images with no /etc/os-release — scratch,
@@ -35,10 +37,13 @@ import { Template } from 'e2b';
  * build can never surface it, so re-run build.ts after touching any runCmd below.
  */
 export const template = Template()
-  // node 22, not 20: re2@1.26.1 (pinned below, byte-identical to the sibling Dockerfile) declares
-  // engines.node "^22.22.2 || ^24.15.0 || >=26.0.0", and npm's resolved node-gyp fails to even
-  // configure under Node 20 (`TypeError: webidl.util.markAsUncloneable is not a function`,
-  // verified on linux/amd64 and linux/arm64). The E2B build was unbuildable on 20.
+  // node 24, not 22: 22 is maintenance-only since 2025-10-21 and EOL 2027-04-30, 24 runs to
+  // 2028-04-30. re2@1.26.1 (pinned below, byte-identical to the sibling Dockerfile) declares
+  // engines.node "^22.22.2 || ^24.15.0 || >=26.0.0", so 24 is in range; 20 never was — npm's
+  // resolved node-gyp fails to even configure there (`TypeError:
+  // webidl.util.markAsUncloneable is not a function`, verified on linux/amd64 and linux/arm64),
+  // and the E2B build was unbuildable on 20. What 24 costs: re2 ships no prebuild for ABI 137, so
+  // it compiles from source and the apk line below must carry `linux-headers`.
   //
   // Alpine, not Debian: every CRITICAL left on the Debian recipe was an unfixable Debian package.
   // bookworm carried 16; trixie cleared libsqlite3-0 and zlib1g and left 13 — all perl
@@ -49,27 +54,32 @@ export const template = Template()
   // Dockerfile's fully built image with `trivy image`: 13 CRITICAL -> 0. `fromImage` rather than
   // `fromAlpineImage('3.24')` so this line stays a literal tag the sibling Dockerfile's FROM can
   // be diffed against; the two resolve to the same base.
-  .fromImage('node:22-alpine3.24')
-  // The `tar` module npm vendors (usr/local/lib/node_modules/npm/node_modules/tar) ships at
-  // 7.5.11 here — unaffected by the base-distro choice above, since it's npm's own payload, not an
-  // apt package — which carries CRITICAL CVE-2026-59873 (gzip-bomb DoS), fixed at tar@7.5.19.
-  // Patch the vendored copy in place rather than bumping npm itself: npm>=12 (the first release
-  // vendoring a fixed tar) flips `allowScripts` off by default, which would silently skip
-  // opencode-ai's and re2's install scripts below — shipping an re2 that throws MODULE_NOT_FOUND
-  // at require time. Verified: npm stays 10.9.8, the vendored tar reads 7.5.19, and `npm install`
-  // still runs afterward.
-  .runCmd(
-    'npm install -g tar@7.5.19 --prefix /tmp/tarfix && cp -r /tmp/tarfix/lib/node_modules/tar/* /usr/local/lib/node_modules/npm/node_modules/tar/ && rm -rf /tmp/tarfix && npm cache clean --force',
-    { user: 'root' },
-  )
-  // git + the agent's clone; python3/py3-pip run the baked bundle validator; make/g++ build re2
-  // (a native addon); bash because THIS SDK execs /bin/bash and Alpine has none (see the header).
+  .fromImage('node:24-alpine3.24')
+  // NO TAR PATCH HERE ANY MORE, and it should not come back — the sibling Dockerfile dropped the
+  // same step in the same commit. It used to copy tar@7.5.19 over the copy npm vendors at
+  // usr/local/lib/node_modules/npm/node_modules/tar, because node:22-alpine3.24's npm 10.9.8
+  // vendored 7.5.11 and carried CRITICAL CVE-2026-59873 (gzip-bomb DoS). node:24-alpine3.24 ships
+  // npm 11.19.0, whose vendored tar is already 7.5.19 — verified on the base — so the step became
+  // a no-op the moment `fromImage` above moved. If it ever recurs, patch the vendored copy again
+  // rather than bumping npm: npm>=12 flips `allowScripts` off by default, which silently skips
+  // opencode-ai's and re2's install scripts below and ships an re2 that throws MODULE_NOT_FOUND
+  // at require time.
+  //
+  // `apk upgrade` first, for the reason the sibling Dockerfile gives on this line: node:24-alpine3.24
+  // is rebuilt on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only
+  // critical this recipe carries. NOTHING IS DELETED HERE, unlike launcher/Dockerfile, which drops
+  // npm and pnpm — this is a sandbox for agent code, so npm, python3, pip, git and the compilers
+  // are its runtime working surface rather than build-time bootstraps.
+  //
+  // Then the packages: git + the agent's clone; python3/py3-pip run the baked bundle validator;
+  // make/g++/linux-headers build re2 FROM SOURCE (no prebuild for Node 24's ABI — see the header);
+  // bash because THIS SDK execs /bin/bash and Alpine has none (see the header).
   // A raw runCmd, not `.aptInstall`, because the builder has no apkInstall — see the header.
   // NOTE: the base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
   // (validate.py + pipeline_io.py, both of which `import yaml`) was previously a hard crash
   // in-VM, silently killing the observer's remediate+validate path. Install pip here and
   // PyYAML below.
-  .runCmd('apk add --no-cache bash git ca-certificates python3 py3-pip make g++', { user: 'root' })
+  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers', { user: 'root' })
   // PyYAML is the validator's only required third-party Python dep. Bake it at build time (no
   // per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
   // system environment PEP 668 externally-managed; PIP_BREAK_SYSTEM_PACKAGES below lets the agent
@@ -106,7 +116,7 @@ export const template = Template()
   // nothing, and npm is already in the base image while pnpm would be another install step.
   // undici pins to ^6 ON PURPOSE: byte-identical to the sibling Dockerfile's install line so the
   // recipes for this one runtime never drift (see the header). 6.x declares node >=18.17 with no
-  // upper bound. undici 8 (node >=22.19) would work on node:22-alpine3.24 but must be bumped everywhere
+  // upper bound. undici 8 (node >=22.19) would work on node:24-alpine3.24 but must be bumped everywhere
   // together: here, the sibling Dockerfile, AND agent-sandbox/package.json (the host-local
   // backend, also ^6.28.0). agent-stream.js needs it to lift fetch's 300s headers timeout.
   .runCmd(

@@ -45,7 +45,7 @@ const DEFAULT_RUN_MS = 900_000;
  * is killed by the CLIENT while the server is still working, surfacing as a bare
  * `TypeError: fetch failed`. The SDK tries to lift this (`req.timeout = false`) but that is a
  * Bun-ism: Bun honours it, Node ignores an unknown property on a WHATWG Request, and these
- * scripts run on node:22-slim.
+ * scripts run on Node (node:24-alpine3.24 in both recipes), not Bun.
  *
  * Bounded by the deadline rather than disabled outright, so the launcher's timeout_ms stays the
  * one authority on how long a run may take. Disabling it (headersTimeout: 0) would let a
