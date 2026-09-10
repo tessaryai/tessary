@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose something new or a change to existing behavior
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: >
+        Agent filing this: name the concrete task that's currently blocked or awkward, and point
+        to where in the repo the gap is (file, module, or missing command). Not a vague pain
+        point — something the next agent can verify by looking.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >
+        The specific change: what gets added or modified, and roughly where. If you considered
+        and rejected an alternative, say so in one line here rather than leaving it implicit.
+    validations:
+      required: true
