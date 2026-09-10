@@ -1,0 +1,39 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >
+        Agent filing this: state the observed behavior as fact (command run, output, error text
+        or stack trace verbatim), then the expected behavior. Cite the file and line if you
+        traced it. No hedging or speculation here — put inference in the report body if needed.
+      placeholder: |
+        Ran: task check -- backend
+        Output: <exact error/output>
+        Expected: <what should have happened>
+        Traced to: backend/foo/Bar.java:42
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Exact commands, in order, from a clean checkout. Another agent should be able to paste
+        these and hit the same failure with no guessing.
+      placeholder: |
+        1. <command>
+        2. <command>
+        3. <observed failure>
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse HEAD` at the time you observed this.
