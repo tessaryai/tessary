@@ -56,11 +56,18 @@
  *                         All three backends get the SAME provider config and the SAME model
  *                         (see agentEnvs / toProviderModel), so they cannot drift apart.
  *   E2B_API_KEY           E2B cloud key (stays here, never sent to the backend) — E2B backend only
- *   E2B_ANALYZER_TEMPLATE agent sandbox template name/id (default tessary-agent-sandbox). Renamed
- *                         from evals-observer-analyzer with the service: the published cloud
- *                         template must be rebuilt under the new alias before an e2b-backed deploy,
- *                         or Sandbox.create resolves nothing and both /rca and /triage fail on
- *                         their first call — see agent-sandbox/build.ts.
+ *   E2B_ANALYZER_TEMPLATE agent sandbox template name/id (default
+ *                         tessary/tessary-agent-sandbox:latest). NAMESPACED because E2B scopes a
+ *                         template name to the project that built it: a bare
+ *                         `tessary-agent-sandbox` resolves only for a key belonging to the Tessary
+ *                         team, which made SANDBOX_BACKEND=e2b unusable for a self-hoster with
+ *                         their own key. The template is published public, so `tessary/…` is
+ *                         reachable by anyone's key. VERSIONED because it is the second recipe for
+ *                         the same runtime AGENT_IMAGE names — .github/workflows/release.yml
+ *                         publishes both from one dispatch and repoints both floating tags in
+ *                         finalize, so an install can never run a backend from one release against
+ *                         an agent from another. Rebuilding it is no longer a human step; see
+ *                         agent-sandbox/build.ts.
  *   SANDBOX_TIMEOUT_MS    per-sandbox wall clock (default 60000)
  *   DOCKER_SOCKET_PATH    unix socket the docker backend talks the Engine API over
  *                         (default /var/run/docker.sock — the socket docker-compose.yml mounts
@@ -157,7 +164,12 @@ const E2B_API_KEY = process.env.E2B_API_KEY;
 // E2B_TEMPLATE / 'evals-grader-runner' was the second alias here — the grader sandbox /grade and
 // /lint ran in. Both routes were removed, so the constant, the env var and its compose entries
 // are gone. The published cloud template is orphaned in E2B; nothing in this tree can delete it.
-const ANALYZER_TEMPLATE = process.env.E2B_ANALYZER_TEMPLATE || 'tessary-agent-sandbox';
+// Namespaced by the E2B project slug and pinned to the floating `latest` tag release.yml's
+// finalize repoints. A BARE name resolves only for a key belonging to the project that built the
+// template (and, to E2B, means `:default`), so the previous bare default was unreachable for any
+// self-hoster using their own E2B key. Held equal to docker-compose.yml's default by
+// scripts/check-version-consistency.sh.
+const ANALYZER_TEMPLATE = process.env.E2B_ANALYZER_TEMPLATE || 'tessary/tessary-agent-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 60000);
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 // Cap on accumulated child stdout in the local and docker backends (neither honors a

@@ -61,16 +61,31 @@ p = sys.argv[1]
 t = open(p, encoding="utf-8").read()
 open(p, "w", encoding="utf-8").write(t.replace("backend-${TESSARY_VERSION:-latest}", "backend-${TESSARY_VERSION:-0.1.0}", 1))
 PY
-    echo "VERSION_SOURCE_SELFTEST=1: checking a scratch tree with a reintroduced literal and a de-floated default." >&2
+    # Breakage 3: the E2B template pinned to a version. Its own pattern, because it is the one
+    # published reference that is not a `tessaryai/tessary:` docker ref — neither regex above would
+    # ever see it, so this arm is what keeps that third pattern from being decorative.
+    printf '\n# E2B_ANALYZER_TEMPLATE=tessary/tessary-agent-sandbox:0.1.0\n' >> "$T/.env.example"
+    echo "VERSION_SOURCE_SELFTEST=1: checking a scratch tree with two reintroduced literals and a de-floated default." >&2
     set +e
-    (cd "$T" && VERSION_SOURCE_SELFTEST=0 bash scripts/check-version-consistency.sh)
+    (cd "$T" && VERSION_SOURCE_SELFTEST=0 bash scripts/check-version-consistency.sh) 2>"$T/out.txt"
     status=$?
     set -e
+    cat "$T/out.txt" >&2
     if [ "$status" -eq 0 ]; then
         echo "SELFTEST FAILED: a reintroduced version literal was expected to fail this script, and it did not." >&2
         exit 1
     fi
-    echo "SELFTEST OK: the reintroduced literal and the de-floated default both failed this script (see FAIL lines above)." >&2
+    # Each breakage named individually: a single red proves only that SOMETHING fired, and the
+    # E2B pattern is new enough that "the script went red" is not evidence it works.
+    for needle in "tessaryai/tessary:agent-sandbox-0.1.0" \
+                  "tessary/tessary-agent-sandbox:0.1.0" \
+                  "backend image default"; do
+        if ! grep -qF "$needle" "$T/out.txt"; then
+            echo "SELFTEST FAILED: nothing in the output named '$needle', so that breakage went undetected." >&2
+            exit 1
+        fi
+    done
+    echo "SELFTEST OK: both reintroduced literals and the de-floated default were each named in the failure output." >&2
     exit 0
 fi
 
@@ -89,6 +104,10 @@ fail = False
 # compose form `${TESSARY_VERSION:-0.1.0}` however it is spelled.
 LITERAL = re.compile(r"tessaryai/tessary:[A-Za-z][A-Za-z-]*-[0-9]+\.[0-9]+\.[0-9]+")
 NESTED = re.compile(r"TESSARY_VERSION:-[0-9]+\.[0-9]+\.[0-9]+")
+# The E2B agent template is the one published artifact that is not a docker ref, so neither
+# pattern above would ever see a pin of it. Same rule, same reason: `tessary/…:0.4.2` written
+# down anywhere is a second copy of the version, and the copy is what goes stale.
+E2B_LITERAL = re.compile(r"tessary/tessary-agent-sandbox:[0-9]+\.[0-9]+\.[0-9]+")
 
 # Named, reasoned exemptions: a file whose version literals RECORD something that was true at a
 # date rather than instructing a machine or a reader to pull it.
@@ -125,7 +144,7 @@ for path in tracked:
     except (OSError, UnicodeDecodeError):
         continue  # binary or unreadable: carries no version literal to find
     scanned += 1
-    for found in set(LITERAL.findall(text)) | set(NESTED.findall(text)):
+    for found in set(LITERAL.findall(text)) | set(NESTED.findall(text)) | set(E2B_LITERAL.findall(text)):
         print(
             f"FAIL: {path} hard-codes a published version: \"{found}\". No file in this tree may "
             "hold a copy of the version — the git tag release.yml pushes is the only source of "
@@ -150,6 +169,17 @@ SITES = [
      "AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}", 1),
     ("sandbox-runner/launcher/server.js", "AGENT_IMAGE code default",
      "process.env.AGENT_IMAGE || 'tessaryai/tessary:agent-sandbox-latest'", 1),
+    # The E2B template — the SECOND recipe for the one agent runtime, and the reference
+    # SANDBOX_BACKEND=e2b follows where the three above are what the docker backend follows. It is
+    # namespaced by the E2B project slug because a bare name resolves only for a key belonging to
+    # the project that built the template, which made it unreachable for a self-hoster's own key.
+    # sandbox-runner/agent-sandbox/build.ts's PUBLIC_REF is the other half of this pair.
+    ("docker-compose.yml", "E2B template default",
+     "E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}", 1),
+    ("docker-compose.dev.yml", "E2B template default",
+     "E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}", 1),
+    ("sandbox-runner/launcher/server.js", "E2B template code default",
+     "process.env.E2B_ANALYZER_TEMPLATE || 'tessary/tessary-agent-sandbox:latest'", 1),
 ]
 
 for path, label, needle, count in SITES:

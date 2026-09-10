@@ -1,8 +1,17 @@
 # =============================================================================
-# Release: publish all four Tessary images
+# Release: publish all four Tessary images and the E2B agent template
 # =============================================================================
 # Builds and pushes all four images (backend, frontend, sandbox-runner, agent-sandbox) from one
-# dispatched bump. It is the only publisher in this repo.
+# dispatched bump, and publishes the E2B agent template alongside them. It is the only publisher in
+# this repo.
+#
+# FIVE ARTIFACTS, NOT FOUR, and the fifth is not a docker image. The agent runtime has TWO recipes:
+# sandbox-runner/agent-sandbox's Dockerfile (what SANDBOX_BACKEND=docker runs) and its template.ts
+# (an E2B cloud template, what SANDBOX_BACKEND=e2b runs). They are alternatives an install chooses
+# between, never a pair that reference each other — so publishing one without the other leaves half
+# the backends on a stale agent. Until build-agent-template existed the E2B half was a human step,
+# tied to no version at all: whatever the last hand-run `tsx build.ts` left behind. See that job's
+# own header for the recipe-hash mechanism, and verify-agent-template's for why it boots the thing.
 #
 # Registry: DOCKER HUB, and only Docker Hub (`tessaryai/tessary`) — every comparable self-hosted
 # OSS project checked ships its primary image there, and `docker pull org/image` with no registry
@@ -77,6 +86,13 @@
 # on 0.2.0 with the other three services carrying no `-latest` at all; this ordering is what makes
 # that state unreachable.
 #
+# THE E2B TEMPLATE SPLITS ALONG THE SAME LINE, and it is the clearest case of why the line is where
+# it is. `<version>` and `recipe-<hash>` are new tags nobody is using, so build-agent-template
+# writes them early and cleanup takes the version one away. `latest` and `default` are NOT new:
+# E2B resolves a bare `tessary-agent-sandbox` to `:default`, so both already point at the previous
+# release and moving them is not reversible by deleting anything. They move in finalize, next to
+# `<service>-latest`, for exactly that reason.
+#
 # THE TWO COMPOSE TAGS SPLIT ALONG THE SAME LINE, and this is the part that is easy to get wrong.
 # `compose-<version>` is new on every release, so it is version-scoped, deletable, and written
 # BEFORE the commit point by publish-compose — which is the whole point: if publishing does not
@@ -122,7 +138,12 @@
 # Required secrets:
 #   DOCKER_USERNAME  - Docker Hub username (for image push from runner)
 #   DOCKER_TOKEN     - Docker Hub access token (for image push from runner)
-# GHCR uses the built-in GITHUB_TOKEN (permissions.packages: write below).
+#   E2B_API_KEY      - the E2B team that owns tessary/tessary-agent-sandbox. OPTIONAL, and the only
+#                      optional one: a fork with no such key still publishes the four images, and
+#                      the two template jobs no-op with a warning. The gate is inside each step
+#                      rather than a job-level `if:` — `secrets` is not available in a job `if`, and
+#                      a SKIPPED job skips everything that `needs:` it, which would silently take
+#                      publish-compose and finalize down with it.
 #
 # NO REPO VARIABLE, AND NO SECOND INPUT OF ANY KIND: the dispatch bump is the only thing a human
 # supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
@@ -484,6 +505,117 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------------------------
+  # THE E2B LANE. The agent runtime has TWO recipes, not one: sandbox-runner/agent-sandbox's
+  # Dockerfile (built by build-agent-sandbox above, what SANDBOX_BACKEND=docker runs) and its
+  # template.ts (an E2B cloud template, what SANDBOX_BACKEND=e2b runs). They are alternatives an
+  # install chooses between, never a pair that reference each other — so a release that ships one
+  # and not the other leaves half the backends on a stale agent.
+  #
+  # Until this job existed the E2B half was a HUMAN STEP: somebody with the team's key ran
+  # `pnpm exec tsx build.ts` and the published template was whatever that last run left behind,
+  # tied to no version at all.
+  #
+  # ADDITIVE, LIKE EVERY OTHER JOB ABOVE FINALIZE. It writes `<version>` and `recipe-<hash>`, both
+  # new, both removable by cleanup. It writes NEITHER `latest` NOR `default` — E2B resolves a bare
+  # `tessary-agent-sandbox` to `:default`, so both of those already point at the previous release
+  # and moving them is finalize's, for exactly the reason `<service>-latest` is.
+  #
+  # "IF IT HAS CHANGED" IS ANSWERED BY E2B, NOT BY GIT. build.ts hashes the real build inputs
+  # (template.ts, the three agent scripts, the validator wrapper, the five contract/ files, the
+  # cpu/memory pair) and carries the digest as a `recipe-<hash>` tag. A build already wearing this
+  # release's hash gets the version tag assigned to it and no rebuild happens. A `git diff` against
+  # the base tag would answer the same question about the SOURCE and be wrong in the one case that
+  # matters: after a release whose template build failed, the source is unchanged at the next
+  # attempt, so a diff would skip the rebuild and stamp a version onto a template that never got
+  # the change.
+  #
+  # SKIPPED, NOT FAILED, WITHOUT THE SECRET. A fork has no E2B_API_KEY and must still be able to
+  # dispatch a release of the four images. The gate is inside the step rather than a job-level
+  # `if:` on purpose — `secrets` is not available in a job `if`, and a job that SKIPS would skip
+  # every job that `needs:` it, silently taking publish-compose and finalize with it.
+  build-agent-template:
+    name: Build the E2B agent template
+    runs-on: ubuntu-24.04
+    needs: preflight
+    outputs:
+      rebuilt: ${{ steps.release.outputs.rebuilt }}
+      recipe: ${{ steps.release.outputs.recipe }}
+      build_id: ${{ steps.release.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Must precede setup-node: its `cache: pnpm` shells out to pnpm to resolve the store path.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: sandbox-runner/agent-sandbox/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: sandbox-runner/agent-sandbox/pnpm-lock.yaml
+      # --ignore-scripts, and it is not a hardening flourish: this manifest carries re2, a native
+      # addon whose install script runs node-gyp. build.ts needs e2b and tsx and nothing else —
+      # the modules with build steps are baked INTO the template, never imported by the publisher.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: sandbox-runner/agent-sandbox
+
+      - id: release
+        working-directory: sandbox-runner/agent-sandbox
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2B_API_KEY:-}" ]; then
+            echo "::warning::E2B_API_KEY is not set, so the E2B template lane is skipped. The four" \
+                 "images still publish; SANDBOX_BACKEND=e2b installs keep resolving the previous build."
+            exit 0
+          fi
+          pnpm exec tsx build.ts --release="${{ needs.preflight.outputs.version }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------------------------
+  # THE ONE GATE NO IMAGE BUILD CAN STAND IN FOR, and template.ts's own header is the argument:
+  # this SDK hardcodes `cmd: "/bin/bash"` (Alpine ships busybox ash and no bash), and E2B's runCmd
+  # is NOT root where Docker's RUN is. Either mistake produces a template that BUILDS CLEANLY and
+  # then fails on every single run — invisible to `docker build`, invisible to review, and last
+  # time it was caught by an actual boot rather than by reading. So the release boots the thing it
+  # just tagged and runs commands through it.
+  #
+  # IT RUNS ON THE DEDUP PATH TOO. "The recipe did not change" is a statement about this
+  # repository; it is not evidence that the published build still resolves and boots.
+  #
+  # It also asserts the template is still PUBLIC and still spells its namespaced name the way this
+  # repo does. E2B namespaces a template by project slug, so `tessary/tessary-agent-sandbox` is
+  # what a self-hoster's own key must resolve — a console toggle flipped back to private would
+  # otherwise be discovered by them, on their first /rca, rather than here.
+  verify-agent-template:
+    name: Boot the E2B template and prove it runs
+    runs-on: ubuntu-24.04
+    needs: [preflight, build-agent-template]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: sandbox-runner/agent-sandbox/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: sandbox-runner/agent-sandbox/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: sandbox-runner/agent-sandbox
+
+      - working-directory: sandbox-runner/agent-sandbox
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2B_API_KEY:-}" ]; then
+            echo "::warning::E2B_API_KEY is not set; nothing was published to E2B, so there is nothing to verify."
+            exit 0
+          fi
+          pnpm exec tsx build.ts --verify="${{ needs.preflight.outputs.version }}"
+
+  # ---------------------------------------------------------------------------------------------
   # No published artifact reaches a real tag with excluded content in it. The four
   # arch-suffixed images above are the artifacts; this job pulls the amd64 build of each and diffs
   # its exported contents against scripts/lib/open-artifact-denylist.txt. It sits BETWEEN the
@@ -630,7 +762,11 @@ jobs:
     # THE PINNED TAG ONLY, and BEFORE finalize — see the header. Writing `compose-<version>` here is
     # what proves publishing works while the run is still reversible; the floating `compose` alias
     # is finalize's, because deleting a floating alias is an outage rather than a rollback.
-    needs: [preflight, merge-manifests, verify-manifests]
+    #
+    # verify-agent-template is in this list for the same reason verify-manifests is: the config
+    # published here pins E2B_ANALYZER_TEMPLATE to `tessary/tessary-agent-sandbox:<version>`, so
+    # that tag must exist and boot before anything hands a self-hoster a file naming it.
+    needs: [preflight, merge-manifests, verify-manifests, verify-agent-template]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -671,6 +807,10 @@ jobs:
                 printf '%s\n' "$rendered" | grep -qF "tessaryai/tessary:${service}-${VERSION}" || {
                   echo "::error::oci://${repo}:${tag} does not pin ${service} to ${VERSION}" >&2; exit 1; }
               done
+              # The E2B template is the fourth pinned reference and the only one that is not a
+              # docker ref, so no loop above would notice it staying floating.
+              printf '%s\n' "$rendered" | grep -qF "tessary/tessary-agent-sandbox:${VERSION}" || {
+                echo "::error::oci://${repo}:${tag} does not pin the E2B template to ${VERSION}" >&2; exit 1; }
               printf '%s\n' "$rendered" | grep -E '^ +source: /' | grep -vE 'source: /(var/run/docker.sock|proc|sys)$' && {
                 echo "::error::oci://${repo}:${tag} carries a host-path bind" >&2; exit 1; } || true
               echo "OK: ${repo}:${tag} renders, pins ${VERSION}, mounts no host path"
@@ -691,7 +831,7 @@ jobs:
   finalize:
     name: Repoint -latest and compose, push the release tag
     runs-on: ubuntu-24.04
-    needs: [preflight, merge-manifests, verify-manifests, publish-compose]
+    needs: [preflight, merge-manifests, verify-manifests, verify-agent-template, publish-compose]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -712,6 +852,34 @@ jobs:
               -t "${{ env.DOCKER_REPO }}:${service}-latest" \
               "${{ env.DOCKER_REPO }}:${service}-${VERSION}"
           done
+
+      # THE E2B TEMPLATE'S FLOATING TAGS, and they belong here for the same reason `-latest` does.
+      # `latest` is what docker-compose.yml's `${TESSARY_VERSION:-latest}` default resolves to;
+      # `default` is what a BARE `tessary-agent-sandbox` means to E2B, which is what every config
+      # written before this lane existed says. Both move together, onto the build
+      # build-agent-template tagged and verify-agent-template booted, so the two spellings cannot
+      # come to disagree about which build is current.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: sandbox-runner/agent-sandbox/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: sandbox-runner/agent-sandbox/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: sandbox-runner/agent-sandbox
+      - name: Repoint the E2B template's latest and default tags
+        working-directory: sandbox-runner/agent-sandbox
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2B_API_KEY:-}" ]; then
+            echo "::warning::E2B_API_KEY is not set; nothing was published to E2B, so there is nothing to repoint."
+            exit 0
+          fi
+          pnpm exec tsx build.ts --promote="${{ needs.preflight.outputs.version }}"
 
       # The floating alias, now that `-latest` resolves to this release. publish-compose already
       # wrote `compose-<version>` from the identical file and proved it renders, so this cannot be
@@ -743,6 +911,8 @@ jobs:
             printf '%s\n' "$rendered" | grep -qF "tessaryai/tessary:${service}-${VERSION}" || {
               echo "::error::${REF} does not pin ${service} to ${VERSION}" >&2; exit 1; }
           done
+          printf '%s\n' "$rendered" | grep -qF "tessary/tessary-agent-sandbox:${VERSION}" || {
+            echo "::error::${REF} does not pin the E2B template to ${VERSION}" >&2; exit 1; }
           echo "OK: ${REF} renders and pins ${VERSION}"
 
       - name: Create and push the release tag
@@ -813,6 +983,8 @@ jobs:
       - build-frontend
       - build-sandbox-runner
       - build-agent-sandbox
+      - build-agent-template
+      - verify-agent-template
       - verify-open-artifacts
       - merge-manifests
       - verify-manifests
@@ -862,3 +1034,31 @@ jobs:
               *)   echo "::warning::could not delete ${tag} (HTTP ${code}; a token without Delete scope answers 403)" ;;
             esac
           done
+
+      # THE E2B HALF OF THE SAME ROLLBACK. Curl rather than `tsx build.ts --rollback`, deliberately:
+      # this job must never turn one failure into a confusing second one, and a toolchain setup is
+      # three more ways to fail while reporting nothing useful. One request, same shape as the
+      # Docker Hub deletes above.
+      #
+      # ONLY THE VERSION TAG GOES. `recipe-<hash>` stays on purpose — it names a build by its
+      # CONTENTS, so it cannot come to mean the wrong thing, and leaving it is what lets the next
+      # attempt at this release skip a template build it already paid for.
+      - name: Remove the E2B version tag this run created
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2B_API_KEY:-}" ] || [ -z "$VERSION" ]; then
+            echo "no E2B key or no version; nothing was tagged on E2B, nothing to remove."
+            exit 0
+          fi
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+            -H "X-API-KEY: $E2B_API_KEY" -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg v "$VERSION" '{name:"tessary-agent-sandbox",tags:[$v]}')" \
+            https://api.e2b.dev/templates/tags)"
+          case "$code" in
+            20*) echo "deleted  e2b tag ${VERSION}" ;;
+            404) echo "absent   e2b tag ${VERSION}" ;;
+            *)   echo "::warning::could not delete the E2B tag ${VERSION} (HTTP ${code})" ;;
+          esac

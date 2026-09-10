@@ -112,11 +112,10 @@ For every layout-level change, touch each of these in order:
    bakes the contract files into the sandbox image from this repo's `contract/` (staged into
    `vendor/` by `build.ts`). The two lanes that run there — RCA and Layer-2 triage — READ the
    bundle to ground a ruling; neither writes one back, so a version skew now fails a comparison
-   rather than corrupting a repo. It still wants a rebuild on a contract bump: `cd
-   sandbox-runner/agent-sandbox && pnpm install && pnpm exec tsx build.ts` (needs the prod
-   team's `E2B_API_KEY`). **The template must exist under the name `tessary-agent-sandbox` before
-   any E2B-backed deploy** — nothing in this repo can create the
-   cloud template.
+   rather than corrupting a repo. **A contract bump no longer needs a manual rebuild**: the five
+   `contract/` files are inputs to `build.ts`'s recipe hash, so the next release notices they moved
+   and rebuilds the template on its own. Nothing to remember, and nothing to forget — which is what
+   the old instruction here was relying on.
 
 ### 4. Verify
 

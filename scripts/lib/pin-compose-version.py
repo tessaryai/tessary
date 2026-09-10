@@ -29,10 +29,12 @@ import re
 import sys
 
 FLOATING = "${TESSARY_VERSION:-latest}"
-# Three `image:` keys (backend, frontend, sandbox-runner) plus sandbox-runner's AGENT_IMAGE env
-# value, which is an env value rather than a compose `image:` key but is still a pull instruction
-# the artifact hands a remote install (D10's own reasoning).
-EXPECTED_SITES = 4
+# Three `image:` keys (backend, frontend, sandbox-runner) plus TWO env values on sandbox-runner —
+# AGENT_IMAGE and E2B_ANALYZER_TEMPLATE. Neither is a compose `image:` key, but both are still a
+# pull instruction the artifact hands a remote install (D10's own reasoning), and they are the two
+# recipes for the one agent runtime: whichever SANDBOX_BACKEND an install picks, the reference it
+# follows has to name this release.
+EXPECTED_SITES = 5
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-]+)?$")
 
 
