@@ -55,10 +55,22 @@
 #   is no longer in docs/docs.json's navigation; it is a plain markdown file at the repository
 #   root, reached from README.md's License section. Same text, same keep-list obligation, new
 #   path. Row count unchanged at 1,361.
+#   SUPERSEDED by the 2026-09-10 amendment below, which deletes the file outright.
 #   NOT absorbed by this amendment: the thirteen new pages under docs/instrument/, docs/concepts/
 #   and docs/reference/ are absent from the body. They are real files in the tree and they will
 #   ship; they are listed here as known drift rather than added, because adding a row asserts a
 #   person read it and no one has. They join the twelve pre-existing drift paths above.
+#
+# AMENDED 2026-09-10 (trademark policy removed) — ONE body row DROPPED by hand: `TRADEMARK.md`.
+#   The policy is deleted from the tree, not relocated again, and the keep-list row that made it
+#   mandatory is struck above rather than retargeted, so a future delta that fails to find it is
+#   a cleanup and not a regression. README.md's License section no longer links it; section 6 of
+#   LICENSE is the whole of what the tree now says about the marks. The body was NOT regenerated:
+#   the twelve pre-existing drift paths and the thirteen docs pages above stay absent, unread and
+#   unabsorbed. Row count 1,359 -> 1,358, counted (`grep -vc '^\(#\|$\)'`) rather than carried
+#   forward: the running claim of 1,361 above was already two rows ahead of the body before this
+#   change. Left uncorrected there, because reconciling a count nobody has traced would assert a
+#   reading of the body that has not happened.
 #
 # reviewed: NOT YET SIGNED OFF. Generated 2026-09-08 against the post-relocation tree:
 #   1,372 paths = 1,368 tracked outside this build's export-excluded directory, plus FOUR files this change adds that were
@@ -97,9 +109,10 @@
 #   SECURITY.md                      present
 #   CONTRIBUTING.md                  present — and is now the ONLY licence declaration besides
 #                                    LICENSE itself (see the exemptions below)
-#   trademark policy                 present — TRADEMARK.md at the repository root. It has
-#                                    moved twice (root TRADEMARKS.md, then a published docs
-#                                    page, now root again); it has never gone away
+#   trademark policy                 GONE, deliberately, and off this keep-list — see the
+#                                    2026-09-10 amendment. It had moved twice (root
+#                                    TRADEMARKS.md, then a published docs page, then root
+#                                    again) before it was removed outright
 #   dependency lockfiles             present — backend/*/pom.xml + the reactor, frontend/pnpm-lock.yaml,
 #                                    classify-service/pnpm-lock.yaml, classifiers/uv.lock,
 #                                    sandbox-runner/*/pnpm-lock.yaml
@@ -123,8 +136,9 @@
 #   .tmux.conf                       present, and the dev scripts DO still use it: scripts/dev.sh
 #                                    reads it and devdocs/guides/local-dev.md documents the layout
 #                                    it configures. It ships.
-#   brand assets under the           present — frontend/public/tessary-logo.png, the one checked-in
-#   trademark policy                 mark; its use is governed by TRADEMARK.md
+#   brand assets                     present — frontend/public/tessary-logo.png, the one checked-in
+#                                    mark. No in-tree policy governs its use since the
+#                                    2026-09-10 amendment; section 6 of LICENSE is what remains
 #
 # ---------------------------------------------------------------------------------------------
 # NAMED, REASONED EXEMPTIONS to "no AGPL or CLA string survives".
@@ -177,7 +191,6 @@ LICENSE
 NOTICE
 README.md
 SECURITY.md
-TRADEMARK.md
 Taskfile.yml
 backend/.dockerignore
 backend/.mvn/jvm.config

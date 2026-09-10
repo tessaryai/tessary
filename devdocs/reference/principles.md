@@ -14,8 +14,9 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   threshold and the evidence behind every finding, and take the pipeline bundle with them if they
   leave. An opaque detector dies at the buyer's code review and is unadoptable by regulated buyers.
   The proprietary asset is the trained classifier weights and the cross-customer priors, not any
-  individual threshold. *(This read "graders" until they were removed; the principle transferred
-  to what the product actually detects with.)*
+  individual threshold. Model-backed detection runs on the operator's own provider credentials, so
+  the escalation path is theirs to see and theirs to keep. *(This read "graders" until they were
+  removed; the principle transferred to what the product actually detects with.)*
 - **Ingestion is push, never pull.** Customers forward OTel traces (direct OTLP or the
   substrate `sdk` source); we do not reach into vendor APIs to fetch them. This is an
   integration constraint, not a positioning claim — a design that polls another vendor's store
