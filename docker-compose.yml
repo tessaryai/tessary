@@ -251,21 +251,21 @@ services:
       # without it; there is no fallback endpoint.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
-      # How long the instance keeps traces and detections; 0 keeps forever. Interpolated
-      # here rather than left to env_file so the registry install, which carries no .env, still
-      # reads the operator's .env beside the command (rule 3 in the header).
       # The ingest spool: `memory` (default, no broker) or `kafka`, the opt-in durable buffer
       # served by the `redpanda` service below under `--profile kafka`. Nothing depends_on it on
       # purpose: with the mode left at memory the profile never starts, and with it set to kafka a
       # broker that is still coming up simply sheds (503 + Retry-After) until it answers.
       TESSARY_INGEST_SPOOL_MODE: ${TESSARY_INGEST_SPOOL_MODE:-memory}
       TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS: ${TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      # The sweep, and how long the instance keeps traces and detections; 0 keeps forever.
+      # Interpolated here rather than left to env_file so the registry install, which carries no
+      # .env, still reads the operator's .env beside the command (rule 3 in the header).
       TESSARY_RETENTION_ENABLED: ${TESSARY_RETENTION_ENABLED:-true}
       TESSARY_RETENTION_TRACE_TTL_DAYS: ${TESSARY_RETENTION_TRACE_TTL_DAYS:-90}
       TESSARY_RETENTION_DETECTION_TTL_DAYS: ${TESSARY_RETENTION_DETECTION_TTL_DAYS:-90}
-      # The opt-OUT heartbeat. Interpolated for the same reason as the two keys above, and it
-      # matters more here: left to env_file alone, an operator on the registry install who sets
-      # this to false in their .env gets no error and keeps sending the ping.
+      # The opt-OUT heartbeat, interpolated for that same reason, and it matters more here: left
+      # to env_file alone, an operator on the registry install who sets this to false in their
+      # .env gets no error and keeps sending the ping.
       TESSARY_TELEMETRY_ENABLED: ${TESSARY_TELEMETRY_ENABLED:-true}
     depends_on:
       postgres:
