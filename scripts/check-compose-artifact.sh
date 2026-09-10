@@ -225,6 +225,12 @@ missing = [
     service for service in ("backend", "frontend", "sandbox-runner", "agent-sandbox")
     if f"tessaryai/tessary:{service}-{probe}" not in pinned
 ]
+# The E2B agent template is the fifth pinned reference and the only one that is not a docker ref,
+# so the loop above cannot see it. It is the same runtime as agent-sandbox, reached by the other
+# SANDBOX_BACKEND — leaving it floating would let a pinned artifact resolve an agent from a
+# different release than the backend it ships with.
+if f"tessary/tessary-agent-sandbox:{probe}" not in pinned:
+    missing.append("the E2B template (E2B_ANALYZER_TEMPLATE)")
 if missing:
     print(
         f"FAIL: the release stamp left {', '.join(missing)} floating. Every published image "
@@ -234,7 +240,13 @@ if missing:
     )
     sys.exit(1)
 
-if pinned.replace(f"-{probe}", "-latest") != unpinned:
+def unpin(text):
+    # Two separators, because the artifact pins two kinds of reference: docker's `name-<version>`
+    # and E2B's `name:<version>`.
+    return text.replace(f"-{probe}", "-latest").replace(f":{probe}", ":latest")
+
+
+if unpin(pinned) != unpinned:
     print(
         "FAIL: the release stamp changed more than the image versions. Rendered configs differ "
         "once the probe version is mapped back to `latest`.",
@@ -242,12 +254,12 @@ if pinned.replace(f"-{probe}", "-latest") != unpinned:
     )
     import difflib
     for line in list(difflib.unified_diff(
-        unpinned.splitlines(), pinned.replace(f"-{probe}", "-latest").splitlines(),
+        unpinned.splitlines(), unpin(pinned).splitlines(),
         "unpinned", "pinned-mapped-back", lineterm="",
     ))[:40]:
         print("  " + line, file=sys.stderr)
     sys.exit(1)
-print("check-compose-artifact: ok   the stamp pins all four images and changes nothing else")
+print("check-compose-artifact: ok   the stamp pins all four images + the E2B template, and changes nothing else")
 PY
 fi
 

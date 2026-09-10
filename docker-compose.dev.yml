@@ -396,7 +396,9 @@ services:
       # Must equal the backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY.
       SANDBOX_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}
       E2B_API_KEY: ${E2B_API_KEY:-}
-      E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary-agent-sandbox}
+      # Namespaced and floating, exactly as docker-compose.yml's sandbox-runner service — see the
+      # comment there for why the bare name was unreachable outside the Tessary E2B project.
+      E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}
       # FULL REMOVAL of every deployment-env-var credential this service used to read —
       # AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole AGENT_PROVIDER
       # dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY,

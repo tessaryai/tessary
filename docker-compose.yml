@@ -542,7 +542,14 @@ services:
       # the name verbatim.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work}
       E2B_API_KEY: ${E2B_API_KEY:-}
-      E2B_ANALYZER_TEMPLATE: tessary-agent-sandbox
+      # NAMESPACED, AND VERSIONED, for the same reason AGENT_IMAGE above is both. E2B scopes a
+      # template name to the project that built it, so the bare `tessary-agent-sandbox` this used
+      # to say resolved ONLY for a key belonging to the Tessary team — a self-hoster who set
+      # SANDBOX_BACKEND=e2b with their own key got `Sandbox.create` finding nothing. The template
+      # is published public; `tessary/…` is the form anyone's key can reach.
+      # Unset floats to `:latest`, which release.yml's finalize repoints; the version lives in the
+      # git tag, never in a literal here.
+      E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}
       # FULL REMOVAL of every deployment-env-var credential the launcher used to read
       # here — AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole
       # AGENT_PROVIDER dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK,

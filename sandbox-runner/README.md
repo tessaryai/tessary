@@ -25,12 +25,14 @@ Three whole subtrees went with them: `lambda/` (the AWS Lambda grading executor 
 `codegen.js` / `codegen-harness.js` / `synthesize.js` / `analyze.js` scripts under
 `agent-sandbox/`. `deploy-grader-lambda.yml` went with the first of those.
 
-**Two E2B cloud templates are affected and only one is rebuilt by this repo.** The analyzer template
-was republished under the alias `tessary-agent-sandbox` (was `evals-observer-analyzer`) — a human
-with the team's E2B key must run the build in `agent-sandbox/` before any e2b-backed deploy, or
-`Sandbox.create` resolves nothing and both surviving routes fail on their first call. The grader
-template's alias, `evals-grader-runner`, is simply orphaned in E2B; nothing in this tree can delete
-it.
+**Two E2B cloud templates are affected and only one is built by this repo.** The analyzer template
+was republished under the name `tessary-agent-sandbox` (was `evals-observer-analyzer`) and is
+**published public**, so it is reachable as `tessary/tessary-agent-sandbox` by any E2B key rather
+than only the team's. Building it is **no longer a human step**: `.github/workflows/release.yml`
+publishes it from the same dispatch that publishes the four images, tags it with the release's
+version, boots it to prove it runs, and repoints its floating tags in finalize — see
+[Deploy](#deploy) below. The grader template's alias, `evals-grader-runner`, is simply orphaned in
+E2B; nothing in this tree can delete it.
 
 ## Layout
 
@@ -74,22 +76,45 @@ The launcher ships as its own image, built and pushed by
 `launcher/Dockerfile`, and runs as the `sandbox-runner` service in both compose files. The backend
 reaches it by service DNS at `http://sandbox-runner:8080` and authenticates with `SANDBOX_API_KEY`.
 
-The E2B backend additionally needs the analyzer template published under the alias the launcher
-expects. **This is a human step and this repo cannot do it** (it needs the team's E2B key):
+The E2B backend's template is published by that same workflow, from the `E2B_API_KEY` repository
+secret, in two jobs either side of the commit point:
+
+| job | writes | undone by |
+|---|---|---|
+| `build-agent-template` | `<version>` and `recipe-<hash>` — and **only builds if the recipe changed** | `cleanup` |
+| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs seven checks through it | n/a |
+| `finalize` | moves `latest` and `default` onto that build | nothing (this is the commit point) |
+
+`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the three agent scripts, the
+validator wrapper, the five `contract/` files, and the cpu/memory pair. A build already carrying
+this release's hash gets the version tag assigned to it and no rebuild happens. Asking E2B which
+recipes it already holds is self-correcting where a `git diff` against the previous tag is not: after
+a release whose template build failed, the source is unchanged at the next attempt, so a diff would
+skip the rebuild and stamp a version onto a template that never got the change.
+
+`verify-agent-template` is the gate no docker build can stand in for. `template.ts`'s header names
+two mistakes — a missing `bash` (this SDK hardcodes `cmd: "/bin/bash"`) and a `runCmd` that needs
+`{ user: 'root' }` — that both produce a template which BUILDS CLEANLY and then fails on every run.
+It runs on the dedup path too: "the recipe did not change" says nothing about whether the published
+build still boots.
+
+To build it by hand (a dev template, or a first build in a fresh E2B project):
 
 ```bash
 cd sandbox-runner/agent-sandbox && pnpm install && E2B_API_KEY=<team key> pnpm exec tsx build.ts
 ```
 
-Until that runs after the rename, `Sandbox.create('tessary-agent-sandbox', …)` resolves
-nothing and both `/rca` and `/triage` fail on their first call.
+That no-argument form is unchanged and publishes under the `default` tag. `--release=`, `--verify=`,
+`--promote=` and `--rollback=` are the four verbs the workflow drives; every one of them is runnable
+on a laptop with the same key, which is the point of them living in `build.ts` rather than inline in
+a workflow step.
 
 ## Local agent backend (`task dev:local`)
 
 Both launcher paths — RCA (`/rca`) and Layer-2 triage (`/triage`) — drive the **`opencode`** CLI. By
 default the launcher runs each in a fresh **E2B microVM** (template
-`tessary-agent-sandbox`), which needs `E2B_API_KEY`, a built template, and Bedrock
-credentials. For local development you can instead run those scripts on the **host**,
+`tessary/tessary-agent-sandbox`, namespaced because E2B scopes template names to the project that
+built them), which needs `E2B_API_KEY` and Bedrock credentials. For local development you can instead run those scripts on the **host**,
 against a locally installed `opencode`, with no E2B at all:
 
 - **`SANDBOX_BACKEND`** — `docker` (default — see below) | `e2b` (opt-in) | `local`.
