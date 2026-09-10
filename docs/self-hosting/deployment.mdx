@@ -40,6 +40,52 @@ The sandbox-runner's access to the host Docker daemon is a deliberate part of ho
 
 Self-hosted Tessary does not support Kubernetes, autoscaling, or multi-node deployment today. The supported shape is one Docker host running `docker compose`.
 
+Because there is only ever one backend, capacity is a question about one host rather than about how many to run.
+
+## Host sizing
+
+Two configurations, both running every service on one host. Which one you want turns on a single decision: whether an accepted batch has to survive a restart of the stack.
+
+| Configuration | Host | Ingest buffer | Run it for |
+| --- | --- | --- | --- |
+| Starter | 2 vCPU, 8 GB RAM, 50 GB disk | `memory`, the default | Evaluation, one team's traffic, and the [setup](/self-hosting/setup) path on a laptop or a small VM (virtual machine). |
+| Durable ingest | 4 vCPU, 16 GB RAM, 200 GB disk | `kafka`, with the bundled Redpanda broker | The smallest host to run when losing a queued batch on restart is not acceptable. |
+
+### Starter
+
+The starter configuration is what the shipped defaults are already tuned for. The backend container is capped at 2 GB and takes 75 percent of that as its heap, the ingest buffer's byte budget is sized against that heap, and Postgres, Caddy and the sandbox runner share the rest of the host. Nothing needs an override file, and `docker compose up -d` on the published configuration is the whole install.
+
+What you accept in exchange is the `memory` buffer's contract: a `200` on `POST /v1/traces` means the batch is queued inside the backend process, and a restart loses what is queued. A full buffer is different, and safe. It answers `503` with `Retry-After`, and stock OTLP (OpenTelemetry Protocol) exporters retry that, so shedding costs latency rather than data. A restart is not a shed, and nothing re-sends a batch the API already accepted.
+
+### Durable ingest
+
+Move to this configuration when that restart window matters, not when you run short of throughput. Turn the durable buffer on as [Configuration](/self-hosting/configuration#ingest-buffer) describes, then give the backend more than its shipped 2 GB, because a larger host does not change that on its own:
+
+```yaml
+# tessary.override.yml
+services:
+  backend:
+    mem_limit: 4g
+```
+
+```bash
+docker compose -f docker-compose.yml -f tessary.override.yml --profile kafka up -d
+```
+
+The extra memory covers three things at once: Redpanda's own footprint of about 512 MB, the larger backend heap, and the page cache Postgres relies on as the substrate fills. The fourth core matters most to the drainers, which in `kafka` mode run four at a time by default.
+
+### Growing past either one
+
+Both are starting points rather than limits, and moving between them is a resize and a restart of one host. There is no data migration and no change to the topology on this page.
+
+Move up when the running system says to, rather than in anticipation:
+
+- The `ingest` component of `/actuator/health` reports DOWN because the oldest unprocessed batch is aging past its lag limit.
+- Backend CPU stays high enough that drain no longer keeps pace with ingest.
+- Postgres and the backend visibly compete for memory on the host. This is the usual reason to give Postgres a machine of its own.
+
+To measure a candidate host instead of estimating it, the load harness in `scripts/bench/` in the repository steps offered load up a ladder and records what was accepted, what reached the database, and what each step cost in CPU.
+
 ## Networking
 
 All services share one Docker bridge network. Only the frontend container needs to be reachable from outside the host.

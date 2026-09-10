@@ -98,6 +98,8 @@ TESSARY_INGEST_SPOOL_MODE=kafka
 docker compose --profile kafka up -d
 ```
 
+The broker and the larger backend heap that goes with it need a bigger host than the default configuration assumes. [Host sizing](/self-hosting/deployment#host-sizing) states the smallest one to run this mode on.
+
 Redpanda keeps its log in the `redpanda-data` volume, listens on the internal network only, takes about 512 MB, and runs with write caching off so the acknowledgement the backend waits for means the batch is on disk. Any Kafka-compatible broker you already run works instead: set the bootstrap address and leave the profile off. The topics (`tessary.ingest`, eight partitions keyed by project, and `tessary.ingest.dead-letter` for a batch that exhausted its write retries) are created the first time the backend reaches the broker.
 
 In both modes `/actuator/health` carries an `ingest` component with the buffer's depth, the age of its oldest unprocessed batch, its dead-lettered count and whether the drainer is alive; it reports DOWN when the drainer is dead or the oldest batch is older than `TESSARY_INGEST_SPOOL_MAX_LAG_MS` (five minutes by default, `0` disables).
