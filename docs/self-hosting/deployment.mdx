@@ -44,18 +44,44 @@ Because there is only ever one backend, capacity is a question about one host ra
 
 ## Host sizing
 
-Two configurations, both running every service on one host. Which one you want turns on a single decision: whether an accepted batch has to survive a restart of the stack.
+Three configurations, all running every service on one host. Two questions pick one: how much you ingest, and whether an accepted batch has to survive a restart of the stack.
 
-| Configuration | Host | Ingest buffer | Run it for |
+| Configuration | Host | Ingest buffer | Ingestion throughput |
 | --- | --- | --- | --- |
-| Starter | 2 vCPU, 8 GB RAM, 50 GB disk | `memory`, the default | Evaluation, one team's traffic, and the [setup](/self-hosting/setup) path on a laptop or a small VM (virtual machine). |
-| Durable ingest | 4 vCPU, 16 GB RAM, 200 GB disk | `kafka`, with the bundled Redpanda broker | The smallest host to run when losing a queued batch on restart is not acceptable. |
+| Basic | 2 vCPU, 4 GB RAM | `memory`, the default | ~8,000 spans/min |
+| Starter | 4 vCPU, 8 GB RAM | `memory`, the default | ~40,000 spans/min |
+| Durable ingest | 4 vCPU, 16 GB RAM | `kafka`, with the bundled Redpanda broker | Scales with the drainers |
+
+<Note>
+  **Throughput figures are at 2 KB spans and do not carry to another span size.** The buffer that sheds
+  counts bytes, not spans, so the same host takes far more small spans per minute and far fewer large
+  ones. Each figure is the sustained rate at which the front door accepts everything offered while
+  staying inside the accepted-write latency objective, with headroom left below the rate at which the
+  host begins shedding. They come from load runs against each shape on a development machine rather
+  than from a gate this repository runs: treat them as a starting point for sizing, and measure on the
+  host you intend to run before you depend on them.
+</Note>
+
+**Cores set throughput, not memory.** Basic and Starter run the same 2 GB backend container and the same
+heap; what separates them is the second core the backend gets on a four-vCPU host. Starter's extra
+memory goes to the page cache Postgres leans on as the substrate grows, which is worth having and is
+not what raises the ingest ceiling. If you are sizing for ingest volume specifically, read the core
+count.
+
+Disk is deliberately absent from the table above, because it follows your retention window rather than
+your host: it is a function of how many spans you keep and for how long, and the same host is right for
+a week of data or a year of it. Size it from your own span volume and retention, and grow it
+independently of CPU and memory.
+
+### Basic
+
+The smallest supported host, and the one the [setup](/self-hosting/setup) path assumes. Every shipped default applies unchanged, so `docker compose up -d` on the published configuration is the whole install.
 
 ### Starter
 
-The starter configuration is what the shipped defaults are already tuned for. The backend container is capped at 2 GB and takes 75 percent of that as its heap, the ingest buffer's byte budget is sized against that heap, and Postgres, Caddy and the sandbox runner share the rest of the host. Nothing needs an override file, and `docker compose up -d` on the published configuration is the whole install.
+Starter is what the shipped defaults are already tuned for. The backend container is capped at 2 GB and takes 75 percent of that as its heap, the ingest buffer's byte budget is sized against that heap, and Postgres, Caddy and the sandbox runner share the rest of the host. Like Basic, nothing needs an override file.
 
-What you accept in exchange is the `memory` buffer's contract: a `200` on `POST /v1/traces` means the batch is queued inside the backend process, and a restart loses what is queued. A full buffer is different, and safe. It answers `503` with `Retry-After`, and stock OTLP (OpenTelemetry Protocol) exporters retry that, so shedding costs latency rather than data. A restart is not a shed, and nothing re-sends a batch the API already accepted.
+What both memory-buffer configurations accept in exchange is that buffer's contract: a `200` on `POST /v1/traces` means the batch is queued inside the backend process, and a restart loses what is queued. A full buffer is different, and safe. It answers `503` with `Retry-After`, and stock OTLP (OpenTelemetry Protocol) exporters retry that, so shedding costs latency rather than data. A restart is not a shed, and nothing re-sends a batch the API already accepted.
 
 ### Durable ingest
 
@@ -72,11 +98,13 @@ services:
 docker compose -f docker-compose.yml -f tessary.override.yml --profile kafka up -d
 ```
 
-The extra memory covers three things at once: Redpanda's own footprint of about 512 MB, the larger backend heap, and the page cache Postgres relies on as the substrate fills. The fourth core matters most to the drainers, which in `kafka` mode run four at a time by default.
+The extra memory covers three things at once: Redpanda's own footprint of about 512 MB, the larger backend heap, and the page cache Postgres relies on as the substrate fills. The drainers, which in `kafka` mode run four at a time by default, are what the cores matter most to.
 
-### Growing past either one
+Budget for the storage as well as the memory. Redpanda keeps its own log on disk alongside what Postgres already stores, so an accepted batch is written twice until the drainers have consumed it. Plan on meaningfully more disk than the same volume needs in `memory` mode.
 
-Both are starting points rather than limits, and moving between them is a resize and a restart of one host. There is no data migration and no change to the topology on this page.
+### Growing past any of them
+
+All three are starting points rather than limits, and moving between them is a resize and a restart of one host. There is no data migration and no change to the topology on this page.
 
 Move up when the running system says to, rather than in anticipation:
 

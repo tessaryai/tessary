@@ -22,7 +22,7 @@ That reference is the Compose configuration itself, published to the registry as
 - Docker Compose v2.34 or newer (`docker compose version`). Older versions either cannot read a compose file from a registry or hide it behind an experimental flag.
 - Docker Engine 26 or newer, for the named-volume subpath mount the sandbox runner uses.
 - A free `tessary` Compose project name on your host (the configuration pins the project name to `tessary`)
-- A host with 2 vCPU, 8 GB of RAM and 50 GB of free disk, the starter configuration in [Host sizing](/self-hosting/deployment#host-sizing)
+- A host with 2 vCPU and 4 GB of RAM, the basic configuration in [Host sizing](/self-hosting/deployment#host-sizing). Free disk is not a fixed figure: the images are a few GB, and the database then grows with how many spans you keep and for how long.
 - The group id of the Docker socket as containers see it, so the sandbox runner can reach it. The default is `0`, which is what Docker Desktop uses on macOS and Windows — if that is you, there is nothing to set. On Linux, run `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock busybox:1.36 stat -c %g /var/run/docker.sock`; if it prints anything but `0` (a stock install usually prints the `docker` group's id, often `999`), write `DOCKER_SOCK_GID=<that number>` into a `.env` file beside `docker-compose.yml` before starting. Getting this wrong shows up as `EACCES /var/run/docker.sock` in the sandbox runner's log and an agentic RCA or triage run that never starts.
 
 A clone is optional. From one, `docker compose up -d` runs the same configuration from `docker-compose.yml` in the repository root, and additionally supports `--build` and the `observability` profile, neither of which a registry reference can resolve.
