@@ -34,6 +34,8 @@ A classifier is a check that evaluates traces against a defined condition, and i
 
 They are built to be cheap enough to run against every trace rather than a sample. None of the five costs a model call: `duration_drift`, `cost_drift` and `tool_error` are arithmetic over stored spans, and `secret_leak` and `malformed_output` are pattern and schema checks.
 
+Model calls arrive later, at triage and root-cause analysis, and they are spent per finding and per case rather than per span. In our testing, that shape cost 5x less than grading on 1% sampled traces.
+
 Three of them compare a call site, or a single tool, against its own recent past, which is why a new project stays quiet for a while. There is no shipped notion of "good" latency, "good" spend, or a "good" failure rate, so each of those classifiers has to watch its population long enough to learn what that population normally does before it can say anything moved. The milestone ladder names that wait: a project sits at `fitting` until its classifiers reach `watching`.
 
 [Classifiers and findings](/concepts/classifiers-and-findings) lists exactly which classifiers the open edition runs, what fitting a baseline involves, and what a finding records.
