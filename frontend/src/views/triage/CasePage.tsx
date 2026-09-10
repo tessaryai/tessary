@@ -2,8 +2,16 @@
 /*
  * Case page — the story of one thing going wrong.
  *
- * Four beats, in order: what happened and over what window, how big it was,
- * why (once RCA has run), and the failures themselves. Everything else is gone.
+ * Four beats, in order: what happened and over what window, why (once RCA has
+ * run), how big it was, and the failures themselves. Everything else is gone.
+ *
+ * <h2>The answer sits above the figure</h2>
+ * The leading hypothesis is what a reader came here for, so it is carded
+ * directly under the headline and the magnitude follows it. The figure is the
+ * SIZE of the answer, not the answer, and a page that opens with a chart makes
+ * a reader scroll past the measurement to reach the finding. What is left of
+ * the analysis — the checks, the weaker leads — stays below the figure, where
+ * it reads as working rather than as the conclusion.
  *
  * <h2>The headline IS the story, and it rewrites itself</h2>
  * Before RCA the title is the detector's own sentence plus the window it spans.
@@ -36,7 +44,7 @@ import type { CaseDetail, EvidenceSpan, RcaReport } from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
+import { Button, Card, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
 import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
@@ -197,7 +205,7 @@ export function CasePage() {
               of a story, not offered at the top of it; they moved to the closing bar with Mute.
               What stays is the one thing the reader can do before they have read anything. */}
           {live && detail.detector_available && rcaEnabled && detail.rca_available && (
-            <div className="flex shrink-0 items-center">
+            <div className="ml-auto flex shrink-0 items-center">
               <Button
                 size="sm"
                 variant={analysed ? "secondary" : "primary"}
@@ -283,10 +291,15 @@ export function CasePage() {
         {rcaM.isError && <RcaErrorNote error={rcaM.error} />}
       </header>
 
+      {/* ----------------------------------------------------------------- why */}
+      {(rcaEnabled || detail.rca_report_id != null) && (
+        <Answer report={report} analysing={analysing} basePath={basePath} />
+      )}
+
       {/* -------------------------------------------------------------- how big */}
       <Magnitude detail={detail} basis={c.basis} />
 
-      {/* ----------------------------------------------------------------- why */}
+      {/* ------------------------------------------------------ the rest of the run */}
       {(rcaEnabled || detail.rca_report_id != null) && (
         <Attribution report={report} analysing={analysing} basePath={basePath} />
       )}
@@ -443,17 +456,21 @@ function Magnitude({ detail, basis }: { detail: CaseDetail; basis: string }) {
 }
 
 /**
- * Why — the analysis, once it has run.
+ * The answer, carded directly under the headline.
  *
- * <p>Ranked hypotheses with their evidence, then the checks that were measured and came back clean.
- * Ruled-out is one line rather than a list of rows: what was eliminated is worth knowing and is not
- * worth a quarter of the page, and the finding's own report carries the full checklist.
+ * <p>One claim: the leading hypothesis, its confidence, its reasoning and the traces it was read
+ * off. The card is what makes it the answer rather than the first row of a list — everything else
+ * the run produced is a peer of everything else, and sits below the figure in {@link Attribution}.
+ *
+ * <p>It also owns the in-flight state, so "Analyzing" appears once and in the place the answer will
+ * land rather than under a heading further down the page.
  *
  * <p>An inconclusive run renders as itself. "Nothing happened here" is a supported conclusion of
  * this lane and the only independent check on the gate triage applies, so it must not read as a
- * failed run or as an empty one.
+ * failed run or as an empty one — a run that reached no hypothesis at all shows its summary here,
+ * because then the summary is the only claim there is.
  */
-function Attribution({
+function Answer({
   report,
   analysing,
   basePath,
@@ -465,21 +482,64 @@ function Attribution({
   if (analysing) {
     return (
       <Block label="Why">
-        <div className="flex items-center gap-2.5">
-          <StatusPill status="running" label="Analyzing" />
-          <span className="text-muted text-body">
-            Reading the evidence and bracketing the change point.
-          </span>
-        </div>
+        <Card className="border border-border p-5">
+          <div className="flex items-center gap-2.5">
+            <StatusPill status="running" label="Analyzing" />
+            <span className="text-muted text-body">
+              Reading the evidence and bracketing the change point.
+            </span>
+          </div>
+        </Card>
       </Block>
     );
   }
 
-  // Nothing to say before a run. The old empty state described what the button does, with the
-  // button already on screen a scroll above it — a heading and a paragraph that added no fact and
-  // pushed the failures below the fold. Reached only when nothing is in flight: the running branch
-  // above returns first.
-  if (!report) return null;
+  // Nothing to say before a run, and a failed run says so once, in the block below the figure.
+  if (!report || report.status === "failed") return null;
+
+  const verdict = report.verdict ? RCA_VERDICT_LABEL[report.verdict] ?? undefined : undefined;
+  const lead = (report.hypotheses ?? [])[0];
+
+  if (!lead) {
+    if (!report.summary) return null;
+    return (
+      <Block label="Why" note={verdict}>
+        <Card className="border border-border p-5">
+          <p className="text-fg m-0 text-body" style={{ maxWidth: 700 }}>
+            {report.summary}
+          </p>
+        </Card>
+      </Block>
+    );
+  }
+
+  return (
+    <Block label="Why" note={verdict}>
+      <Card className="border border-border p-5">
+        <Lead h={lead} basePath={basePath} />
+      </Card>
+    </Block>
+  );
+}
+
+/**
+ * What else the run did — the working behind the answer, below the figure.
+ *
+ * <p>Every check that was measured, with its assessment and what it found, then the leads that
+ * ranked below the one in the card. Neither is the conclusion, which is exactly why neither is at
+ * the top of the page any more.
+ */
+function Attribution({
+  report,
+  analysing,
+  basePath,
+}: {
+  report: RcaReport | undefined;
+  analysing: boolean;
+  basePath: string;
+}) {
+  // The card above owns the in-flight state, and there is nothing to say before a run.
+  if (analysing || !report) return null;
 
   if (report.status === "failed") {
     return (
@@ -499,13 +559,17 @@ function Attribution({
   // redesign, `failing_cohort_shape` came back "contributing" and never reached the page at all.
   const checks = report.ruled_out ?? [];
   const eliminated = checks.filter((c) => c.assessment === "ruled_out").length;
-  const [lead, ...rest] = hypotheses;
+  const [, ...rest] = hypotheses;
+
+  // Everything this block held is now either in the card or absent, so it renders nothing rather
+  // than an empty heading.
+  if (checks.length === 0 && rest.length === 0) return null;
 
   return (
-    <Block label="Why" note={report.verdict ? RCA_VERDICT_LABEL[report.verdict] ?? undefined : undefined}>
-      {/* The verdict itself is the Block's note; this line says how much work stands behind it.
-          Counted, never written — the old five-sentence summary paragraph opened with a prose
-          version of the same claim and then repeated the leading hypothesis almost verbatim. */}
+    <Block label="What else was checked">
+      {/* How much work stands behind the answer. Counted, never written — the old five-sentence
+          summary paragraph opened with a prose version of the same claim and then repeated the
+          leading hypothesis almost verbatim. */}
       {checks.length > 0 && (
         <p className="text-muted mt-0 mx-0 mb-4 text-body">
           {checks.length} {checks.length === 1 ? "explanation" : "explanations"} tested, {eliminated}{" "}
@@ -539,25 +603,6 @@ function Attribution({
             </div>
           ))}
         </ListChassis>
-      )}
-
-      {/* A report with no hypotheses is a legitimate outcome — nothing survived as a lead — and
-          there the summary is the only prose there is. Where hypotheses exist they make the same
-          claim with a confidence and evidence attached, so the summary is the redundant copy and
-          the one worth dropping. */}
-      {hypotheses.length === 0 && report.summary && (
-        <p className="text-fg mt-4.5 mx-0 mb-0 text-body" style={{ maxWidth: 700 }}>
-          {report.summary}
-        </p>
-      )}
-
-      {lead && (
-        <div className="mt-5.5">
-          <p className="text-body font-medium text-fg mt-0 mx-0 mb-1.25">
-            What&rsquo;s left
-          </p>
-          <Lead h={lead} basePath={basePath} />
-        </div>
       )}
 
       {/* Ranked "most likely first" by the schema, so everything past the first is a weaker lead.
@@ -631,7 +676,9 @@ function Lead({
           <Confidence level={h.confidence} />
         </p>
       )}
-      <p className="text-muted m-0 text-body" style={{ maxWidth: 680 }}>
+      {/* No measure cap: this paragraph sits in a card that spans the content column, and a
+          rationale stopping two thirds of the way across leaves the card looking half-drawn. */}
+      <p className="text-muted m-0 text-body">
         {h.rationale}
       </p>
       {h.evidence_trace_ids.length > 0 && (
