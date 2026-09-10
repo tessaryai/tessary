@@ -62,9 +62,14 @@ FROM caddy:2-alpine AS runtime
 # as a convenience, and nothing here calls it — Caddy is a static Go binary that uses crypto/tls
 # and never links libcurl, the compose healthcheck uses busybox wget, and caddy/entrypoint.sh
 # shells out to neither. Deleting is the stronger of the two because it is permanent, where an
-# upgrade only holds until the next advisory. `apk del` cascades to the orphans (libidn2,
-# libunistring, nghttp2); libcurl has exactly one reverse dependency, curl itself, so nothing else
-# loses a library. Verified on the built image: caddy runs and busybox wget still does HTTPS.
+# upgrade only holds until the next advisory. libcurl has exactly one reverse dependency — curl
+# itself — so `apk del` takes the whole subtree with it: NINE packages, not two. Measured, in
+# order: curl, libcurl, libpsl, nghttp2-libs, zstd-libs, brotli-libs, c-ares, libidn2,
+# libunistring. Two of those names look alarming for a web server and are not: Caddy is a static
+# Go binary that links none of them, and `encode gzip` in caddy/base.caddy is the only compression
+# this site configures — brotli and zstd were never enabled, so purging their C libraries changes
+# nothing. Verified on the built image, both arches: caddy serves, gzip still negotiates, busybox
+# wget still does HTTPS.
 RUN apk upgrade --no-cache \
     && apk del --no-cache curl libcurl \
     && apk add --no-cache libcap \
