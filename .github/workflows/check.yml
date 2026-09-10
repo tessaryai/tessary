@@ -29,15 +29,25 @@ on:
     # that job belongs; nothing here duplicates it.
     # secret-scan.yml deliberately keeps no filter: a credential can land in a README.
     #
-    # ONE KNOWN GAP, ACCEPTED ON PURPOSE, so nobody re-derives it as a bug later.
-    # check-version-consistency.sh does not read prose but it does scan every path `git ls-files`
-    # returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>` literal, which
-    # is the shape an install block pastes. On a doc-only PR that gate no longer runs. It is not
-    # lost: the scan is over the whole tree rather than the diff, so the next PR that touches code
-    # still fails on it. The cost of the trade is that the failure surfaces on a diff that does not
-    # contain the offending file, and the fix is `git log -S` on the literal. If that bites more
-    # than once, the answer is a docs-triggered workflow running that one gate, not deleting the
-    # filter below.
+    # `.github/**` IS ON THE LIST TOO, and that one is not free. Two running gates read paths under
+    # it, both by exact path, neither through a glob:
+    #   check-open-boundary.sh rule 7 — Taskfile.yml, this file and drift-checks.yml may reference
+    #     the overlay only from inside a `[ -d tessary-paid ]`-shaped guard.
+    #   check-open-boundary.sh rule 8 — dependabot.yml may not point a `directory:` at tessary-paid/.
+    # A PR that only edits a workflow therefore no longer proves those. Broken YAML is still caught,
+    # by GitHub itself, which reports an unparseable workflow on the PR without running anything.
+    #
+    # TWO KNOWN GAPS THEN, BOTH ACCEPTED ON PURPOSE, so nobody re-derives them as bugs later. The
+    # other is check-version-consistency.sh: it does not read prose, but it does scan every path
+    # `git ls-files` returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>`
+    # literal, the shape an install block pastes.
+    #
+    # NEITHER GAP LOSES COVERAGE, AND THAT IS THE WHOLE REASON THEY ARE ACCEPTABLE. Both gates scan
+    # the tree, not the diff, so the next PR that touches code re-reads the file the skipped PR
+    # changed and fails there. What the trade actually costs is blame: the failure surfaces on a
+    # diff that does not contain the offending file. `git log -S` on the literal, or on
+    # `tessary-paid`, is the way back. If that bites more than once, the answer is a workflow
+    # triggered on these paths running those two gates, not deleting the filter below.
     #
     # A DENYLIST, NOT AN ALLOWLIST, on purpose. With `paths:` a new top-level code directory would
     # be silently ungated until someone remembered to add it; with `paths-ignore:` it is gated by
@@ -63,6 +73,7 @@ on:
       - 'docs/**'
       - 'devdocs/**'
       - 'handbook/**'
+      - '.github/**'
     # THE DEFAULT SET IS opened + synchronize + reopened. Naming it explicitly costs the two below,
     # and both are load-bearing:
     #
