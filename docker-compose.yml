@@ -263,6 +263,10 @@ services:
       TESSARY_RETENTION_ENABLED: ${TESSARY_RETENTION_ENABLED:-true}
       TESSARY_RETENTION_TRACE_TTL_DAYS: ${TESSARY_RETENTION_TRACE_TTL_DAYS:-90}
       TESSARY_RETENTION_DETECTION_TTL_DAYS: ${TESSARY_RETENTION_DETECTION_TTL_DAYS:-90}
+      # The opt-OUT heartbeat. Interpolated for the same reason as the two keys above, and it
+      # matters more here: left to env_file alone, an operator on the registry install who sets
+      # this to false in their .env gets no error and keeps sending the ping.
+      TESSARY_TELEMETRY_ENABLED: ${TESSARY_TELEMETRY_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

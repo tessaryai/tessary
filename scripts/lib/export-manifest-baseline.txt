@@ -1241,7 +1241,6 @@ docs/vale/styles/Tessary/TitleCaseH1.yml
 docs/vale/styles/Tessary/VaguePrerequisites.yml
 docs/vale/styles/Tessary/WordsToAvoid.yml
 frontend/.dockerignore
-frontend/.env.example
 frontend/.gitignore
 frontend/AGENTS.md
 frontend/DESIGN_SYSTEM.md

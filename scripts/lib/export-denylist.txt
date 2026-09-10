@@ -57,4 +57,3 @@ tessary-paid|delete|dir|paid overlay
 *.key|never|glob|key material
 id_rsa*|never|glob|key material
 .env.example|exempt|file|documented template, no values
-frontend/.env.example|exempt|file|documented template, no values
