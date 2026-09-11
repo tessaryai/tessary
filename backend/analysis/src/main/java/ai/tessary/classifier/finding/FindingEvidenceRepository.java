@@ -332,8 +332,9 @@ public class FindingEvidenceRepository {
     /**
      * {@link #page}, with the span each ref names joined on. Same keyset, order and over-fetch, so a
      * reader paging this and a reader paging the refs see the population in the same sequence; kept
-     * separate from {@link #page} because the MCP door returns ids and no bodies, while a person looking
-     * at a table needs the row to say something.
+     * separate from {@link #page} because the dossier's enumeration wants ids and nothing else, while a
+     * reader judging one row — a person at the table, an agent on the MCP door — needs the row to say
+     * something.
      *
      * <p>The join is LEFT and falls back to the trace's logical root for a trace-grain ref, so a
      * behaviour-drift finding still renders a name and a time rather than an id and four dashes. A ref
@@ -341,7 +342,8 @@ public class FindingEvidenceRepository {
      *
      * <p>Payloads are normally kept off list and sweep surfaces; this join is the bounded exception, a
      * keyset page of at most {@code limit} spans, 1:1 on the span primary key, with columns truncated in
-     * SQL so a page costs {@code limit × 2 × PREVIEW_CHARS} however large the payloads behind it are.
+     * SQL so a page costs {@code limit × 2 × PREVIEW_CHARS} however large the payloads behind it are. The
+     * previews are for the table; the MCP door drops them and sends callers to {@code get_span}.
      */
     public SpanPage spanPage(
             String projectId, String findingId, @Nullable String role, int limit, @Nullable String cursor) {

@@ -9,11 +9,14 @@ finding is about. The dossier states the claim; you go and check it.
   substrate aged out, never a lost write. ZERO in BOTH under `baseline` is a real state, not
   missing evidence: several detectors compare against a fitted model and have no reference
   rows to enumerate. Read it as "no enumerable reference side" and say so in your ruling.
-- `get_finding_evidence(finding_id, role=…, limit=…, cursor=…)` — the refs themselves
-  (`role`, `grain`, `sessionId`, `traceId`, `spanId`, `rank`) in the detector's own stable
-  order. Field names are camelCase on this surface, and the next page's token is
-  `nextCursor`. There is NO sampling mode: take the stride or the draw you want, and say in
-  your citation which one you took.
+- `get_finding_evidence(finding_id, role=…, limit=…, cursor=…)` — the rows themselves, under
+  `rows`, in the detector's own stable order. Each row carries what was MEASURED on it, not
+  just a pointer to it: `role`, `rank`, `sessionId`, `traceId`, `spanId`, `name`, `kind`,
+  `status`, `level`, `errorType`, `startedAt`, `latencyMs`, `totalTokens`, `totalCost`,
+  `model`, `callSiteId`. Rank and compare on the page itself, and pick the rows you open from
+  the numbers. The payloads are NOT on this page; `get_span` is where a body comes from.
+  Field names are camelCase on this surface, and the next page's token is `nextCursor`. No
+  sampling. Page the whole role and compute over all of it.
 - `get_trace(trace_id)` and `get_span(trace_id, span_id)` — the bodies behind a ref. A span id
   is unique only within its trace, which is why get_span takes both.
 - `list_traces` / `list_spans` / `list_sessions` / `get_session` — this project's traffic when

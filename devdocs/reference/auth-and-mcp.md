@@ -71,9 +71,14 @@ no registered tool name is write-shaped, and none of the tools removed by the cu
 
 **`get_finding_evidence` is the door the analysis lanes read through.** A detector enumerates the
 population its claim rests on at finding-open — one `finding_evidence` ref per measured row, uncapped —
-and this tool pages those refs back out: `{role, grain, session_id?, trace_id?, span_id?, rank?}` +
-`next_cursor`, plus `count_only=true` for the per-role sizes with no rows. Refs are ids, not bodies;
-the caller follows one with `get_trace` / `get_span` / `list_spans`. That is what lets triage and RCA
+and this tool pages those rows back out joined to the span each names, so a row says what was measured
+on it rather than only where to find it: `{role, rank, sessionId, traceId, spanId, name, kind, status,
+level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}` + `nextCursor`
+(camelCase, unlike the snake_case tools around it), plus `count_only=true` for the per-role sizes with
+no rows, which answers in the ref shape under `refs`. The join is read-time, so it holds for evidence
+already recorded. Payload text is not on the page; the caller follows a row with `get_trace` /
+`get_span` / `list_spans`. Rows carrying their own numbers is what lets a lane rank a population of
+hundreds and open the handful it chose, instead of opening a handful and calling that the population. That is what lets triage and RCA
 ship a dossier of the finding's *claim* alone and fetch the traffic on demand, rather than hydrating
 traces into a prompt — the materialize-what-is-finding-specific, read-substrate-over-MCP posture both
 lanes take. It is scoped and gated exactly like `get_finding` (same service, same project scope, a

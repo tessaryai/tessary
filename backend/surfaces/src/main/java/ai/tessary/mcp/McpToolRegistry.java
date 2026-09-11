@@ -728,11 +728,15 @@ public class McpToolRegistry {
 
         add(new McpTool(
                 "get_finding_evidence",
-                "Page the substrate a finding's claim rests on: one ref per row the detector measured, at the"
+                "Page the substrate a finding's claim rests on: one row per unit the detector measured, at the"
                         + " grain it measured (role 'member' is the flagged population ENUMERATED, not a sample;"
                         + " 'baseline' is the reference window's rows; 'exemplar' / 'witness' / 'changepoint' are"
-                        + " the reading aids). Refs are IDS, not bodies — follow one with get_trace, get_span"
-                        + " (both ids) or list_spans. Call it with count_only=true first: that returns the"
+                        + " the reading aids). Each row carries what was MEASURED on it, not just a pointer to"
+                        + " it: role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType,"
+                        + " startedAt, latencyMs, totalTokens, totalCost, model, callSiteId. So compare, rank and"
+                        + " pick rows from the page itself, and open only the ones you decided to open — the"
+                        + " payloads are NOT here, and get_span (trace id plus span id) is where a body comes"
+                        + " from. Call it with count_only=true first: that returns the"
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
                         + " context on it. counts is what SURVIVES and can still be opened; recorded_counts is"
                         + " what the detector wrote at finding-open — counts below recorded means substrate aged"
@@ -758,10 +762,11 @@ public class McpToolRegistry {
                                         "count_only",
                                         boolField("Optional. Return the per-role counts with no rows — the cheap"
                                                 + " first call. Rows are omitted rather than empty, and"
-                                                + " rows_omitted says so.")),
+                                                + " rowsOmitted says so. This page answers under 'refs' (empty)"
+                                                + " rather than 'rows'.")),
                                 Map.entry(
                                         "limit",
-                                        intField("Optional. Max refs in this page (default " + EVIDENCE_DEFAULT_LIMIT
+                                        intField("Optional. Max rows in this page (default " + EVIDENCE_DEFAULT_LIMIT
                                                 + ", capped at " + EVIDENCE_MAX_LIMIT + ").")),
                                 Map.entry(
                                         "cursor",
@@ -822,15 +827,25 @@ public class McpToolRegistry {
     }
 
     /**
-     * {@code get_finding_evidence}: a page of the population a detector enumerated. Delegates to
-     * {@link FindingService#findingEvidence}, which carries the same reachability guard {@code get_finding}
-     * does, so the gate lives in one place rather than being restated per tool.
+     * {@code get_finding_evidence}: a page of the population a detector enumerated, each row joined to what
+     * was measured on it. Delegates to {@link FindingService#findingEvidenceSpans}, which carries the same
+     * reachability guard {@code get_finding} does, so the gate lives in one place rather than being
+     * restated per tool.
+     *
+     * <p>Measurements rather than bare refs because a reading agent judging a row cannot do it from an id:
+     * with only ids, deciding whether one row of 174 is worth opening costs a {@code get_span} per row, so
+     * it opens a handful, picks them blind, and rules on those. The numbers it selects on now ride the page
+     * it selects from.
+     *
+     * <p>{@code count_only} still goes to {@link FindingService#findingEvidence}: the cheap sizing call
+     * returns no rows, so joining to spans it would not return buys nothing, and that path has no span
+     * variant.
      *
      * <p>An unrecognised {@code role} is an error, not an empty page, same reasoning as
      * {@link #listCases}: a client can send anything regardless of the schema, and an empty page here would
      * read as "no evidence" rather than "bad argument".
      */
-    private BehaviorDtos.FindingEvidencePage getFindingEvidence(TenantContext ctx, Map<String, Object> args) {
+    private Object getFindingEvidence(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
         String findingId = requireStr(args, "finding_id");
         String role = strArg(args, "role");
@@ -839,14 +854,77 @@ public class McpToolRegistry {
                     + FindingEvidenceRow.Role.ALL + ".");
         }
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), EVIDENCE_DEFAULT_LIMIT, EVIDENCE_MAX_LIMIT);
+        String cursor = strArg(args, "cursor");
         try {
-            return behaviorDrift.findingEvidence(
-                    projectId, findingId, role, pageSize, strArg(args, "cursor"), boolArg(args, "count_only"));
+            if (boolArg(args, "count_only")) {
+                return behaviorDrift.findingEvidence(projectId, findingId, role, pageSize, cursor, true);
+            }
+            BehaviorDtos.FindingEvidenceSpanPage page =
+                    behaviorDrift.findingEvidenceSpans(projectId, findingId, role, pageSize, cursor);
+            return new EvidenceSpanPage(
+                    page.rows().stream().map(EvidenceSpan::of).toList(),
+                    page.nextCursor(),
+                    page.counts(),
+                    page.recordedCounts());
         } catch (TessaryException e) {
             String message = e.getMessage();
             throw new McpTool.ToolException(message == null ? "finding not found: " + findingId : message, e);
         }
     }
+
+    /**
+     * One evidence row on the MCP door: {@link BehaviorDtos.EvidenceSpanView} without the payload previews.
+     *
+     * <p>The previews are dropped here rather than in the view, which the finding page's evidence table
+     * shares and still renders them in. This surface hands out measurements and ids; payload text comes
+     * from {@code get_span}, where a caller asks for one span's body on purpose instead of receiving a
+     * thousand truncated ones it did not ask for.
+     */
+    record EvidenceSpan(
+            String role,
+            @Nullable Integer rank,
+            @Nullable String sessionId,
+            @Nullable String traceId,
+            @Nullable String spanId,
+            @Nullable String name,
+            @Nullable String kind,
+            @Nullable String status,
+            @Nullable String level,
+            @Nullable String errorType,
+            @Nullable String startedAt,
+            @Nullable Long latencyMs,
+            @Nullable Long totalTokens,
+            @Nullable Double totalCost,
+            @Nullable String model,
+            @Nullable String callSiteId) {
+
+        static EvidenceSpan of(BehaviorDtos.EvidenceSpanView v) {
+            return new EvidenceSpan(
+                    v.role(),
+                    v.rank(),
+                    v.sessionId(),
+                    v.traceId(),
+                    v.spanId(),
+                    v.name(),
+                    v.kind(),
+                    v.status(),
+                    v.level(),
+                    v.errorType(),
+                    v.startedAt(),
+                    v.latencyMs(),
+                    v.totalTokens(),
+                    v.totalCost(),
+                    v.model(),
+                    v.callSiteId());
+        }
+    }
+
+    /** {@link BehaviorDtos.FindingEvidenceSpanPage} with {@link EvidenceSpan} rows: the same envelope. */
+    record EvidenceSpanPage(
+            List<EvidenceSpan> rows,
+            @Nullable String nextCursor,
+            Map<String, Long> counts,
+            Map<String, Long> recordedCounts) {}
 
     private void add(McpTool t) {
         tools.put(t.name(), t);

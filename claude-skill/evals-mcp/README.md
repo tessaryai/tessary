@@ -81,11 +81,13 @@ Conventions the tools share, stated here once rather than per row:
   `list_sessions`): `limit` (default 50, capped 100) + `cursor` in, `next_cursor` out. An unreadable or
   stale cursor restarts at the newest page rather than erroring. `query_search` keeps its own older
   limits (default 100, capped 1000), and `get_finding_evidence` pages at the same wider bound — its rows
-  are ids rather than prose, and the set it pages is a whole measured population.
+  are ids and numbers rather than prose, and the set it pages is a whole measured population.
 - **Lists find, gets read.** List rows carry typed columns and the stored `input_preview`/`output_preview`
   plus `payload_available`, never the full payload. Raw text comes from `get_span`, or from `get_trace` /
   `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or ≤ 24h.
-- Timestamps ISO-8601; the snake_case wire shape is identical to REST.
+- Timestamps ISO-8601; the snake_case wire shape is identical to REST. The one exception is
+  `get_finding_evidence`, whose response fields are camelCase; its arguments are snake_case like
+  every other tool's.
 
 | Tool | Args (`limit`/`cursor` omitted — see above) | Returns | Gate |
 |---|---|---|---|
@@ -96,7 +98,7 @@ Conventions the tools share, stated here once rather than per row:
 | `get_case` | `id` (stored id or `C-118`) | case + activity trail + `finding_id` + exemplars + the **RCA report inline in `rca`** when one has finished | open |
 | `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) + withheld count | open |
 | `get_finding` | `id` | finding + parsed evidence | open |
-| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged refs `{role, grain, session_id?, trace_id?, span_id?, rank?}` into the population the detector measured, + live and as-written per-role counts | open |
+| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}`, camelCase, no payload text — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` | open |
 | `list_traces` | `model`, `kind`, `call_site_id`, `status`, `range`, `q` | paged trace rollup rows + previews | open |
 | `get_trace` | `trace_id`, `fields` | rollup + spans, oldest-first, capped 200 + `spans_truncated`; skeleton rows (typed columns + previews + `payload_available`) unless `fields: ["payload"]` | open |
 | `list_spans` | `trace_id`, `call_site_id`, `kind`, `name`, `status`, `model_id`, `session_id`, `range`, `q`, `mode` (keyword\|semantic), `fields` | paged compact span rows; full payloads only when scoped | open |
