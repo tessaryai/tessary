@@ -100,7 +100,8 @@ public final class BehaviorDtos {
             Map<String, Long> recordedCounts) {}
 
     /**
-     * One row of the finding page's evidence table: the ref, and the span it names.
+     * One row of a finding's evidence, joined: the ref, and the span it names. Rendered by the finding
+     * page's evidence table, and returned on the MCP door minus the two previews.
      *
      * <p>The unit here is whatever the detector measured; for tool error and both drift measures
      * that is a span, one ref per call. Rendering these as traces would print the same trace four

@@ -20,8 +20,9 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
-import ai.tessary.classifier.finding.BehaviorDtos.EvidenceRefView;
+import ai.tessary.classifier.finding.BehaviorDtos.EvidenceSpanView;
 import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidencePage;
+import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidenceSpanPage;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
@@ -360,13 +361,48 @@ class McpFindingToolsTest {
         return out;
     }
 
-    private static FindingEvidencePage samplePage(@Nullable String nextCursor) {
-        return new FindingEvidencePage(
+    private static FindingEvidenceSpanPage samplePage(@Nullable String nextCursor) {
+        return new FindingEvidenceSpanPage(
                 List.of(
-                        new EvidenceRefView("trace", null, "trace-7", null, FindingEvidenceRow.Role.MEMBER, 0),
-                        new EvidenceRefView("span", null, "trace-8", "span-2", FindingEvidenceRow.Role.MEMBER, 3)),
+                        new EvidenceSpanView(
+                                FindingEvidenceRow.Role.MEMBER,
+                                0,
+                                "sess-4",
+                                "trace-7",
+                                null,
+                                "plan",
+                                "llm",
+                                "ok",
+                                null,
+                                null,
+                                "2026-02-03T10:00:00Z",
+                                7293L,
+                                4120L,
+                                0.031,
+                                "claude-opus-5",
+                                "otto-von-bismarck",
+                                "what the span was given",
+                                "what it returned"),
+                        new EvidenceSpanView(
+                                FindingEvidenceRow.Role.MEMBER,
+                                3,
+                                "sess-9",
+                                "trace-8",
+                                "span-2",
+                                "lookup",
+                                "tool",
+                                "error",
+                                "error",
+                                "Timeout",
+                                "2026-02-03T10:04:00Z",
+                                84L,
+                                null,
+                                null,
+                                null,
+                                "otto-von-bismarck",
+                                "tool input",
+                                "tool output")),
                 nextCursor,
-                false,
                 counts(120, 0),
                 counts(120, 0));
     }
@@ -384,38 +420,67 @@ class McpFindingToolsTest {
     }
 
     /**
-     * The refs are ids at a grain, and both grains round-trip: a trace ref carries one id, a span ref
-     * carries BOTH (span identity under substrate v2 is the composite key), and {@code rank} survives with
-     * its gaps intact — it is the detector's order, not an index.
+     * A row carries what was measured on it, not just a pointer to it: the ids still round-trip (a
+     * trace-grain row carries no span id, a span-grain row carries both, since span identity under
+     * substrate v2 is the composite key), and {@code rank} survives with its gaps intact — it is the
+     * detector's order, not an index — but latency, tokens, cost and call site ride along, which is what
+     * lets a reader rank the page before it opens anything.
      */
     @Test
-    void getFindingEvidence_pagesRefsAsIdsAtTheirGrain() throws Exception {
-        when(behaviorDrift.findingEvidence(PROJECT_ID, "find-1", null, 100, null, false))
+    void getFindingEvidence_pagesRowsWithTheirMeasurements() throws Exception {
+        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
                 .thenReturn(samplePage("cursor-2"));
 
         JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
 
-        assertEquals(2, body.get("refs").size());
-        assertEquals("trace-7", body.get("refs").get(0).get("traceId").asText());
-        assertTrue(body.get("refs").get(0).get("spanId").isNull(), "a trace ref carries no span id");
-        assertEquals("span", body.get("refs").get(1).get("grain").asText());
-        assertEquals("trace-8", body.get("refs").get(1).get("traceId").asText());
-        assertEquals("span-2", body.get("refs").get(1).get("spanId").asText());
-        assertEquals(3, body.get("refs").get(1).get("rank").asInt());
+        assertEquals(2, body.get("rows").size());
+        JsonNode first = body.get("rows").get(0);
+        assertEquals("trace-7", first.get("traceId").asText());
+        assertTrue(first.get("spanId").isNull(), "a trace-grain row carries no span id");
+        assertEquals(7293, first.get("latencyMs").asLong());
+        assertEquals(4120, first.get("totalTokens").asLong());
+        assertEquals("claude-opus-5", first.get("model").asText());
+        assertEquals("otto-von-bismarck", first.get("callSiteId").asText());
+        JsonNode second = body.get("rows").get(1);
+        assertEquals("trace-8", second.get("traceId").asText());
+        assertEquals("span-2", second.get("spanId").asText());
+        assertEquals(3, second.get("rank").asInt());
+        assertEquals(84, second.get("latencyMs").asLong());
+        assertEquals("Timeout", second.get("errorType").asText());
+        // A tool span has neither, and an empty cell is the honest answer rather than a zero.
+        assertTrue(second.get("totalTokens").isNull(), "a tool span has no tokens");
         assertEquals("cursor-2", body.get("nextCursor").asText());
+        assertEquals(120, body.get("counts").get("member").asLong());
+    }
+
+    /**
+     * The previews stay on the table the UI renders and never reach this door. An agent that wants a
+     * body asks {@code get_span} for one span on purpose, instead of being handed a thousand truncated
+     * ones it did not ask for.
+     */
+    @Test
+    void getFindingEvidence_dropsThePayloadPreviews() throws Exception {
+        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
+                .thenReturn(samplePage(null));
+
+        JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
+
+        JsonNode first = body.get("rows").get(0);
+        assertFalse(first.has("inputPreview"), first.toString());
+        assertFalse(first.has("outputPreview"), first.toString());
     }
 
     /** The paging contract: default limit, the cap, the role filter and the cursor all reach the service. */
     @Test
     void getFindingEvidence_passesRoleLimitAndCursorThroughAndClampsTheLimit() throws Exception {
-        when(behaviorDrift.findingEvidence(eq(PROJECT_ID), eq("find-1"), any(), anyInt(), any(), anyBoolean()))
+        when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("find-1"), any(), anyInt(), any()))
                 .thenReturn(samplePage(null));
 
         structured(callTool(
                 "get_finding_evidence",
                 "{\"finding_id\":\"find-1\",\"role\":\"member\",\"limit\":9000,\"cursor\":\"c-1\"}"));
 
-        verify(behaviorDrift).findingEvidence(PROJECT_ID, "find-1", FindingEvidenceRow.Role.MEMBER, 1000, "c-1", false);
+        verify(behaviorDrift).findingEvidenceSpans(PROJECT_ID, "find-1", FindingEvidenceRow.Role.MEMBER, 1000, "c-1");
     }
 
     /**
@@ -431,6 +496,8 @@ class McpFindingToolsTest {
 
         assertEquals(0, body.get("refs").size());
         assertTrue(body.get("rowsOmitted").asBoolean(), "count_only omits rows rather than returning none");
+        // The sizing call returns no rows, so there is nothing to join spans to.
+        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
         // Live below recorded is retention, not a lost write — the pair is the whole point of sending both.
         assertEquals(118, body.get("counts").get("member").asLong());
         assertEquals(120, body.get("recordedCounts").get("member").asLong());
@@ -449,6 +516,7 @@ class McpFindingToolsTest {
 
         assertTrue(text.contains("members"), text);
         assertTrue(text.contains(FindingEvidenceRow.Role.BASELINE), text);
+        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
         verify(behaviorDrift, org.mockito.Mockito.never())
                 .findingEvidence(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
@@ -458,6 +526,7 @@ class McpFindingToolsTest {
         String text = errorText(callTool("get_finding_evidence", "{}"));
 
         assertTrue(text.contains("finding_id"), text);
+        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
         verify(behaviorDrift, org.mockito.Mockito.never())
                 .findingEvidence(any(), any(), any(), anyInt(), any(), anyBoolean());
     }
@@ -468,7 +537,7 @@ class McpFindingToolsTest {
      */
     @Test
     void getFindingEvidence_notFoundIsCleanToolError() throws Exception {
-        when(behaviorDrift.findingEvidence(eq(PROJECT_ID), eq("other-tenant"), any(), anyInt(), any(), anyBoolean()))
+        when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("other-tenant"), any(), anyInt(), any()))
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "other-tenant"));
 
         String text = errorText(callTool("get_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));

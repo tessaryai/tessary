@@ -7,12 +7,15 @@ finding is about. The dossier states the claim; you go and read it.
   cheap first call, always. `counts` is what SURVIVES and can still be opened;
   `recordedCounts` is what the detector wrote at finding-open, so counts below recorded means
   substrate aged out, never a lost write.
-- `get_finding_evidence(finding_id, role=…, limit=…, cursor=…)` — the refs themselves
-  (`role`, `grain`, `sessionId`, `traceId`, `spanId`, `rank`) in the detector's own stable
-  order. Field names are camelCase on this surface, and the next page's token is
-  `nextCursor`. Role `baseline` is the BEFORE side; every other role is what was flagged.
-  There is NO sampling mode: take the stride or the draw you want, and say which one you
-  took.
+- `get_finding_evidence(finding_id, role=…, limit=…, cursor=…)` — the rows themselves, under
+  `rows`, in the detector's own stable order. Each row carries what was MEASURED on it, not
+  just a pointer to it: `role`, `rank`, `sessionId`, `traceId`, `spanId`, `name`, `kind`,
+  `status`, `level`, `errorType`, `startedAt`, `latencyMs`, `totalTokens`, `totalCost`,
+  `model`, `callSiteId`. Compare the two sides on the page itself, and pick the rows you open
+  from the numbers. The payloads are NOT on this page; `get_span` is where a body comes from.
+  Field names are camelCase on this surface, and the next page's token is `nextCursor`. Role
+  `baseline` is the BEFORE side; every other role is what was flagged. No sampling. Page the
+  whole role and compute over all of it.
 - `get_trace(trace_id)` and `get_span(trace_id, span_id)` — the bodies behind a ref. A span
   id is unique only within its trace, which is why get_span takes both.
 - `list_traces` / `list_spans` / `list_sessions` / `get_session` — this project's traffic
