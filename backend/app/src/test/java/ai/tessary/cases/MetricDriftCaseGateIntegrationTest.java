@@ -185,6 +185,7 @@ class MetricDriftCaseGateIntegrationTest {
                         null,
                         null,
                         null,
+                        null,
                         0,
                         null,
                         null,

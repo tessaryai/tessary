@@ -63,6 +63,22 @@ public record MetricBaselineRow(
         @Nullable String prevTokensJson,
         @Nullable String currentTokensJson,
         /**
+         * The rows folded into the window being filled, same codec as {@link #pinnedRefsJson} — the
+         * member population a finding on this window would be a claim about.
+         *
+         * <p>Persisted rather than held per sweep page, which is what it used to be: the sketch and the
+         * count survive a page, so refs that did not left a multi-page window able to enumerate only the
+         * page its close landed in. That is a contiguous tail of the population presented as the whole
+         * of it, and {@code finding_evidence}'s {@code member} role forbids exactly that — the writer
+         * may not sample for the reader, because a selection rule the reader cannot see makes the claim
+         * unauditable.
+         *
+         * <p>Rotates with {@link #currentSketchJson} for the reason the sidecars do, and is bounded by
+         * {@code window_target_count}: the close check runs per sample, so the list cannot outgrow the
+         * window it describes.
+         */
+        @Nullable String currentRefsJson,
+        /**
          * The rolling control: this bucket's recent normal, as a ring of per-UTC-day merges
          * ({@link MetricControl}). An exact record of what closed when; the weighting and the exclusion
          * of days a confirmed regression ran through are applied when it's read, which is what lets a

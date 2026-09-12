@@ -180,6 +180,73 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
+     * A trace-grain ref names a TRACE, and the span join has to pick one span out of it. The fallback it
+     * picks by, {@code is_logical_root}, is not unique within a trace — it marks every sub-agent boundary
+     * — so a plain {@code ON} multiplied one ref by however many agents ran inside that trace.
+     *
+     * <p>That was not a cosmetic duplicate. The copies were sub-agent roots with {@code latency_ms = 0},
+     * the page disagreed with {@code countsByRole} over the same evidence, and a reader instructed to
+     * compute over every row was handed a set padded with zeros. This pins one ref to one row.
+     */
+    @Test
+    @DisplayName("a trace-grain ref resolves to ONE span, the outermost root, however many agents ran inside")
+    void traceGrainEvidenceDoesNotFanOutAcrossLogicalRoots() {
+        Project p = project("finding-evidence-fanout");
+        String findingId = firing(p, "gram-fanout");
+        String now = Instant.now().toString();
+        String traceId = "trace-many-roots";
+
+        // The shape a real sub-agent trace has: one parentless root, and a logical root per sub-agent
+        // under it. Every one of these is_logical_root, which is exactly why the flag cannot pick.
+        jdbc.sql("INSERT INTO trace (project_id, id, started_at, event_ts) VALUES (:pid, :tid, now(), now())")
+                .param("pid", p.id())
+                .param("tid", traceId)
+                .update();
+        insertRootSpan(p.id(), traceId, "span-outer", null, "invoke_agent outer", 5_000L);
+        insertRootSpan(p.id(), traceId, "span-sub-a", "span-outer", "invoke_agent sub-a", 0L);
+        insertRootSpan(p.id(), traceId, "span-sub-b", "span-outer", "invoke_agent sub-b", 0L);
+        insertRootSpan(p.id(), traceId, "span-sub-c", "span-outer", "invoke_agent sub-c", 0L);
+
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.trace(traceId)),
+                now);
+
+        var page = behaviorDrift.findingEvidenceSpans(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, 100, null);
+
+        assertEquals(1, page.rows().size(), "one ref is one row: " + page.rows());
+        assertEquals(
+                page.counts().get(FindingEvidenceRow.Role.MEMBER),
+                (long) page.rows().size(),
+                "the page and the count must describe the same evidence");
+        var row = page.rows().get(0);
+        assertEquals("invoke_agent outer", row.name(), "the outermost root, not whichever sub-agent sorted first");
+        assertEquals(5_000L, row.latencyMs(), "a zero-latency sub-agent root would drag every computed median");
+        assertNull(page.nextCursor(), "a page that exhausted the set mints no cursor");
+    }
+
+    /**
+     * One logical-root span, inserted straight in: the substrate fixtures build whole traces, and this
+     * test needs an unnatural one — several logical roots in a single trace — to exercise the join.
+     */
+    private void insertRootSpan(
+            String projectId, String traceId, String spanId, @Nullable String parentId, String name, long latencyMs) {
+        jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name, is_logical_root,"
+                        + " started_at, latency_ms, event_ts)"
+                        + " VALUES (:pid, :tid, :sid, CAST(:parent AS text), 'agent', :name, true,"
+                        + " now(), :latency, now())")
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .param("sid", spanId)
+                .param("parent", parentId)
+                .param("name", name)
+                .param("latency", latencyMs)
+                .update();
+    }
+
+    /**
      * The evidence door's project scope, through the real service rather than a stubbed one.
      *
      * <p>The MCP-side test can only prove that a thrown not-found maps to a clean tool error, because it

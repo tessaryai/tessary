@@ -213,6 +213,42 @@ class MetricDriftSweepIntegrationTest {
     }
 
     @Test
+    @DisplayName("a window filled across two pages enumerates both, not just the page its close landed in")
+    void windowRefsSurviveThePageBoundary() {
+        String pid = project("metric-sweep-refs-across-pages");
+        ClassifierRow signal = signal(pid);
+
+        // Page one: 30 turns, which is the minimum sample and still under the 50 target, so the window
+        // stays open and its refs have to outlive this pass to be worth anything.
+        seedTurns(pid, 0, 30, 2_000, null);
+        assertEquals(30, sweep.sweepMetrics(claim(pid, signal), signal).scanned());
+        MetricBaselineRow afterFirst = baseline(pid, signal);
+        assertEquals(30, afterFirst.currentCount());
+        assertEquals(
+                30,
+                MetricEvidenceRefs.fromJson(afterFirst.currentRefsJson()).size(),
+                "the open window kept the rows it folded, not just their count");
+
+        // Page two crosses the target: the window closes at 50 and the last 10 open the next one.
+        seedTurns(pid, 30, 30, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed());
+
+        MetricBaselineRow row = baseline(pid, signal);
+        assertEquals(50, sketch(row.pinnedSketchJson()).count(), "the bootstrap pin is the window that closed");
+        // The regression this test exists for. windowRefs used to be a per-pass local while the sketch
+        // and count were persisted, so a window spanning two pages pinned only the 20 refs folded in the
+        // pass its close landed in — a contiguous TAIL of 50 samples, written down as the population.
+        assertEquals(
+                50,
+                MetricEvidenceRefs.fromJson(row.pinnedRefsJson()).size(),
+                "the pinned reference enumerates every sample in the window, across both pages");
+        assertEquals(
+                10,
+                MetricEvidenceRefs.fromJson(row.currentRefsJson()).size(),
+                "and the refs rotate with the sketch: the new window holds the carry only");
+    }
+
+    @Test
     @DisplayName("a turn whose root span has not landed holds the cursor instead of being stepped over")
     void aTraceStillWaitingForItsRootHoldsThePage() {
         String pid = project("metric-sweep-late-root");

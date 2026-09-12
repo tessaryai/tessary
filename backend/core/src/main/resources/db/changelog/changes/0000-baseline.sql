@@ -22,8 +22,9 @@
 --comment: ever touched was dropped and recreated on its reset day, so a database of this era has
 --comment: run this one changeset and nothing else. A database that predates the baseline
 --comment: fails its first boot loudly on the precondition below and is recreated, never repaired.
---comment: New open migrations go in changes/NNNN-*.sql under author `evals`, numbering from the
---comment: next free number after this fold (0024); paid-lane migrations are numbered
+--comment: New open migrations go in changes/NNNN-*.sql under author `evals`, numbering from 0001:
+--comment: the fold carried no history forward, so the open chain starts after this file rather
+--comment: than continuing the private numbering; paid-lane migrations are numbered
 --comment: independently in the overlay's own changelog.
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'project'

@@ -33,6 +33,7 @@ public class MetricBaselineRepository {
             + "state, pinned_sketch_json, pinned_at, pinned_by_version_id, "
             + "current_sketch_json, pinned_workload_json, current_workload_json, "
             + "pinned_tokens_json, pinned_refs_json, prev_tokens_json, current_tokens_json, "
+            + "current_refs_json, "
             + "control_json, current_opened_at, current_count, "
             + "counted_through_at, counted_through_id, last_event_at, created_at, updated_at";
 
@@ -68,7 +69,7 @@ public class MetricBaselineRepository {
         return jdbc.sql("INSERT INTO metric_baseline (" + COLS + ") VALUES (:id, :pid, :sid, :measure, "
                         + ":bucketKind, :bucketKey, :state, :pinnedSketch, :pinnedAt, :pinnedVersion, "
                         + ":currentSketch, :pinnedWorkload, :currentWorkload, "
-                        + ":pinnedTokens, :pinnedRefs, :prevTokens, :currentTokens, :control, "
+                        + ":pinnedTokens, :pinnedRefs, :prevTokens, :currentTokens, :currentRefs, :control, "
                         + ":currentOpenedAt, :currentCount, :countedThroughAt, "
                         + ":countedThroughId, :lastEventAt, :createdAt, :updatedAt) "
                         + "ON CONFLICT (" + SCOPE_KEY + ") DO UPDATE "
@@ -91,6 +92,7 @@ public class MetricBaselineRepository {
                 .param("pinnedRefs", seed.pinnedRefsJson())
                 .param("prevTokens", seed.prevTokensJson())
                 .param("currentTokens", seed.currentTokensJson())
+                .param("currentRefs", seed.currentRefsJson())
                 .param("control", seed.controlJson())
                 .param("currentOpenedAt", seed.currentOpenedAt())
                 .param("currentCount", seed.currentCount())
@@ -210,19 +212,27 @@ public class MetricBaselineRepository {
      * of. All three are written in one statement because they describe the same samples: a window whose
      * measure sketch advanced while a sidecar lagged would report a shift against inputs from a different
      * set of turns, which is the one comparison a finding must never make.
+     *
+     * <p>And the refs with them, for the same reason plus one of their own: they are the only part of the
+     * window that cannot be recomputed later. Before they were persisted here, a window spanning more
+     * than one sweep page kept the sketch from every page and the refs from one, so its member evidence
+     * was the tail of its population wearing the population's name.
      */
     public void updateCurrentSketch(
             String id,
             @Nullable String currentSketchJson,
             @Nullable String currentWorkloadJson,
             @Nullable String currentTokensJson,
+            @Nullable String currentRefsJson,
             String now) {
         jdbc.sql("UPDATE metric_baseline SET current_sketch_json = :sketch, "
                         + "current_workload_json = CAST(:workload AS text), "
-                        + "current_tokens_json = CAST(:tokens AS text), updated_at = :now WHERE id = :id")
+                        + "current_tokens_json = CAST(:tokens AS text), "
+                        + "current_refs_json = CAST(:refs AS text), updated_at = :now WHERE id = :id")
                 .param("sketch", currentSketchJson)
                 .param("workload", currentWorkloadJson)
                 .param("tokens", currentTokensJson)
+                .param("refs", currentRefsJson)
                 .param("now", now)
                 .param("id", id)
                 .update();
@@ -255,6 +265,7 @@ public class MetricBaselineRepository {
             @Nullable String carriedSketchJson,
             @Nullable String carriedWorkloadJson,
             @Nullable String carriedTokensJson,
+            @Nullable String carriedRefsJson,
             long carriedCount,
             String now) {
         jdbc.sql("""
@@ -269,6 +280,10 @@ public class MetricBaselineRepository {
                    -- measure sketch rolling on its own.
                    current_workload_json = CAST(:carriedWorkload AS text),
                    current_tokens_json = CAST(:carriedTokens AS text),
+                   -- The refs rotate here too, and must: they are the rows the NEW window is a claim
+                   -- about, so a close that folded the sketch but left the old list behind would open a
+                   -- window already holding the closed window's population.
+                   current_refs_json = CAST(:carriedRefs AS text),
                    current_opened_at = CAST(:openedAt AS text),
                    current_count = :carriedCount,
                    updated_at = :now
@@ -278,6 +293,7 @@ public class MetricBaselineRepository {
                 .param("carriedSketch", carriedSketchJson)
                 .param("carriedWorkload", carriedWorkloadJson)
                 .param("carriedTokens", carriedTokensJson)
+                .param("carriedRefs", carriedRefsJson)
                 .param("openedAt", openedAt)
                 .param("carriedCount", carriedCount)
                 .param("now", now)
@@ -369,6 +385,7 @@ public class MetricBaselineRepository {
                 rs.getString("pinned_refs_json"),
                 rs.getString("prev_tokens_json"),
                 rs.getString("current_tokens_json"),
+                rs.getString("current_refs_json"),
                 rs.getString("control_json"),
                 rs.getString("current_opened_at"),
                 rs.getLong("current_count"),

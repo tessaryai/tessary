@@ -316,6 +316,7 @@ class TriageAutoEscalationIntegrationTest {
                         null,
                         null,
                         null,
+                        null,
                         0,
                         null,
                         null,

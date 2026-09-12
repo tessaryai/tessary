@@ -8,8 +8,15 @@
 # nothing else. There is no conversion path and no straggler accommodation: a database that predates
 # the baseline fails its first boot loudly and is recreated, never repaired in place.
 #
-# New migrations go here in order below the baseline, as changes/NNNN-*.sql under author `evals`,
-# numbering from the next free number after the fold (0024).
+# New migrations go here in order below the baseline, as changes/NNNN-*.sql under author `evals`.
+# The open repo numbers them from 0001: the fold's own chain is inside the baseline, so the number
+# after 0000 is free and there is no private history for a public checkout to continue.
+#
+# One wrinkle from the renumbering: 0001-rca-report-repo-available.sql was briefly shipped as
+# 0024-rca-report-repo-available.sql in v1.0.1, so every v1.0.1 install has already added the
+# column and already has a databasechangelog row under the old filename. Liquibase identity is
+# id + author + filename, so the file carries an onFail:MARK_RAN precondition that skips the ALTER
+# when the column is already there. The stale 0024 row is left in place and is inert.
 #
 # A reading note for the rest of the repo: comments in Java, Python and shell that cite a migration
 # by number ("added by 0072", "as of the teardown (0083)", "dropped by 0016", "removed in 0017")
@@ -22,5 +29,8 @@ databaseChangeLog:
       file: db/changelog/changes/0000-baseline.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0024-rca-report-repo-available.sql
+      file: db/changelog/changes/0001-rca-report-repo-available.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0002-metric-baseline-current-refs.sql
       relativeToChangelogFile: false

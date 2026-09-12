@@ -740,7 +740,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             count = 0;
             openedAt = null;
             if (persisted != null) {
-                baselines.closeWindow(row.id(), row.controlJson(), null, null, null, null, 0, now);
+                baselines.closeWindow(row.id(), row.controlJson(), null, null, null, null, null, 0, now);
                 countZeroed = true;
             }
         }
@@ -754,9 +754,19 @@ public class MetricDriftSweep implements ClassifierSweep {
         // grain as many as dispatched the tool. Cleared with the window, because it describes THAT window.
         Map<String, Long> callSites = new LinkedHashMap<>();
         // Every row folded into the window, in fold order — the population a finding on it would be a
-        // claim about. Held only for the window being filled: the sketch is what survives a rotation,
-        // and the refs of a window that earned no finding are of no interest to anyone.
-        List<FindingEvidenceRepository.Ref> windowRefs = new ArrayList<>();
+        // claim about. REHYDRATED from the row, not started empty: a window is filled across as many
+        // sweep pages as its traffic takes, and this list used to be a per-page local while the sketch
+        // and count it describes were persisted. A window that spanned pages therefore kept the refs of
+        // one page only — the page its close landed in — so its member evidence was a contiguous tail of
+        // the population presented as the population, which is the one thing the `member` role forbids
+        // the writer to do.
+        List<FindingEvidenceRepository.Ref> windowRefs =
+                new ArrayList<>(MetricEvidenceRefs.fromJson(row.currentRefsJson()));
+        if (countZeroed) {
+            // The stale-grid branch above already discarded the window; its refs go with it, or the
+            // window reopening here would inherit a population it never measured.
+            windowRefs.clear();
+        }
         for (Sample sample : fresh) {
             if (openedAt == null) {
                 openedAt = sample.eventAt();
@@ -798,7 +808,9 @@ public class MetricDriftSweep implements ClassifierSweep {
                     closedWindow.workload(),
                     closedWindow.tokens(),
                     closedAt);
-            baselines.closeWindow(row.id(), control.toJson(), null, null, null, null, 0, now);
+            // Refs rotate with the sketch: the window just closed took its population with it into
+            // the finding (compareAndPin, above), and the window opening here has none yet.
+            baselines.closeWindow(row.id(), control.toJson(), null, null, null, null, null, 0, now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
             callSites = new LinkedHashMap<>();
@@ -826,6 +838,10 @@ public class MetricDriftSweep implements ClassifierSweep {
                 empty ? null : current.measure().toJson(),
                 empty ? null : current.workloadJson(),
                 empty ? null : current.tokensJson(),
+                // The tail's refs, carried forward for the next page to append to. `empty` is the
+                // window, not the list: a page that rotated and folded nothing after the cut leaves an
+                // empty window, and its refs must be dropped with it rather than outliving the sketch.
+                empty ? null : MetricEvidenceRefs.toJson(windowRefs),
                 now);
         Sample last = fresh.get(fresh.size() - 1);
         baselines.advanceWindow(
@@ -1384,9 +1400,10 @@ public class MetricDriftSweep implements ClassifierSweep {
                 spec.bucketKind(),
                 bucket.key(),
                 MetricBaselineRow.State.LEARNING,
-                // The pinned and current sketch, the workload, token and ref blobs beside them, then the
+                // The pinned and current sketch, the workload, token and ref blobs beside both, then the
                 // control ring and the window's open time: a bucket seen for the first time has closed
                 // nothing and pinned nothing.
+                null,
                 null,
                 null,
                 null,
