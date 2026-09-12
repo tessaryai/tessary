@@ -31,3 +31,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0001-rca-report-repo-available.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0002-metric-baseline-current-refs.sql
+      relativeToChangelogFile: false

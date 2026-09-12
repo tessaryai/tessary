@@ -143,17 +143,29 @@ class MetricBaselineRepositoryTest {
         String id = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a")).id();
         baselines.advanceWindow(
                 id, 500, now(), "2026-07-20T10:00:00Z", "2026-07-20T18:00:00Z", "2026-07-20T18:00:09Z", "obs-500");
-        baselines.updateCurrentSketch(id, "{\"kind\":\"hist\",\"n\":500}", null, null, now());
+        baselines.updateCurrentSketch(
+                id, "{\"kind\":\"hist\",\"n\":500}", null, null, "[{\"t\":\"tr-in-window\"}]", now());
 
         // A batch legitimately straddles the cut: windows are cut on event time, and one ingest page can
         // hold samples from both sides. The caller splits it and hands the far side back, so those samples
         // open the next window instead of being counted into the closed one or dropped.
         baselines.closeWindow(
-                id, CONTROL_RING, "2026-07-20T18:00:00Z", "{\"kind\":\"hist\",\"n\":12}", null, null, 12, now());
+                id,
+                CONTROL_RING,
+                "2026-07-20T18:00:00Z",
+                "{\"kind\":\"hist\",\"n\":12}",
+                null,
+                null,
+                "[{\"t\":\"tr-after-cut\"}]",
+                12,
+                now());
 
         MetricBaselineRow row = baselines.findById(scope.projectId, id).orElseThrow();
         assertEquals(CONTROL_RING, row.controlJson(), "the closed window went into the control ring");
         assertEquals("{\"kind\":\"hist\",\"n\":12}", row.currentSketchJson());
+        // The refs rotate with the sketch they belong to. Leaving the closed window's list behind would
+        // open a window already holding a population it never measured.
+        assertEquals("[{\"t\":\"tr-after-cut\"}]", row.currentRefsJson(), "the carry's refs, not the closed window's");
         assertEquals(12, row.currentCount(), "current_count is per WINDOW, so it resets to the carry");
         // counted_through_* is per ROW, not per window. Resetting it here would re-admit the tail of the
         // window just closed into the window just opened — the double count the watermark exists to stop.
@@ -167,7 +179,7 @@ class MetricBaselineRepositoryTest {
         Scope scope = scope("baseline-repin");
         String id = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a")).id();
         baselines.advanceWindow(id, 400, now(), "2026-07-20T10:00:00Z", "2026-07-20T18:00:00Z", null, null);
-        baselines.updateCurrentSketch(id, "{\"kind\":\"hist\",\"n\":400}", null, null, now());
+        baselines.updateCurrentSketch(id, "{\"kind\":\"hist\",\"n\":400}", null, null, null, now());
 
         assertNull(baselines.findById(scope.projectId, id).orElseThrow().pinnedSketchJson());
 
@@ -221,6 +233,7 @@ class MetricBaselineRepositoryTest {
                 BucketKind.CALL_SITE,
                 bucketKey,
                 State.LEARNING,
+                null,
                 null,
                 null,
                 null,

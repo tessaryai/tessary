@@ -226,6 +226,7 @@ class MetricFindingResolveIntegrationTest {
                         null,
                         null,
                         null,
+                        null,
                         0,
                         null,
                         null,
@@ -236,7 +237,8 @@ class MetricFindingResolveIntegrationTest {
         // A day's worth of closed windows in the control ring, and the next window already part-filled —
         // the state any real bucket is in by the time a human looks at its finding. Absorbing pins the
         // ring's NEWEST day, never the filling window, which is what the assertions below pin down.
-        baselines.closeWindow(baselineId, CONTROL_RING, "2026-07-24T00:00:00Z", FILLING_SKETCH, null, null, 9, now);
+        baselines.closeWindow(
+                baselineId, CONTROL_RING, "2026-07-24T00:00:00Z", FILLING_SKETCH, null, null, null, 9, now);
 
         String findingId = findings.recordShift(
                         Ids.ulid(),

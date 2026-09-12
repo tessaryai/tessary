@@ -340,6 +340,14 @@ public class FindingEvidenceRepository {
      * behaviour-drift finding still renders a name and a time rather than an id and four dashes. A ref
      * whose substrate has aged out keeps its ids and carries nulls.
      *
+     * <p><b>LATERAL, and one row per ref.</b> {@code is_logical_root} is not unique within a trace — it
+     * marks every sub-agent boundary — so a plain {@code ON} with that fallback multiplied a trace-grain
+     * ref by however many agents ran inside it. That put copies in
+     * the page, disagreed with {@link #countsByRole} on the same evidence, and handed a reader told to
+     * compute over every row a set padded with sub-agent roots whose {@code latency_ms} is zero. The
+     * subquery picks the ref's own span where it has one, else the outermost root: parentless first,
+     * then shallowest, then earliest, then by id so the choice is stable across pages.
+     *
      * <p>Payloads are normally kept off list and sweep surfaces; this join is the bounded exception, a
      * keyset page of at most {@code limit} spans, 1:1 on the span primary key, with columns truncated in
      * SQL so a page costs {@code limit × 2 × PREVIEW_CHARS} however large the payloads behind it are. The
@@ -355,8 +363,16 @@ public class FindingEvidenceRepository {
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
                 + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview"
                 + " FROM finding_evidence e"
-                + " LEFT JOIN span s ON s.project_id = e.project_id AND s.trace_id = e.trace_id"
-                + "   AND (s.id = e.span_id OR (e.span_id IS NULL AND s.is_logical_root))"
+                + " LEFT JOIN LATERAL ("
+                + "   SELECT sp.* FROM span sp"
+                + "    WHERE sp.project_id = e.project_id AND sp.trace_id = e.trace_id"
+                + "      AND (sp.id = e.span_id OR (e.span_id IS NULL AND sp.is_logical_root))"
+                + "    ORDER BY (sp.id = e.span_id) DESC NULLS LAST,"
+                + "             (sp.parent_span_id IS NULL) DESC,"
+                + "             sp.depth ASC NULLS LAST,"
+                + "             sp.started_at ASC NULLS LAST,"
+                + "             sp.id"
+                + "    LIMIT 1) s ON true"
                 + " LEFT JOIN span_payload pl ON pl.project_id = s.project_id"
                 + "   AND pl.trace_id = s.trace_id AND pl.span_id = s.id"
                 + " WHERE e.project_id = :pid AND e.finding_id = :fid");
