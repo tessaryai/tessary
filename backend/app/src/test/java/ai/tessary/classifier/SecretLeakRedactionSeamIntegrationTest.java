@@ -150,6 +150,18 @@ class SecretLeakRedactionSeamIntegrationTest {
         assertTrue(evidence.contains("aws-access-token"), "the evidence names the rule, not the token: " + evidence);
         assertTrue(evidence.contains("redaction"), "and says it was read from what redaction recorded");
         assertFalse(evidence.contains(CANARY), "the evidence never carries the credential");
+
+        // Arming runs on the sweep thread after the detection lands, and the witness tally is its last write.
+        // Wait for it: a test that returns mid-arming races the after-class TRUNCATE into a deadlock.
+        long witnesses = 0;
+        for (int i = 0; i < 100 && witnesses == 0; i++) {
+            witnesses = jdbc.sql("""
+                    SELECT COALESCE(SUM((evidence_counts ->> 'witness')::bigint), 0) FROM finding
+                    WHERE project_id = :pid AND classifier_key = 'secret_leak'
+                    """).param("pid", pid).query(Long.class).single();
+            if (witnesses == 0) sleep(100);
+        }
+        assertEquals(1, witnesses, "one leak opens a finding with its span as the witness");
     }
 
     private static void sleep(long ms) {
