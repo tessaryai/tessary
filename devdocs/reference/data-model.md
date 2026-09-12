@@ -20,13 +20,14 @@ SQL baseline for the full table list.
 > applied by a second Liquibase bean strictly after the open one, and two dead tables plus the
 > (already-unread) `classifier_detection_v` view were dropped outright. The net schema this
 > page describes is the open master (`0000-baseline.sql`) plus that overlay; rows marked
-> **Paid.** live in the overlay. Neither lane has a changeset below its baseline: the
-> `0017`–`0023` chain was folded into `0000-baseline.sql` for the public cutover, so the
-> open master declares exactly one include and the overlay master one more. New open migrations
-> number from `0024`, new paid ones from `P0001` in the paid overlay's own changelog. Every
-> migration number in the rationale prose below — the pre-2026-08 ones, `0001`–`0016` and
-> `0017`–`0023` alike — no longer resolves to anything on disk; kept because it explains *why*
-> a column or table looks the way it does.
+> **Paid.** live in the overlay. The `0017`–`0023` chain was folded into `0000-baseline.sql` for
+> the public cutover. New open migrations number from `0001`, not from the next number after the
+> fold: the fold carried no history forward, so the open repo starts its own chain rather than
+> continuing a private one. New paid ones number from `P0001` in the paid overlay's own changelog.
+> Every migration number in the rationale prose below — the pre-2026-08 ones, `0001`–`0016` and
+> `0017`–`0023` alike — names a changeset that is inside a baseline and not a file, so where the
+> open chain has since reused a number, the file on disk is a *different* migration than the prose
+> means; kept because it explains *why* a column or table looks the way it does.
 
 **Skim:** [How to read](#how-to-read-it) · [Diagram](#diagram) · [Inventory](#table-inventory-by-domain) · [Notes](#notes--gotchas)
 
