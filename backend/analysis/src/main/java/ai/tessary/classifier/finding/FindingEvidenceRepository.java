@@ -169,6 +169,20 @@ public class FindingEvidenceRepository {
     }
 
     /**
+     * {@link #record}, stopping once {@code role} holds {@code max} rows for this finding.
+     *
+     * <p>Only for a role that promises no enumeration, which is {@link FindingEvidenceRow.Role#WITNESS}: a
+     * reader wants to open a few instances of the same failure, and a detector that keeps firing on one
+     * cause must not pin an ever-growing slice of retention to it. A ref already stored still spends a slot
+     * in the trimmed list and writes nothing, so a set short of {@code max} fills on a later pass.
+     */
+    public int recordUpTo(String projectId, String findingId, String role, List<Ref> refs, int max, String now) {
+        int remaining = max - countFor(findingId, role);
+        if (remaining <= 0 || refs.isEmpty()) return 0;
+        return record(projectId, findingId, role, refs.size() <= remaining ? refs : refs.subList(0, remaining), now);
+    }
+
+    /**
      * Add what this call wrote to the finding's per-role tally. Accumulates rather than assigns, since
      * a role can be appended to across passes. Deliberately does not touch {@code updated_at}: recording
      * what a claim already rested on is not a change to the claim.

@@ -13,6 +13,8 @@ import org.jspecify.annotations.Nullable;
  * @param providedUsage the producer's raw usage object, kept as a receipt and NEVER read for arithmetic.
  *     When an unmodelled token bucket starts mattering, it gets promoted to a real column on {@code span}
  *     and backfilled from here.
+ * @param redactions the credentials redaction removed from this payload, as a JSON array of {@code
+ *     RedactionStamp}; null when it removed none
  */
 public record SpanPayloadRow(
         String projectId,
@@ -22,4 +24,19 @@ public record SpanPayloadRow(
         @Nullable String output,
         @Nullable String attributes,
         @Nullable String providedUsage,
-        String eventTs) {}
+        String eventTs,
+        @Nullable String redactions) {
+
+    /** A payload redaction removed nothing from. */
+    public SpanPayloadRow(
+            String projectId,
+            String traceId,
+            String spanId,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable String attributes,
+            @Nullable String providedUsage,
+            String eventTs) {
+        this(projectId, traceId, spanId, input, output, attributes, providedUsage, eventTs, null);
+    }
+}

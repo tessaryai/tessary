@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest;
 
+import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -61,7 +62,11 @@ public record RawEntry(
          *  already resolved at ingest rather than re-deriving it through per-source mappings. Null for every
          *  other adapter (Langfuse/Braintrust/Phoenix pull, JSONL upload, the OTLP receiver), which leave
          *  call-site resolution to {@code MappingResolver} at ingest time. */
-        @Nullable String callSiteId) {
+        @Nullable String callSiteId,
+        /** The credentials redaction removed, written by {@code RedactionService} and by nothing else. Null on
+         *  every entry before redaction and on one it found nothing in. Redaction is the last hop that rebuilds
+         *  an entry before the write, so nothing after it can drop this the way a copy can drop a field. */
+        @Nullable List<RedactionStamp> redactions) {
 
     /**
      * The version stamp the v2 substrate orders redeliveries by: the span's END time when the producer
@@ -163,6 +168,42 @@ public record RawEntry(
                 endTimestamp,
                 inputMessagesJson,
                 outputMessagesJson,
+                null);
+    }
+
+    /** The pre-redaction arity: every source, which knows nothing of what redaction will find. */
+    public RawEntry(
+            @Nullable String sourceExternalId,
+            @Nullable String sourceUrl,
+            @Nullable String name,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable String model,
+            @Nullable Map<String, Object> metadata,
+            @Nullable String parentId,
+            @Nullable String traceId,
+            @Nullable String timestamp,
+            @Nullable String operationKind,
+            @Nullable String endTimestamp,
+            @Nullable String inputMessagesJson,
+            @Nullable String outputMessagesJson,
+            @Nullable String callSiteId) {
+        this(
+                sourceExternalId,
+                sourceUrl,
+                name,
+                input,
+                output,
+                model,
+                metadata,
+                parentId,
+                traceId,
+                timestamp,
+                operationKind,
+                endTimestamp,
+                inputMessagesJson,
+                outputMessagesJson,
+                callSiteId,
                 null);
     }
 }

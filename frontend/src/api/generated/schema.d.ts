@@ -2725,6 +2725,7 @@ export interface components {
             id: string;
             mode: string;
             name: string;
+            readiness: string | null;
             updated_at: string;
             /** Format: int32 */
             version: number;

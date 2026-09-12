@@ -163,6 +163,33 @@ public class ClassifierJobRepository {
     }
 
     /**
+     * Record one page of progress mid-sweep and renew the lease, without releasing the job.
+     *
+     * <p>A sweep that drains several pages inside one claim calls this between pages, so a worker that dies
+     * partway resumes from the last page it finished rather than from where the claim began, and a drain
+     * that runs past its original lease is not reclaimed by another worker while it is still running.
+     *
+     * <p>Guarded on {@code lease_owner}: false means this worker no longer holds the job, and the caller
+     * stops rather than keep moving a cursor someone else now owns.
+     */
+    public boolean advanceCursor(String id, String leaseOwner, String cursorAt, String cursorId, long leaseSeconds) {
+        Instant now = Instant.now();
+        return jdbc.sql("UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId,"
+                        + " lease_expires_at = :expires, updated_at = :now"
+                        + " WHERE id = :id AND lease_owner = :owner AND status = 'claimed'"
+                        + " RETURNING id")
+                .param("cursorAt", cursorAt)
+                .param("cursorId", cursorId)
+                .param("expires", now.plus(Duration.ofSeconds(leaseSeconds)).toString())
+                .param("now", now.toString())
+                .param("id", id)
+                .param("owner", leaseOwner)
+                .query(String.class)
+                .optional()
+                .isPresent();
+    }
+
+    /**
      * Drop the keyset high-water mark back to the beginning and re-pend, so the classifier's next sweep
      * re-reads its project's whole observation history. The one operation {@link #markSwept} cannot
      * express: it advances the cursor through {@code COALESCE(:cursorAt, cursor_at)}, which by

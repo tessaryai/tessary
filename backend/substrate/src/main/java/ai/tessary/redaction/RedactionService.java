@@ -4,6 +4,7 @@ package ai.tessary.redaction;
 import ai.tessary.config.RedactionProperties;
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.RawEntry;
+import ai.tessary.ingest.RedactionStamp;
 import ai.tessary.open.errors.RedactionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -14,8 +15,10 @@ import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
@@ -23,6 +26,7 @@ import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -288,22 +292,41 @@ public class RedactionService {
         return s == null ? 0 : s.length();
     }
 
+    /**
+     * Redact one entry, stamping it with the credentials the corpus rule removed.
+     *
+     * <p>The copy passes every component through, {@code callSiteId} included. It used to rebuild through the
+     * pre-call-site constructor, which nulled the call site {@code SubstrateSource} sets. Nothing on the write
+     * path reads that field, so nothing broke; it is the field-by-field-copy hazard {@link RawEntry#eventTs}'s
+     * javadoc warns about, and the next reader would have found it null.
+     */
     private RawEntry redactEntry(RawEntry e, List<CompiledRule> rules) {
+        Set<RedactionStamp> stamps = new LinkedHashSet<>();
+        List<RedactionStamp> earlier = e.redactions();
+        if (earlier != null) stamps.addAll(earlier);
+        Consumer<GitleaksCorpus.Finding> input = stampInto(stamps, RedactionStamp.INPUT);
+        Consumer<GitleaksCorpus.Finding> output = stampInto(stamps, RedactionStamp.OUTPUT);
         return new RawEntry(
                 e.sourceExternalId(),
                 e.sourceUrl(),
                 e.name(),
-                redact(e.input(), rules),
-                redact(e.output(), rules),
+                redact(e.input(), rules, input),
+                redact(e.output(), rules, output),
                 e.model(),
-                redactMetadata(e.metadata(), rules),
+                redactMetadata(e.metadata(), rules, stampInto(stamps, RedactionStamp.ATTRIBUTES)),
                 e.parentId(),
                 e.traceId(),
                 e.timestamp(),
                 e.operationKind(),
                 e.endTimestamp(),
-                redact(e.inputMessagesJson(), rules),
-                redact(e.outputMessagesJson(), rules));
+                redact(e.inputMessagesJson(), rules, input),
+                redact(e.outputMessagesJson(), rules, output),
+                e.callSiteId(),
+                stamps.isEmpty() ? null : List.copyOf(stamps));
+    }
+
+    private static Consumer<GitleaksCorpus.Finding> stampInto(Set<RedactionStamp> stamps, String field) {
+        return f -> stamps.add(new RedactionStamp(f.ruleId(), field, f.anchored()));
     }
 
     /**
@@ -321,8 +344,9 @@ public class RedactionService {
      * value is byte-for-byte identical to the promoted column, and two fields carrying the same document
      * through two different redactors would stop being identical the moment a rule fired on both.
      */
-    private @Nullable String redact(@Nullable String text, List<CompiledRule> rules) {
-        return RedactionEngine.applyToJson(text, rules);
+    private @Nullable String redact(
+            @Nullable String text, List<CompiledRule> rules, Consumer<GitleaksCorpus.Finding> matched) {
+        return RedactionEngine.applyToJson(text, rules, matched);
     }
 
     /**
@@ -339,14 +363,16 @@ public class RedactionService {
      * defined as an integer count or a decimal amount, so none is a place PII can be.
      */
     private @Nullable Map<String, Object> redactMetadata(
-            @Nullable Map<String, Object> metadata, List<CompiledRule> rules) {
+            @Nullable Map<String, Object> metadata,
+            List<CompiledRule> rules,
+            Consumer<GitleaksCorpus.Finding> matched) {
         if (metadata == null || metadata.isEmpty()) return metadata;
         Map<String, Object> out = new LinkedHashMap<>(metadata.size());
         boolean changed = false;
         for (Map.Entry<String, Object> kv : metadata.entrySet()) {
             Object v = kv.getValue();
             if (v instanceof String s && !GenAiAttributes.isUsageOrCostKey(kv.getKey())) {
-                String r = RedactionEngine.applyToJson(s, rules);
+                String r = RedactionEngine.applyToJson(s, rules, matched);
                 if (!s.equals(r)) changed = true;
                 out.put(kv.getKey(), r);
             } else {

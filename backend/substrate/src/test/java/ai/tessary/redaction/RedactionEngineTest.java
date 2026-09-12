@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.redaction.RedactionEngine.CompiledRule;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -365,23 +366,93 @@ class RedactionEngineTest {
 
     @Test
     void builtInChainKeepsTheCredentialTokenUnderAKeyName() {
-        // Rule 90 (secret assignment) runs after rule 80 (provider API key) over the already-substituted
-        // string; it must not re-wrap the token, or the secret_leak detector reads LOW instead of HIGH.
-        List<CompiledRule> chain = BuiltInRedactionRules.TEMPLATES.stream()
-                .map(t -> rule(t.name(), t.pattern(), t.replacement()))
-                .toList();
+        // The chain as a project's write path compiles it, corpus rule first. A later rule runs over the
+        // already-substituted string and must not re-wrap a token another rule left.
+        List<CompiledRule> chain = builtInChain();
+        // AWS's own documentation key is on gitleaks' allowlist, so the corpus leaves it and the prefix rule
+        // behind it still redacts: the reason those rules stay.
         assertEquals(
                 "api_key: [REDACTED_API_KEY] set", RedactionEngine.apply("api_key: AKIAIOSFODNN7EXAMPLE set", chain));
         assertEquals(
                 "client_secret=[REDACTED_API_KEY]",
-                RedactionEngine.apply("client_secret=ghp_abcdefghijklmnopqrstuvwxyz0123456789", chain));
+                RedactionEngine.apply("client_secret=ghp_abcdefghijklmnopqrstuvwxyz0123456789", chain),
+                "a sequential placeholder is on gitleaks' allowlist, and the prefix rule still takes it");
         assertEquals(
-                "access_token=[REDACTED_JWT]",
-                RedactionEngine.apply("access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij", chain));
+                "client_secret=[REDACTED_SECRET]",
+                RedactionEngine.apply("client_secret=ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5", chain),
+                "a real-looking token goes to the corpus, which keeps the key name beside it");
+        assertEquals(
+                "access_token=[REDACTED_SECRET]",
+                RedactionEngine.apply("access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij", chain),
+                "a token assigned to access_token is the corpus's generic-api-key, which leaves the name");
+        assertEquals(
+                "token [REDACTED_JWT] end",
+                RedactionEngine.apply("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij end", chain),
+                "a bare JWT too short for gitleaks' jwt rule is still taken by the prefix rule");
         // The secret-assignment rule replaces the key name together with the value, by design.
         assertEquals(
                 "[REDACTED_SECRET]",
                 RedactionEngine.apply("password: hunter22", chain),
-                "an ordinary value still redacts");
+                "a password too plain for gitleaks to call a secret still redacts");
+    }
+
+    @Test
+    void corpusRule_replacesTheCredentialAndReportsWhatItFound() {
+        List<GitleaksCorpus.Finding> found = new ArrayList<>();
+        String out = RedactionEngine.apply(
+                "deploy with AKIA" + "QYLPMN5HHHFPZAM2 then ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5",
+                builtInChain(),
+                found::add);
+        assertEquals("deploy with [REDACTED_SECRET] then [REDACTED_SECRET]", out);
+        assertEquals(
+                List.of("aws-access-token", "github-pat"),
+                found.stream().map(GitleaksCorpus.Finding::ruleId).toList());
+        assertTrue(found.stream().allMatch(GitleaksCorpus.Finding::anchored));
+    }
+
+    @Test
+    void corpusRule_reportsFromInsideAJsonDocument() {
+        List<GitleaksCorpus.Finding> found = new ArrayList<>();
+        String out = RedactionEngine.applyToJson(
+                "{\"messages\":[{\"role\":\"assistant\",\"content\":\"key is AKIA"
+                        + "QYLPMN5HHHFPZAM2\"}],\"n\":1234567890}",
+                builtInChain(),
+                found::add);
+        assertEquals(
+                "{\"messages\":[{\"role\":\"assistant\",\"content\":\"key is [REDACTED_SECRET]\"}],\"n\":1234567890}",
+                out);
+        assertEquals(1, found.size(), "one credential, reported once");
+    }
+
+    @Test
+    void corpusRule_returnsTheSameReferenceAndReportsNothingWhenThereIsNoCredential() {
+        List<GitleaksCorpus.Finding> found = new ArrayList<>();
+        String text = "the secret to a good token is patience";
+        CompiledRule corpus = builtInChain().get(0);
+        assertSame(text, RedactionEngine.apply(text, List.of(corpus), found::add));
+        assertEquals(List.of(), found);
+    }
+
+    @Test
+    void compileAll_onlyABuiltInRowNamesTheCorpus() {
+        String pattern = GitleaksCorpus.get().patternValue();
+        List<CompiledRule> compiled = RedactionEngine.compileAll(List.of(
+                row("Credentials", pattern, true),
+                row("A custom rule that happens to read gitleaks:", pattern, false)));
+        assertTrue(compiled.get(0) instanceof RedactionEngine.CorpusRule, "the platform's row is the corpus");
+        assertTrue(
+                compiled.get(1) instanceof RedactionEngine.RegexRule,
+                "an operator's rule with the same text is a literal regex, not a way to invoke the corpus");
+    }
+
+    private static List<CompiledRule> builtInChain() {
+        return RedactionEngine.compileAll(BuiltInRedactionRules.TEMPLATES.stream()
+                .map(t -> new RedactionRuleRow(
+                        t.name(), "p", t.name(), t.pattern(), t.replacement(), true, true, t.sortOrder(), "now", "now"))
+                .toList());
+    }
+
+    private static RedactionRuleRow row(String name, String pattern, boolean builtIn) {
+        return new RedactionRuleRow(name, "p", name, pattern, "[X]", true, builtIn, 1, "now", "now");
     }
 }

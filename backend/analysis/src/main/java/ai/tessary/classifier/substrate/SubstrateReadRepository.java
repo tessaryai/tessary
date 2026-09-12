@@ -298,6 +298,18 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         return java.util.Map.copyOf(out);
     }
 
+    /**
+     * Whether any call site in the project declares a schema. None means Malformed Output has nothing it can
+     * judge yet, which is a different state from judging and finding nothing wrong. Not on {@link
+     * CallSiteSchemaReads}, which stays the detector's one-method seam.
+     */
+    public boolean anyOutputSchema(String projectId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM call_site WHERE project_id = :pid AND output_schema IS NOT NULL)")
+                .param("pid", projectId)
+                .query(Boolean.class)
+                .single();
+    }
+
     /** The declared shape of a batch's call sites: the Groundedness built-in's gating read. */
     @Override
     public java.util.Map<String, String> callSiteShapes(String projectId, java.util.Set<String> callSiteIds) {
@@ -682,6 +694,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                    s.name               AS name,
                    pl.input             AS input,
                    pl.output            AS output,
+                   pl.redactions::text  AS redactions,
                    (SELECT MIN(tc.error_type) FROM tool_call tc
                       WHERE tc.project_id = s.project_id AND tc.trace_id = s.trace_id
                         AND tc.span_id = s.id AND tc.error_type IS NOT NULL) AS tool_error,
@@ -719,6 +732,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 rs.getString("input"),
                 rs.getString("output"),
                 rs.getString("tool_error"),
-                ai.tessary.storage.Timestamps.iso(rs, "created_at"));
+                ai.tessary.storage.Timestamps.iso(rs, "created_at"),
+                rs.getString("redactions"));
     }
 }

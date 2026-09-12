@@ -3738,6 +3738,12 @@
           "name" : {
             "type" : "string"
           },
+          "readiness" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "updated_at" : {
             "type" : "string"
           },
@@ -3757,6 +3763,7 @@
           "id",
           "mode",
           "name",
+          "readiness",
           "updated_at",
           "version"
         ],

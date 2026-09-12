@@ -81,7 +81,8 @@ public class BehaviorTriageSource implements TriageSource {
      */
     private static final List<String> BEHAVIOR_CLASSIFIERS = List.of(
             BuiltInDetector.Kind.BEHAVIOR_DRIFT, BuiltInDetector.Kind.DURATION_DRIFT,
-            BuiltInDetector.Kind.COST_DRIFT, BuiltInDetector.Kind.TOOL_ERROR);
+            BuiltInDetector.Kind.COST_DRIFT, BuiltInDetector.Kind.TOOL_ERROR,
+            BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT);
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;

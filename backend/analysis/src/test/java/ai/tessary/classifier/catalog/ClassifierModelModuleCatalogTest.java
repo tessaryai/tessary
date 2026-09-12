@@ -245,7 +245,9 @@ class ClassifierModelModuleCatalogTest {
         // 8: the attribution gate switched on, and the user-facing description changed with it,
         // because "high" now means emotion and agent-attribution rather than emotion alone.
         assertEquals(8, versionOf(builtIns, "frustration"));
-        assertEquals(2, versionOf(builtIns, "secret_leak"));
+        // 3: shipped armed. One high-band leak in a day files a finding per call site and pattern, and
+        // only a version bump carries that arming block onto projects seeded before it.
+        assertEquals(3, versionOf(builtIns, "secret_leak"));
         assertEquals(1, versionOf(builtIns, "malformed_output"));
         // 2: evidence-as-premise + per-sentence claims + the abstain filter. 3: tool results dropped
         // as evidence, so tool-backed turns are out of scope. 4: the head changed from a binary
@@ -269,10 +271,12 @@ class ClassifierModelModuleCatalogTest {
         // ConformanceSweep took over the dispatch. Any future change to its config blob must bump
         // this or already-seeded projects never see it.
         assertEquals(4, versionOf(builtIns, "sop_conformance"));
-        // frustration and groundedness carry a shifted operating point; the others use detector defaults.
+        // frustration and groundedness carry a shifted operating point; secret_leak carries its arming bar,
+        // which its detector ignores and ClassifierArming reads.
         assertNotNull(configOf(builtIns, "frustration"));
         assertNotNull(configOf(builtIns, "groundedness"));
-        assertNull(configOf(builtIns, "secret_leak"));
+        String secretLeakConfig = configOf(builtIns, "secret_leak");
+        assertTrue(secretLeakConfig != null && secretLeakConfig.contains("\"arming\""), "secret_leak ships armed");
     }
 
     @Test

@@ -64,7 +64,8 @@ class SecretLeakRedactionSeamIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
-    private static final String CANARY = "AKIABOOTCHECKCANARY1";
+    /** A FAKE key in AWS's real format, which the corpus recognises; exempted from the repo scan in .gitleaks.toml. */
+    private static final String CANARY = "AKIA" + "QYLPMN5HHHFPZAM2";
 
     private static KeyValue kv(String key, String value) {
         return KeyValue.newBuilder()
@@ -113,12 +114,20 @@ class SecretLeakRedactionSeamIntegrationTest {
         otlp.ingest(pid, batchWithLeakedKey());
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "the ingest write path drained");
 
-        String persisted = jdbc.sql("SELECT output FROM span_payload WHERE project_id = :pid LIMIT 1")
+        Map<String, Object> payload = jdbc.sql(
+                        "SELECT output, redactions::text AS redactions FROM span_payload WHERE project_id = :pid LIMIT 1")
                 .param("pid", pid)
-                .query(String.class)
-                .single();
+                .query()
+                .singleRow();
+        String persisted = String.valueOf(payload.get("output"));
         assertFalse(persisted.contains(CANARY), "the raw credential never reaches the substrate");
-        assertTrue(persisted.contains("[REDACTED_API_KEY]"), "redaction left its marker in the persisted output");
+        assertTrue(
+                persisted.contains("aws_access_key_id=[REDACTED_SECRET]"), "the corpus took it and kept the key name");
+        String stamps = String.valueOf(payload.get("redactions"));
+        assertTrue(
+                stamps.contains("\"aws-access-token\"") && stamps.contains("\"output\""),
+                "redaction recorded what it removed, and from where: " + stamps);
+        assertFalse(stamps.contains(CANARY), "the stamp carries nothing of the credential");
 
         worker.tick();
         long detections = 0;
@@ -136,9 +145,10 @@ class SecretLeakRedactionSeamIntegrationTest {
                 .query()
                 .singleRow();
         assertEquals("critical", row.get("severity"));
-        assertEquals("high", row.get("confidence"));
+        assertEquals("high", row.get("confidence"), "an anchored provider format, read off the stamp");
         String evidence = String.valueOf(row.get("evidence"));
-        assertTrue(evidence.contains("redacted-api-key"), "the evidence names the redaction marker's rule");
+        assertTrue(evidence.contains("aws-access-token"), "the evidence names the rule, not the token: " + evidence);
+        assertTrue(evidence.contains("redaction"), "and says it was read from what redaction recorded");
         assertFalse(evidence.contains(CANARY), "the evidence never carries the credential");
     }
 

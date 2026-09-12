@@ -15,13 +15,17 @@ Five built-in classifiers run out of the box.
 
 | Classifier | Watches | Method | Cost per trace |
 | --- | --- | --- | --- |
-| `secret_leak` | Span output | A curated pattern set: cloud keys, VCS and chat tokens, private-key blocks, JWTs, and assigned secrets behind an entropy gate | None. No model call. |
-| `malformed_output` | Span output against its call site's declared output schema | JSON Schema validation. Not JSON, or JSON that fails the schema, fires. | None. No model call. |
+| `secret_leak` | Span output | The gitleaks credential rule set, over 200 formats, plus this product's own token formats | None. No model call. |
+| `malformed_output` | Span output against its call site's declared output schema | JSON Schema validation per span, then a CUSUM over each call site's failure rate, the same one `tool_error` uses | None. No model call. |
 | `duration_drift` | A call site's turns, and each tool's own calls | Two windows of the same population compared as distributions | None. No model call. |
 | `cost_drift` | A call site's cost per turn | The same machine as `duration_drift`, on a different unit | None. No model call. |
 | `tool_error` | One tool's failure rate | A CUSUM (cumulative sum) over that tool's calls, replayed from hourly tallies | None. No model call. |
 
-Two notes on the deterministic pair. `secret_leak` reads what the write path left behind, so on a default project it usually fires on the redaction marker that replaced a credential rather than on the credential itself, and its evidence carries the marker and never the secret. `malformed_output` stays quiet until a call site has a captured output schema to validate against, so a project that has imported no pipeline bundle sees nothing from it.
+Two notes on the deterministic pair.
+
+`secret_leak` reads what redaction recorded. Redaction removes a credential before anything is stored and notes which rule matched, so a leak is named (an `aws-access-token`, not just a redaction marker) and its evidence never carries the secret. One high-confidence leak opens a finding, one per call site and credential type. High confidence means a format the provider stamps into the key, like `AKIA` or `ghp_`. A vendor name beside a random string, a JWT, or a bare redaction marker is low confidence: it stays listed on the classifier and never opens a finding.
+
+`malformed_output` checks each output against its call site's schema, and opens a finding when a call site's failure rate rises above what its own history predicts, not on a fixed count. It needs a captured output schema to do anything, and says so: until your repository is connected and a call site declares one, the classifier reads as waiting on schemas rather than as quiet.
 
 ### What is not available in the open edition
 

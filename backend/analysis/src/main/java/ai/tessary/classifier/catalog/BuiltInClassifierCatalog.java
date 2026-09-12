@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * declaration here, not edits scattered across the catalog, the detector list, and seeding.
  *
  * <p>Nine built-ins ship in three tiers. The <b>deterministic</b> tier costs nothing per observation
- * and calls no model: Secret Leak matches a curated credential-pattern set ({@link
+ * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
  * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
  * ({@link MalformedOutputDetector}). The <b>encoder</b> tier scores observation text against a shared
  * ONNX head served by the standalone classify-service {@code /classify}: Frustration ({@link
@@ -189,16 +189,24 @@ public class BuiltInClassifierCatalog {
             new ClassifierModelModule(
                     "secret_leak",
                     "Secret Leak",
-                    "The agent's output leaked a credential — a curated pattern set (cloud keys, "
-                            + "VCS/chat tokens, private-key blocks, JWTs, assigned secrets with an entropy "
-                            + "gate) matched over the output with no model call.",
+                    "The agent's output leaked a credential. Matched against the gitleaks rule set, "
+                            + "over 200 credential formats, with no model call. It reads what redaction recorded "
+                            + "removing, so a leak is named even after the credential is gone. High confidence "
+                            + "is a format the provider stamps into the key, like AKIA or ghp_; a vendor name "
+                            + "beside a random string, a JWT, or a bare redaction token is low confidence "
+                            + "and never opens a finding.",
                     Kind.SECRET_LEAK,
-                    2,
+                    3,
                     Capability.SECRET_LEAK,
                     // Any span can leak a credential: an inner call's output reaches logs and downstream
                     // prompts just like a user-facing one.
                     Grain.OBSERVATION,
-                    null,
+                    // Armed at one: a single leaked credential is the whole incident, so there is no
+                    // count below which it is noise. ClassifierArming files it per call site and per
+                    // pattern. Only the HIGH band counts toward the bar; the classifier stays in
+                    // discovery so the LOW band is still listed on its page without opening anything.
+                    "{\"arming\":{\"basis\":\"event_count\",\"threshold\":1,\"window_seconds\":86400,"
+                            + "\"confidence\":\"high\"}}",
                     d -> new SecretLeakDetector(d.mapper())),
             new ClassifierModelModule(
                     "malformed_output",

@@ -2,8 +2,12 @@
 package ai.tessary.classifier;
 
 import ai.tessary.detection.DetectionTableRegistry;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -34,6 +38,19 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class ClassifierDetectionWriteRepository {
+
+    /**
+     * The window a detection falls in, on the span's own clock: {@code floor(started_at / W) * W} in epoch
+     * seconds. Bound to {@code :window}, and the same expression wherever a facet window is read, so the
+     * query that finds which windows a sweep touched and the one that counts them cannot disagree.
+     */
+    private static final String EVENT_WINDOW = "(floor(extract(epoch FROM s.started_at) / :window)::bigint * :window)";
+
+    /** The HIGH band. NULL reads as high, the convention every detection read here uses. */
+    private static final String HIGH_BAND = " AND (confidence = 'high' OR confidence IS NULL)";
+
+    private static final String SPAN_JOIN = " JOIN span s ON s.project_id = d.project_id"
+            + " AND s.trace_id = d.subject_trace_id AND s.id = d.subject_span_id";
 
     private final JdbcClient jdbc;
     private final DetectionTableRegistry tables;
@@ -119,7 +136,7 @@ public class ClassifierDetectionWriteRepository {
         return jdbc.sql("SELECT COUNT(*) FROM " + table
                         + " WHERE project_id = :pid AND classifier_id = :sid"
                         + " AND created_at >= :start::timestamptz AND created_at < :end::timestamptz"
-                        + (trackingOnly ? " AND (confidence = 'high' OR confidence IS NULL)" : ""))
+                        + (trackingOnly ? HIGH_BAND : ""))
                 .param("pid", projectId)
                 .param("sid", classifierId)
                 .param("start", start)
@@ -178,12 +195,127 @@ public class ClassifierDetectionWriteRepository {
         return jdbc.sql("SELECT COUNT(DISTINCT subject_session_id) FROM " + table
                         + " WHERE project_id = :pid AND classifier_id = :sid"
                         + " AND created_at >= :start::timestamptz AND created_at < :end::timestamptz"
-                        + (trackingOnly ? " AND (confidence = 'high' OR confidence IS NULL)" : ""))
+                        + (trackingOnly ? HIGH_BAND : ""))
                 .param("pid", projectId)
                 .param("sid", classifierId)
                 .param("start", start)
                 .param("end", end)
                 .query(Long.class)
                 .single();
+    }
+
+    /** A span, by both halves of its composite key. */
+    public record SpanKey(String traceId, String spanId) {}
+
+    /**
+     * One fired detection, resolved to the call site and facet it is about and the event-time window its
+     * span falls in.
+     */
+    public record FiredFacet(
+            String traceId, String spanId, @Nullable String callSiteId, String facet, long windowStartEpochSecond) {}
+
+    /** One call site's detections of one facet inside one event-time window. */
+    public record FacetWindow(
+            @Nullable String callSiteId,
+            String facet,
+            long windowStartEpochSecond,
+            long observed,
+            Instant lastSeenAt) {}
+
+    private record WindowKey(String callSiteId, String facet, long windowStartEpochSecond) {}
+
+    /**
+     * Resolve the spans this classifier just fired on to the facet each detection is about and the window
+     * its span falls in.
+     *
+     * <p><b>Event time, not write time.</b> A detection's {@code created_at} is when the sweep checked the
+     * span, and a backfill checks months of traffic in an afternoon: bucketing on it would report a
+     * quarter's firings as one day's. The span's {@code started_at} is when the thing happened.
+     *
+     * @param facetKey the evidence member the facet is read from; a detection without one is left out
+     * @param highOnly restrict to the HIGH band (NULL reads as high)
+     */
+    public List<FiredFacet> firedFacets(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            Collection<SpanKey> spans,
+            String facetKey,
+            long windowSeconds,
+            boolean highOnly) {
+        String table = tableFor(detectorKind);
+        if (table == null || spans.isEmpty()) return List.of();
+        List<Object[]> keys =
+                spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
+        return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, s.call_site_id,"
+                        + " d.evidence ->> :facetKey AS facet, " + EVENT_WINDOW + " AS window_start"
+                        + " FROM " + table + " d" + SPAN_JOIN
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND (d.subject_trace_id, d.subject_span_id) IN (:spans)"
+                        + " AND d.evidence ->> :facetKey IS NOT NULL"
+                        + (highOnly ? HIGH_BAND : ""))
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("spans", keys)
+                .param("facetKey", facetKey)
+                .param("window", windowSeconds)
+                .query((rs, n) -> new FiredFacet(
+                        rs.getString("subject_trace_id"),
+                        rs.getString("subject_span_id"),
+                        rs.getString("call_site_id"),
+                        rs.getString("facet"),
+                        rs.getLong("window_start")))
+                .list();
+    }
+
+    /**
+     * Count every detection in the windows {@code touched} names, across all sweeps rather than only the
+     * one that touched them, ordered by window start so a caller filing them walks forward in event time.
+     *
+     * @param distinctSessions count sessions rather than detections, the {@code distinct_users} basis
+     */
+    public List<FacetWindow> countFacetWindows(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            String facetKey,
+            long windowSeconds,
+            boolean highOnly,
+            boolean distinctSessions,
+            Collection<FiredFacet> touched) {
+        String table = tableFor(detectorKind);
+        if (table == null || touched.isEmpty()) return List.of();
+        Set<WindowKey> distinct = new LinkedHashSet<>();
+        for (FiredFacet f : touched) {
+            distinct.add(
+                    new WindowKey(f.callSiteId() == null ? "" : f.callSiteId(), f.facet(), f.windowStartEpochSecond()));
+        }
+        List<Object[]> keys = distinct.stream()
+                .map(k -> new Object[] {k.callSiteId(), k.facet(), k.windowStartEpochSecond()})
+                .toList();
+        // Grouped by ordinal: the facet and window expressions each bind their parameter afresh, so
+        // Postgres would not recognise a repeated expression in GROUP BY as the one in the select list.
+        return jdbc.sql("SELECT s.call_site_id, d.evidence ->> :facetKey AS facet, " + EVENT_WINDOW
+                        + " AS window_start, "
+                        + (distinctSessions ? "COUNT(DISTINCT d.subject_session_id)" : "COUNT(*)") + " AS observed,"
+                        + " MAX(s.started_at) AS last_seen_at"
+                        + " FROM " + table + " d" + SPAN_JOIN
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND (COALESCE(s.call_site_id, ''), d.evidence ->> :facetKey, " + EVENT_WINDOW
+                        + ") IN (:keys)"
+                        + (highOnly ? HIGH_BAND : "")
+                        + " GROUP BY 1, 2, 3 ORDER BY 3, 1 NULLS FIRST, 2")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("keys", keys)
+                .param("facetKey", facetKey)
+                .param("window", windowSeconds)
+                .query((rs, n) -> new FacetWindow(
+                        rs.getString("call_site_id"),
+                        rs.getString("facet"),
+                        rs.getLong("window_start"),
+                        rs.getLong("observed"),
+                        rs.getObject("last_seen_at", OffsetDateTime.class).toInstant()))
+                .list();
     }
 }

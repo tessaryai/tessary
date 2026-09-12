@@ -41,7 +41,7 @@ title = "Tessary open tree"
 path = "scripts/lib/gitleaks-self-minted.toml"
 
 [[allowlists]]
-description = "fixtures for the product's own secret_leak detector: structurally valid FAKE Google, Stripe, GitHub, Slack, Anthropic and AWS-documentation keys"
+description = "fixtures for the product's own secret_leak detector: structurally valid FAKE AWS, GitHub and Stripe keys"
 paths = ['''^backend/app/src/test/java/ai/tessary/classifier/detector/SecretLeakDetectorTest\.java$''']
 
 [[allowlists]]
@@ -111,6 +111,18 @@ paths = ['''^backend/tenancy/src/test/java/ai/tessary/auth/PublicOriginGuardTest
 [[allowlists]]
 description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it); it exists so the secret_leak detector has something to catch"
 paths = ['''^classifiers/data_gen/emit_local\.py$''']
+
+[[allowlists]]
+description = "fixtures for the vendored credential corpus: structurally valid FAKE AWS, GitHub, Stripe, Slack, Tessary and generic-assignment values minted to prove each rule fires, and a base64-wrapped sample JWT; no real credential"
+paths = ['''^backend/substrate/src/test/java/ai/tessary/redaction/GitleaksCorpusTest\.java$''']
+
+[[allowlists]]
+description = "one FAKE AWS-format key sent through OTLP ingest to prove redaction removes it and the secret_leak detector still names it; no real credential"
+paths = ['''^backend/app/src/test/java/ai/tessary/classifier/SecretLeakRedactionSeamIntegrationTest\.java$''']
+
+[[allowlists]]
+description = "gitleaks' own rule definitions, vendored by scripts/sync-gitleaks.sh: regex and keyword sources for credential formats, no literal key"
+paths = ['''^backend/substrate/src/main/resources/redaction/gitleaks\-rules\.json$''']
 
 [[allowlists]]
 description = "build output and dependencies: JaCoCo re-renders allowlisted test sources as HTML under target/; both trees are gitignored and never exported, but present in a local checkout"

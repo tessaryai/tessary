@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -37,8 +38,22 @@ public final class RedactionEngine {
 
     private RedactionEngine() {}
 
-    /** A redaction rule with its regex already compiled (validated once, applied many times). */
-    public record CompiledRule(String name, Pattern pattern, String replacement) {}
+    /** A redaction rule ready to apply: validated once, applied many times. */
+    public sealed interface CompiledRule permits RegexRule, CorpusRule {
+        String name();
+
+        String replacement();
+    }
+
+    /** An operator-authored or built-in regex, its replacement substituted literally. */
+    public record RegexRule(String name, Pattern pattern, String replacement) implements CompiledRule {}
+
+    /**
+     * A built-in rule backed by the {@link GitleaksCorpus} rather than a single regex. It is the one kind of
+     * rule that reports what it matched, because a credential redacted on the way in is the record a leak
+     * detector reads afterwards: see {@link #apply(String, List, Consumer)}.
+     */
+    public record CorpusRule(String name, GitleaksCorpus corpus, String replacement) implements CompiledRule {}
 
     /**
      * Compile a rule's regex, or return null when it does not compile (a malformed rule is skipped, never
@@ -47,7 +62,7 @@ public final class RedactionEngine {
      */
     public static @Nullable CompiledRule compile(String name, String regex, String replacement) {
         try {
-            return new CompiledRule(name, Pattern.compile(regex), replacement);
+            return new RegexRule(name, Pattern.compile(regex), replacement);
         } catch (PatternSyntaxException e) {
             return null;
         }
@@ -69,15 +84,42 @@ public final class RedactionEngine {
      * replacement is substituted literally.
      */
     public static @Nullable String apply(@Nullable String text, List<CompiledRule> rules) {
+        return apply(text, rules, null);
+    }
+
+    /**
+     * {@link #apply(String, List)}, reporting every credential a {@link CorpusRule} replaced to {@code
+     * matched}. Regex rules report nothing: what they remove is named only by their replacement token.
+     */
+    public static @Nullable String apply(
+            @Nullable String text, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
         String out = text;
         for (CompiledRule rule : rules) {
-            // replaceAll() alone, with no find() pre-check: a pre-check would scan the regex twice
-            // on every matching rule. replaceAll() already returns the input unchanged when there is
-            // no match, so the allocate-nothing property the javadoc promises still holds.
-            out = rule.pattern().matcher(out).replaceAll(Matcher.quoteReplacement(rule.replacement()));
+            out = switch (rule) {
+                // replaceAll() alone, with no find() pre-check: a pre-check would scan the regex twice
+                // on every matching rule. replaceAll() already returns the input unchanged when there is
+                // no match, so the allocate-nothing property the javadoc promises still holds.
+                case RegexRule r -> r.pattern().matcher(out).replaceAll(Matcher.quoteReplacement(r.replacement()));
+                case CorpusRule c -> replaceFindings(out, c, matched);
+            };
         }
         return out;
+    }
+
+    /** Replace each corpus finding's span with the rule's token, left to right; the same reference if none. */
+    private static String replaceFindings(
+            String text, CorpusRule rule, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+        List<GitleaksCorpus.Finding> findings = rule.corpus().find(text);
+        if (findings.isEmpty()) return text;
+        StringBuilder out = new StringBuilder(text.length());
+        int cursor = 0;
+        for (GitleaksCorpus.Finding f : findings) {
+            out.append(text, cursor, f.start()).append(rule.replacement());
+            cursor = f.end();
+            if (matched != null) matched.accept(f);
+        }
+        return out.append(text, cursor, text.length()).toString();
     }
 
     /** Minimum contiguous payload characters before a run is treated as binary. */
@@ -133,6 +175,12 @@ public final class RedactionEngine {
      * are re-joined byte-identical.
      */
     public static @Nullable String applyToTextParts(@Nullable String text, List<CompiledRule> rules) {
+        return applyToTextParts(text, rules, null);
+    }
+
+    /** {@link #applyToTextParts(String, List)}, reporting corpus findings to {@code matched}. */
+    public static @Nullable String applyToTextParts(
+            @Nullable String text, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
 
         StringBuilder out = null; // allocated lazily: most fields contain no payload at all
@@ -153,16 +201,16 @@ public final class RedactionEngine {
             if (out == null) out = new StringBuilder(n);
             String segment = text.substring(cursor, skipFrom);
             // apply() is null-in/null-out and `segment` is a substring, so this is never null.
-            String redacted = Objects.requireNonNull(apply(segment, rules));
+            String redacted = Objects.requireNonNull(apply(segment, rules, matched));
             changed |= !redacted.equals(segment);
             out.append(redacted);
             out.append(text, skipFrom, skipTo); // payload interior preserved verbatim
             cursor = skipTo;
         }
-        if (out == null) return apply(text, rules); // no payload: the ordinary path, unchanged semantics
+        if (out == null) return apply(text, rules, matched); // no payload: the ordinary path, unchanged semantics
 
         String tail = text.substring(cursor);
-        String redactedTail = Objects.requireNonNull(apply(tail, rules));
+        String redactedTail = Objects.requireNonNull(apply(tail, rules, matched));
         changed |= !redactedTail.equals(tail);
         out.append(redactedTail);
         // Nothing matched anywhere, so the rebuilt string is byte-identical to the input. Return the
@@ -219,18 +267,24 @@ public final class RedactionEngine {
      * working.
      */
     public static @Nullable String applyToJson(@Nullable String json, List<CompiledRule> rules) {
+        return applyToJson(json, rules, null);
+    }
+
+    /** {@link #applyToJson(String, List)}, reporting corpus findings to {@code matched}. */
+    public static @Nullable String applyToJson(
+            @Nullable String json, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
         if (json == null || json.isEmpty() || rules.isEmpty()) return json;
-        if (json.length() > MAX_JSON_PARSE_CHARS) return applyToTextParts(json, rules);
+        if (json.length() > MAX_JSON_PARSE_CHARS) return applyToTextParts(json, rules, matched);
         JsonNode root = parseContainer(json);
-        if (root == null) return applyToTextParts(json, rules);
-        JsonNode redacted = redactNode(root, rules, 0);
+        if (root == null) return applyToTextParts(json, rules, matched);
+        JsonNode redacted = redactNode(root, rules, 0, matched);
         if (redacted == null) return json; // nothing matched: original bytes, original reference
         try {
             return JSON.writeValueAsString(redacted);
         } catch (JsonProcessingException e) {
             // It parsed, so it serializes; this is unreachable in practice. Falling back to the text path
             // keeps the guarantee that matters: nothing unredacted is ever returned from here.
-            return applyToTextParts(json, rules);
+            return applyToTextParts(json, rules, matched);
         }
     }
 
@@ -256,12 +310,13 @@ public final class RedactionEngine {
      * a flag: it lets an untouched subtree be shared instead of copied, so the common no-PII document
      * allocates nothing at all, matching {@link #apply}'s contract.
      */
-    private static @Nullable JsonNode redactNode(JsonNode node, List<CompiledRule> rules, int depth) {
+    private static @Nullable JsonNode redactNode(
+            JsonNode node, List<CompiledRule> rules, int depth, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
         if (depth >= MAX_JSON_DEPTH) return null;
         if (node.isObject()) {
             ObjectNode copy = null;
             for (Map.Entry<String, JsonNode> field : node.properties()) {
-                JsonNode rewritten = redactNode(field.getValue(), rules, depth + 1);
+                JsonNode rewritten = redactNode(field.getValue(), rules, depth + 1, matched);
                 if (rewritten != null) {
                     if (copy == null) copy = node.deepCopy();
                     copy.set(field.getKey(), rewritten);
@@ -272,7 +327,7 @@ public final class RedactionEngine {
         if (node.isArray()) {
             ArrayNode copy = null;
             for (int i = 0; i < node.size(); i++) {
-                JsonNode rewritten = redactNode(node.get(i), rules, depth + 1);
+                JsonNode rewritten = redactNode(node.get(i), rules, depth + 1, matched);
                 if (rewritten != null) {
                     if (copy == null) copy = node.deepCopy();
                     copy.set(i, rewritten);
@@ -282,7 +337,7 @@ public final class RedactionEngine {
         }
         if (node.isTextual()) {
             String text = node.textValue();
-            String redacted = redactStringLeaf(text, rules, depth);
+            String redacted = redactStringLeaf(text, rules, depth, matched);
             return redacted.equals(text) ? null : TextNode.valueOf(redacted);
         }
         // Numbers, booleans and nulls are returned untouched. This is the whole point: it is not that a
@@ -291,35 +346,51 @@ public final class RedactionEngine {
     }
 
     /** A string leaf: recursed into when it is itself a JSON container, redacted as text otherwise. */
-    private static String redactStringLeaf(String text, List<CompiledRule> rules, int depth) {
+    private static String redactStringLeaf(
+            String text, List<CompiledRule> rules, int depth, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
         if (depth + 1 < MAX_JSON_DEPTH && text.length() <= MAX_JSON_PARSE_CHARS) {
             JsonNode nested = parseContainer(text);
             if (nested != null) {
-                JsonNode rewritten = redactNode(nested, rules, depth + 1);
+                JsonNode rewritten = redactNode(nested, rules, depth + 1, matched);
                 if (rewritten == null) return text;
                 try {
                     return JSON.writeValueAsString(rewritten);
                 } catch (JsonProcessingException e) {
-                    return Objects.requireNonNull(applyToTextParts(text, rules));
+                    return Objects.requireNonNull(applyToTextParts(text, rules, matched));
                 }
             }
         }
-        return Objects.requireNonNull(applyToTextParts(text, rules));
+        return Objects.requireNonNull(applyToTextParts(text, rules, matched));
     }
 
     /** Count how many matches a single compiled rule has in {@code text} (for the playground preview). */
     public static int countMatches(@Nullable String text, CompiledRule rule) {
         if (text == null || text.isEmpty()) return 0;
-        Matcher m = rule.pattern().matcher(text);
-        int n = 0;
-        while (m.find()) n++;
-        return n;
+        return switch (rule) {
+            case RegexRule r -> {
+                Matcher m = r.pattern().matcher(text);
+                int n = 0;
+                while (m.find()) n++;
+                yield n;
+            }
+            case CorpusRule c -> c.corpus().find(text).size();
+        };
     }
 
-    /** Compile a list of {@link RedactionRuleRow}s, dropping any whose regex does not compile. */
+    /**
+     * Compile a list of {@link RedactionRuleRow}s, dropping any whose regex does not compile.
+     *
+     * <p>A built-in row whose pattern names the corpus ({@code gitleaks:v8.30.1}) compiles to a {@link
+     * CorpusRule}. Only a built-in: a custom rule whose regex happens to read {@code gitleaks:...} is an
+     * operator's literal and stays one.
+     */
     public static List<CompiledRule> compileAll(List<RedactionRuleRow> rows) {
         List<CompiledRule> compiled = new ArrayList<>(rows.size());
         for (RedactionRuleRow row : rows) {
+            if (row.builtIn() && row.pattern().startsWith(GitleaksCorpus.PATTERN_SCHEME)) {
+                compiled.add(new CorpusRule(row.name(), GitleaksCorpus.get(), row.replacement()));
+                continue;
+            }
             CompiledRule rule = compile(row.name(), row.pattern(), row.replacement());
             if (rule != null) compiled.add(rule);
         }

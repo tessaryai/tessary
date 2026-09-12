@@ -21,6 +21,7 @@ import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,6 +37,7 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -66,6 +68,19 @@ public class ClassifierWorker {
     // Jobs claimed per round; the bounded signalTaskExecutor backpressures dispatch, so this only
     // bounds how many job rows one UPDATE...SKIP LOCKED flips at once (not the per-sweep batch size).
     private static final int CLAIM_BATCH = 5;
+
+    /**
+     * The kinds whose sweep keeps paging inside one claim until it reaches the head of the stream.
+     *
+     * <p>A backlog for these arrives all at once rather than a page a minute: a backfill upload lands months
+     * of spans in one go, and Malformed Output rewinds to the start of history the moment a call site's schema
+     * arrives. At one page a tick, a 250,000-span project takes most of a day to catch up. Both are
+     * deterministic and cheap per span. The encoder-backed kinds are left at one page a tick on purpose:
+     * draining them would put a whole backlog of scoring calls on the classify service in a single tick.
+     */
+    private static final Set<String> DRAIN_TO_HEAD =
+            Set.of(BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT);
+
     // A job stuck failing every tick gets one full stacktrace, then a "still failing" summary
     // every 30 occurrences (~30 ticks at the default 60s heartbeat) instead of one per tick.
     private static final int SWEEP_FAILURE_SUMMARY_EVERY = 30;
@@ -84,6 +99,9 @@ public class ClassifierWorker {
      */
     private final ClassifierSweepRegistry sweeps;
 
+    /** Population work a classifier does once its sweep has caught up; see {@link ClassifierCatchUp}. */
+    private final ObjectProvider<ClassifierCatchUp> catchUps;
+
     private final ClassifierProperties props;
     private final TaskExecutor executor;
     private final TraceMdcBridge traceBridge;
@@ -101,6 +119,7 @@ public class ClassifierWorker {
             BuiltInClassifierCatalog catalog,
             PreDeployCheckService preDeployChecks,
             ClassifierSweepRegistry sweeps,
+            ObjectProvider<ClassifierCatchUp> catchUps,
             ClassifierProperties props,
             TraceMdcBridge traceBridge,
             @Qualifier("signalTaskExecutor") TaskExecutor executor) {
@@ -113,6 +132,7 @@ public class ClassifierWorker {
         this.catalog = catalog;
         this.preDeployChecks = preDeployChecks;
         this.sweeps = sweeps;
+        this.catchUps = catchUps;
         this.props = props;
         this.traceBridge = traceBridge;
         this.executor = executor;
@@ -318,7 +338,7 @@ public class ClassifierWorker {
                 }
                 SweepOutcome outcome = sweep.get().sweep(new SweepContext(job, signal));
                 sweepFailures.clear(job.id());
-                logSweepComplete(job, signal, grain, outcome.scanned(), outcome.fired(), start);
+                logSweepComplete(job, signal, grain, outcome.scanned(), outcome.fired(), 1, start);
             }
             case TURN, OBSERVATION -> sweepObservationGrain(job, signal, grain, start);
         }
@@ -366,7 +386,14 @@ public class ClassifierWorker {
         return kept;
     }
 
-    /** The observation-grain sweep, drawing its candidate window at {@code grain}. */
+    /**
+     * The observation-grain sweep, drawing its candidate windows at {@code grain}.
+     *
+     * <p>One page per claim, except for a kind in {@link #DRAIN_TO_HEAD}, which keeps taking pages until one
+     * comes back short, its drain budget runs out, or it loses the lease. The cadence stays one tick a minute
+     * either way; what changes is how far one tick gets. Each page is persisted before the next is read and
+     * armed after its cursor lands, so a failure part way loses at most the page in hand.
+     */
     private void sweepObservationGrain(ClassifierJobRow job, ClassifierRow signal, Grain grain, Instant start) {
         // A detector with no registered DetectionTable has nowhere to write a fired detection:
         // ClassifierDetectionWriteRepository#insert throws IllegalArgumentException for exactly this
@@ -392,15 +419,143 @@ public class ClassifierWorker {
         }
         BuiltInDetector detector = catalog.detectorFor(signal.detector());
         String detectorConfig = signal.configJson();
+        boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
+        Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
 
+        String cursorAt = job.cursorAt();
+        String cursorId = job.cursorId();
+        int pages = 0;
+        int scanned = 0;
+        int fired = 0;
+        boolean leaseLost = false;
+        boolean atHead = false;
+        // The first genuinely-new detection of this sweep, captured to drive the pre-deploy
+        // registration exactly once per sweep, never per-event, so the trigger stays cheap even
+        // when a whole drain fires.
+        NewDetection firstNew = null;
+        while (true) {
+            Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId);
+            if (page == null) {
+                jobs.markSwept(job.id(), null, null);
+                atHead = true;
+                break;
+            }
+            pages++;
+            scanned += page.scored();
+            fired += page.fired();
+            if (firstNew == null) firstNew = page.firstNew();
+            cursorAt = page.cursorAt();
+            cursorId = page.cursorId();
+            boolean more = drain
+                    && page.windowSize() >= props.getBatchSize()
+                    && Duration.between(start, Instant.now()).compareTo(budget) < 0;
+            if (more) {
+                leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.getLeaseSeconds());
+            } else {
+                jobs.markSwept(job.id(), cursorAt, cursorId);
+                atHead = page.windowSize() < props.getBatchSize();
+            }
+            // The classifier's own arming, evaluated here rather than by an alerting worker reading the
+            // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
+            // After the cursor lands and fail-soft, for the same reason: the detections have been written,
+            // and a failure to roll them up must not make the sweep re-score the page.
+            armIfConfigured(job.projectId(), signal, page.firedRefs(), Instant.now());
+            if (!more || leaseLost) break;
+        }
+        sweepFailures.clear(job.id());
+        if (atHead) catchUp(job, signal, cursorAt);
+
+        if (pages == 0) {
+            // DEBUG: a sweep with no new observations is the steady state, not news. Together with
+            // sweep.start this was 77% of all backend log volume, all of it saying nothing happened.
+            StructuredLog.debug(log, "signal.sweep.empty")
+                    .message("no new observations for %s since the last sweep", signal.classifierKey())
+                    .field("job", job.id())
+                    .field("signal", signal.classifierKey())
+                    .field("classifierId", signal.id())
+                    .field("cursor", job.cursorId())
+                    .log();
+            return;
+        }
+        if (leaseLost) {
+            StructuredLog.warn(log, Markers.OPS, "signal.sweep.lease-lost")
+                    .message(
+                            "%s lost its lease after %d page(s) of a drain; stopping so the new holder resumes"
+                                    + " from the last page recorded",
+                            signal.classifierKey(), pages)
+                    .field("job", job.id())
+                    .field("signal", signal.classifierKey())
+                    .field("classifierId", signal.id())
+                    .field("project", job.projectId())
+                    .field("pages", pages)
+                    .log();
+        }
+        logSweepComplete(job, signal, grain, scanned, fired, pages, start);
+        // A genuinely-new production signal discovery closes the loop to the edge: register a
+        // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
+        // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
+        // tessary.predeploy.enabled, fail-soft.
+        registerPreDeployCheck(job.projectId(), signal, firstNew);
+    }
+
+    /**
+     * Hand a sweep that just caught up to the classifier's population work, if it has any. Fail-soft for the
+     * reason arming is: the detections have landed and the cursor has moved, and a failure to roll them up must
+     * not make the sweep re-score what it already checked.
+     */
+    private void catchUp(ClassifierJobRow job, ClassifierRow signal, @Nullable String checkedBefore) {
+        catchUps.orderedStream()
+                .filter(c -> c.kinds().contains(signal.detector()))
+                .forEach(c -> {
+                    try {
+                        c.caughtUp(job, signal, checkedBefore);
+                    } catch (RuntimeException e) {
+                        StructuredLog.warn(log, Markers.OPS, "signal.catch-up.failed")
+                                .field("project", job.projectId())
+                                .field("signal", signal.classifierKey())
+                                .field("classifierId", signal.id())
+                                .field("error", e.getClass().getSimpleName())
+                                .log();
+                        log.debug("catch-up failure detail", e);
+                    }
+                });
+    }
+
+    /**
+     * What one page of a sweep did.
+     *
+     * @param windowSize rows the cursor advanced over, which is how a drain tells a full page from the head
+     * @param scored rows actually handed to the detector, after the grain's own filtering
+     */
+    private record Page(
+            int windowSize,
+            int scored,
+            int fired,
+            @Nullable NewDetection firstNew,
+            List<FindingEvidenceRepository.Ref> firedRefs,
+            String cursorAt,
+            String cursorId) {}
+
+    /**
+     * Score one page past {@code (cursorAt, cursorId)} and write what fired, or return null when there is
+     * nothing past the cursor. Persists nothing about the job: the caller owns the cursor and the lease.
+     */
+    private @Nullable Page sweepPage(
+            ClassifierJobRow job,
+            ClassifierRow signal,
+            Grain grain,
+            @Nullable BuiltInDetector detector,
+            @Nullable String detectorConfig,
+            @Nullable String cursorAt,
+            @Nullable String cursorId) {
         // The window is what the cursor advances over, the same unfiltered stream at both grains so
         // the cursor always moves. `obs`, what actually gets scored, is the window minus the rows the
         // grain rejects, so a dropped row is never re-offered on a later tick.
         List<SubstrateObservation> window;
         List<SubstrateObservation> obs;
         if (grain == Grain.TURN) {
-            List<SubstrateReadRepository.TurnCandidate> candidates = substrate.turnCandidatesAfter(
-                    job.projectId(), job.cursorAt(), job.cursorId(), props.getBatchSize());
+            List<SubstrateReadRepository.TurnCandidate> candidates =
+                    substrate.turnCandidatesAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
             window = candidates.stream()
                     .map(SubstrateReadRepository.TurnCandidate::observation)
                     .toList();
@@ -412,31 +567,14 @@ public class ClassifierWorker {
                             .map(SubstrateReadRepository.TurnCandidate::observation)
                             .toList()));
         } else {
-            window = substrate.observationsAfter(job.projectId(), job.cursorAt(), job.cursorId(), props.getBatchSize());
+            window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
             obs = window;
         }
-        if (window.isEmpty()) {
-            // DEBUG: a sweep with no new observations is the steady state, not news. Together with
-            // sweep.start this was 77% of all backend log volume, all of it saying nothing happened.
-            StructuredLog.debug(log, "signal.sweep.empty")
-                    .message("no new observations for %s since the last sweep", signal.classifierKey())
-                    .field("job", job.id())
-                    .field("signal", signal.classifierKey())
-                    .field("classifierId", signal.id())
-                    .field("cursor", job.cursorId())
-                    .log();
-            jobs.markSwept(job.id(), null, null);
-            sweepFailures.clear(job.id());
-            return;
-        }
+        if (window.isEmpty()) return null;
 
-        Instant nowInstant = Instant.now();
         int fired = 0;
-        // The first genuinely-new detection of this sweep, captured to drive the pre-deploy
-        // registration exactly once per sweep, never per-event, so the trigger stays cheap even
-        // when a whole batch fires.
         NewDetection firstNew = null;
-        // What this sweep flagged, in sweep order, as evidence refs, handed to the arming gate so a
+        // What this page flagged, in sweep order, as evidence refs, handed to the arming gate so a
         // finding it opens is already pointing at the spans that opened it.
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
         if (detector != null) {
@@ -486,26 +624,20 @@ public class ClassifierWorker {
         // cursor_id as "<trace_id>:<span_id>", the spelling SubstrateReadRepository.parseHandle reads
         // back. A bare span id has no colon, parses as "no cursor", and the sweep then restarts from
         // page one on every tick forever: not a crash, just an unbounded re-scan that never advances.
-        jobs.markSwept(
-                job.id(), last.createdAt(), SubstrateReadRepository.handle(last.traceId(), last.observationId()));
-        sweepFailures.clear(job.id());
-        logSweepComplete(job, signal, grain, obs.size(), fired, start);
-        // The classifier's own arming, evaluated here rather than by an alerting worker reading the
-        // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
-        // Fail-soft for the same reason everything else after the cursor advance is: the detections
-        // have landed, and a failure to roll them up must not make the sweep re-score the window.
-        armIfConfigured(job.projectId(), signal, firedRefs, nowInstant);
-        // A genuinely-new production signal discovery closes the loop to the edge: register a
-        // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
-        // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
-        // tessary.predeploy.enabled, fail-soft.
-        registerPreDeployCheck(job.projectId(), signal, firstNew);
+        return new Page(
+                window.size(),
+                obs.size(),
+                fired,
+                firstNew,
+                firedRefs,
+                last.createdAt(),
+                SubstrateReadRepository.handle(last.traceId(), last.observationId()));
     }
 
     /**
      * Hand this sweep's firings to the arming gate. A classifier with no {@code arming} block in its
-     * config does nothing here, which is the shipped default: the platform draws no bar on anyone's
-     * behalf.
+     * config does nothing here: a user's classifier ships unarmed, and only a built-in whose bar the
+     * platform authored arrives with one.
      */
     private void armIfConfigured(
             String projectId, ClassifierRow signal, List<FindingEvidenceRepository.Ref> firedRefs, Instant now) {
@@ -522,11 +654,11 @@ public class ClassifierWorker {
 
     /** One field set for every grain, so a Loki query does not have to know which sweep ran. */
     private void logSweepComplete(
-            ClassifierJobRow job, ClassifierRow signal, Grain grain, int scanned, int fired, Instant start) {
+            ClassifierJobRow job, ClassifierRow signal, Grain grain, int scanned, int fired, int pages, Instant start) {
         StructuredLog.info(log, Markers.OPS, "signal.sweep.complete")
                 .message(
-                        "swept %d observation(s) for %s at %s grain, %d fired",
-                        scanned, signal.classifierKey(), grain.name().toLowerCase(Locale.ROOT), fired)
+                        "swept %d observation(s) for %s at %s grain over %d page(s), %d fired",
+                        scanned, signal.classifierKey(), grain.name().toLowerCase(Locale.ROOT), pages, fired)
                 .field("job", job.id())
                 .field("signal", signal.classifierKey())
                 .field("classifierId", signal.id())
@@ -534,6 +666,7 @@ public class ClassifierWorker {
                 .field("grain", grain.name().toLowerCase(Locale.ROOT))
                 .field("scanned", scanned)
                 .field("fired", fired)
+                .field("pages", pages)
                 .durationMs(start)
                 .log();
     }

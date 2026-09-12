@@ -31,7 +31,18 @@ public final class BuiltInRedactionRules {
     /** A built-in rule template: stable name, regex, replacement, and application order. */
     public record Template(String name, String pattern, String replacement, int sortOrder) {}
 
+    /**
+     * The credential corpus, as one built-in rule. First in the list on purpose: a PII rule that ran before it
+     * could rewrite part of a credential (the card rule matches a run of digits inside a token) and leave the
+     * corpus nothing to recognise or to stamp. The prefix rules further down stay, because they redact what the
+     * corpus does not name: legacy {@code sk-} keys, this platform's own {@code tsy_} tokens, and a password
+     * with too little entropy for gitleaks to call a secret.
+     */
+    public static final Template CREDENTIALS =
+            new Template("Credentials", GitleaksCorpus.get().patternValue(), "[REDACTED_SECRET]", 5);
+
     public static final List<Template> TEMPLATES = List.of(
+            CREDENTIALS,
             // The quantifiers are BOUNDED, and that is a performance fix, not pedantry. With
             // unbounded `+` this pattern is O(n^2) on text that contains no email: `[A-Za-z0-9.-]+`
             // can consume the whole remainder before failing to find `\.[A-Za-z]{2,}`, and find()

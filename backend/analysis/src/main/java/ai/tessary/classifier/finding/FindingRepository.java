@@ -238,7 +238,49 @@ public class FindingRepository {
             String evidenceJson,
             String quietBefore,
             String now) {
-        String payload = mergeVocabulary(evidenceJson, nativeVocabulary("rate_shift", "", causeKey, null));
+        return recordRecomputedRate(
+                id,
+                projectId,
+                "tool_error",
+                CauseKey.toolError(causeKey),
+                FindingRow.Cause.RATE_SHIFT,
+                causeKey,
+                FindingRow.SubjectKind.TOOL,
+                CauseKey.toolOf(causeKey),
+                CauseKey.toolOf(causeKey),
+                observedCount,
+                callSiteId,
+                onsetAt,
+                evidenceJson,
+                quietBefore,
+                now);
+    }
+
+    /**
+     * {@link #recordRecomputedCause}'s write for any classifier that recomputes a rate from an hourly
+     * aggregate on every pass. Malformed Output is the second: it runs tool_error's engine over call sites,
+     * and so needs exactly this write's contract of assigned counts, refreshed observations and untouched
+     * judgements, under its own classifier, cause kind and subject.
+     *
+     * @param nativeCauseKey the classifier's own name for the cause, recorded in the payload vocabulary
+     */
+    public Recorded recordRecomputedRate(
+            String id,
+            String projectId,
+            String classifierKey,
+            String causeKey,
+            String causeKind,
+            String nativeCauseKey,
+            String subjectKind,
+            String subjectId,
+            String subjectLabel,
+            long observedCount,
+            @Nullable String callSiteId,
+            @Nullable String onsetAt,
+            String evidenceJson,
+            String quietBefore,
+            String now) {
+        String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey, null));
         Recorded outcome = jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
@@ -268,11 +310,11 @@ public class FindingRepository {
             """)
                 .param("id", id)
                 .param("pid", projectId)
-                .param("classifier", "tool_error")
-                .param("causeKey", CauseKey.toolError(causeKey))
-                .param("subjectKind", FindingRow.SubjectKind.TOOL)
-                .param("subjectId", CauseKey.toolOf(causeKey))
-                .param("subjectLabel", CauseKey.toolOf(causeKey))
+                .param("classifier", classifierKey)
+                .param("causeKey", causeKey)
+                .param("subjectKind", subjectKind)
+                .param("subjectId", subjectId)
+                .param("subjectLabel", subjectLabel)
                 .param("callSiteId", callSiteId)
                 .param("count", observedCount)
                 .param("payload", payload)
@@ -347,6 +389,90 @@ public class FindingRepository {
                 .param("subjectLabel", label)
                 .param("callSiteId", callSiteId)
                 .param("count", observedCount)
+                .param("payload", payloadJson)
+                .param("quietBefore", quietBefore)
+                .param("now", now)
+                .query((rs, n) -> recorded(rs))
+                .single();
+        return created(id, outcome);
+    }
+
+    /**
+     * Open or refresh the finding for one facet of a per-span classifier (one call site, one kind of thing
+     * the detector saw) from an event-time window that crossed the classifier's bar.
+     *
+     * <p><b>Every field moves forward only.</b> Windows are bucketed on when the span happened, and a late
+     * upload can report a window older than the one this finding already holds. So {@code last_seen_at}
+     * keeps the later of the two, {@code sample_count} and {@code payload} belong to the newest window and
+     * an older one leaves them alone, and {@code onset_at} starts a new spell only when a NEWER window
+     * follows a quiet gap, never because an old window arrived late.
+     *
+     * <p>The comparisons cast to {@code timestamptz}. The columns are text, and {@code Instant#toString}
+     * drops a zero fraction, so {@code ...:00.5Z} sorts before {@code ...:00Z} as a string while being
+     * later as an instant.
+     *
+     * @param onsetAt the window's start
+     * @param lastSeenAt when the latest detection in the window happened
+     * @param quietBefore a finding last seen before this has been quiet long enough that a newer window
+     *     is a new spell
+     */
+    public Recorded recordArmedFacet(
+            String id,
+            String projectId,
+            String classifierKey,
+            String classifierId,
+            String label,
+            @Nullable String callSiteId,
+            String facet,
+            long observedCount,
+            String onsetAt,
+            String lastSeenAt,
+            String payloadJson,
+            String quietBefore,
+            String now) {
+        Recorded outcome = jdbc.sql("""
+            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
+                                 subject_label, call_site_id, status, onset_at, last_seen_at,
+                                 sample_count, payload, created_at, updated_at)
+            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
+                    'open', :onsetAt, :lastSeenAt, :count, CAST(:payload AS jsonb), :now, :now)
+            ON CONFLICT (project_id, classifier_key, cause_key)
+                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                updated_at = EXCLUDED.updated_at,
+                onset_at = CASE
+                    WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
+                         AND CAST(finding.last_seen_at AS timestamptz) < CAST(:quietBefore AS timestamptz)
+                    THEN EXCLUDED.onset_at ELSE finding.onset_at END,
+                sample_count = CASE
+                    WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
+                    THEN EXCLUDED.sample_count ELSE finding.sample_count END,
+                payload = CASE
+                    WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
+                    THEN EXCLUDED.payload ELSE finding.payload END,
+                last_seen_at = CASE
+                    WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
+                    THEN EXCLUDED.last_seen_at ELSE finding.last_seen_at END,
+                -- A newer detection after a closing ruling is the cause recurring; an old one arriving
+                -- late is not. The blocked arm keeps counting sweeps, as every other writer's does.
+                recurrences_since_verdict = finding.recurrences_since_verdict
+                    + CASE WHEN finding.status = 'blocked' THEN 1
+                           WHEN finding.triage_action = 'closed'
+                                AND CAST(EXCLUDED.last_seen_at AS timestamptz)
+                                    > CAST(finding.last_seen_at AS timestamptz) THEN 1
+                           ELSE 0 END
+            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+            """)
+                .param("id", id)
+                .param("pid", projectId)
+                .param("classifier", classifierKey)
+                .param("causeKey", CauseKey.perSpanClassifierFacet(classifierId, callSiteId, facet))
+                .param("subjectKind", FindingRow.SubjectKind.CLASSIFIER)
+                .param("subjectId", classifierId)
+                .param("subjectLabel", label)
+                .param("callSiteId", callSiteId)
+                .param("count", observedCount)
+                .param("onsetAt", onsetAt)
+                .param("lastSeenAt", lastSeenAt)
                 .param("payload", payloadJson)
                 .param("quietBefore", quietBefore)
                 .param("now", now)
