@@ -162,26 +162,34 @@ Connecting a GitHub repository needs no environment variables. Connect one in-ap
 A default deployment has exactly one outbound destination: `home.tessary.ai`. There is no Google
 Fonts call, no analytics SDK, and no other third-party host a default install reaches — the
 product's one non-Geist typeface (the wordmark) ships as a local font file, not a call to Google's
-CDN. Nothing else in this section is an exception to that; it exists to say precisely what the one
-ping carries.
+CDN. Nothing else in this section is an exception to that; it exists to say precisely what the
+backend sends there and fetches from there.
 
-**What the ping sends, once on backend start and then every 24 hours:**
+**What the ping sends, once on backend start and then every 6 hours:**
 
 | Field | Example | What it is |
 | --- | --- | --- |
 | `contract_version` | `1` | Schema version of this payload. |
 | `install_id` | a v4 UUID | Generated once at first boot. Identifies an install, never a person or an org. |
-| `edition` | `"open"` | Which build sent the ping. |
+| `ping_seq` | `41` | How many pings this install has sent before this one. |
+| `sent_at` | an ISO-8601 UTC timestamp | When the ping was generated. |
 | `app_version` | `"2026.9.1"` | The running app's version. |
+| `edition` | `"open"` | Which build sent the ping. |
 | `os` / `arch` | `"linux"` / `"arm64"` | Host OS family and CPU architecture. |
-| `org_count_bucket` / `project_count_bucket` | `"1-5"` | Coarse, bucketed counts — never an exact number. |
-| `trace_volume_bucket` | `"1k-10k"` | Coarse, bucketed daily trace-ingest volume — never an exact count, and never trace content. |
-| `timestamp` | an ISO-8601 UTC timestamp | When the ping was generated. |
+| `counts` | `{"projects": 3, "spans": 1204551, "findings": 88, "cases": 12, "l1": 40210}` | Install-wide usage totals: projects, spans ingested, findings, cases, and classifier detections. One number each for the whole install, never per org or project. |
+| `price_book` | `{"digest": "a5ad23f7…", "schema_max": 1}` | Which model price book this install prices from, by its sha256. |
 
 It never carries an email address, an org or project name, trace/prompt/dataset content, a license
-key, or a retained IP address. The full field-by-field contract, including the closed bucket enums,
-lives at `devdocs/reference/telemetry-contract.md` in the repository for anyone auditing the wire
-format against the running code.
+key, or a retained IP address.
+
+**What the backend fetches, on the same schedule:** the model price book. It requests
+`/v1/pricing/manifest.json`, a few hundred bytes naming the current book's hash, and downloads the
+book itself (about 2 MB) only when that hash is one it does not already hold. It checks the download
+against the hash before using it. Neither request carries a body or any identifier. New prices apply
+to spans ingested afterwards; costs already recorded never change.
+
+The full field-by-field contract lives at `devdocs/reference/telemetry-contract.md` in the repository
+for anyone auditing the wire format against the running code.
 
 ## What leaves your network
 
@@ -189,15 +197,16 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 
 | Destination | When | Why it is permitted |
 | --- | --- | --- |
-| `home.tessary.ai` | Once at backend start and every 24 hours, only while `TESSARY_TELEMETRY_ENABLED` is `true` | The heartbeat above. Off, the name is never even resolved. |
+| `home.tessary.ai` | Once at backend start and every 6 hours, only while `TESSARY_TELEMETRY_ENABLED` is `true` | The heartbeat and the price book check above. Off, the name is never even resolved. |
 | `docker.io` | `docker compose pull`, before the stack runs; and once more at the first analysis, for the agent image the sandbox runner pulls lazily unless you pull it first | The published images. The check pulls or builds them before its observation window opens, so a pull during operation is a failure; the agent image is the one exception, named here because the check's walk stops before the first analysis. |
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
 | The provider, alert and Git endpoints you configure | Only after you enter a credential in Settings | Your own integrations. A default boot has none. |
 
-**Turning it off costs nothing functional.** `TESSARY_TELEMETRY_ENABLED=false` gives Tessary no
-install-count or activation visibility into your deployment — that is the entire effect. There is no
-license check, feature gate, or in-app behavior that depends on the heartbeat reaching us.
+**Turning it off costs one thing: price updates between releases.** `TESSARY_TELEMETRY_ENABLED=false`
+gives Tessary no install-count or activation visibility into your deployment, and your instance stops
+checking for newer model prices, so it prices from the book bundled in the release you run until you
+upgrade. There is no license check, feature gate, or other in-app behavior that depends on reaching us.
 
 **Tessary will never use your conversations to train or improve any model — no exceptions, no
 toggle.** This is an absolute guarantee, not a default you could accidentally switch off. See

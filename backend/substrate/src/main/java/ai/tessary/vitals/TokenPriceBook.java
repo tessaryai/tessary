@@ -15,22 +15,20 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Component;
 
 /**
- * Per-token USD rates for the models customers run, read from the same checked-in vendored LiteLLM
- * snapshot the {@code price_book} table is imported from ({@code resources/pricing/litellm-model-prices.json}).
+ * Per-token USD rates read straight from the vendored LiteLLM snapshot in the jar
+ * ({@code resources/pricing/litellm-model-prices.json}), with no database.
  *
- * <p><b>What is left of this class, and why.</b> It was the read-time price book for customer traffic,
- * against a hand-maintained catalog that priced only the handful of models the PLATFORM calls — a third of
- * production calls were on models that catalog did not list, and the gap was Opus, the expensive one. Both
- * of those jobs are gone: ingested spans are priced on arrival against the versioned {@code price_book}
- * and never repriced, and the platform lane moved onto the same book.
- * The ONE reader left is {@code classifier/metric/MetricSource}'s {@link #billsCacheCreation}, which asks
- * a question about billing CONVENTION rather than about dollars and asks it once per leaf span inside a
- * sweep — an in-memory map read, where the book's repository would be three queries. Retiring this class
- * means giving {@code PriceBookRepository} a cached convention lookup; until then it reads the same file,
- * so the two cannot disagree about which models carry a cache-creation rate.
+ * <p><b>Offline only. Nothing in the running application reads this, and it is not a Spring bean.</b> The
+ * running app prices from the {@code price_book} table, which can hold a newer book fetched from
+ * home.tessary.ai than the file in the jar; a reader of the jar's file would disagree with it. The last
+ * in-app reader, {@code classifier/metric/MetricSource}'s cache-creation question, moved to
+ * {@code pricing/ModelResolver#reportedModelBillsCacheCreation} for exactly that reason.
+ *
+ * <p>What still constructs it is {@code classifiers/metric_drift/bridge.jsh}, the research harness's JShell
+ * bridge, which prices a corpus offline at the rates in a given build without a database. For that, the jar's
+ * file is the right book.
  *
  * <p><b>A second hand-maintained file used to layer corrections on top of this one</b>, including a
  * {@code global.amazon.nova-2-lite-v1:0} cache-creation rate the vendored snapshot has never carried — no
@@ -49,7 +47,6 @@ import org.springframework.stereotype.Component;
  * read surface counts those calls separately. Pricing an unknown model at $0 would render a real
  * spend as free, which is the one failure mode that makes the number worse than not showing it.
  */
-@Component
 public class TokenPriceBook {
 
     private static final Logger log = LoggerFactory.getLogger(TokenPriceBook.class);

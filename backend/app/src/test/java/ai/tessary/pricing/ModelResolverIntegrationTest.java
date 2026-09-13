@@ -83,4 +83,19 @@ class ModelResolverIntegrationTest {
         assertFalse(resolver.billsCacheCreation("definitely-not-a-real-model-v9"), "unknown convention, no claim");
         assertFalse(resolver.billsCacheCreation(null));
     }
+
+    @Test
+    @DisplayName("the memoised check answers a reported name the way resolve then billsCacheCreation does")
+    void reportedModelBillsCacheCreation_matchesTheUnmemoisedAnswer() {
+        for (String reported : new String[] {
+            "claude-sonnet-5", "anthropic.claude-haiku-4-5", "GPT-4o", "definitely-not-a-real-model-v9"
+        }) {
+            boolean direct =
+                    resolver.resolve(reported).map(resolver::billsCacheCreation).orElse(false);
+            assertEquals(direct, resolver.reportedModelBillsCacheCreation(reported), reported);
+            assertEquals(direct, resolver.reportedModelBillsCacheCreation(reported), reported + ", memoised");
+        }
+        assertFalse(resolver.reportedModelBillsCacheCreation(null));
+        assertFalse(resolver.reportedModelBillsCacheCreation("  "));
+    }
 }

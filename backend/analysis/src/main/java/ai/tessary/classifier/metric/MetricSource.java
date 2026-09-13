@@ -8,7 +8,7 @@ import ai.tessary.classifier.metric.MetricSourceRepository.TurnFacts;
 import ai.tessary.classifier.substrate.ActionSymbol;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository.TraceHead;
-import ai.tessary.vitals.TokenPriceBook;
+import ai.tessary.pricing.ModelResolver;
 import ai.tessary.vitals.TokenUsage;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -65,9 +65,9 @@ import org.springframework.stereotype.Component;
 public class MetricSource {
 
     private final MetricSourceRepository repository;
-    private final TokenPriceBook prices;
+    private final ModelResolver prices;
 
-    public MetricSource(MetricSourceRepository repository, TokenPriceBook prices) {
+    public MetricSource(MetricSourceRepository repository, ModelResolver prices) {
         this.repository = repository;
         this.prices = prices;
     }
@@ -122,7 +122,7 @@ public class MetricSource {
          * takes, counting unpriced calls rather than reading them as free.
          *
          * <p>Two things produce it, and an operator does the same thing about both. Either the
-         * generation ran on a model {@link TokenPriceBook} carried no rate for when it arrived, fix the
+         * generation ran on a model the price book carried no rate for when it arrived, fix the
          * book, and traffic from the next deploy onward is priced, or it predates
          * ingest-time pricing at all, in which case it abstains until it ages
          * out of the windows. Neither is repaired retroactively, and deliberately: dollars are recorded
@@ -136,7 +136,7 @@ public class MetricSource {
          *
          * <p>The case this exists for is {@code tok_cache_write}. Whether writing to a prompt cache is a
          * counted quantity at all is a per-model fact, and the model's rate is what settles it:
-         * {@link TokenPriceBook#billsCacheCreation}, not a provider-family list, because the convention
+         * {@link ModelResolver#reportedModelBillsCacheCreation}, not a provider-family list, because the convention
          * now differs inside a single vendor ({@code gpt-5.6} bills cache creation, {@code gpt-4o}'s
          * automatic caching does not) and Gemini bills storage per hour rather than per written token.
          * Recording zero on any of those would say "no writes" when the truth is "not measured", and a
@@ -571,7 +571,7 @@ public class MetricSource {
             // The second gate: the model has to be one the book bills for cache creation. See above.
             if (cacheWrite != null) {
                 cacheWriteTokens += cacheWrite;
-                reportsCacheWrite |= prices.billsCacheCreation(leaf.model());
+                reportsCacheWrite |= prices.reportedModelBillsCacheCreation(leaf.model());
             }
             // The price this generation was billed at when it arrived, written by IngestPricer against
             // the book in force then, and the ONLY source of dollars here.

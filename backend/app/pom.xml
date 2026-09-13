@@ -224,6 +224,18 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <executions>
+                    <!-- META-INF/build-info.properties, and so a BuildProperties bean. Its build time dates the
+                         price book bundled in this jar (pricing/PriceBookImporter), which is what keeps a
+                         restart from putting an older bundled book in force over a newer one fetched from
+                         home.tessary.ai. -->
+                    <execution>
+                        <id>build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
