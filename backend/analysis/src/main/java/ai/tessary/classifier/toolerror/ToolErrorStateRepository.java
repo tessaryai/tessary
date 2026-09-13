@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -18,9 +19,36 @@ import org.springframework.stereotype.Repository;
 public class ToolErrorStateRepository {
 
     private final JdbcClient jdbc;
+    private final String table;
+    private final String keyColumn;
 
+    /** tool_error's own state, one row per tool. The constructor Spring uses; {@link #forTable} is the other. */
+    @Autowired
     public ToolErrorStateRepository(JdbcClient jdbc) {
+        this(jdbc, "tool_error_state", "tool_key");
+    }
+
+    private ToolErrorStateRepository(JdbcClient jdbc, String table, String keyColumn) {
         this.jdbc = jdbc;
+        this.table = table;
+        this.keyColumn = keyColumn;
+    }
+
+    /**
+     * The same persistence over another classifier's state table, for a classifier that runs this engine on
+     * buckets that are not tools. Malformed Output keeps one row per call site in {@code
+     * malformed_output_state}, whose columns match tool_error's apart from the key.
+     *
+     * <p>The names are interpolated, so they must be the literal identifiers of a table this codebase owns;
+     * nothing that reaches them may come from a request.
+     */
+    public static ToolErrorStateRepository forTable(JdbcClient jdbc, String table, String keyColumn) {
+        return new ToolErrorStateRepository(jdbc, table, keyColumn);
+    }
+
+    /** A statement with {@code {key}} as this table's key column and {@code {table}} as the table. */
+    private String sql(String template) {
+        return template.replace("{key}", keyColumn).replace("{table}", table);
     }
 
     /** Every carried state in the project, keyed by tool. Empty for a project that has never swept. */
@@ -30,15 +58,15 @@ public class ToolErrorStateRepository {
 
     /** Every carried state in the project, for the map above and for tests that want the order. */
     public List<CarriedState> list(String projectId) {
-        return jdbc.sql("""
-                        SELECT tool_key, s_up, s_down, onset_up_at, onset_down_at,
+        return jdbc.sql(sql("""
+                        SELECT {key} AS bucket_key, s_up, s_down, onset_up_at, onset_down_at,
                                calls_since_onset_up, calls_since_onset_down,
                                baseline_calls, baseline_failures, watermark_bucket, state_epoch,
                                pending_pin_by, pending_pin_at
-                          FROM tool_error_state
+                          FROM {table}
                          WHERE project_id = :pid
-                         ORDER BY tool_key
-                        """)
+                         ORDER BY {key}
+                        """))
                 .param("pid", projectId)
                 .query((rs, n) -> {
                     long baselineCalls = rs.getLong("baseline_calls");
@@ -48,7 +76,7 @@ public class ToolErrorStateRepository {
                         baseline.addCounts(baselineCalls, rs.getLong("baseline_failures"));
                     }
                     return new CarriedState(
-                            rs.getString("tool_key"),
+                            rs.getString("bucket_key"),
                             new State(
                                     rs.getDouble("s_up"),
                                     rs.getDouble("s_down"),
@@ -76,14 +104,14 @@ public class ToolErrorStateRepository {
     public void save(String projectId, CarriedState carried, String updatedAt) {
         State state = carried.state();
         ToolErrorRate baseline = carried.baseline();
-        jdbc.sql("""
-                        INSERT INTO tool_error_state (
-                            project_id, tool_key, s_up, s_down, onset_up_at, onset_down_at,
+        jdbc.sql(sql("""
+                        INSERT INTO {table} (
+                            project_id, {key}, s_up, s_down, onset_up_at, onset_down_at,
                             calls_since_onset_up, calls_since_onset_down,
                             baseline_calls, baseline_failures, watermark_bucket, state_epoch, updated_at)
                         VALUES (:pid, :tool, :sUp, :sDown, :onsetUp, :onsetDown, :callsUp, :callsDown,
                                 :baseCalls, :baseFailures, :watermark, :epoch, :at)
-                        ON CONFLICT (project_id, tool_key) DO UPDATE SET
+                        ON CONFLICT (project_id, {key}) DO UPDATE SET
                             s_up = EXCLUDED.s_up,
                             s_down = EXCLUDED.s_down,
                             onset_up_at = EXCLUDED.onset_up_at,
@@ -95,7 +123,7 @@ public class ToolErrorStateRepository {
                             watermark_bucket = EXCLUDED.watermark_bucket,
                             state_epoch = EXCLUDED.state_epoch,
                             updated_at = EXCLUDED.updated_at
-                        """)
+                        """))
                 .param("pid", projectId)
                 .param("tool", carried.toolKey())
                 .param("sUp", state.sUp())
@@ -119,15 +147,15 @@ public class ToolErrorStateRepository {
      * sweep that would have created it.
      */
     public void markPendingPin(String projectId, String toolKey, @Nullable String by, String at, String epoch) {
-        jdbc.sql("""
-                        INSERT INTO tool_error_state (project_id, tool_key, state_epoch, updated_at,
+        jdbc.sql(sql("""
+                        INSERT INTO {table} (project_id, {key}, state_epoch, updated_at,
                                                       pending_pin_by, pending_pin_at)
                         VALUES (:pid, :tool, :epoch, :at, :by, :at)
-                        ON CONFLICT (project_id, tool_key) DO UPDATE SET
+                        ON CONFLICT (project_id, {key}) DO UPDATE SET
                             pending_pin_by = EXCLUDED.pending_pin_by,
                             pending_pin_at = EXCLUDED.pending_pin_at,
                             updated_at = EXCLUDED.updated_at
-                        """)
+                        """))
                 .param("pid", projectId)
                 .param("tool", toolKey)
                 .param("epoch", epoch)
@@ -138,11 +166,11 @@ public class ToolErrorStateRepository {
 
     /** Drop a pending absorb, because it has been honoured or the tool has moved on. */
     public void clearPendingPin(String projectId, String toolKey, String at) {
-        jdbc.sql("""
-                        UPDATE tool_error_state
+        jdbc.sql(sql("""
+                        UPDATE {table}
                            SET pending_pin_by = NULL, pending_pin_at = NULL, updated_at = :at
-                         WHERE project_id = :pid AND tool_key = :tool
-                        """)
+                         WHERE project_id = :pid AND {key} = :tool
+                        """))
                 .param("pid", projectId)
                 .param("tool", toolKey)
                 .param("at", at)
@@ -162,14 +190,14 @@ public class ToolErrorStateRepository {
      *     is the sentence somebody wants six weeks later when the same tool alarms again
      */
     public void reset(String projectId, String toolKey, @Nullable String resetBy, String note, String resetAt) {
-        jdbc.sql("""
-                        UPDATE tool_error_state
+        jdbc.sql(sql("""
+                        UPDATE {table}
                            SET s_up = 0, s_down = 0,
                                onset_up_at = NULL, onset_down_at = NULL,
                                calls_since_onset_up = 0, calls_since_onset_down = 0,
                                reset_at = :at, reset_by = :by, reset_note = :note, updated_at = :at
-                         WHERE project_id = :pid AND tool_key = :tool
-                        """)
+                         WHERE project_id = :pid AND {key} = :tool
+                        """))
                 .param("pid", projectId)
                 .param("tool", toolKey)
                 .param("by", resetBy)

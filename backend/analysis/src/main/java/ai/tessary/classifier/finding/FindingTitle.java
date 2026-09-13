@@ -47,6 +47,8 @@ public final class FindingTitle {
         return switch (finding.causeKind()) {
             case FindingRow.Cause.DISTRIBUTION_SHIFT -> metric(finding);
             case FindingRow.Cause.RATE_SHIFT -> toolError(finding);
+            case FindingRow.Cause.ARMED_WINDOW -> armed(finding);
+            case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
             // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
             // much" to put in a sentence, and the cause key already reads as the action sequence.
             default -> finding.nativeCauseKey();
@@ -88,6 +90,30 @@ public final class FindingTitle {
         String movement = last >= 0 && "down".equals(key.substring(last + 1)) ? "reduced" : "elevated";
         return String.format(
                 Locale.ROOT, "%s showing %s error rates", ToolErrorEvidence.shortName(read.bucketKey()), movement);
+    }
+
+    /**
+     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet; the
+     * classifier's own key for one filed against the whole classifier, which is what it read before.
+     *
+     * <p>Built from the payload and the call-site column, not the cause key: the key leads with a classifier
+     * id, which means nothing to someone reading a title.
+     */
+    private static String armed(FindingRow finding) {
+        String facet = FindingPayload.text(finding.payloadJson(), "facet");
+        if (facet == null) return finding.nativeCauseKey();
+        String callSite = finding.callSiteId();
+        return facet + " in " + (callSite == null ? "agent" : callSite) + " output";
+    }
+
+    /**
+     * {@code "checkout-agent outputs failing their schema"}. No rate in the headline, for the reason
+     * {@link #toolError} gives: the finding's basis carries the numbers, and a percentage in a title invites
+     * comparing two call sites whose traffic is not comparable.
+     */
+    private static String malformedRate(FindingRow finding) {
+        String callSite = finding.callSiteId();
+        return (callSite == null ? finding.nativeCauseKey() : callSite) + " outputs failing their schema";
     }
 
     /**

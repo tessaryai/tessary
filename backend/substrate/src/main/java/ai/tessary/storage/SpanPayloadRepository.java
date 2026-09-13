@@ -30,7 +30,7 @@ import org.springframework.stereotype.Repository;
 public class SpanPayloadRepository {
 
     private static final String COLS = "project_id, trace_id, span_id, input, output, attributes::text AS attributes, "
-            + "provided_usage::text AS provided_usage, event_ts";
+            + "provided_usage::text AS provided_usage, event_ts, redactions::text AS redactions";
 
     private final JdbcClient jdbc;
 
@@ -43,15 +43,16 @@ public class SpanPayloadRepository {
 
     private static final String UPSERT_SQL = """
                         INSERT INTO span_payload (project_id, trace_id, span_id, input, output, attributes,
-                                                  provided_usage, event_ts)
+                                                  provided_usage, event_ts, redactions)
                         VALUES (:pid, :traceId, :spanId, :input, :output, :attributes::jsonb,
-                                :providedUsage::jsonb, :eventTs::timestamptz)
+                                :providedUsage::jsonb, :eventTs::timestamptz, :redactions::jsonb)
                         ON CONFLICT (project_id, trace_id, span_id) DO UPDATE
                            SET input          = excluded.input,
                                output         = excluded.output,
                                attributes     = excluded.attributes,
                                provided_usage = excluded.provided_usage,
-                               event_ts       = excluded.event_ts
+                               event_ts       = excluded.event_ts,
+                               redactions     = excluded.redactions
                          WHERE excluded.event_ts >= span_payload.event_ts
                         """;
 
@@ -65,6 +66,7 @@ public class SpanPayloadRepository {
         source.addValue("attributes", row.attributes());
         source.addValue("providedUsage", row.providedUsage());
         source.addValue("eventTs", row.eventTs());
+        source.addValue("redactions", row.redactions());
         return source;
     }
 
@@ -165,6 +167,7 @@ public class SpanPayloadRepository {
                 rs.getString("output"),
                 rs.getString("attributes"),
                 rs.getString("provided_usage"),
-                requireIso(rs, "event_ts"));
+                requireIso(rs, "event_ts"),
+                rs.getString("redactions"));
     }
 }

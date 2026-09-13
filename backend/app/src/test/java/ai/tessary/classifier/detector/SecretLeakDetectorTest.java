@@ -7,122 +7,167 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.testsupport.ClassifierObservations;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+/**
+ * The Secret Leak detector's three readings (the redaction stamp, the raw output, a bare redaction token) and
+ * the band each earns. The credentials below are FAKE, structurally valid shapes exempted from this repo's
+ * secret scan in {@code .gitleaks.toml}.
+ */
 class SecretLeakDetectorTest {
 
-    private final SecretLeakDetector detector = new SecretLeakDetector(new ObjectMapper());
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private final SecretLeakDetector detector = new SecretLeakDetector(MAPPER);
 
     private Detection detect(@Nullable String output) {
+        return detect(output, null);
+    }
+
+    private Detection detect(@Nullable String output, @Nullable String redactions) {
         SubstrateObservation obs = new SubstrateObservation(
-                "obs-1", "p", "t", "s", null, null, "llm", "chat", null, output, null, "2026-01-01T00:00:00Z");
+                "obs-1",
+                "p",
+                "t",
+                "s",
+                null,
+                null,
+                "llm",
+                "chat",
+                null,
+                output,
+                null,
+                "2026-01-01T00:00:00Z",
+                redactions);
         return detector.detect(obs, null);
     }
 
-    @Test
-    void providerShapedKeysFireHighAndCritical() {
-        Detection aws = detect("Sure — your key is AKIAIOSFODNN7EXAMPLE and the region is us-east-1.");
-        assertTrue(aws.fired(), "AWS access key id fires");
-        assertEquals(Detection.Severity.CRITICAL, aws.severity());
-        assertEquals(Detection.Confidence.HIGH, aws.confidence());
-        String evidence = Objects.requireNonNull(aws.evidenceJson());
-        assertTrue(evidence.contains("aws-access-key-id"), "evidence names the pattern");
-
-        assertTrue(detect("token: ghp_abcdefghijklmnopqrstuvwxyz0123456789").fired(), "GitHub classic token fires");
-        assertTrue(detect("Use xoxb-1234567890-abcdefghij for the bot.").fired(), "Slack token fires");
-        assertTrue(detect("-----BEGIN RSA PRIVATE KEY-----\nMIIEow...").fired(), "PEM block fires");
-        assertTrue(
-                detect("set ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrst")
-                        .fired(),
-                "Anthropic key fires");
-        assertTrue(detect("maps key AIzaSyA1234567890abcdefghijklmnopqrstuv").fired(), "Google API key fires");
-        assertTrue(detect("stripe: sk_live_abcdefghijklmnop").fired(), "Stripe live key fires");
-        assertTrue(
-                detect("Authorization: Bearer dGhpcy1pcy1hLXZlcnktbG9uZy1vcGFxdWUtdG9rZW4")
-                        .fired(),
-                "bearer token fires");
-    }
+    // ---- the stamp -------------------------------------------------------------------------------------------
 
     @Test
-    void evidenceNeverEchoesTheSecret() {
-        String secret = "AKIAIOSFODNN7EXAMPLE";
-        Detection d = detect("here you go: " + secret);
+    void anAnchoredStampOnTheOutputIsAHighLeakNamedByItsRule() {
+        Detection d = detect(
+                "your key is [REDACTED_SECRET]",
+                "[{\"rule\":\"aws-access-token\",\"field\":\"output\",\"anchored\":true}]");
         assertTrue(d.fired());
-        String evidence = Objects.requireNonNull(d.evidenceJson());
-        assertFalse(evidence.contains(secret), "the raw credential must not appear in evidence");
-        assertTrue(evidence.contains("AKIA…"), "evidence keeps a 4-char redacted prefix");
+        assertEquals(Detection.Severity.CRITICAL, d.severity());
+        assertEquals(Detection.Confidence.HIGH, d.confidence());
+        JsonNode evidence = evidence(d);
+        assertEquals("aws-access-token", evidence.path("pattern").asText(), "named by the rule, not by the token");
+        assertEquals("redaction", evidence.path("source").asText());
+        assertTrue(evidence.path("match_redacted").isMissingNode(), "there is no credential left to excerpt");
     }
 
     @Test
-    void pgpPrivateKeyBlockEvidenceRedactsTheHeaderNotTheCaptureGroup() {
-        Detection d = detect("-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBGRr...");
-        assertTrue(d.fired(), "PGP private-key armor header fires");
-        String evidence = Objects.requireNonNull(d.evidenceJson());
-        assertTrue(evidence.contains("private-key-block"), "evidence names the pattern");
-        assertTrue(
-                evidence.contains("----…"),
-                "the redacted snippet is a prefix of the full header, not the optional-suffix capture group");
-        assertFalse(evidence.contains(" BLO"), "the ' BLOCK' suffix group must not leak into evidence");
+    void anUnanchoredStampIsLow() {
+        Detection d = detect(
+                "api_key = [REDACTED_SECRET]",
+                "[{\"rule\":\"generic-api-key\",\"field\":\"output\",\"anchored\":false}]");
+        assertEquals(Detection.Confidence.LOW, d.confidence(), "a vendor name beside a random string");
+        assertEquals("generic-api-key", evidence(d).path("pattern").asText());
     }
 
     @Test
-    void assignedSecretIsEntropyGatedAndLowConfidence() {
-        Detection highEntropy = detect("config: api_key = \"q7Zr2mK9xW4vN8pL3sT6yB1cF5hJ0dGa\"");
-        assertTrue(highEntropy.fired(), "high-entropy assigned value fires");
-        assertEquals(Detection.Confidence.LOW, highEntropy.confidence(), "generic assignment is LOW band");
+    void anAnchoredRuleWhoseShapeIsNotReliablyALeakIsLow() {
+        for (String rule : SecretLeakDetector.LOW_BAND_RULES) {
+            Detection d =
+                    detect("[REDACTED_SECRET]", "[{\"rule\":\"" + rule + "\",\"field\":\"output\",\"anchored\":true}]");
+            assertEquals(Detection.Confidence.LOW, d.confidence(), rule);
+        }
+    }
 
-        assertFalse(detect("password = \"aaaaaaaaaaaaaaaaaaaa\"").fired(), "low-entropy value is gated out");
-        assertFalse(detect("A password is required to continue.").fired(), "prose never fires");
+    @Test
+    void theStrongestStampOnTheOutputWinsWhateverItsOrder() {
+        Detection d = detect(
+                "[REDACTED_SECRET] and [REDACTED_SECRET]",
+                "[{\"rule\":\"generic-api-key\",\"field\":\"output\",\"anchored\":false},"
+                        + "{\"rule\":\"github-pat\",\"field\":\"output\",\"anchored\":true}]");
+        assertEquals(Detection.Confidence.HIGH, d.confidence());
+        assertEquals("github-pat", evidence(d).path("pattern").asText());
+    }
+
+    @Test
+    void aStampOnTheInputIsNotALeak() {
+        // A user pasting a credential is input hygiene, which this classifier does not claim.
+        assertFalse(detect("ok", "[{\"rule\":\"aws-access-token\",\"field\":\"input\",\"anchored\":true}]")
+                .fired());
+    }
+
+    // ---- the raw output --------------------------------------------------------------------------------------
+
+    @Test
+    void anUnredactedProviderKeyInTheOutputIsHigh() {
+        Detection d = detect("deploy with AKIA" + "QYLPMN5HHHFPZAM2 for staging");
+        assertEquals(Detection.Confidence.HIGH, d.confidence());
+        JsonNode evidence = evidence(d);
+        assertEquals("aws-access-token", evidence.path("pattern").asText());
+        assertEquals("output", evidence.path("source").asText());
+        assertEquals("AKIA…(20 chars)", evidence.path("match_redacted").asText(), "four characters and a length");
+    }
+
+    @Test
+    void evidenceNeverEchoesTheCredential() {
+        String secret = "ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5";
+        Detection d = detect("token: " + secret);
+        assertTrue(d.fired());
+        assertFalse(Objects.requireNonNull(d.evidenceJson()).contains(secret));
     }
 
     @Test
     void firesOnAKeyInsideTheRealGenAiOutputEnvelope() {
-        // SecretLeak scans the raw output column, so a credential in the assistant message of the
-        // stored gen_ai envelope is still caught — the shape ingest actually writes.
+        // The raw output column holds the stored gen_ai envelope, so a credential in the assistant message is
+        // still found: the shape ingest actually writes.
         Detection d = detect(ClassifierObservations.assistantOutput(
-                "Sure, the AWS key is AKIAIOSFODNN7EXAMPLE for the staging bucket."));
-        assertTrue(d.fired(), "a key in the assistant envelope message fires");
-        assertEquals(Detection.Severity.CRITICAL, d.severity());
-        assertFalse(
-                Objects.requireNonNull(d.evidenceJson()).contains("AKIAIOSFODNN7EXAMPLE"), "evidence stays redacted");
+                "Sure, the Stripe key is sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc for the billing job."));
+        assertEquals(Detection.Confidence.HIGH, d.confidence());
+        assertEquals("stripe-access-token", evidence(d).path("pattern").asText());
     }
 
     @Test
-    void cleanAndEmptyOutputsAreQuiet() {
+    void aPlaceholderOrProseIsNotALeak() {
+        assertFalse(detect("set api_key = ${API_KEY} before you run it").fired());
+        assertFalse(detect("A password is required to continue.").fired());
         assertFalse(
                 detect("The deployment finished successfully in 42 seconds.").fired());
         assertFalse(detect("").fired());
         assertFalse(detect(null).fired());
     }
 
+    // ---- a bare token ----------------------------------------------------------------------------------------
+
     @Test
-    void entropyIsBitsPerCharacter() {
-        assertEquals(0.0, SecretLeakDetector.shannonEntropy("aaaa"), 1e-9);
-        assertTrue(SecretLeakDetector.shannonEntropy("q7Zr2mK9xW4vN8pL") > 3.5, "random-ish keys clear the floor");
-        assertTrue(SecretLeakDetector.shannonEntropy("passwordpassword") < 3.5, "repetitive text stays below");
+    void aRedactionTokenWithNoStampIsLow() {
+        // Stored before stamping existed, taken by a prefix rule the corpus does not share, or redacted upstream:
+        // something was removed, and nothing says what.
+        for (String token : new String[] {
+            "[REDACTED_API_KEY]",
+            "[REDACTED_CREDENTIAL]",
+            "[REDACTED_JWT]",
+            "[REDACTED_PRIVATE_KEY]",
+            "[REDACTED_SECRET]"
+        }) {
+            Detection d = detect("the value was " + token);
+            assertTrue(d.fired(), token);
+            assertEquals(Detection.Confidence.LOW, d.confidence(), token);
+            assertEquals("marker", evidence(d).path("source").asText(), token);
+        }
     }
 
     @Test
-    void redactionMarkersFireAtTheirRuleBand() {
-        // The write-path redaction rules run before the sweep, so on a default project the raw literal
-        // is already `[REDACTED_API_KEY]` by the time this detector reads the persisted output.
-        Detection apiKey = detect("Sure — your key is [REDACTED_API_KEY] and the region is us-east-1.");
-        assertTrue(apiKey.fired(), "an API-key redaction token fires");
-        assertEquals(Detection.Confidence.HIGH, apiKey.confidence());
-        assertEquals(Detection.Severity.CRITICAL, apiKey.severity());
-        assertTrue(
-                Objects.requireNonNull(apiKey.evidenceJson()).contains("redacted-api-key"),
-                "evidence names the token's rule");
-        assertTrue(detect("Authorization: [REDACTED_CREDENTIAL]").fired(), "an authorization token fires");
-        assertTrue(detect("session [REDACTED_JWT]").fired(), "a JWT token fires");
-        assertTrue(detect("[REDACTED_PRIVATE_KEY]\nMIIEow...").fired(), "a private-key token fires");
-        Detection secret = detect("password=[REDACTED_SECRET]");
-        assertTrue(secret.fired(), "a secret-assignment token fires");
-        assertEquals(Detection.Confidence.LOW, secret.confidence(), "at the generic assignment's LOW band");
-        assertFalse(
-                detect("mail me at [REDACTED_EMAIL], card [REDACTED_CARD]").fired(), "PII tokens are not credentials");
+    void anUnreadableStampFallsThroughToTheOutput() {
+        Detection d = detect("key AKIA" + "QYLPMN5HHHFPZAM2", "not json");
+        assertEquals(Detection.Confidence.HIGH, d.confidence(), "a broken stamp must not hide a leak in plain sight");
+    }
+
+    private static JsonNode evidence(Detection d) {
+        try {
+            return MAPPER.readTree(Objects.requireNonNull(d.evidenceJson()));
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 }

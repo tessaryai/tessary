@@ -46,6 +46,13 @@ import {
 // This build's `@paid` alias; see src/paid/index.ts for the mechanism.
 import { paid } from "@paid";
 
+/** `ClassifierView.readiness` while Malformed Output has no call site schema to validate against. */
+const WAITING_ON_SCHEMAS = "waiting_on_schemas";
+
+const SCHEMAS_EXPLAINED =
+  "Waiting on schemas. No call site declares an output schema yet, so there is nothing to check outputs against. " +
+  "Schemas arrive when your repository is connected and assessed.";
+
 // A separate lazy chunk, not a static import: nobody opening the Classifiers page pays for the
 // debug section's code until they actually expand its disclosure. See `views/classifiers/debug/`.
 const DebugSection = lazy(() => import("./debug/DebugSection"));
@@ -180,7 +187,15 @@ function DetectorRow({
   const failing = health?.status === "failed";
   // A silent tripwire is healthy: it reads faint, never as a broken dash.
   const quiet = count === 0;
-  const status = !volumeKnown ? "–" : quiet ? "quiet 7d" : `${count} detection${count === 1 ? "" : "s"} 7d`;
+  // A classifier that has nothing to judge yet is not quiet: "quiet 7d" would read as clean.
+  const waiting = classifier.readiness === WAITING_ON_SCHEMAS;
+  const status = waiting
+    ? "waiting on schemas"
+    : !volumeKnown
+      ? "–"
+      : quiet
+        ? "quiet 7d"
+        : `${count} detection${count === 1 ? "" : "s"} 7d`;
 
   return (
     <div className="flex items-center bg-surface hover:bg-hover transition-colors gap-3.5 py-3.25 px-4">
@@ -199,7 +214,10 @@ function DetectorRow({
         </span>
       )}
 
-      <span className={cn("shrink-0 font-mono text-small", quiet ? "text-subtle" : "text-muted")} >
+      <span
+        className={cn("shrink-0 font-mono text-small", quiet || waiting ? "text-subtle" : "text-muted")}
+        title={waiting ? SCHEMAS_EXPLAINED : undefined}
+      >
         {status}
       </span>
 
@@ -489,6 +507,9 @@ function ClassifierRail({
           >
             Sweep failing: {health.last_error ?? "unknown error"}
           </div>
+        )}
+        {classifier.readiness === WAITING_ON_SCHEMAS && (
+          <p className="text-muted m-0 mb-3 text-small">{SCHEMAS_EXPLAINED}</p>
         )}
         <dl
       className="gap-y-1.75 gap-x-3.5 m-0"

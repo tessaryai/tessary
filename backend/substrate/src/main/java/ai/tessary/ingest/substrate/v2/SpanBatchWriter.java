@@ -7,6 +7,7 @@ import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.MediaExternalizer;
 import ai.tessary.ingest.RawEntry;
+import ai.tessary.ingest.RedactionStamp;
 import ai.tessary.model.ContentExtractor;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
@@ -544,7 +545,8 @@ public class SpanBatchWriter {
                 output,
                 attributesJson(raw),
                 priced.providedUsage(),
-                eventTs.toString());
+                eventTs.toString(),
+                redactionsJson(raw));
         return new Prepared(
                 span,
                 payload,
@@ -625,6 +627,25 @@ public class SpanBatchWriter {
      * payload is rewritten at write time and never on read. A carrier whose bytes are not in the column
      * stays in the bag.
      */
+    /**
+     * What redaction removed from this entry, for {@code span_payload.redactions}. A failure to serialize is
+     * logged and dropped rather than failing the write: the content is already redacted, so losing the stamp
+     * costs the leak detector a name, never exposes a credential.
+     */
+    private @Nullable String redactionsJson(RawEntry raw) {
+        List<RedactionStamp> stamps = raw.redactions();
+        if (stamps == null || stamps.isEmpty()) return null;
+        try {
+            return mapper.writeValueAsString(stamps);
+        } catch (JsonProcessingException e) {
+            StructuredLog.warn(log, Markers.OPS, "ingest.v2.redactions-dropped")
+                    .message("dropped %d redaction stamp(s) that would not serialize", stamps.size())
+                    .field("stamps", stamps.size())
+                    .log();
+            return null;
+        }
+    }
+
     private @Nullable String attributesJson(RawEntry raw) {
         Map<String, Object> attrs = raw.metadata();
         if (attrs == null || attrs.isEmpty()) return null;

@@ -27,9 +27,22 @@ public final class ClassifierDtos {
             boolean enabled,
             String mode,
             @JsonProperty("created_at") String createdAt,
-            @JsonProperty("updated_at") String updatedAt) {
+            @JsonProperty("updated_at") String updatedAt,
+            /**
+             * Why an enabled classifier cannot judge anything yet, or null when it can. {@link
+             * #WAITING_ON_SCHEMAS} on Malformed Output while no call site declares a schema: without one there is
+             * nothing to validate against, and a classifier reporting no detections would otherwise read as clean.
+             */
+            @Nullable String readiness) {
+
+        /** Malformed Output with no call site schema to validate against. Arrives from the connected repo. */
+        public static final String WAITING_ON_SCHEMAS = "waiting_on_schemas";
 
         public static ClassifierView of(ClassifierRow r) {
+            return of(r, null);
+        }
+
+        public static ClassifierView of(ClassifierRow r, @Nullable String readiness) {
             return new ClassifierView(
                     r.id(),
                     r.classifierKey(),
@@ -42,7 +55,8 @@ public final class ClassifierDtos {
                     r.enabled(),
                     r.mode(),
                     r.createdAt(),
-                    r.updatedAt());
+                    r.updatedAt(),
+                    readiness);
         }
     }
 

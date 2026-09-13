@@ -69,15 +69,18 @@ class ClassifierDefinitionIntegrationTest {
     }
 
     @Test
-    void secretLeakIsWiredToTheCuratedPatternDetector() {
+    void secretLeakIsWiredToTheCredentialCorpusDetectorAndSeedsArmed() {
         String pid = bootstrapGranted("signal-secret-leak").project().id();
 
         ClassifierRow secretLeak = signals.findByKey(pid, "secret_leak").orElseThrow();
         assertEquals(
                 BuiltInDetector.Kind.SECRET_LEAK,
                 secretLeak.detector(),
-                "Secret Leak is wired to the curated credential-pattern detector");
-        assertEquals(2, secretLeak.version(), "the catalog version bumped to 2 so re-seeding re-syncs it");
+                "Secret Leak is wired to the credential-corpus detector");
+        assertEquals(3, secretLeak.version(), "the catalog version bumped to 3 so re-seeding carries the arming block");
+        assertTrue(
+                secretLeak.configJson() != null && secretLeak.configJson().contains("\"arming\""),
+                "Secret Leak seeds armed");
         assertTrue(secretLeak.enabled(), "Secret Leak seeds enabled");
     }
 

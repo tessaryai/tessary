@@ -14,7 +14,7 @@
 # No `expires` column, on purpose: these are permanent test fixtures and detector sources, and an
 # entry that re-fires on a date is the recurring red run nobody acts on. An entry whose path no
 # longer exists in the export fails the gate by name.
-backend/app/src/test/java/ai/tessary/classifier/detector/SecretLeakDetectorTest.java|fixtures for the product's own secret_leak detector: structurally valid FAKE Google, Stripe, GitHub, Slack, Anthropic and AWS-documentation keys
+backend/app/src/test/java/ai/tessary/classifier/detector/SecretLeakDetectorTest.java|fixtures for the product's own secret_leak detector: structurally valid FAKE AWS, GitHub and Stripe keys
 backend/substrate/src/main/java/ai/tessary/redaction/BuiltInRedactionRules.java|the redaction rules' own regex sources for credential prefixes; no literal key, kept here so a scanner heuristic change cannot turn a control into a red run
 backend/tenancy/src/test/java/ai/tessary/auth/PlaceholderSecretGuardTest.java|fixture: one random 44-char base64 value standing in for a real sealing key, so the guard's "not the placeholder" branch has something to compare; minted for the test, seals nothing
 scripts/check-notice-coverage.sh|a run-scoped throwaway Postgres password literal for a stack that lives minutes and holds nothing
@@ -29,3 +29,6 @@ backend/substrate/src/main/java/ai/tessary/git/GitCloneUrls.java|documents the c
 backend/analysis/src/test/java/ai/tessary/rca/E2bRcaSandboxTest.java|fixture clone URL with the placeholder token "tok"
 sandbox-runner/launcher/server.js|comments document the clone URL and API-key shapes with placeholders
 sandbox-runner/agent-sandbox/agent-stream.js|comments document the clone URL and API-key shapes with placeholders
+backend/substrate/src/test/java/ai/tessary/redaction/GitleaksCorpusTest.java|fixtures for the vendored credential corpus: structurally valid FAKE AWS, GitHub, Stripe, Slack, Tessary and generic-assignment values minted to prove each rule fires, and a base64-wrapped sample JWT; no real credential
+backend/app/src/test/java/ai/tessary/classifier/SecretLeakRedactionSeamIntegrationTest.java|one FAKE AWS-format key sent through OTLP ingest to prove redaction removes it and the secret_leak detector still names it; no real credential
+backend/substrate/src/main/resources/redaction/gitleaks-rules.json|gitleaks' own rule definitions, vendored by scripts/sync-gitleaks.sh: regex and keyword sources for credential formats, no literal key

@@ -187,6 +187,21 @@ public record FindingRow(
         public static final String DISTRIBUTION_SHIFT = "distribution_shift";
 
         /**
+         * A per-span classifier crossed its own arming bar: N detections in a window. Written by
+         * {@code ClassifierArming}, and scoped either to the whole classifier or, for a classifier that
+         * facets its arming, to one call site and one facet of the detection.
+         */
+        public static final String ARMED_WINDOW = "armed_window";
+
+        /**
+         * A call site's outputs are failing their declared schema at a rate its own history does not
+         * predict. Recomputed from an hourly aggregate on every pass, through tool_error's engine, but its own
+         * kind rather than {@link #RATE_SHIFT}: the correction loop reads that kind as a tool's rate and writes
+         * a tool reference, which is not something a call site's finding may ever reach.
+         */
+        public static final String MALFORMED_RATE = "malformed_rate";
+
+        /**
          * A tool's failure rate moved against its own in-control level: the {@code tool_error}
          * classifier's only cause. Deliberately not filed under {@link #DISTRIBUTION_SHIFT}, since
          * a tool-error finding under that kind would open a case labelled metric_drift and name the

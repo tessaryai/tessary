@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * How each classifier's cause identity is scoped into {@code finding.cause_key}.
  *
@@ -56,6 +58,26 @@ public final class CauseKey {
      */
     public static String perSpanClassifier(String classifierId) {
         return classifierId;
+    }
+
+    /**
+     * {@code <classifier_id>:<call_site_id>:<facet>} — a per-span classifier that files one finding per
+     * place and per kind of thing it saw, rather than one for the whole classifier. A leaked AWS key from
+     * one call site and a leaked GitHub token from another are two causes with two fixes, and keyed on
+     * the classifier alone one ruling would silence both. A span with no call site keeps an empty middle
+     * segment, so it stays distinct from every named call site without colliding with them.
+     */
+    public static String perSpanClassifierFacet(String classifierId, @Nullable String callSiteId, String facet) {
+        return classifierId + ":" + (callSiteId == null ? "" : callSiteId) + ":" + facet;
+    }
+
+    /**
+     * {@code <classifier_id>:<call_site_id>} — Malformed Output's shape, one cause per call site. The call site
+     * is the scope because the schema a failure is measured against belongs to it, and the classifier id
+     * rather than its key for the reason {@link #perSpanClassifier} gives.
+     */
+    public static String malformedOutput(String classifierId, String callSiteId) {
+        return classifierId + ":" + callSiteId;
     }
 
     /**

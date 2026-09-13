@@ -143,6 +143,7 @@ class ClassifierWorkerLoggingTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());
@@ -174,6 +175,7 @@ class ClassifierWorkerLoggingTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());
@@ -216,6 +218,7 @@ class ClassifierWorkerLoggingTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 mockBridge,
                 new SyncTaskExecutor());
@@ -244,6 +247,7 @@ class ClassifierWorkerLoggingTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());
@@ -299,6 +303,7 @@ class ClassifierWorkerLoggingTest {
                 preDeployChecks,
                 // This build carries no sweep for behaviour drift or SOP conformance.
                 registryOf(metricSweep, toolErrorSweep),
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());
@@ -366,6 +371,7 @@ class ClassifierWorkerLoggingTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                TestObjectProvider.of(),
                 new ClassifierProperties(),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());

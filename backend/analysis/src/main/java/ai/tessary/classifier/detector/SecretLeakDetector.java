@@ -3,105 +3,97 @@ package ai.tessary.classifier.detector;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.ingest.RedactionStamp;
+import ai.tessary.redaction.GitleaksCorpus;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Secret Leak built-in: a curated credential-pattern set matched over the observation's
- * OUTPUT (an agent echoing a credential is the leak; the user pasting one is an input-hygiene
- * problem this signal does not claim). No model call, no configuration — the pattern set is the
- * product's opinion of what a leaked credential looks like, in the spirit of gitleaks:
+ * The Secret Leak built-in: the agent's OUTPUT carried a credential. An agent echoing a credential is the
+ * leak; a user pasting one is an input-hygiene problem this classifier does not claim.
  *
- * <ul>
- *   <li>provider-shaped keys (AWS, GitHub, Slack, Google, Stripe, Anthropic/OpenAI);</li>
- *   <li>PEM private-key blocks and JWTs;</li>
- *   <li>a generic {@code key/secret/token/password = "value"} assignment, gated by a Shannon-entropy
- *       floor on the value so prose like {@code password is required} never fires.</li>
- * </ul>
+ * <p><b>What it reads, in order.</b>
  *
- * <p>Every pattern fires at {@link Detection.Confidence#HIGH} (these shapes are unambiguous) except
- * the entropy-gated generic assignment, which fires LOW — the discovery-vs-tracking split. Evidence
- * carries the pattern name and a REDACTED snippet (first four characters + length), never the match
- * itself: a leak detector must not re-emit the secret into a verdict row.
+ * <ol>
+ *   <li><b>The redaction stamp.</b> Redaction runs the gitleaks corpus on the write path and replaces a
+ *       credential before anything is stored, recording which rule matched in {@code span_payload.redactions}.
+ *       That is the record of the leak, and it names it: an {@code aws-access-token} rather than a token
+ *       that says only that something was removed.
+ *   <li><b>The output itself.</b> A project that turned redaction off stores credentials as they came, so the
+ *       same corpus runs over the stored output. On a project that redacts, it finds nothing, because the
+ *       credentials are gone.
+ *   <li><b>A redaction token with no stamp.</b> A span stored before stamping existed, one a regex rule
+ *       redacted (the corpus does not name every shape the prefix rules catch), or one a producer redacted
+ *       upstream. Something was removed, and nothing says what.
+ * </ol>
  *
- * <p><b>Redaction runs first, and the detector reads what it left.</b> The persisted output is what
- * this detector sees, and on a default project almost every credential shape above (all but the
- * Stripe key and the rarer AWS prefixes) is also a built-in redaction rule applied on the write path, so the raw literal is gone by the time the sweep runs;
- * with the raw patterns alone the classifier was dead on the OTLP path. The redaction rules
- * substitute a token that names what was removed ({@code [REDACTED_API_KEY]} and its siblings, see
- * {@code BuiltInRedactionRules}), and that token is the record of the leak: the detector fires on it
- * at the confidence the corresponding raw shape carries, with the token itself as the evidence
- * (never the credential). The secret-assignment token is broader than the entropy-gated raw pattern,
- * since that redaction rule has no entropy gate and a six-character floor, so {@code password:
- * required} redacts and then fires LOW; that is the discovery band doing what it is for. A token
- * that arrived already in the producer's own output (an upstream redaction, a re-ingested export)
- * fires the same way, by design: the marker says a credential was there. Nothing is persisted that
- * was not persisted before; the signal is recovered from the marker rather than from the secret.
+ * <p><b>The band says how sure the match is that it is a credential.</b> HIGH is a rule anchored on a literal
+ * the provider stamps into the credential ({@code AKIA}, {@code ghp_}, {@code xoxb-}): the shape is the
+ * proof. LOW is everything else: a vendor's name near a random-looking string, the five anchored rules in
+ * {@link #LOW_BAND_RULES} whose shape still turns up on text that is not a leak, and a bare redaction token.
+ * Only HIGH counts toward the classifier's arming bar; LOW stays listed for anyone looking.
  *
- * <p>This detector deliberately ignores {@code config_json} — the curated pattern set is the
- * product's opinion of what a credential looks like, not user-configurable state — a documented
- * carve-out from the {@code config_json}-override convention {@link RegexDetector} and
- * {@link EncoderDetector} follow.
+ * <p>Evidence names the rule and never carries the credential. Reading the stamp, there is none to carry;
+ * reading raw output, it keeps four characters and the length.
+ *
+ * <p>This detector deliberately ignores {@code config_json}: the corpus is the product's opinion of what a
+ * credential looks like, not per-project state. A documented carve-out from the convention {@link
+ * RegexDetector} and {@link EncoderDetector} follow.
  */
 public final class SecretLeakDetector implements BuiltInDetector {
 
-    /** A named credential pattern; {@code strong} decides the confidence band. */
-    private record CredentialPattern(String name, Pattern pattern, boolean strong) {}
+    /**
+     * Anchored rules that still fire LOW. Their shape is precise, but what it describes is not reliably a
+     * leak: a JWT in an output is as often a public id token or a documentation example as a live session;
+     * an {@code Authorization} header inside a {@code curl} line is what every API reference prints; and a
+     * Kubernetes {@code kind: Secret} manifest is how one is written down, usually with placeholder data.
+     */
+    static final Set<String> LOW_BAND_RULES =
+            Set.of("jwt", "jwt-base64", "curl-auth-header", "curl-auth-user", "kubernetes-secret-yaml");
 
     /**
-     * The tokens the write-path redaction rules leave in place of a credential, each paired with the
-     * band its raw shape fires at: the API-key, authorization, JWT and private-key tokens replace
-     * unambiguous shapes (HIGH); the secret-assignment token replaces the generic assignment, which
-     * on the redaction side is ungated and so fires LOW. {@code [REDACTED_EMAIL]} and the other PII tokens are not credentials and are
-     * not here.
+     * The tokens redaction leaves in place of a credential. All LOW: a token says something was removed and
+     * cannot say what, which is exactly the ambiguity the stamp exists to resolve.
      */
-    private static final List<CredentialPattern> REDACTION_MARKERS = List.of(
-            new CredentialPattern("redacted-api-key", Pattern.compile("\\[REDACTED_API_KEY\\]"), true),
-            new CredentialPattern("redacted-credential", Pattern.compile("\\[REDACTED_CREDENTIAL\\]"), true),
-            new CredentialPattern("redacted-jwt", Pattern.compile("\\[REDACTED_JWT\\]"), true),
-            new CredentialPattern("redacted-private-key", Pattern.compile("\\[REDACTED_PRIVATE_KEY\\]"), true),
-            new CredentialPattern("redacted-secret", Pattern.compile("\\[REDACTED_SECRET\\]"), false));
+    private static final Map<String, Pattern> REDACTION_MARKERS = markers();
 
-    private static final List<CredentialPattern> PATTERNS = List.of(
-            new CredentialPattern(
-                    "aws-access-key-id", Pattern.compile("\\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\\b"), true),
-            new CredentialPattern(
-                    "github-token", Pattern.compile("\\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\\b"), true),
-            new CredentialPattern(
-                    "github-fine-grained-pat", Pattern.compile("\\bgithub_pat_[A-Za-z0-9_]{22,255}\\b"), true),
-            new CredentialPattern("slack-token", Pattern.compile("\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b"), true),
-            new CredentialPattern(
-                    "private-key-block", Pattern.compile("-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"), true),
-            new CredentialPattern(
-                    "jwt", Pattern.compile("\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b"), true),
-            new CredentialPattern("anthropic-api-key", Pattern.compile("\\bsk-ant-[A-Za-z0-9_-]{20,}\\b"), true),
-            new CredentialPattern(
-                    "openai-api-key",
-                    Pattern.compile("\\bsk-(?:proj-|svcacct-)?[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}\\b"),
-                    true),
-            new CredentialPattern("google-api-key", Pattern.compile("\\bAIza[0-9A-Za-z_-]{35}\\b"), true),
-            new CredentialPattern("stripe-key", Pattern.compile("\\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\\b"), true),
-            new CredentialPattern("bearer-token", Pattern.compile("(?i)\\bbearer\\s+[A-Za-z0-9._~+/=-]{30,}"), true),
-            // Generic assigned secret: key/secret/token/password = "<value>". Entropy-gated (see
-            // detect) and LOW-band: it widens recall in discovery mode without polluting tracking.
-            new CredentialPattern(
-                    "assigned-secret",
-                    Pattern.compile("(?i)\\b(?:api[_-]?key|secret|token|password|passwd)\\b\\s*[:=]\\s*[\"']?"
-                            + "([A-Za-z0-9+/_=-]{16,})[\"']?"),
-                    false));
+    private static Map<String, Pattern> markers() {
+        Map<String, Pattern> m = new LinkedHashMap<>();
+        m.put("redacted-api-key", Pattern.compile("\\[REDACTED_API_KEY]"));
+        m.put("redacted-credential", Pattern.compile("\\[REDACTED_CREDENTIAL]"));
+        m.put("redacted-jwt", Pattern.compile("\\[REDACTED_JWT]"));
+        m.put("redacted-private-key", Pattern.compile("\\[REDACTED_PRIVATE_KEY]"));
+        m.put("redacted-secret", Pattern.compile("\\[REDACTED_SECRET]"));
+        return Map.copyOf(m);
+    }
 
-    /** Shannon-entropy floor (bits/char) for the generic assigned-secret value — prose sits well below. */
-    private static final double MIN_ENTROPY_BITS = 3.5;
+    /** Where evidence says the rule was read from. */
+    static final class Source {
+        private Source() {}
+
+        static final String REDACTION = "redaction";
+        static final String OUTPUT = "output";
+        static final String MARKER = "marker";
+    }
 
     private final ObjectMapper mapper;
+    private final GitleaksCorpus corpus;
 
     public SecretLeakDetector(ObjectMapper mapper) {
+        this(mapper, GitleaksCorpus.get());
+    }
+
+    SecretLeakDetector(ObjectMapper mapper, GitleaksCorpus corpus) {
         this.mapper = mapper;
+        this.corpus = corpus;
     }
 
     @Override
@@ -111,77 +103,79 @@ public final class SecretLeakDetector implements BuiltInDetector {
 
     @Override
     public Detection detect(SubstrateObservation obs, @Nullable String config) {
-        // Deliberately the RAW output, not the flattened text view: a leaked credential is a leak
-        // wherever it appears in the output payload — including tool-call arguments and structured
-        // parts a text flatten drops. Credential patterns are alnum, unaffected by JSON escaping.
+        Detection stamped = fromStamps(obs.redactionsJson());
+        if (stamped != null) return stamped;
+
+        // Deliberately the RAW output, not the flattened text view: a leaked credential is a leak wherever
+        // it appears in the output payload, tool-call arguments and structured parts a text flatten drops
+        // included. Credential shapes are alphanumeric, so JSON escaping does not hide them.
         String haystack = obs.output();
         if (haystack == null || haystack.isBlank()) return Detection.none();
-        for (CredentialPattern cp : PATTERNS) {
-            String matched = firstCredentialMatch(cp, haystack);
-            if (matched != null) {
-                String confidence = cp.strong() ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
-                return Detection.fired(Detection.Severity.CRITICAL, evidence(cp.name(), matched), confidence);
-            }
+
+        List<GitleaksCorpus.Finding> findings = corpus.find(haystack);
+        if (!findings.isEmpty()) {
+            GitleaksCorpus.Finding best = strongest(findings);
+            String match = haystack.substring(best.start(), best.end());
+            return fired(
+                    best.ruleId(),
+                    band(best.ruleId(), best.anchored()),
+                    Source.OUTPUT,
+                    match.substring(0, Math.min(4, match.length())) + "…(" + match.length() + " chars)");
         }
-        // A marker is a constant, so the entropy gate does not apply; the band comes from the rule.
-        for (CredentialPattern cp : REDACTION_MARKERS) {
-            Matcher m = cp.pattern().matcher(haystack);
-            if (m.find()) {
-                String confidence = cp.strong() ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
-                return Detection.fired(Detection.Severity.CRITICAL, evidenceJson(cp.name(), m.group()), confidence);
-            }
+
+        for (Map.Entry<String, Pattern> marker : REDACTION_MARKERS.entrySet()) {
+            Matcher m = marker.getValue().matcher(haystack);
+            if (m.find()) return fired(marker.getKey(), Detection.Confidence.LOW, Source.MARKER, m.group());
         }
         return Detection.none();
     }
 
-    /** The first match of {@code cp} in {@code haystack} that survives the entropy gate, or null. */
-    private static @Nullable String firstCredentialMatch(CredentialPattern cp, String haystack) {
-        Matcher m = cp.pattern().matcher(haystack);
-        while (m.find()) {
-            String matched = m.groupCount() >= 1 && m.group(1) != null ? m.group(1) : m.group();
-            // A strong pattern is a credential by shape; a weak one must clear the entropy floor
-            // (a low-entropy value is prose or a placeholder, so the scan continues past it).
-            if (cp.strong() || shannonEntropy(matched) >= MIN_ENTROPY_BITS) {
-                return matched;
-            }
-        }
-        return null;
-    }
-
-    /** Redacted evidence: the pattern name plus first-4-chars + length, never the credential itself. */
-    private String evidence(String patternName, String match) {
-        return evidenceJson(
-                patternName, match.substring(0, Math.min(4, match.length())) + "…(" + match.length() + " chars)");
-    }
-
-    private String evidenceJson(String patternName, String matchRedacted) {
+    /** A detection from what redaction recorded removing from the output, or null when it recorded nothing. */
+    private @Nullable Detection fromStamps(@Nullable String redactionsJson) {
+        if (redactionsJson == null || redactionsJson.isBlank()) return null;
+        JsonNode stamps;
         try {
-            return mapper.writeValueAsString(Map.of("pattern", patternName, "match_redacted", matchRedacted));
+            stamps = mapper.readTree(redactionsJson);
         } catch (JsonProcessingException e) {
-            return "{\"pattern\":\"" + patternName + "\"}";
+            return null;
         }
+        String low = null;
+        for (JsonNode stamp : stamps) {
+            if (!RedactionStamp.OUTPUT.equals(stamp.path("field").asText())) continue;
+            String rule = stamp.path("rule").asText(null);
+            if (rule == null) continue;
+            if (Detection.Confidence.HIGH.equals(
+                    band(rule, stamp.path("anchored").asBoolean(false)))) {
+                return fired(rule, Detection.Confidence.HIGH, Source.REDACTION, null);
+            }
+            if (low == null) low = rule;
+        }
+        return low == null ? null : fired(low, Detection.Confidence.LOW, Source.REDACTION, null);
     }
 
-    /** Shannon entropy in bits per character. */
-    static double shannonEntropy(String s) {
-        if (s.isEmpty()) return 0;
-        int[] counts = new int[128];
-        int other = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c < 128) counts[c]++;
-            else other++;
+    /** The first HIGH finding, or the first finding when none is HIGH. */
+    private static GitleaksCorpus.Finding strongest(List<GitleaksCorpus.Finding> findings) {
+        for (GitleaksCorpus.Finding f : findings) {
+            if (Detection.Confidence.HIGH.equals(band(f.ruleId(), f.anchored()))) return f;
         }
-        double entropy = 0;
-        for (int count : counts) {
-            if (count == 0) continue;
-            double p = (double) count / s.length();
-            entropy -= p * Math.log(p) / Math.log(2);
+        return findings.get(0);
+    }
+
+    static String band(String rule, boolean anchored) {
+        return anchored && !LOW_BAND_RULES.contains(rule) ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
+    }
+
+    private Detection fired(String rule, String confidence, String source, @Nullable String matchRedacted) {
+        Map<String, String> evidence = new LinkedHashMap<>();
+        evidence.put("pattern", rule);
+        evidence.put("source", source);
+        if (matchRedacted != null) evidence.put("match_redacted", matchRedacted);
+        String json;
+        try {
+            json = mapper.writeValueAsString(evidence);
+        } catch (JsonProcessingException e) {
+            json = "{\"pattern\":\"" + rule + "\"}";
         }
-        if (other > 0) {
-            double p = (double) other / s.length();
-            entropy -= p * Math.log(p) / Math.log(2);
-        }
-        return entropy;
+        return Detection.fired(Detection.Severity.CRITICAL, json, confidence);
     }
 }

@@ -86,17 +86,18 @@ recall, and this is the recall it costs.
 | **Any value that arrived as a JSON number or boolean** | `RedactionEngine.java:322-324`: "Numbers, booleans and nulls are returned untouched… it is not that a rule is unlikely to match them, it is that no rule is ever offered them." An SSN or a card number serialized unquoted is invisible to every rule |
 | **The interior of a long inline payload run** (base64 media, embedded blobs) | `RedactionEngine.java:170-180` skips the interior of a contiguous payload-character run once it exceeds `EDGE_MARGIN`×2 + `MIN_RUN` (512 + 512 + 512 ≈ 1.5 KB). The first and last 512 characters are still scanned; everything between them is preserved verbatim and never offered to a rule |
 
-### A control redaction used to break: `secret_leak`
+### What redaction records for `secret_leak`
 
-Through 2026-09-06 this was true: `SecretLeakDetector` (`classifier/detector/SecretLeakDetector.java:42-68`)
-read `obs.output()` (`:117`) after the write-path guard had already replaced ten of its eleven strong
-credential patterns with `[REDACTED_…]` markers, so a green `secret_leak` result on the OTLP path meant
-nothing.
+Redaction removes a credential before anything is stored, which used to leave the `secret_leak` detector
+reading a marker token that could not say what it replaced: `[REDACTED_SECRET]` looked the same for an
+AWS key and for the word after `password=`.
 
-This was fixed on 2026-09-07: the detector now also matches the five redaction-marker tokens
-(`REDACTION_MARKERS`, `:63-68`) and fires at the confidence band the underlying raw shape carries, so the
-marker redaction left behind is itself the evidence. `stripe-key` still has no marker to fall back on,
-because redaction still doesn't cover Stripe's key format — that part is unchanged.
+The `Credentials` built-in now records it. When its corpus rule replaces a credential it writes a stamp
+into `span_payload.redactions`: the gitleaks rule id, the field (`input`, `output` or `attributes`), and
+whether the rule is anchored on a literal the provider puts in the key. Never any part of the credential.
+The detector reads the stamp first, the raw output second (a project with redaction off stores
+credentials as they came), and a bare marker last, at low confidence. Only the corpus rule stamps; the
+regex rules below it are named only by their replacement token.
 
 ## Rules
 
@@ -107,9 +108,24 @@ not edit or delete it. Custom rules are fully owned by the project.
 ### The defaults, in two tiers
 
 - **Regulated PII** — email, US SSN, credit card, phone, IPv4.
-- **Credentials** — `Authorization` bearer/basic values, JSON Web Tokens, provider API-key formats
-  (`sk-`, `sk-ant-`, `AKIA`/`ASIA`, `gh?_`, `github_pat_`, `xox?-`, `AIza`, and our own `tsy_`), secret
-  assignments (`api_key=…`, `password: …`), and private-key block headers.
+- **Credentials** — first, the `Credentials` rule: the gitleaks corpus (`resources/redaction/gitleaks-rules.json`,
+  vendored at a pinned release by `scripts/sync-gitleaks.sh`, merged with this repo's self-minted formats
+  from `scripts/lib/gitleaks-self-minted.toml`), which names over 200 formats and stamps what it removes.
+  Then the prefix rules it does not replace: `Authorization` bearer/basic values, JSON Web Tokens, provider
+  API-key formats (`sk-`, `sk-ant-`, `AKIA`/`ASIA`, `gh?_`, `github_pat_`, `xox?-`, `AIza`, and our own
+  `tsy_`), secret assignments (`api_key=…`, `password: …`), and private-key block headers.
+
+The corpus rule runs at sort order 5, before the PII tier, because the card rule can match a run of digits
+inside a token and leave the corpus nothing to recognise. The prefix rules stay after it because they
+redact what the corpus deliberately does not call a secret: a legacy `sk-` key, a sequential placeholder, a
+password too plain to clear gitleaks' entropy floor. Redaction favours recall; the detector's confidence
+bands are where precision lives.
+
+The corpus's regexes are written for Go's RE2, which never backtracks, and run here on Java's, which does.
+`GitleaksCorpus` translates the constructs the two spell differently and, for gitleaks' keyword-context
+rules (`(?i)[\w.-]{0,50}?(?:vendor)…`), anchors the rule once per vendor name instead of at every position.
+That is the difference between roughly 530 ms and 210 ms per megabyte of keyword-dense text, and a test
+holds the fast path to exactly what a whole-text scan finds.
 
 The second tier exists because of what this product ingests rather than because of a regulation: an
 agent's traces carry tool arguments, tool results, headers and environment dumps, so the

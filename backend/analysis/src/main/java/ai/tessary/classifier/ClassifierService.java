@@ -412,6 +412,18 @@ public class ClassifierService {
     }
 
     /**
+     * Why {@code row} cannot judge anything yet, or null when it can: see {@link ClassifierDtos.ClassifierView}.
+     *
+     * <p>A state, not a switch. The classifier stays enabled and its row untouched, because disabling it would be
+     * a decision somebody made, and re-enabling does not rewind the sweep, which would strand the history a
+     * schema's arrival rewinds to check.
+     */
+    public @Nullable String readiness(String projectId, ClassifierRow row) {
+        if (!BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(row.detector())) return null;
+        return substrate.anyOutputSchema(projectId) ? null : ClassifierDtos.ClassifierView.WAITING_ON_SCHEMAS;
+    }
+
+    /**
      * Sweep-job health for every signal in the project. One row per signal definition regardless
      * of whether a job has ever been enqueued for it, so a brand-new or disabled signal reads as
      * healthy rather than absent from the response.

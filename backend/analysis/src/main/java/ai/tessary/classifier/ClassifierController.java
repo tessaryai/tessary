@@ -51,8 +51,10 @@ public class ClassifierController {
     public ApiResponse<List<ClassifierView>> list(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(
-                service.list(r.project().id()).stream().map(ClassifierView::of).toList());
+        String projectId = r.project().id();
+        return ApiResponse.ok(service.list(projectId).stream()
+                .map(row -> ClassifierView.of(row, service.readiness(projectId, row)))
+                .toList());
     }
 
     /**
@@ -76,7 +78,9 @@ public class ClassifierController {
             @PathVariable String projectSlug,
             @PathVariable String id) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(ClassifierView.of(service.get(r.project().id(), id)));
+        ClassifierRow row = service.get(r.project().id(), id);
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
     }
 
     @PutMapping("/{id}/enabled")
@@ -88,7 +92,9 @@ public class ClassifierController {
             @Valid @RequestBody SetEnabledRequest req) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "enable or disable signals");
-        return ApiResponse.ok(ClassifierView.of(service.setEnabled(r.project().id(), id, req.enabled())));
+        ClassifierRow row = service.setEnabled(r.project().id(), id, req.enabled());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
     }
 
     /**
@@ -104,7 +110,9 @@ public class ClassifierController {
             @Valid @RequestBody SetModeRequest req) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "change a classifier's operating mode");
-        return ApiResponse.ok(ClassifierView.of(service.setMode(r.project().id(), id, req.mode())));
+        ClassifierRow row = service.setMode(r.project().id(), id, req.mode());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
     }
 
     /**
