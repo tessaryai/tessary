@@ -45,7 +45,7 @@
 # Usage:  scripts/refresh-model-prices.sh
 # Then:   review the diff, commit it.
 #
-# Also invoked daily by .github/workflows/price-book-refresh.yml — this file stays
+# Also invoked every 6 hours by .github/workflows/price-book-refresh.yml — this file stays
 # the single source of truth for how the price book gets refreshed.
 
 set -euo pipefail
