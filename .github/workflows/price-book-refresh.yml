@@ -30,13 +30,15 @@ name: Price book refresh
 # header carries the same caveat). A frequent cron does not fix this: the disable trips on repository
 # inactivity, not on cron frequency, and it does not make it worse either.
 #
-# EVERY 6 HOURS, the same cadence tessary-home's publish-pricing.yml fetches this file on. Upstream
-# commits to LiteLLM's file 10-20 times a day, so even this bundles several changes per PR. The
-# fixed, force-pushed branch below keeps it to ONE open PR however often this runs. On a no-change
-# run the job costs a curl, a diff and an exit.
+# DAILY 05:00 UTC. tessary-home's publish-pricing.yml fetches this file from main once a day at
+# 07:20 UTC, so a refresh merged before then is published the same day. Upstream commits to
+# LiteLLM's file 10-20 times a day, so daily bundles about a dozen changes per PR; weekly would
+# bundle ninety, which nobody reviews honestly. The fixed, force-pushed branch below keeps it to ONE
+# open PR however many days it goes unreviewed. On a no-change day the job costs a curl, a diff and
+# an exit.
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 permissions:

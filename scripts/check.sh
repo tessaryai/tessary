@@ -160,7 +160,7 @@
 # CI IS A PER-PR GATE. .github/workflows/check.yml runs this script, this manifest, on
 # `pull_request:`, so "local green => CI green" holds by construction on the same script rather than
 # on a weekly cron nobody watched. secret-scan.yml is armed alongside it. The one cron in this
-# repository is price-book-refresh.yml, every 6 hours. Its bot-authored PRs do not trigger check.yml,
+# repository is price-book-refresh.yml, daily. Its bot-authored PRs do not trigger check.yml,
 # so it runs the price-book-contract gate itself before pushing. Everything else is
 # workflow_dispatch only ahead of the public cutover. namespace-recheck.yml notably included, so
 # that check runs nowhere automatically; its header says what that costs. The overlay's reusable-ecs-deploy.yml is
