@@ -205,6 +205,27 @@ public class MetricRollupRepository {
     }
 
     /** One timeseries bucket of usage. */
+    /**
+     * The install's lifetime total of one unit: every {@code day} rollup, across every org and project. The
+     * telemetry heartbeat's {@code counts.spans} and {@code counts.l1} (devdocs/reference/telemetry-contract.md
+     * §1), read here rather than counted from {@code span} because that would be a scan of the largest table
+     * on the install every six hours.
+     *
+     * <p>Retention never lowers it: retention deletes spans and detections, not their rollups. Deleting a
+     * project or an org does, because {@code metric_rollup} cascades from both. The {@code day} grain, not {@code hour}, because each one
+     * re-aggregates its whole day, so a backend that was down across a few hour boundaries still meters them;
+     * the cost is that the day in progress is not counted yet. Summing both grains would double count (see
+     * {@link #orgTotals}).
+     */
+    public long installLifetimeTotal(UsageUnit unit) {
+        return jdbc.sql("SELECT COALESCE(SUM(value), 0)::bigint FROM metric_rollup"
+                        + " WHERE metric = :metric AND granularity = :bunit")
+                .param("metric", unit.wire())
+                .param("bunit", UsageUnit.BUCKET_DAY)
+                .query(Long.class)
+                .single();
+    }
+
     public record UsageBucket(String bucketStart, long value) {}
 
     /** One unit's total over a period (org-scoped billing read). */

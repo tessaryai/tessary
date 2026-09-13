@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -70,6 +71,48 @@ public class PriceBookRepository {
                 .isPresent();
     }
 
+    /** Whether a book imported from a file with this full sha256 is already here, under any version. */
+    public boolean hasDigest(String digest) {
+        return jdbc.sql("SELECT 1 FROM price_book WHERE digest = :digest")
+                .param("digest", digest)
+                .query(Integer.class)
+                .optional()
+                .isPresent();
+    }
+
+    /**
+     * The full sha256 of the book in force for {@code source}, or null when there is no book or it predates
+     * the {@code digest} column and has not been backfilled. What the heartbeat reports as
+     * {@code price_book.digest}.
+     */
+    public @Nullable String currentDigest(String source) {
+        return jdbc.sql("SELECT digest FROM price_book WHERE source = :source "
+                        + "ORDER BY published_at DESC, created_at DESC LIMIT 1")
+                .param("source", source)
+                .query((rs, n) -> rs.getString("digest"))
+                .optional()
+                .orElse(null);
+    }
+
+    /**
+     * Bring a book an earlier boot imported in line with what this boot knows about it: fill a missing
+     * {@code digest}, and move {@code published_at} back to {@code publishedAt} when it is later.
+     *
+     * <p>The second half is the upgrade repair. Before the bundled book was dated by the jar's build time it
+     * was dated by import time, so a book imported at boot could outrank a newer one fetched from
+     * home.tessary.ai for no reason but when the process started. It only ever moves the date earlier, so it
+     * can never promote a book over one that genuinely came later, and a second call changes nothing.
+     */
+    public void reconcile(String version, String digest, Instant publishedAt) {
+        jdbc.sql("UPDATE price_book SET digest = COALESCE(digest, :digest), "
+                        + "published_at = LEAST(published_at, CAST(:published AS timestamptz)) "
+                        + "WHERE version = :version")
+                .param("version", version)
+                .param("digest", digest)
+                .param("published", publishedAt.toString())
+                .update();
+    }
+
     /** Whether the pricing schema knows this model id — the resolver's one question. */
     public boolean hasModel(String modelId) {
         return jdbc.sql("SELECT 1 FROM model WHERE id = :id")
@@ -82,6 +125,10 @@ public class PriceBookRepository {
     /**
      * Insert a snapshot as a new book: the version, any model ids not seen before, and its rates.
      *
+     * <p>{@code publishedAt} decides which book is in force ({@link #currentBooks} takes the newest), so it
+     * must be when the file's content was published, not when this process got round to importing it: the
+     * jar's build time for the bundled book, home's manifest {@code published_at} for a fetched one.
+     *
      * <p>The version insert is the gate. Two instances booting at once both reach here; the second one's
      * {@code ON CONFLICT DO NOTHING} reports nothing inserted and it stops, rather than racing the first
      * through 2,000 rate rows to the same end.
@@ -89,12 +136,13 @@ public class PriceBookRepository {
     @Transactional
     public Imported importBook(PriceSnapshot snapshot, Instant publishedAt) {
         int book = jdbc.sql("""
-                        INSERT INTO price_book (version, source, published_at)
-                        VALUES (:version, :source, CAST(:published AS timestamptz))
+                        INSERT INTO price_book (version, source, published_at, digest)
+                        VALUES (:version, :source, CAST(:published AS timestamptz), :digest)
                         ON CONFLICT (version) DO NOTHING
                         """)
                 .param("version", snapshot.version())
                 .param("source", snapshot.source())
+                .param("digest", snapshot.digest())
                 .param("published", publishedAt.toString())
                 .update();
         if (book == 0) return Imported.SKIPPED;

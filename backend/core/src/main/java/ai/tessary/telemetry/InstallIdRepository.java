@@ -56,4 +56,18 @@ public class InstallIdRepository {
                 .query(String.class)
                 .single();
     }
+
+    /**
+     * The {@code ping_seq} for the ping about to be sent: 0 for an install's first ping, then one more on
+     * every call, across restarts and replicas (the {@code 0005-telemetry-ping-seq.sql} changeset).
+     *
+     * <p>One {@code UPDATE ... RETURNING}, so the read and the increment are a single statement and two
+     * replicas pinging at once can never be handed the same value. Call {@link #get} first: this assumes
+     * the singleton row exists and fails loudly if it does not.
+     */
+    public long nextPingSeq() {
+        return jdbc.sql("UPDATE telemetry_install SET ping_seq = ping_seq + 1 RETURNING ping_seq - 1")
+                .query(Long.class)
+                .single();
+    }
 }

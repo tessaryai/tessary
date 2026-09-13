@@ -545,7 +545,7 @@ Purpose-level summary. The SQL baseline (`db/changelog/changes/`) is the source 
 | Table | Purpose |
 |---|---|
 | `model` | Model identity — the id a reported model name resolves to (lowercased), plus LiteLLM's provider route prefix and the key's original spelling. Populated from the rate snapshots by `PriceBookImporter`; a name that is not here is honestly unresolved rather than quietly mistyped. |
-| `price_book` | One version of the rate table: `version` (`<source>-<12 hex of the file's sha256>`), `source` (`litellm` \| `manual`), `published_at`. Books LAYER — the newest `manual` book outranks the newest `litellm` one for the models it names — so a correction to a wrong upstream row never edits the vendored book. |
+| `price_book` | One version of the rate table: `version` (`<source>-<12 hex of the file's sha256>`), `digest` (the full sha256, `0006`; what home.tessary.ai names a published book by), `source` (`litellm`), `published_at`. The book in force is the newest `published_at`. Books arrive two ways and are dated by when their content was published, not when they were imported: the file bundled in the jar by the jar's build time (`PriceBookImporter`, on boot), and a book fetched from home by the manifest's `published_at` (`PriceBookFetcher`, on the telemetry tick). The same bytes from both share a version and are stored once. |
 | `model_price` | A model's USD rates per million tokens in one book: input / output / cache-read / cache-write. A NULL bucket means never billed for it; a MISSING row means we hold no rate, which is what makes a span unpriced rather than free. |
 
 ### Pipeline content (per-project synthesized)

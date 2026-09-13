@@ -160,7 +160,7 @@ public record MetricBaselineRow(
         /**
          * Abstains rather than recording zero wherever cache creation is not a billed, and so not a
          * counted, quantity. The model's own rate settles that
-         * ({@link ai.tessary.vitals.TokenPriceBook#billsCacheCreation}) rather than a provider family,
+         * ({@link ai.tessary.pricing.ModelResolver#reportedModelBillsCacheCreation}) rather than a provider family,
          * since the convention differs inside one vendor: {@code gpt-5.6} bills cache creation and
          * {@code gpt-4o}'s automatic caching does not, while Gemini bills storage per hour on every model.
          * A zero here would mean "no writes" when the truth is "not reported".

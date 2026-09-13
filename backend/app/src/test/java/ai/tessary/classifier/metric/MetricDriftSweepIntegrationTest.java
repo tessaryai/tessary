@@ -138,9 +138,9 @@ class MetricDriftSweepIntegrationTest {
     @Autowired
     TenantService tenants;
 
-    /** Prices the cost fixture's generations the way {@code IngestPricer} prices them at ingest. */
+    /** Prices the cost fixture's generations from the imported book, the one {@code IngestPricer} reads. */
     @Autowired
-    ai.tessary.vitals.TokenPriceBook prices;
+    ai.tessary.pricing.PlatformCallPricer prices;
 
     private SubstrateV2Fixtures fx;
 
@@ -662,8 +662,14 @@ class MetricDriftSweepIntegrationTest {
      * abstains on.
      */
     private @Nullable String priceOf(String model, TokenUsage usage) {
-        return prices.costOf(model, usage)
-                .map(java.math.BigDecimal::toPlainString)
+        return prices.price(
+                        model,
+                        null,
+                        Math.toIntExact(usage.inputTokens()),
+                        Math.toIntExact(usage.outputTokens()),
+                        Math.toIntExact(usage.cacheReadTokens()),
+                        Math.toIntExact(usage.cacheWriteTokens()))
+                .map(priced -> priced.total().toPlainString())
                 .orElse(null);
     }
 

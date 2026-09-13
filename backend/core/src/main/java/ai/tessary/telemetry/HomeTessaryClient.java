@@ -2,6 +2,7 @@
 package ai.tessary.telemetry;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -25,7 +26,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class HomeTessaryClient {
 
-    private static final String BASE_URL = "https://home.tessary.ai";
+    public static final String BASE_URL = "https://home.tessary.ai";
 
     private final HttpClient http;
 
@@ -38,7 +39,7 @@ public class HomeTessaryClient {
     }
 
     /**
-     * POST {@code json} to {@code path} (e.g. {@code "/ping"}) under {@value #BASE_URL}. Returns the
+     * POST {@code json} to {@code path} (e.g. {@code "/v1/ping"}) under {@value #BASE_URL}. Returns the
      * HTTP status code. Throws on transport failure; the caller swallows — telemetry must never fail a
      * caller's own operation.
      *
@@ -56,5 +57,32 @@ public class HomeTessaryClient {
                 .build();
         HttpResponse<Void> res = http.send(req, HttpResponse.BodyHandlers.discarding());
         return res.statusCode();
+    }
+
+    /** A GET's status and body. The body is empty for anything but a 200. */
+    public record Fetched(int status, byte[] body) {}
+
+    /**
+     * GET {@code path} (e.g. {@code "/v1/pricing/manifest.json"}) under {@value #BASE_URL}, reading at most
+     * {@code maxBytes} of body. Throws past that limit rather than truncating, so a caller that hashes the
+     * body can never mistake a cut-off file for a different one; throws on transport failure.
+     *
+     * <p>Same enabled-gate contract as {@link #postJson}: the caller checks it before calling.
+     */
+    public Fetched getBytes(String path, int maxBytes) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(BASE_URL + path))
+                .GET()
+                .header("Accept", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .build();
+        HttpResponse<InputStream> res = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+        try (InputStream in = res.body()) {
+            if (res.statusCode() != 200) return new Fetched(res.statusCode(), new byte[0]);
+            byte[] body = in.readNBytes(maxBytes + 1);
+            if (body.length > maxBytes) {
+                throw new IOException(path + " is over the " + maxBytes + "-byte limit");
+            }
+            return new Fetched(res.statusCode(), body);
+        }
     }
 }

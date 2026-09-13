@@ -45,10 +45,8 @@ public class OrganizationRepository {
                 .optional();
     }
 
-    /** Every organization on this install, regardless of owner — the telemetry heartbeat's
-     *  {@code org_count_bucket} input (devdocs/reference/telemetry-contract.md §1). No archived-row
-     *  exclusion: unlike {@code ProjectRepository#findActive}, the ping counts what exists, not what
-     *  is currently in active use. */
+    /** Every organization on this install, regardless of owner. No archived-row exclusion: it counts
+     *  what exists, not what is currently in active use. */
     public long countAll() {
         return jdbc.sql("SELECT COUNT(*) FROM organization").query(Long.class).single();
     }

@@ -30,12 +30,16 @@ import org.springframework.core.io.ClassPathResource;
  * is a different version and therefore a new book. A date would have been weaker on both counts — two
  * different files can carry one date, and one file re-imported on two days would look like two books.
  *
+ * <p>{@link #digest} is the full sha256 the version abbreviates. It is what home.tessary.ai names a published
+ * book by, and home publishes the vendored file byte for byte, so a book fetched from home and the same
+ * file read from the jar share one digest and one version.
+ *
  * <p><b>Rates are converted to per-million-token on the way in.</b> The files are per-token because that
  * is LiteLLM's shape; the schema is per MTok because that is how a rate is published and read. Converting
  * once here means no reader ever has to know which unit it is holding, and the conversion is exact —
  * {@link BigDecimal#movePointRight} shifts the decimal point rather than multiplying through a double.
  */
-public record PriceSnapshot(String source, String version, List<Model> models) {
+public record PriceSnapshot(String source, String version, String digest, List<Model> models) {
 
     private static final Logger log = LoggerFactory.getLogger(PriceSnapshot.class);
 
@@ -69,11 +73,23 @@ public record PriceSnapshot(String source, String version, List<Model> models) {
             log.warn("price snapshot unreadable at {}; its models will hold no rate", resource, e);
             return Optional.empty();
         }
+        return parse(mapper, source, bytes, resource);
+    }
+
+    /**
+     * Parse a rate file's raw bytes, or empty when they are not JSON. {@code origin} names where they came
+     * from, for the log line only. The digest is taken over exactly these bytes, never a re-serialization.
+     */
+    public static Optional<PriceSnapshot> parse(ObjectMapper mapper, String source, byte[] bytes, String origin) {
         JsonNode root;
         try {
             root = mapper.readTree(bytes);
         } catch (IOException e) {
-            log.warn("price snapshot at {} is not parseable JSON; its models will hold no rate", resource, e);
+            log.warn("price snapshot at {} is not parseable JSON; its models will hold no rate", origin, e);
+            return Optional.empty();
+        }
+        if (root == null || !root.isObject()) {
+            log.warn("price snapshot at {} is not a JSON object; its models will hold no rate", origin);
             return Optional.empty();
         }
         Map<String, Model> models = new LinkedHashMap<>();
@@ -83,7 +99,9 @@ public record PriceSnapshot(String source, String version, List<Model> models) {
             if (!pricesTokens(parsed.rates())) return;
             models.putIfAbsent(id, parsed);
         });
-        return Optional.of(new PriceSnapshot(source, source + "-" + digest(bytes), List.copyOf(models.values())));
+        String sha256 = sha256Hex(bytes);
+        return Optional.of(new PriceSnapshot(
+                source, source + "-" + sha256.substring(0, VERSION_HASH_CHARS), sha256, List.copyOf(models.values())));
     }
 
     /**
@@ -99,12 +117,9 @@ public record PriceSnapshot(String source, String version, List<Model> models) {
      * 2026-09-02 they never got this far, because {@code scripts/refresh-model-prices.sh} dropped them
      * while trimming the vendored file down to four fields. That script now vendors upstream verbatim, so
      * the rule lives here — a property of what a price book means, not of how the file was produced.
-     * {@link ai.tessary.vitals.TokenPriceBook} applies the identical rule on the in-memory read
-     * path and the two must not drift: a model imported here but skipped there (or the reverse) reads as
-     * priced in one surface and unpriced in the other, which is the exact disagreement the layered-book
-     * design exists to avoid.
+     * It is the only copy of the rule: every reader prices from the imported book.
      *
-     * <p>Note this filters the models, never the hash: {@link #load} digests the file's raw bytes, so the
+     * <p>Note this filters the models, never the hash: {@link #parse} digests the file's raw bytes, so the
      * version still identifies exactly what was vendored.
      */
     private static boolean pricesTokens(ModelRates rates) {
@@ -144,10 +159,11 @@ public record PriceSnapshot(String source, String version, List<Model> models) {
         return new BigDecimal(v.asText()).movePointRight(PER_MTOK_SHIFT);
     }
 
-    private static String digest(byte[] bytes) {
+    /** Lowercase hex sha256 of {@code bytes}: the digest home.tessary.ai publishes a book under. */
+    public static String sha256Hex(byte[] bytes) {
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
-            return HexFormat.of().formatHex(hash).substring(0, VERSION_HASH_CHARS);
+            return HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is required by every JVM", e);
         }

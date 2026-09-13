@@ -60,7 +60,7 @@ Tessary is licensed under the [Apache License 2.0](./LICENSE).
 
 ## Telemetry
 
-A self-hosted instance sends one anonymous heartbeat to `home.tessary.ai` at backend start and every 24 hours after. It carries a schema version and a timestamp, an install id, the edition, the app version, the host OS family and CPU architecture, and bucketed counts of orgs, projects, and daily trace volume. It never carries trace or prompt content, an email address, an org or project name, a hostname, or a retained IP address.
+A self-hosted instance sends one anonymous heartbeat to `home.tessary.ai` at backend start and every 6 hours after. It carries a schema version, an install id, a ping sequence number, a timestamp, the edition, the app version, the host OS family and CPU architecture, install-wide totals of projects, ingested spans, findings, cases, and classifier detections, and the hash of the model price book it holds. On the same schedule it checks `home.tessary.ai` for a newer price book and downloads it only when the hash has changed. It never carries trace or prompt content, an email address, an org or project name, a hostname, or a retained IP address.
 
 ```bash
 TESSARY_TELEMETRY_ENABLED=false

@@ -348,9 +348,9 @@ holds. A package appears in exactly one module.
 | `sources/` | `substrate` | persistence + REST for `IngestionSource`. | — |
 | `storage/` | `substrate` | the streaming trace substrate (see *SPI-seam slices* above). | — |
 | `tenant/` | `tenancy` | orgs/projects/users, membership, API keys / MCP tokens (one `api_key` store via `ApiKeyService`), RBAC. Environments were removed: a project is the only scope below an org. | [auth-and-mcp.md](./auth-and-mcp.md) |
-| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics`: `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstallIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat`/`TelemetryBuckets` (the `@Scheduled` orchestrator, next to `MeteringWorker`, which needs both). | [telemetry-contract.md](./telemetry-contract.md) |
+| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics`: `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstallIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat` (the `@Scheduled` orchestrator: `POST /v1/ping`, then `pricing/PriceBookFetcher`'s price book check, every 6 hours, next to `MeteringWorker`). | [telemetry-contract.md](./telemetry-contract.md) |
 | `traces/` | `substrate` | read-side trace explorer over the substrate. | — |
 | `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker were removed along with grading; nothing here caps anything now. | — |
 | `version/` | `tenancy` | project-version timeline (one row per commit SHA). | — |
-| `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage`, `TokenPriceBook` and the pricing catalogue behind them. | — |
+| `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage`, and `TokenPriceBook`, an offline reader of the jar's rate file used only by the metric-drift research bridge (the app prices from `pricing/`). | — |
 | `web/` | `core` | shared HTTP plumbing ONLY: `ApiResponse` envelope, `ResponseMeta`, `ErrorBody`, `GlobalExceptionHandler`. | — |

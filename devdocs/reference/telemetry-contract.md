@@ -2,9 +2,11 @@
 
 > **Status: the §1 heartbeat client is built; the §2 license-check endpoint is not.**
 > `backend/core/.../telemetry` (`TelemetryProperties`, `HomeTessaryClient`, `InstallIdRepository`) and
-> `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`, `TelemetryBuckets`) implement §1, §3 and
-> §5 of this contract. No service exists at `home.tessary.ai` today, so the client's POSTs fail —
-> harmlessly; see §1's error handling — until that service (owner: §6) is stood up. The
+> `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`) implement §1, §3 and §5 of this contract.
+> The server is `tessaryai/tessary-home`; §1 matches its `POST /v1/ping` route, and
+> `TelemetryHeartbeatTest` validates the real payload against a copy of that repository's
+> `contracts/ping.v1.schema.json`. Until `home.tessary.ai` is deployed the client's POSTs fail,
+> harmlessly (see §1's error handling). The
 > Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.analytics`,
 > `frontend/src/lib/mixpanel.ts`) is gone outright, not superseded gradually — deleted in the same
 > change that added this client. §2's license-check endpoint remains spec-only.
@@ -13,38 +15,40 @@ Anonymous ping, opt-out, disclosed in the README.
 
 ## 1. Ping payload
 
-Sent from the backend process (see §4, Scope). Every field below is required
-unless marked optional; `contract_version` governs which optional fields a given
-payload may carry (see §5, Versioning).
+`POST https://home.tessary.ai/v1/ping`, JSON, sent from the backend process (see §4, Scope). The
+first five fields are required by home; home answers 400 without them. The rest are optional there
+and always sent here. Home strips any field it does not know.
 
 | Field | Type | Example | Purpose |
 |---|---|---|---|
-| `contract_version` | int | `1` | Schema version of this payload; see §5. |
+| `contract_version` | int | `1` | Schema version of this payload; must match the `/v1` route. See §5. |
 | `install_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Generated once at first boot, persisted locally. Identifies an install, never a person or org — never derived from org name, user email, or license key. |
+| `ping_seq` | int ≥ 0 | `41` | 0 on an install's first ping, then one more on every ping, persisted in `telemetry_install.ping_seq` so it keeps rising across restarts and replicas. Lets home tell a missed ping from a restart. |
+| `sent_at` | ISO-8601 UTC, `Z` | `"2026-09-13T07:20:00.123Z"` | When the ping was generated. |
+| `app_version` | string, ≤ 64 chars | `"2026.9.1"` | The running app's version; `"dev"` outside a packaged jar. |
 | `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live: the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
-| `app_version` | string (semver) | `"2026.9.1"` | The running app's version. |
-| `os` | string | `"linux"` | Host OS family. |
-| `arch` | string | `"arm64"` | Host CPU architecture. |
-| `org_count_bucket` | enum bucket | `"1-5"` | Coarse, bucketed org count — never the exact number. |
-| `project_count_bucket` | enum bucket | `"6-25"` | Coarse, bucketed project count — never the exact number. |
-| `trace_volume_bucket` | enum bucket | `"1k-10k"` | Coarse, bucketed daily trace-ingest volume (see the closed set below) — never an exact count, and never trace content. |
-| `timestamp` | ISO-8601 UTC | `"2026-09-01T00:00:00Z"` | When the ping was generated. |
+| `os` | string, ≤ 32 chars | `"linux"` | Host OS family. |
+| `arch` | string, ≤ 32 chars | `"arm64"` | Host CPU architecture. |
+| `counts.projects` | int ≥ 0 | `3` | Projects on the install, archived ones included. |
+| `counts.spans` | int ≥ 0 | `1204551` | Spans ingested over the install's life: the sum of every `day` rollup of `ingested_spans` in `metric_rollup`. |
+| `counts.findings` | int ≥ 0 | `88` | Findings on the install, in any status. |
+| `counts.cases` | int ≥ 0 | `12` | Cases on the install, open or resolved. |
+| `counts.l1` | int ≥ 0 | `40210` | Classifier detections over the install's life: the sum of every `day` rollup of `l1_evals`. |
+| `price_book.digest` | sha256 hex | `"a5ad23f7…"` | The sha256 of the price book this install prices from. Omitted when it holds none (pricing disabled, or a book imported before digests were recorded and not yet backfilled). |
+| `price_book.schema_max` | int | `1` | The newest price-book manifest schema this build parses (§1a). |
 
-**Bucket enums — closed sets, not free-form strings.** Both sides of the ping
-exchange must agree on the exact boundaries; a "coarse bucket" left as an
-illustrative example rather than an enumerated set defeats this doc's purpose
-of being mechanically diffable against a real implementation.
+**Counts.** Totals across the whole install, never per org or project, and never names or content.
+`counts` is sent whole or not at all: if any count fails to read, the ping goes out without it.
+`spans` and `l1` come from the metering rollups rather than a `COUNT(*)` so the ping never scans the
+span table. Those rollups survive retention, so the two totals do not drop when old spans are
+deleted. They lag by up to a day, because only closed days are summed. They drop when a project or
+org is deleted, because `metric_rollup` cascades from both. `projects`, `findings` and `cases` are
+current row counts.
 
-`org_count_bucket` / `project_count_bucket`: `"0"`, `"1-5"`, `"6-25"`,
-`"26-100"`, `"101-500"`, `"500+"`.
+**Not sent.** `deploy_mode`, which home's contract also accepts.
 
-`trace_volume_bucket` (traces/day, rolling 24h average): `"0"`, `"1-100"`,
-`"101-1k"`, `"1k-10k"`, `"10k-100k"`, `"100k+"`.
-
-Adding a bucket boundary is an additive change under §5's versioning rule; a
-consumer on an older `contract_version` simply never sees the new bucket value.
-Narrowing or removing a boundary is not additive and needs the major-version
-bump §5 describes.
+**Response.** Ignored. `HomeTessaryClient` discards the body; a non-2xx status is logged at debug
+and the next ping is the retry.
 
 **Anonymity guarantee — closed negative list.** The ping never carries: an email
 address; a hostname; an org or project name; trace, prompt, or dataset content; a license key
@@ -52,11 +56,46 @@ address; a hostname; an org or project name; trace, prompt, or dataset content; 
 the heartbeat ping); or an IP address retained beyond the lifetime of the
 inbound connection.
 
-**Frequency.** Once on backend process start, then every 24 hours, jittered to
-avoid a synchronized thundering herd across self-hosted fleets. Backend-only
-(§4). Deliberately coarser than the Mixpanel per-action event stream it
-replaces — this is a heartbeat with rollup counts, not a re-implementation of
-the now-deleted Mixpanel doc's seven-row backend event inventory.
+**Frequency.** Once on backend process start (after a 5-30 second jitter, to
+avoid a synchronized thundering herd across self-hosted fleets), then every 6
+hours, measured from the end of the previous tick. Backend-only (§4).
+Deliberately coarser than the Mixpanel per-action event stream it replaces —
+this is a heartbeat, not a re-implementation of the now-deleted Mixpanel doc's
+seven-row backend event inventory.
+
+## 1a. Price book check
+
+The same tick, right after the ping and regardless of whether the ping succeeded
+(`pricing/PriceBookFetcher`, called from `TelemetryHeartbeat`):
+
+1. `GET https://home.tessary.ai/v1/pricing/manifest.json`, which home serves as
+   `{"schema": 1, "digest": "<sha256>", "url": "https://home.tessary.ai/v1/pricing/<sha256>.json", "published_at": "<ISO-8601>"}`.
+   No request body, no identifiers.
+2. If a book with that `digest` is already in `price_book`, stop. This is almost
+   every tick, and it costs one indexed lookup.
+3. Otherwise `GET /v1/pricing/<digest>.json`: tessary's vendored LiteLLM file,
+   published byte for byte from `main` (tessaryai/tessary-home's
+   `publish-pricing.yml`).
+4. Import it as a new book dated by the manifest's `published_at`. New spans and
+   platform calls price from it; stored costs never change.
+
+The instance refuses, logs, and keeps the book it has when: the manifest is not
+JSON; `schema` is not one it parses; `digest` is not 64 lowercase hex; `url` is
+anything but home's own path for that digest; `published_at` is not an instant;
+the book is over 32 MB, does not hash to `digest`, or prices no models. home
+being unreachable is the same: the next tick retries.
+
+**Which book is in force.** The newest `published_at` per source. The book
+bundled in the jar is dated by the jar's build time (Spring Boot `build-info`),
+so a restart cannot put an older bundled book back in force over a newer fetched
+one, and a newer release's bundle still wins over an older fetched book. home
+publishes the same bytes the jar carries, so the two share a digest and a
+version and are never stored twice.
+
+**Opted out.** Both calls sit behind the one `TESSARY_TELEMETRY_ENABLED` gate
+(§3). An opted-out install never fetches and prices from its bundled book, which
+updates only with a release. `tessary.pricing.enabled=false` turns off both the
+bundled import and the fetch.
 
 ## 2. License-check endpoint
 
@@ -90,8 +129,8 @@ wins).
 ([`config-keys.md`](./config-keys.md)).
 
 When set `false`: zero outbound network calls — including DNS resolution to
-`home.tessary.ai` — from the backend process (§4), covering both the heartbeat
-ping (§1) and the license-check call (§2). This is written precisely enough for
+`home.tessary.ai` — from the backend process (§4), covering the heartbeat
+ping (§1), the price book check (§1a), and the license-check call (§2). This is written precisely enough for
 `check-zero-egress.sh` to assert
 mechanically: with the var off, no attempt to resolve or reach
 `home.tessary.ai` may occur anywhere in a boot-to-triage run — proven via a
@@ -124,9 +163,8 @@ appended to the bottom of this file recording what changed and why.
 
 ## 6. Owner
 
-The `home.tessary.ai` service itself lives outside this repo. Owner: **the Tessary
-maintainers (security@tessary.ai)** — the service is not yet built; the owners have taken
-responsibility for building and hosting it.
+The `home.tessary.ai` service itself lives outside this repo, in `tessaryai/tessary-home`. Owner:
+**the Tessary maintainers (security@tessary.ai)**.
 
 ## Changelog
 
@@ -135,3 +173,11 @@ responsibility for building and hosting it.
 - 2026-09-01 — The §1 heartbeat client lands: `analytics` (Mixpanel) is deleted outright — backend
   package and frontend `lib/mixpanel.ts` + all 13 call sites — and replaced by `core`/`surfaces`'s
   `telemetry` package, built to this contract. §2 (license-check) stays spec-only.
+- 2026-09-13 — §1 aligned with the server actually built, `tessary-home`'s `POST /v1/ping`, still
+  `contract_version` 1. The path moved from `/ping` to `/v1/ping`; `ping_seq` was added and
+  `timestamp` became `sent_at`, both required by that route; `org_count_bucket`,
+  `project_count_bucket` and `trace_volume_bucket` were replaced by the route's `counts` object
+  (`projects`, `spans`, `findings`, `cases`), plus `counts.l1`. Not a version bump under §5: no server ever accepted the earlier shape, so no
+  consumer saw it. Frequency went from 24 hours to 6.
+- 2026-09-13 — §1a: the instance checks home's price book manifest on the same 6-hour tick and imports
+  a new book when the digest changes. The ping gains `price_book.digest` and `price_book.schema_max`.

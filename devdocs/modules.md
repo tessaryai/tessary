@@ -32,10 +32,12 @@ from below any more: the ping is self-scheduled, not called per-request, so the 
 import the emitter" question the old paragraph answered no longer has an object. The split itself is
 forced, not stylistic: `core` has no dependency on `tenancy` or `substrate` (by design — see its own
 pom), so the dumb transport, config, and install-id persistence (`TelemetryProperties`,
-`HomeTessaryClient`, `InstallIdRepository`) sit in `core` where `analytics` used to, but the orchestrator
-that actually gathers org/project/trace-volume counts (`TelemetryHeartbeat`, `TelemetryBuckets`) has
-to sit above both — `surfaces`, next to `MeteringWorker`, the existing precedent for a plain
-`@Scheduled` heartbeat with no dedicated executor.
+`HomeTessaryClient`, `InstallIdRepository`) sit in `core` where `analytics` used to. The orchestrator
+(`TelemetryHeartbeat`) sits in `surfaces`, next to `MeteringWorker`, the existing precedent for a plain
+`@Scheduled` heartbeat with no dedicated executor. It has to sit above `core`: the install-wide
+counts it sends come from `tenancy` (projects), `analysis` (findings, cases) and `substrate` (the
+`metric_rollup` span and detection totals), and the price book check it runs is `substrate`'s
+`pricing/PriceBookFetcher`.
 
 **`metering` and `billing` are in `surfaces`.** `metering` imports `llm` and `plan` because it measures
 platform LLM spend, and `billing` is now a thin read over it — since self-serve billing was deleted, the surviving

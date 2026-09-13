@@ -50,7 +50,7 @@ public final class MetricTokens {
      * <p>{@code tok_cache_write} is folded only where the model is billed for cache creation, so on a
      * bucket whose traffic never was, its sketch stays empty and its evidence pair reads {@code null}
      * rather than {@code 0} — "not measured" rather than "no writes"
-     * ({@link ai.tessary.vitals.TokenPriceBook#billsCacheCreation}).
+     * ({@link ai.tessary.pricing.ModelResolver#reportedModelBillsCacheCreation}).
      */
     public static final String INPUT = Measure.TOK_INPUT;
 

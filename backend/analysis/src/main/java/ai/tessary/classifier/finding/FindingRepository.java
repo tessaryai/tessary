@@ -56,6 +56,12 @@ public class FindingRepository {
         this.jdbc = jdbc;
     }
 
+    /** Every finding on this install, in any status and any project: the telemetry heartbeat's
+     *  {@code counts.findings} (devdocs/reference/telemetry-contract.md §1). */
+    public long countAll() {
+        return jdbc.sql("SELECT COUNT(*) FROM finding").query(Long.class).single();
+    }
+
     /**
      * The outcome of recording a firing against a cause.
      *

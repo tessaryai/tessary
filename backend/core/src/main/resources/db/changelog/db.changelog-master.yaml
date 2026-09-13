@@ -40,3 +40,9 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0004-malformed-output-state.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0005-telemetry-ping-seq.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0006-price-book-digest.sql
+      relativeToChangelogFile: false

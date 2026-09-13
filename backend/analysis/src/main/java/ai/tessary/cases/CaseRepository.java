@@ -39,6 +39,12 @@ public class CaseRepository {
         this.jdbc = jdbc;
     }
 
+    /** Every case on this install, open or resolved, in any project: the telemetry heartbeat's
+     *  {@code counts.cases} (devdocs/reference/telemetry-contract.md §1). */
+    public long countAll() {
+        return jdbc.sql("SELECT COUNT(*) FROM eval_case").query(Long.class).single();
+    }
+
     // ---- paging vocabulary -------------------------------------------------------------------
 
     /**

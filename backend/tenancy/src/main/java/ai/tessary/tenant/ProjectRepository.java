@@ -80,9 +80,8 @@ public class ProjectRepository {
                 .single();
     }
 
-    /** Every project on this install — the telemetry heartbeat's {@code project_count_bucket} input
-     *  (devdocs/reference/telemetry-contract.md §1). Mirrors {@link OrganizationRepository#countAll}:
-     *  the whole install, not just {@link #findActive}. */
+    /** Every project on this install, archived ones included: the telemetry heartbeat's {@code counts.projects}
+     *  (devdocs/reference/telemetry-contract.md §1). */
     public long countAll() {
         return jdbc.sql("SELECT COUNT(*) FROM project").query(Long.class).single();
     }

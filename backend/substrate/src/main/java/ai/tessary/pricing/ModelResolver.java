@@ -2,8 +2,13 @@
 package ai.tessary.pricing;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -45,7 +50,19 @@ public class ModelResolver {
     private static final String[] VENDOR_PREFIXES = {"anthropic.", "openai.", "meta.", "mistral.", "cohere.", "amazon."
     };
 
+    /** How long a memoised cache-creation answer is trusted before the books in force are re-read. */
+    private static final Duration BOOKS_RECHECK = Duration.ofMinutes(5);
+
+    /**
+     * {@link #reportedModelBillsCacheCreation} answers, valid for the books in force when {@code books} was read.
+     * Swapped whole, never edited in place, so a reader never sees answers from two different books.
+     */
+    private record CacheCreationMemo(List<String> books, Instant checkedAt, Map<String, Boolean> answers) {}
+
     private final PriceBookRepository books;
+
+    private volatile CacheCreationMemo memo =
+            new CacheCreationMemo(List.of(), Instant.EPOCH, new ConcurrentHashMap<>());
 
     public ModelResolver(PriceBookRepository books) {
         this.books = books;
@@ -78,12 +95,8 @@ public class ModelResolver {
      * different sentences and only one of them is a number: a call site that switched provider
      * would otherwise show a clean collapse in cache writes for purely bookkeeping reasons.
      *
-     * <p><b>The measure does not call this yet, and that is deliberate.</b> It asks once per leaf
-     * span inside a sweep, where this method's one-to-three queries would be a per-span database
-     * round trip, so {@code vitals/TokenPriceBook#billsCacheCreation} answers it from an in-memory
-     * map loaded from the same rate file. This becomes the single implementation once {@code
-     * PriceBookRepository} carries a cached convention lookup; until then the two are kept in step
-     * by reading the same book, and a change to either belongs in both.
+     * <p>The metric-drift measure asks once per leaf span inside a sweep, so it calls the memoised
+     * {@link #reportedModelBillsCacheCreation} rather than this.
      *
      * <p>Takes a {@code model.id}: a name as a producer reported it must be put through {@link
      * #resolve} first, or a vendor-prefixed spelling the book carries only in bare form answers
@@ -111,6 +124,39 @@ public class ModelResolver {
                     return write != null && write.signum() > 0;
                 })
                 .orElse(false);
+    }
+
+    /**
+     * {@link #billsCacheCreation} for a model name as a producer reported it, memoised per name for the books in
+     * force. The metric-drift {@code tok_cache_write} measure asks this once per leaf span inside a sweep, where
+     * {@link #resolve} plus a rate lookup would be several queries per span; memoised, a sweep costs one lookup
+     * per distinct model.
+     *
+     * <p>The books in force are re-read at most every {@link #BOOKS_RECHECK}, and a changed set discards every
+     * answer, so a book fetched from home.tessary.ai reaches this within that window without a restart.
+     */
+    public boolean reportedModelBillsCacheCreation(@Nullable String reportedModelName) {
+        if (reportedModelName == null || reportedModelName.isBlank()) return false;
+        String key = reportedModelName.trim().toLowerCase(Locale.ROOT);
+        CacheCreationMemo current = currentMemo();
+        Boolean known = current.answers().get(key);
+        if (known != null) return known;
+        boolean answer = resolve(key).map(this::billsCacheCreation).orElse(false);
+        current.answers().put(key, answer);
+        return answer;
+    }
+
+    private CacheCreationMemo currentMemo() {
+        CacheCreationMemo current = memo;
+        Instant now = Instant.now();
+        if (now.isBefore(current.checkedAt().plus(BOOKS_RECHECK))) return current;
+        List<String> inForce =
+                books.currentBooks().stream().map(PriceBook::version).toList();
+        CacheCreationMemo next = inForce.equals(current.books())
+                ? new CacheCreationMemo(inForce, now, current.answers())
+                : new CacheCreationMemo(inForce, now, new ConcurrentHashMap<>());
+        memo = next;
+        return next;
     }
 
     /** {@code key} with the first matching prefix removed, or unchanged when none matches. */

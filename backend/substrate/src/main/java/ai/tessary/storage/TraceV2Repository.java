@@ -6,9 +6,6 @@ import static ai.tessary.storage.SessionRepository.requireIso;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -107,20 +104,6 @@ public class TraceV2Repository {
      */
     public boolean getOrCreate(TraceV2Row row) {
         return jdbc.sql(GET_OR_CREATE_SQL).paramSource(params(row)).update() > 0;
-    }
-
-    /**
-     * Traces started in the last {@code since..now} window, across every project on this install, the
-     * telemetry heartbeat's {@code trace_volume_bucket} input (devdocs/reference/telemetry-contract.md
-     * §1: "rolling 24h average"). Deliberately install-wide, unlike every other query in this class:
-     * the ping reports one coarse install-level bucket, never a per-project figure, so there is no
-     * {@code project_id} predicate to add.
-     */
-    public long countStartedSince(Instant since) {
-        return jdbc.sql("SELECT COUNT(*) FROM trace WHERE started_at >= :since AND NOT is_deleted")
-                .param("since", OffsetDateTime.ofInstant(since, ZoneOffset.UTC))
-                .query(Long.class)
-                .single();
     }
 
     /**
