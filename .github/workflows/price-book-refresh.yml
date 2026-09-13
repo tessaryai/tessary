@@ -20,32 +20,25 @@ name: Price book refresh
 #      create and approve pull requests". Without it, `gh pr create` below 403s — loud failure,
 #      not a silent no-op, which is the correct behavior until that's turned on.
 #   2. PRs authored by the default GITHUB_TOKEN don't trigger other `pull_request`-scoped
-#      workflows (a GitHub platform limitation, not a bug here). That's moot in practice today —
-#      every workflow in this repo is `schedule` + `workflow_dispatch` only, none trigger on
-#      `pull_request` — but it's worth stating so a reviewer isn't confused by the opened PR
-#      showing no CI status check.
+#      workflows (a GitHub platform limitation, not a bug here), and check.yml IS one, so the PR
+#      this opens shows no CI status check. That is why the job below runs
+#      scripts/check-price-book-contract.sh itself before it pushes: the one gate that matters to
+#      this file (tessary-home fetches it by raw URL, see that script's header) cannot be skipped by
+#      the only PRs that routinely change it.
 #
-# GitHub disables scheduled workflows after 60 days without repository activity (drift-checks.yml's header
-# carries the same caveat). A daily cron does not fix this — the disable trips on repository
-# inactivity, not on cron frequency — and it does not make it worse either.
-# ALL AUTOMATIC TRIGGERS ARE DISABLED. Nothing in this repository starts a workflow run on its
-# own; every workflow here is `workflow_dispatch` only, so runs happen when a human presses Run.
-# Re-arming them is tracked separately. The original trigger block for this file is preserved
-# commented-out immediately below — re-enabling is uncommenting it, nothing else.
-# on:
-#   schedule:
-#     # DAILY 05:00 UTC. Unlike every other cron in this repo (drift-checks.yml 0 3 * * 1, codeql.yml 0 4 * * 1 — all Mondays-only), this one runs every day ON PURPOSE: a
-#     # stale price book doesn't just mis-render a number, it corrupts the cost_drift classifier's
-#     # output (MetricSource reads TokenPriceBook, which reads this same vendored file), so the
-#     # staleness window is a correctness window, not a display-freshness nicety. Upstream commits to
-#     # this file 10-20 times a day, so even daily bundles a dozen changes per PR; weekly would
-#     # bundle ninety, which nobody reviews honestly. On Mondays this still lands clear of the other
-#     # three (one hour after codeql.yml's 04:00, two after drift-checks.yml's 03:00). On a no-change day the
-#     # job costs a curl, a diff and an exit.
-#     - cron: '0 5 * * *'
-#   workflow_dispatch:
-
+# GitHub disables scheduled workflows after 60 days without repository activity (drift-checks.yml's
+# header carries the same caveat). A frequent cron does not fix this: the disable trips on repository
+# inactivity, not on cron frequency, and it does not make it worse either.
+#
+# DAILY 05:00 UTC. tessary-home's publish-pricing.yml fetches this file from main once a day at
+# 07:20 UTC, so a refresh merged before then is published the same day. Upstream commits to
+# LiteLLM's file 10-20 times a day, so daily bundles about a dozen changes per PR; weekly would
+# bundle ninety, which nobody reviews honestly. The fixed, force-pushed branch below keeps it to ONE
+# open PR however many days it goes unreviewed. On a no-change day the job costs a curl, a diff and
+# an exit.
 on:
+  schedule:
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 permissions:
@@ -61,6 +54,10 @@ jobs:
 
       - name: refresh vendored price book
         run: bash scripts/refresh-model-prices.sh
+
+      # Before the diff, so a refresh that would break tessary-home's fetch never becomes a PR.
+      - name: price book contract
+        run: bash scripts/check-price-book-contract.sh
 
       - name: check for changes
         id: diff

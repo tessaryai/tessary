@@ -436,6 +436,11 @@ tasks:
     cmds:
       - bash scripts/check-no-bedrock.sh
 
+  check:price-book-contract:
+    desc: "The vendored price book stays at its pinned path, parses as a LiteLLM-shaped object with a floor of priced models, and every in-repo reader and writer names that path. tessary-home fetches it by raw GitHub URL, so a move breaks every instance's price updates. Runs in `task check` and in price-book-refresh.yml."
+    cmds:
+      - bash scripts/check-price-book-contract.sh
+
   classifiers:parity:
     desc: "Run the classifier port-parity gates (Python <-> Java/JS duplicates that must not drift). ALL SIX pins are overlay-owned, so this runs 6 when they are importable and ZERO otherwise, saying so loudly rather than printing a bare OK. `--edition open` forces the zero-pin arm."
     cmds:

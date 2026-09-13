@@ -159,10 +159,11 @@
 # ---------------------------------------------------------------------------------------------
 # CI IS A PER-PR GATE. .github/workflows/check.yml runs this script, this manifest, on
 # `pull_request:`, so "local green => CI green" holds by construction on the same script rather than
-# on a weekly cron nobody watched. secret-scan.yml is armed alongside it, and those two are the whole
-# of it: there is no cron anywhere in this repository, and everything else is workflow_dispatch only
-# ahead of the public cutover. namespace-recheck.yml notably included, so that check runs nowhere
-# automatically; its header says what that costs. The overlay's reusable-ecs-deploy.yml is
+# on a weekly cron nobody watched. secret-scan.yml is armed alongside it. The one cron in this
+# repository is price-book-refresh.yml, daily. Its bot-authored PRs do not trigger check.yml,
+# so it runs the price-book-contract gate itself before pushing. Everything else is
+# workflow_dispatch only ahead of the public cutover. namespace-recheck.yml notably included, so
+# that check runs nowhere automatically; its header says what that costs. The overlay's reusable-ecs-deploy.yml is
 # `workflow_call`.
 #
 # Nothing is merge-BLOCKING: this repo's plan tier offers neither branch protection nor rulesets, so
@@ -303,6 +304,7 @@ compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no 
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
 classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 no-bedrock|scripts/check-no-bedrock.sh|RUN|RUN|repo-wide invariant, every slice and every edition
+price-book-contract|scripts/check-price-book-contract.sh|RUN|RUN|the vendored price book's path and shape are a contract tessary-home fetches by raw URL; nothing in this repo reads that URL, so this gate is the only place a move, rename or reshape shows up. Repo-wide and cheap (one JSON parse, a few greps), so it runs on every slice too
 frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction ('@paid' resolves to the in-tree stub)
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
 paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid frontend surfaces; they live in the overlay|a gate that lives in the overlay
@@ -546,6 +548,7 @@ if [ -z "$SLICES" ]; then
     _gate compile-service
     _gate overlay-schema
     _gate no-bedrock
+    _gate price-book-contract
     _gate frontend
     _gate paid-image
     _gate paid-frontend
@@ -620,11 +623,13 @@ if [ "$want_compile_service" = 1 ]; then
     _gate compile-service
 fi
 
-# ALWAYS, whatever slice was asked for. The Bedrock ban and the license-header gate are both
-# repo-wide invariants and both cheap (a few greps / a text scan), so a narrow `task check -- rca`
-# must not be a hole a new call site or a new header-less file slips through.
+# ALWAYS, whatever slice was asked for. The Bedrock ban, the license-header gate and the price-book
+# contract are all repo-wide invariants and all cheap (a few greps / a text scan / one JSON parse),
+# so a narrow `task check -- rca` must not be a hole a new call site, a new header-less file or a
+# moved price book slips through.
 _gate no-bedrock
 _gate license-headers
+_gate price-book-contract
 # Also unconditional, for the same reason: docker-compose.yml is the PUBLISHED one-command
 # install, so any edit to it from any slice can break a remote install while `docker compose up`
 # stays green locally. Pure text plus a client-side render, so it costs a second.
