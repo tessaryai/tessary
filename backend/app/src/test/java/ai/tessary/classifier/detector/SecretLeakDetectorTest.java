@@ -157,7 +157,7 @@ class SecretLeakDetectorTest {
             assertEquals(Detection.Confidence.LOW, d.confidence(), token);
             JsonNode evidence = evidence(d);
             assertEquals("marker", evidence.path("source").asText(), token);
-            assertEquals("unknown", evidence.path("stored").asText(), token);
+            assertEquals("redacted", evidence.path("stored").asText(), token);
         }
     }
 

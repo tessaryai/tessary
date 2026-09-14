@@ -188,8 +188,9 @@ public class FindingService {
         Map<String, Long> recorded = new LinkedHashMap<>();
         for (String r : FindingEvidenceRow.Role.ALL) recorded.put(r, finding.evidenceCount(r));
         boolean secretLeak = BuiltInDetector.Kind.SECRET_LEAK.equals(finding.classifierKey());
+        boolean malformedOutput = BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(finding.classifierKey());
         FindingEvidenceRepository.SpanPage page =
-                evidence.spanPage(projectId, findingId, role, limit, cursor, secretLeak);
+                evidence.spanPage(projectId, findingId, role, limit, cursor, secretLeak, malformedOutput);
         return new BehaviorDtos.FindingEvidenceSpanPage(
                 page.rows().stream().map(BehaviorDtos.EvidenceSpanView::of).toList(),
                 page.nextCursor(),

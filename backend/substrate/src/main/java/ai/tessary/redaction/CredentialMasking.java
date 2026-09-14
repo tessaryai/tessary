@@ -52,12 +52,22 @@ public final class CredentialMasking {
      * {@link #mask}, which scrubs every credential inside a block of prose for display; this names ONE
      * credential a caller already isolated, so its own key can be told apart from another leaking one
      * without reconstructing either.
+     *
+     * <p>Guarded the same way {@link #maskSecret} is: a prefix and a suffix window only ever reveal a
+     * caller-recognisable sliver, never the whole credential. When the match is too short for a 4+4
+     * window to leave anything hidden, only the provider prefix (or nothing) survives.
      */
     public static String maskedKey(String rawMatch) {
         if (rawMatch.isEmpty()) return "…";
         Matcher m = PROVIDER_PREFIX.matcher(rawMatch);
-        String prefix = m.lookingAt() ? m.group() : rawMatch.substring(0, Math.min(4, rawMatch.length()));
-        String suffix = rawMatch.length() <= 4 ? rawMatch : rawMatch.substring(rawMatch.length() - 4);
+        boolean providerPrefix = m.lookingAt();
+        String prefix = providerPrefix ? m.group() : rawMatch.substring(0, Math.min(4, rawMatch.length()));
+        // At least 4 characters must sit between the prefix and the suffix, or a suffix is not shown at
+        // all: two 4-character windows over a short match otherwise cover the whole credential, only
+        // cosmetically split by the ellipsis. A recognisable provider prefix is a known constant, not
+        // part of the secret, so it still surfaces on its own when the suffix is withheld.
+        if (rawMatch.length() - prefix.length() < 8) return (providerPrefix ? prefix : "") + "…";
+        String suffix = rawMatch.substring(rawMatch.length() - 4);
         return prefix + "…" + suffix;
     }
 }

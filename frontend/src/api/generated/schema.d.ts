@@ -2913,6 +2913,7 @@ export interface components {
             /** Format: int64 */
             totalTokens: number | null;
             traceId: string | null;
+            violation: string | null;
         };
         EvidencedSignal: {
             evidence: string;

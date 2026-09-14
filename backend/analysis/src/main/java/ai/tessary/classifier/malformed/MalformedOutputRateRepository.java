@@ -98,16 +98,17 @@ public class MalformedOutputRateRepository {
 
     /**
      * A detection's evidence matches {@code :field} when it is the not-JSON bucket, the pre-rework
-     * catch-all, or a structured violation whose own {@code field} equals it. Shared between {@link
-     * #fieldFailureCounts} and {@link #failingOutputs} so the two can never disagree about which
-     * detections a field owns.
+     * catch-all, a structured violation whose own {@code field} equals it, or (also under the "other"
+     * bucket) a structured violation whose instance location is the document root, so its collapsed
+     * path is empty rather than absent. Shared between {@link #fieldFailureCounts} and {@link
+     * #failingOutputs} so the two can never disagree about which detections a field owns.
      */
     private static final String FIELD_MATCH = """
             ( (:field = 'not_json' AND d.evidence->>'reason' = 'not_json')
            OR (:field <> 'not_json' AND EXISTS (
                  SELECT 1 FROM jsonb_array_elements(COALESCE(d.evidence->'violations', '[]'::jsonb)) v(value)
-                WHERE (:field = 'other' AND jsonb_typeof(v.value) <> 'object')
-                   OR (:field <> 'other' AND jsonb_typeof(v.value) = 'object' AND v.value ->> 'field' = :field)
+                WHERE (:field = 'other' AND (jsonb_typeof(v.value) <> 'object' OR COALESCE(v.value ->> 'field', '') = ''))
+                   OR (:field <> 'other' AND jsonb_typeof(v.value) = 'object' AND NULLIF(v.value ->> 'field', '') = :field)
               )) )
             """;
 
@@ -125,7 +126,7 @@ public class MalformedOutputRateRepository {
                         SELECT
                           CASE
                             WHEN d.evidence ->> 'reason' = 'not_json' THEN 'not_json'
-                            WHEN jsonb_typeof(v.value) = 'object' THEN COALESCE(v.value ->> 'field', 'other')
+                            WHEN jsonb_typeof(v.value) = 'object' THEN COALESCE(NULLIF(v.value ->> 'field', ''), 'other')
                             ELSE 'other'
                           END AS field,
                           COUNT(DISTINCT (d.subject_trace_id, d.subject_span_id)) AS failing

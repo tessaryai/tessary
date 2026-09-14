@@ -176,7 +176,7 @@ public final class SecretLeakDetector implements BuiltInDetector {
     /** What {@link #Source} says about whether the credential itself is still sitting in stored output. */
     private static String storedAs(String source) {
         return switch (source) {
-            case Source.REDACTION -> Stored.REDACTED;
+            case Source.REDACTION, Source.MARKER -> Stored.REDACTED;
             case Source.OUTPUT -> Stored.RAW;
             default -> Stored.UNKNOWN;
         };

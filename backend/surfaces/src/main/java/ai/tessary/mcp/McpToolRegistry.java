@@ -906,7 +906,11 @@ public class McpToolRegistry {
              *  the credential itself, so kept alongside the measurements rather than dropped with the
              *  previews. Set only on a secret-leak finding's evidence. */
             @Nullable String secretKey,
-            @Nullable String storedAs) {
+            @Nullable String storedAs,
+            /** The schema-violation message this row's own output failed with — already a plain message,
+             *  never a credential, so kept alongside the measurements rather than dropped with the
+             *  previews. Set only on a malformed-output finding's evidence. */
+            @Nullable String violation) {
 
         static EvidenceSpan of(BehaviorDtos.EvidenceSpanView v) {
             return new EvidenceSpan(
@@ -927,7 +931,8 @@ public class McpToolRegistry {
                     v.model(),
                     v.callSiteId(),
                     v.secretKey(),
-                    v.storedAs());
+                    v.storedAs(),
+                    v.violation());
         }
     }
 

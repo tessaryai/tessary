@@ -386,6 +386,7 @@ class McpFindingToolsTest {
                                 "what the span was given",
                                 "what it returned",
                                 null,
+                                null,
                                 null),
                         new EvidenceSpanView(
                                 FindingEvidenceRow.Role.MEMBER,
@@ -406,6 +407,7 @@ class McpFindingToolsTest {
                                 "otto-von-bismarck",
                                 "tool input",
                                 "tool output",
+                                null,
                                 null,
                                 null)),
                 nextCursor,

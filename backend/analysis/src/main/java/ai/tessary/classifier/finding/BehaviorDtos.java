@@ -141,7 +141,12 @@ public final class BehaviorDtos {
              * secret-leak finding's evidence table — see {@code FindingEvidenceRepository.SpanRef}.
              */
             @Nullable String secretKey,
-            @Nullable String storedAs) {
+            @Nullable String storedAs,
+            /**
+             * The schema-violation message this row's own output failed with, filled only on a
+             * malformed-output finding's evidence table — see {@code FindingEvidenceRepository.SpanRef}.
+             */
+            @Nullable String violation) {
 
         public static EvidenceSpanView of(FindingEvidenceRepository.SpanRef r) {
             return new EvidenceSpanView(
@@ -164,7 +169,8 @@ public final class BehaviorDtos {
                     r.inputPreview(),
                     r.outputPreview(),
                     r.secretKey(),
-                    r.storedAs());
+                    r.storedAs(),
+                    r.violation());
         }
     }
 

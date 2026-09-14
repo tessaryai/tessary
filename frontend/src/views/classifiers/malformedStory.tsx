@@ -74,9 +74,7 @@ export function MalformedHeader({
         </span>
       }
       subtitle={
-        <span title={finding.causeKey}>
-          {[rate.bucketKey, since && `since ${since} vs the rate it was fitted at`].filter(Boolean).join(" · ")}
-        </span>
+        since ? <span title={finding.causeKey}>since {since} vs the rate it was fitted at</span> : undefined
       }
       actions={
         finding.triageStatus === "done" ? (

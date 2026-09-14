@@ -4464,6 +4464,12 @@
               "string",
               "null"
             ]
+          },
+          "violation" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -4486,7 +4492,8 @@
           "storedAs",
           "totalCost",
           "totalTokens",
-          "traceId"
+          "traceId",
+          "violation"
         ],
         "type" : "object"
       },

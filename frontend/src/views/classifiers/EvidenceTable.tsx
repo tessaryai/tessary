@@ -57,6 +57,7 @@ type ColumnKey =
   | "status"
   | "key"
   | "storedAs"
+  | "violation"
   | "started"
   | "latency"
   | "tokens"
@@ -73,6 +74,7 @@ const COLUMNS: ColumnDef[] = [
   { key: "status", label: "Status" },
   { key: "key", label: "Key" },
   { key: "storedAs", label: "Stored as" },
+  { key: "violation", label: "Violation" },
   { key: "started", label: "Start time" },
   { key: "latency", label: "Latency (ms)", numeric: true },
   { key: "tokens", label: "Total tokens", numeric: true },
@@ -108,11 +110,18 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
   const pages = q.data?.pages ?? [];
   const rows = pages.flatMap((p) => p.rows ?? []);
   // Forward-only per decision #2: a secret-leak finding armed before the masked-key rework carries
-  // no secretKey on any row, and the two columns would be a header over an empty column.
+  // no secretKey on any row, and the two columns would be a header over an empty column. Same for a
+  // malformed-output finding armed before the structured-violation rework and its Violation column.
   const hasSecretKeys = useMemo(() => rows.some((r) => r.secretKey != null), [rows]);
+  const hasViolations = useMemo(() => rows.some((r) => r.violation != null), [rows]);
   const columns = useMemo(
-    () => COLUMNS.filter((c) => (c.key === "key" || c.key === "storedAs" ? hasSecretKeys : visible.has(c.key))),
-    [visible, hasSecretKeys],
+    () =>
+      COLUMNS.filter((c) => {
+        if (c.key === "key" || c.key === "storedAs") return hasSecretKeys;
+        if (c.key === "violation") return hasViolations;
+        return visible.has(c.key);
+      }),
+    [visible, hasSecretKeys, hasViolations],
   );
   // Recorded counts, not live ones: the question a footer answers is "how big is the claim", and a
   // ref whose substrate aged out was still part of what the detector measured.
@@ -254,6 +263,10 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
       ) : (
         NONE
       );
+    // A schema violation is the anomaly this row exists to report, so it is always coloured, not just
+    // on a status mismatch — every row here failed.
+    case "violation":
+      return row.violation ? <span className="font-mono text-error">{row.violation}</span> : NONE;
     // Status carries the one bit a reader scans for on a tool-error finding, so it is coloured rather
     // than printed: three error rows in a page of successes should be findable without reading.
     case "status":

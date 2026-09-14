@@ -350,7 +350,15 @@ public class FindingEvidenceRepository {
              * detection row for.
              */
             @Nullable String secretKey,
-            @Nullable String storedAs) {}
+            @Nullable String storedAs,
+            /**
+             * The schema-violation message this row's own output failed with: {@code "not JSON"} for a
+             * not-JSON detection, else the first structured violation's {@code message}. Joined from
+             * {@code malformed_output_detection} on this ref's trace/span. Null on any finding that is
+             * not a malformed-output facet — see {@link #spanPage}'s {@code malformedOutput} parameter —
+             * and on a row the join found no detection for.
+             */
+            @Nullable String violation) {}
 
     /** A page of {@link SpanRef}s and the cursor that resumes after it, null when this was the last. */
     public record SpanPage(List<SpanRef> rows, @Nullable String nextCursor) {}
@@ -382,6 +390,8 @@ public class FindingEvidenceRepository {
      * @param secretLeak true exactly for a secret-leak finding's own page: only then is {@code
      *     secret_leak_detection} joined for {@link SpanRef#secretKey} / {@link SpanRef#storedAs}, so a
      *     span that happens to carry an unrelated leak on some other finding's page stays silent about it
+     * @param malformedOutput true exactly for a malformed-output finding's own page: only then is
+     *     {@code malformed_output_detection} joined for {@link SpanRef#violation}, for the same reason
      */
     public SpanPage spanPage(
             String projectId,
@@ -389,7 +399,8 @@ public class FindingEvidenceRepository {
             @Nullable String role,
             int limit,
             @Nullable String cursor,
-            boolean secretLeak) {
+            boolean secretLeak,
+            boolean malformedOutput) {
         Key key = decodeCursor(cursor);
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
@@ -400,6 +411,10 @@ public class FindingEvidenceRepository {
                 + (secretLeak
                         ? " ld.evidence ->> 'masked' AS secret_key, ld.evidence ->> 'stored' AS stored_as"
                         : " NULL::text AS secret_key, NULL::text AS stored_as")
+                + (malformedOutput
+                        ? " , CASE WHEN md.evidence ->> 'reason' = 'not_json' THEN 'not JSON'"
+                                + "        ELSE md.evidence -> 'violations' -> 0 ->> 'message' END AS violation"
+                        : " , NULL::text AS violation")
                 + " FROM finding_evidence e"
                 + " LEFT JOIN LATERAL ("
                 + "   SELECT sp.* FROM span sp"
@@ -418,6 +433,12 @@ public class FindingEvidenceRepository {
                                 + "   WHERE sld.project_id = e.project_id AND sld.subject_trace_id = e.trace_id"
                                 + "     AND sld.subject_span_id = e.span_id"
                                 + "   ORDER BY sld.created_at DESC LIMIT 1) ld ON true"
+                        : "")
+                + (malformedOutput
+                        ? " LEFT JOIN LATERAL (SELECT mod.evidence FROM malformed_output_detection mod"
+                                + "   WHERE mod.project_id = e.project_id AND mod.subject_trace_id = e.trace_id"
+                                + "     AND mod.subject_span_id = e.span_id"
+                                + "   ORDER BY mod.created_at DESC LIMIT 1) md ON true"
                         : "")
                 + " WHERE e.project_id = :pid AND e.finding_id = :fid");
         if (role != null) sql.append(" AND e.role = :role");
@@ -631,7 +652,8 @@ public class FindingEvidenceRepository {
                 CredentialMasking.mask(rs.getString("input_preview")),
                 CredentialMasking.mask(rs.getString("output_preview")),
                 rs.getString("secret_key"),
-                rs.getString("stored_as"));
+                rs.getString("stored_as"),
+                rs.getString("violation"));
     }
 
     private int countFor(String findingId, String role) {
