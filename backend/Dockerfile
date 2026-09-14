@@ -53,6 +53,13 @@ COPY surfaces/src ./surfaces/src
 COPY app/src ./app/src
 COPY core/tools ./core/tools
 
+# Stamp the reactor with the release version so the packaged jar's manifest
+# (Implementation-Version, read by TelemetryHeartbeat.appVersion()) matches the image tag instead of
+# the checked-in 0.0.1-SNAPSHOT placeholder. "dev" (the default below) is a valid Maven version
+# string, so a bare `docker build` with no --build-arg still packages cleanly.
+ARG IMAGE_VERSION=dev
+RUN mvn -B -q versions:set -DnewVersion=${IMAGE_VERSION} -DgenerateBackupPoms=false -DprocessAllModules=true
+
 # Build the executable (layered) bootJar; skip tests (CI runs the full gate).
 RUN mvn -B -q -DskipTests package
 
