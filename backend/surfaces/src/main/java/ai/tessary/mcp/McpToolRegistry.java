@@ -812,7 +812,11 @@ public class McpToolRegistry {
      */
     private static BehaviorFindingDetailView withoutTriage(BehaviorFindingDetailView detail) {
         return new BehaviorFindingDetailView(
-                detail.finding().withoutTriage(), detail.metric(), detail.toolError(), detail.baseline());
+                detail.finding().withoutTriage(),
+                detail.metric(),
+                detail.toolError(),
+                detail.baseline(),
+                detail.malformedOutput());
     }
 
     /** See {@link #withoutTriage}: the same firewall applies here. */

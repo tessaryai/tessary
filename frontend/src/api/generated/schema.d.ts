@@ -852,6 +852,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/malformed-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_malformedOutputs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/resolution": {
         parameters: {
             query?: never;
@@ -2076,6 +2092,10 @@ export interface components {
             data?: components["schemas"]["FacetsView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFailingOutputPage: {
+            data?: components["schemas"]["FailingOutputPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFindingEvidenceSpanPage: {
             data?: components["schemas"]["FindingEvidenceSpanPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2436,6 +2456,7 @@ export interface components {
         BehaviorFindingDetailView: {
             baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
+            malformedOutput: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             toolError: components["schemas"]["RateDetail"] | null;
         };
@@ -2918,6 +2939,21 @@ export interface components {
             facets: components["schemas"]["FacetBucket"][];
             field: string;
         };
+        FailingOutputPage: {
+            nextCursor: string | null;
+            rows: components["schemas"]["FailingOutputView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        FailingOutputView: {
+            document: string | null;
+            highlightLines: number[];
+            message: string | null;
+            name: string | null;
+            spanId: string;
+            startedAt: string;
+            traceId: string;
+        };
         FailureMode: {
             call_site_id: string | null;
             chain_id: string | null;
@@ -3129,6 +3165,14 @@ export interface components {
             /** Format: email */
             email: string;
             password: string;
+        };
+        MalformedDetail: {
+            fields: components["schemas"]["SchemaFieldView"][];
+            /** Format: int64 */
+            notJson: number;
+            /** Format: int64 */
+            other: number;
+            rate: components["schemas"]["RateDetail"];
         };
         ManifestStartView: {
             manifest: string;
@@ -3572,6 +3616,16 @@ export interface components {
             severity_policy: {
                 [key: string]: string;
             };
+        };
+        SchemaFieldView: {
+            /** Format: int32 */
+            depth: number;
+            /** Format: int64 */
+            failing: number;
+            name: string;
+            path: string;
+            required: boolean;
+            type: string;
         };
         SearchHit: {
             id: string;
@@ -5988,6 +6042,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFindingEvidenceSpanPage"];
+                };
+            };
+        };
+    };
+    FindingController_malformedOutputs: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                field: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFailingOutputPage"];
                 };
             };
         };

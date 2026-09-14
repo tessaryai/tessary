@@ -419,6 +419,17 @@ export type EvidenceSpan = S["EvidenceSpanView"];
 export type EvidenceSpanPage = S["FindingEvidenceSpanPage"];
 
 /**
+ * A `malformed_rate` finding's "How outputs broke": the rate, the declared schema annotated with a
+ * failure count per field, and the two buckets no declared field owns (`notJson`, `other`).
+ */
+export type MalformedOutputDetail = S["MalformedDetail"];
+export type MalformedOutputSchemaField = S["SchemaFieldView"];
+
+/** One failing output for a selected schema field, and the page it came from. */
+export type MalformedOutputRow = S["FailingOutputView"];
+export type MalformedOutputPage = S["FailingOutputPage"];
+
+/**
  * One finding, with the triage fields narrowed to the vocabulary the server writes.
  *
  * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never

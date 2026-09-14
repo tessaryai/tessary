@@ -9,6 +9,8 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.finding.BehaviorDtos.EvidenceRefView;
+import ai.tessary.classifier.malformed.MalformedOutputDetailService;
+import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.LinkedHashMap;
@@ -60,17 +62,22 @@ public class FindingService {
      */
     private final List<TriageSource> triageSources;
 
+    /** The one classifier-specific read on this surface: a {@code malformed_rate} finding's failing outputs. */
+    private final MalformedOutputDetailService malformedOutputs;
+
     public FindingService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             ClassifierService classifiers,
             BehaviorBaselineEventRepository events,
-            List<TriageSource> triageSources) {
+            List<TriageSource> triageSources,
+            MalformedOutputDetailService malformedOutputs) {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
         this.events = events;
         this.triageSources = triageSources;
+        this.malformedOutputs = malformedOutputs;
     }
 
     /**
@@ -185,6 +192,22 @@ public class FindingService {
                 page.nextCursor(),
                 evidence.countsByRole(projectId, findingId),
                 recorded);
+    }
+
+    /**
+     * One field's failing outputs since onset, for a {@code malformed_rate} finding's "How outputs
+     * broke": the same reachability guard as {@link #finding}, since the field a reader selected is
+     * still a view onto this finding's own population.
+     *
+     * <p>A finding that is not {@code malformed_rate} — or any field a reader selected on one that is —
+     * simply comes back empty rather than 404ing: the field is UI-selected off the finding's own schema
+     * tree, not a client-supplied id, so an empty page is what "nothing failed this field since onset"
+     * looks like, never a broken reference.
+     */
+    public MalformedOutputEvidence.FailingOutputPage malformedOutputs(
+            String projectId, String findingId, String field, int limit, @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        return malformedOutputs.failingOutputs(finding, field, limit, cursor);
     }
 
     /**

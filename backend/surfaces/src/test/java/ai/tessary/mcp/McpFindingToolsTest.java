@@ -196,7 +196,8 @@ class McpFindingToolsTest {
                         f.conformanceKind()),
                 base.metric(),
                 base.toolError(),
-                base.baseline());
+                base.baseline(),
+                base.malformedOutput());
     }
 
     // ---- registration --------------------------------------------------------------------------

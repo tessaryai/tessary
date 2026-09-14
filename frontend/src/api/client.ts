@@ -44,6 +44,7 @@ import {
   type BehaviorFinding,
   type BehaviorFindingDetail,
   type EvidenceSpanPage,
+  type MalformedOutputPage,
   type BehaviorAnalysis,
   type BehaviorFindings,
   type BehaviorFindingStatus,
@@ -606,6 +607,18 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       if (params?.cursor) q.set("cursor", params.cursor);
       const qs = q.toString();
       return http<EvidenceSpanPage>(`${base}/findings/${enc(id)}/evidence${qs ? `?${qs}` : ""}`);
+    },
+
+    /**
+     * One field's failing outputs since onset, for a `malformed_rate` finding's "How outputs broke".
+     * `field` is a declared field's collapsed path (`items[].sku`), or `not_json` / `other` for the
+     * two buckets no declared field owns.
+     */
+    getMalformedOutputs: (id: string, field: string, params?: { limit?: number; cursor?: string }) => {
+      const q = new URLSearchParams({ field });
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.cursor) q.set("cursor", params.cursor);
+      return http<MalformedOutputPage>(`${base}/findings/${enc(id)}/malformed-outputs?${q.toString()}`);
     },
 
     /**

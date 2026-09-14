@@ -221,7 +221,7 @@ class FindingServiceMergeTest {
      */
     @SuppressWarnings("NullAway") // deliberate: the injected repositories are unreachable on these paths
     private static FindingService service(List<TriageSource> sources) {
-        return new FindingService(null, null, null, null, sources);
+        return new FindingService(null, null, null, null, sources, null); // MalformedOutputDetailService unreached
     }
 
     private static BehaviorFindingView view(String id) {

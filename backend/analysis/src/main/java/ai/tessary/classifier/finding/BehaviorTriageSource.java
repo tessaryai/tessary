@@ -9,6 +9,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricControl;
@@ -118,6 +119,9 @@ public class BehaviorTriageSource implements TriageSource {
 
     private final ObjectMapper mapper;
 
+    /** The {@code malformed_rate} branch of {@link #detail}; every other cause never touches it. */
+    private final MalformedOutputDetailService malformedOutputs;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -133,7 +137,8 @@ public class BehaviorTriageSource implements TriageSource {
             AnnotationRepository annotations,
             BehaviorSubstrateRepository substrate,
             ObjectProvider<CauseResolver> causeResolvers,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            MalformedOutputDetailService malformedOutputs) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -153,6 +158,7 @@ public class BehaviorTriageSource implements TriageSource {
         // promises. Held by AbsentAdapterContextTest.
         this.causeResolvers = causeResolvers.orderedStream().toList();
         this.mapper = mapper;
+        this.malformedOutputs = malformedOutputs;
     }
 
     @Override
@@ -203,7 +209,8 @@ public class BehaviorTriageSource implements TriageSource {
         }
         // Reachability is re-asserted rather than assumed: a withheld classifier's finding must 404,
         // and this source has now claimed the id, so throwing is the contract.
-        return Optional.of(BehaviorFindingDetailView.of(requireReachableFinding(projectId, findingId)));
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        return Optional.of(BehaviorFindingDetailView.of(finding, malformedOutputs.detail(finding)));
     }
 
     // ---- escalation -----------------------------------------------------------------------------
