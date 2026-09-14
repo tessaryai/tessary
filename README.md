@@ -6,9 +6,10 @@
 <p align="center">Stop your agents from failing silently in production.</p>
 
 <p align="center">
-  <a href="https://tessary.ai/docs">Docs</a> ·
+  <a href="https://docs.tessary.ai">Docs</a> ·
   <a href="#get-running">Self-host</a> ·
-  <a href="https://github.com/tessaryai/tessary/issues">Report an issue</a>
+  <a href="https://github.com/tessaryai/tessary/issues">Report an issue</a> ·
+  <a href="https://github.com/tessaryai/tessary/discussions">Discussions</a>
 </p>
 
 <p align="center">
@@ -37,6 +38,8 @@ docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 ```
 
 Either way, open <http://localhost> when `docker compose -p tessary ps` reports every service healthy. It needs Docker Engine 26 or newer and Docker Compose v2.34 or newer on the machine. [Set up Tessary](./docs/self-hosting/setup.mdx) takes it from there.
+
+Once it's running, instrument your agent so Tessary has traces to watch: see the [instrumentation overview](https://docs.tessary.ai/instrument/overview).
 
 ### 1. Point your agent's traces at it
 
