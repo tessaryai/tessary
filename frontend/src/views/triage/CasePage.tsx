@@ -48,6 +48,8 @@ import { Button, Card, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSke
 import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
+import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
+import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, timeAgo, truncateId } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
@@ -310,7 +312,20 @@ export function CasePage() {
       )}
 
       {/* -------------------------------------------------------------- how big */}
-      <Magnitude detail={detail} basis={c.basis} />
+      <Magnitude detail={detail} basis={c.basis} basePath={basePath} />
+
+      {/* ---------------------------------------------------- how outputs broke */}
+      {detail.malformed_output && detail.finding_id && (
+        <Block label="How outputs broke" note="each schema field with its failures, beside one failing output">
+          <HowOutputsBroke
+            findingId={detail.finding_id}
+            detail={detail.malformed_output}
+            linkToTrace={(traceId, spanId) =>
+              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
+            }
+          />
+        </Block>
+      )}
 
       {/* ------------------------------------------------------ the rest of the run */}
       {(rcaEnabled || detail.rca_report_id != null) && (
@@ -438,14 +453,26 @@ function Block({ label, note, children }: { label: string; note?: string; childr
  * <p>Neither figure present is the normal state for a shift with no drawable shape, and it says so.
  * That is the rule this file has always held; it now has something real to hold it against.
  */
-function Magnitude({ detail, basis }: { detail: CaseDetail; basis: string }) {
+function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: string; basePath: string }) {
   const rate = detail.tool_error;
   const shift = detail.metric;
+  const secretLeak = detail.secret_leak;
+  const malformedOutput = detail.malformed_output;
 
   return (
     <Block
       label="How big"
-      note={rate ? "share of calls that failed" : shift ? "median to 95th percentile, log scale" : undefined}
+      note={
+        rate
+          ? "share of calls that failed"
+          : shift
+            ? "median to 95th percentile, log scale"
+            : secretLeak
+              ? "one dot per leaking output, one lane per key"
+              : malformedOutput
+                ? "share of outputs that failed their schema"
+                : undefined
+      }
     >
       {rate ? (
         <>
@@ -457,6 +484,18 @@ function Magnitude({ detail, basis }: { detail: CaseDetail; basis: string }) {
           <ShiftChart shift={shift} />
           <ShiftPins shift={shift} />
         </>
+      ) : secretLeak ? (
+        <>
+          <LeakTimeline secretLeak={secretLeak} />
+          <LeakPins
+            secretLeak={secretLeak}
+            linkToTrace={(traceId, spanId) =>
+              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
+            }
+          />
+        </>
+      ) : malformedOutput ? (
+        <MalformedRate rate={malformedOutput.rate} />
       ) : (
         <p className="text-subtle m-0 text-body" style={{ maxWidth: 560 }}>
           This classifier's movement carries no measured shift. It is a claim about the shape of what

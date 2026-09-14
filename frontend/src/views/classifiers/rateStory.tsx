@@ -76,20 +76,24 @@ const NUMBER_WORDS = [
 ];
 
 /**
- * A rate as a count of calls per hundred, in words.
+ * A rate as a count per hundred, in words.
  *
  * <p>"Four calls in every hundred" is a thing a reader can picture; "4.02%" is a thing they have to
  * convert first. Words only up to twelve, because past that the numeral reads faster than the word,
  * and never for a rate below one in a hundred — "no calls in every hundred" would be a lie about a
  * tool that does fail, just rarely. That case gets the sub-one phrasing instead.
+ *
+ * <p>`noun` is the whole countable phrase ("call", "navigate call", "output") — a caller building a
+ * tool-specific phrase concatenates its own modifier before calling this, rather than this function
+ * gluing " call" onto whatever it is handed. That is what lets a rate finding whose population is
+ * outputs rather than calls ask for "outputs" and not "output calls".
  */
-export function perHundred(r: number, noun?: string): string {
-  const what = noun ? `${noun} call` : "call";
+export function perHundred(r: number, noun: string = "call"): string {
   const n = r * 100;
-  if (n < 1) return `fewer than one ${what} in every hundred`;
+  if (n < 1) return `fewer than one ${noun} in every hundred`;
   const rounded = Math.round(n);
   const word = rounded < NUMBER_WORDS.length ? NUMBER_WORDS[rounded] : String(rounded);
-  return `${word} ${what}${rounded === 1 ? "" : "s"} in every hundred`;
+  return `${word} ${noun}${rounded === 1 ? "" : "s"} in every hundred`;
 }
 
 /** Sentence-cases a clause that starts with a number word. */
@@ -123,7 +127,7 @@ const PLOT_X1 = 770;
  * baseline is not zero is a bar chart that lies about ratios. The reference bar is neutral and the
  * flagged bar carries the direction, so the colour says which way this went without a legend.
  */
-export function RateChart({ rate }: { rate: Rate }) {
+export function RateChart({ rate, label = "Failure rate" }: { rate: Rate; label?: string }) {
   const before = rate.refRate * 100;
   const after = rate.curRate * 100;
   const tone = rateToneOf(rate);
@@ -137,7 +141,7 @@ export function RateChart({ rate }: { rate: Rate }) {
       viewBox="0 0 800 196"
       style={{ width: "100%", height: "auto", display: "block" }}
       role="img"
-      aria-label={`Failure rate: ${formatRate(rate.refRate)} before, ${formatRate(rate.curRate)} after`}
+      aria-label={`${label}: ${formatRate(rate.refRate)} before, ${formatRate(rate.curRate)} after`}
     >
       {ticks.map((t) => (
         <line
@@ -229,8 +233,13 @@ export function RateChart({ rate }: { rate: Rate }) {
   );
 }
 
-/** One numbered observation, keyed to a pin on the chart above. */
-function Pin({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+/**
+ * One numbered observation, keyed to a pin on the chart above.
+ *
+ * Exported so a detector with its own before/after story (the secret-leak timeline, most notably)
+ * can carry the same numbered-pin anatomy without a second copy of this markup.
+ */
+export function Pin({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div
       className={cn("flex items-start gap-3 py-3.25 px-4", n > 1 && "border-t border-border")}
@@ -259,6 +268,15 @@ const DAY_MONTH: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
 /** Below this many failures, the finding is a lead rather than a result. See {@link RatePins}. */
 const FEW_FAILURES = 20;
 
+/** The bordered chassis a numbered {@link Pin} list sits in, shared with a non-rate before/after story. */
+export function PinList({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col rounded-card border border-border bg-surface mt-2.75">
+      {children}
+    </div>
+  );
+}
+
 /**
  * The two readings worth naming, in the order the argument is made: what it is now, then what it was.
  *
@@ -266,16 +284,22 @@ const FEW_FAILURES = 20;
  * one a reader is here for. Pin 2 is the reference, and it carries the sample size — a rate over 500
  * calls and a rate over 13,000 are different kinds of claim, and the denominator is the only thing on
  * this page that says which one this is.
+ *
+ * <p>`unit` names what a "call" is here, for a rate whose population is not literally calls (a
+ * malformed-output rate counts outputs) — it replaces the tool-derived phrase in Pin 1's headline
+ * only; the denominator elsewhere on the card stays "calls" because it is the count of attempts a
+ * rate is measured over, tool error and malformed output alike.
  */
-export function RatePins({ rate }: { rate: Rate }) {
+export function RatePins({ rate, unit }: { rate: Rate; unit?: string }) {
   const tool = toolWords(rate.bucketKey);
+  const headlineNoun = unit ?? (tool ? `${tool} call` : "call");
   const since = rate.onsetAt ? new Date(rate.onsetAt).toLocaleDateString(undefined, DAY_MONTH) : null;
   const rose = rate.curRate > rate.refRate;
   const points = Math.abs(rate.deltaPp);
 
   return (
-    <div className="flex flex-col rounded-card border border-border bg-surface mt-2.75">
-      <Pin n={1} title={`${upperFirst(perHundred(rate.curRate, tool))} fail now`}>
+    <PinList>
+      <Pin n={1} title={`${upperFirst(perHundred(rate.curRate, headlineNoun))} fail now`}>
         {rate.failuresCur.toLocaleString()} failure{rate.failuresCur === 1 ? "" : "s"} across the{" "}
         {rate.nCur.toLocaleString()} calls{since ? ` since ${since}` : ""}. This is the number that fired
         the finding.
@@ -296,6 +320,6 @@ export function RatePins({ rate }: { rate: Rate }) {
           </>
         )}
       </Pin>
-    </div>
+    </PinList>
   );
 }
