@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * The one {@code github_app_config} row (or none, before the manifest wizard has ever run).
- * Same singleton shape as {@code telemetry_install}/{@link ai.tessary.telemetry.InstallIdRepository}:
+ * Same singleton shape as {@code telemetry_instance}/{@link ai.tessary.telemetry.InstanceIdRepository}:
  * the table's primary key sits on a fixed sentinel id, so {@link #upsert} is a plain
  * {@code INSERT ... ON CONFLICT DO UPDATE} rather than needing its own "is there already a row"
  * branch — a re-run of the wizard just overwrites the same key.

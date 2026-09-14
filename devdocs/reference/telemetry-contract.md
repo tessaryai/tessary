@@ -1,7 +1,7 @@
 # The `home.tessary.ai` telemetry contract
 
 > **Status: the §1 heartbeat client is built; the §2 license-check endpoint is not.**
-> `backend/core/.../telemetry` (`TelemetryProperties`, `HomeTessaryClient`, `InstallIdRepository`) and
+> `backend/core/.../telemetry` (`TelemetryProperties`, `HomeTessaryClient`, `InstanceIdRepository`) and
 > `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`) implement §1, §3 and §5 of this contract.
 > The server is `tessaryai/tessary-home`; §1 matches its `POST /v1/ping` route, and
 > `TelemetryHeartbeatTest` validates the real payload against a copy of that repository's
@@ -22,8 +22,8 @@ and always sent here. Home strips any field it does not know.
 | Field | Type | Example | Purpose |
 |---|---|---|---|
 | `contract_version` | int | `1` | Schema version of this payload; must match the `/v1` route. See §5. |
-| `install_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Generated once at first boot, persisted locally. Identifies an install, never a person or org — never derived from org name, user email, or license key. |
-| `ping_seq` | int ≥ 0 | `41` | 0 on an install's first ping, then one more on every ping, persisted in `telemetry_install.ping_seq` so it keeps rising across restarts and replicas. Lets home tell a missed ping from a restart. |
+| `instance_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Generated once at first boot, persisted locally. Identifies an instance, never a person or org — never derived from org name, user email, or license key. |
+| `ping_seq` | int ≥ 0 | `41` | 0 on an instance's first ping, then one more on every ping, persisted in `telemetry_instance.ping_seq` so it keeps rising across restarts and replicas. Lets home tell a missed ping from a restart. |
 | `sent_at` | ISO-8601 UTC, `Z` | `"2026-09-13T07:20:00.123Z"` | When the ping was generated. |
 | `app_version` | string, ≤ 64 chars | `"2026.9.1"` | The running app's version; `"dev"` outside a packaged jar. |
 | `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live: the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
@@ -106,7 +106,7 @@ Not yet implemented. Shapes only:
 | Field | Type | Example | Purpose |
 |---|---|---|---|
 | `contract_version` | int | `1` | Schema version, same as §1. |
-| `install_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Same install identity as the heartbeat ping. |
+| `instance_id` | UUID v4 | `"a1b2c3d4-...-000000000001"` | Same instance identity as the heartbeat ping. |
 | `license_key` | string | `"tsy_live_..."` | The self-hoster's license key, present only on this call. |
 
 **Response**

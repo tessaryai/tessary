@@ -638,7 +638,7 @@ backend/core/src/main/java/ai/tessary/model/TouchedSurface.java
 backend/core/src/main/java/ai/tessary/ops/RetentionPolicyRepository.java
 backend/core/src/main/java/ai/tessary/ops/RetentionPolicyRow.java
 backend/core/src/main/java/ai/tessary/telemetry/HomeTessaryClient.java
-backend/core/src/main/java/ai/tessary/telemetry/InstallIdRepository.java
+backend/core/src/main/java/ai/tessary/telemetry/InstanceIdRepository.java
 backend/core/src/main/java/ai/tessary/telemetry/TelemetryProperties.java
 backend/core/src/main/java/ai/tessary/web/ApiResponse.java
 backend/core/src/main/java/ai/tessary/web/ErrorBody.java

@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * fire-and-forget virtual-thread pool, deleted with it). {@code core} cannot host it: the counts it sends
  * come from {@code tenancy}, {@code analysis} and {@code substrate}.
  *
- * <p><b>The enabled-gate is checked FIRST, before {@link InstallIdRepository}, {@link HomeTessaryClient} or
+ * <p><b>The enabled-gate is checked FIRST, before {@link InstanceIdRepository}, {@link HomeTessaryClient} or
  * {@link PriceBookFetcher} are touched at all.</b> One gate covers both calls to home, so an opted-out install
  * neither pings nor fetches prices, and prices from the book bundled in its jar. This is the single choke point that makes the contract's §3 guarantee true —
  * "zero outbound calls, including DNS resolution, when disabled" — and what a future {@code
@@ -53,7 +53,7 @@ public class TelemetryHeartbeat {
     private static final int MAX_PLATFORM_CHARS = 32;
 
     private final TelemetryProperties props;
-    private final InstallIdRepository installIds;
+    private final InstanceIdRepository instanceIds;
     private final HomeTessaryClient client;
     private final ProjectRepository projects;
     private final FindingRepository findings;
@@ -66,7 +66,7 @@ public class TelemetryHeartbeat {
 
     public TelemetryHeartbeat(
             TelemetryProperties props,
-            InstallIdRepository installIds,
+            InstanceIdRepository instanceIds,
             HomeTessaryClient client,
             ProjectRepository projects,
             FindingRepository findings,
@@ -77,7 +77,7 @@ public class TelemetryHeartbeat {
             ObjectMapper mapper,
             Edition edition) {
         this.props = props;
-        this.installIds = installIds;
+        this.instanceIds = instanceIds;
         this.client = client;
         this.projects = projects;
         this.findings = findings;
@@ -123,9 +123,9 @@ public class TelemetryHeartbeat {
     }
 
     private void send() {
-        String installId = installIds.get();
-        long pingSeq = installIds.nextPingSeq();
-        ObjectNode ping = payload(installId, pingSeq, Instant.now(), counts(), heldPriceBookDigest());
+        String instanceId = instanceIds.get();
+        long pingSeq = instanceIds.nextPingSeq();
+        ObjectNode ping = payload(instanceId, pingSeq, Instant.now(), counts(), heldPriceBookDigest());
 
         try {
             int status = client.postJson(PATH, mapper.writeValueAsString(ping));
@@ -178,20 +178,20 @@ public class TelemetryHeartbeat {
 
     /**
      * The ping body, to home's {@code ping.v1} schema: the five fields it requires ({@code contract_version},
-     * {@code install_id}, {@code ping_seq}, {@code sent_at}, {@code app_version}), the optional
+     * {@code instance_id}, {@code ping_seq}, {@code sent_at}, {@code app_version}), the optional
      * {@code edition}, {@code os} and {@code arch}, {@code counts} when they could be read, and {@code price_book}.
      * {@code price_book.schema_max} is the newest manifest schema {@link PriceBookFetcher} parses; its
      * {@code digest} is omitted when this install holds none.
      */
     ObjectNode payload(
-            String installId,
+            String instanceId,
             long pingSeq,
             Instant sentAt,
             @Nullable ObjectNode counts,
             @Nullable String priceBookDigest) {
         ObjectNode payload = mapper.createObjectNode();
         payload.put("contract_version", 1);
-        payload.put("install_id", installId);
+        payload.put("instance_id", instanceId);
         payload.put("ping_seq", pingSeq);
         payload.put("sent_at", sentAt.toString());
         payload.put("app_version", cap(appVersion(), MAX_VERSION_CHARS));

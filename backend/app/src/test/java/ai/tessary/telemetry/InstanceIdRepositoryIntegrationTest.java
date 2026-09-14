@@ -18,10 +18,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** The heartbeat's {@code ping_seq} against the real Postgres: it starts at 0, rises by one, and never repeats. */
 @SpringBootTest
-class InstallIdRepositoryIntegrationTest {
+class InstanceIdRepositoryIntegrationTest {
 
     @Autowired
-    InstallIdRepository installIds;
+    InstanceIdRepository instanceIds;
 
     @Autowired
     JdbcClient jdbc;
@@ -29,20 +29,20 @@ class InstallIdRepositoryIntegrationTest {
     /** The schema is cleaned per test class, not per test, and every test here counts from a fresh install. */
     @BeforeEach
     void freshInstall() {
-        jdbc.sql("DELETE FROM telemetry_install").update();
+        jdbc.sql("DELETE FROM telemetry_instance").update();
     }
 
     @Test
-    @DisplayName("an install's first ping is 0, then each ping is one more, and the counter is persisted")
+    @DisplayName("an instance's first ping is 0, then each ping is one more, and the counter is persisted")
     void pingSeq_startsAtZeroAndRisesByOne() {
-        installIds.get();
+        instanceIds.get();
 
-        assertEquals(0L, installIds.nextPingSeq());
-        assertEquals(1L, installIds.nextPingSeq());
-        assertEquals(2L, installIds.nextPingSeq());
+        assertEquals(0L, instanceIds.nextPingSeq());
+        assertEquals(1L, instanceIds.nextPingSeq());
+        assertEquals(2L, instanceIds.nextPingSeq());
         assertEquals(
                 3L,
-                jdbc.sql("SELECT ping_seq FROM telemetry_install")
+                jdbc.sql("SELECT ping_seq FROM telemetry_instance")
                         .query(Long.class)
                         .single(),
                 "the stored value is the NEXT ping's sequence, so a restart continues from it");
@@ -51,15 +51,15 @@ class InstallIdRepositoryIntegrationTest {
     @Test
     @DisplayName("replicas pinging at once are never handed the same ping_seq")
     void pingSeq_concurrentCallsGetDistinctValues() throws Exception {
-        installIds.get();
+        instanceIds.get();
         int callers = 16;
         ExecutorService pool = Executors.newFixedThreadPool(callers);
         try {
             List<Callable<Long>> calls = IntStream.range(0, callers)
-                    .<Callable<Long>>mapToObj(i -> installIds::nextPingSeq)
+                    .<Callable<Long>>mapToObj(i -> instanceIds::nextPingSeq)
                     .toList();
             List<Long> seqs = pool.invokeAll(calls).stream()
-                    .map(InstallIdRepositoryIntegrationTest::join)
+                    .map(InstanceIdRepositoryIntegrationTest::join)
                     .sorted()
                     .toList();
 
@@ -70,13 +70,13 @@ class InstallIdRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("minting the install id leaves ping_seq at 0")
+    @DisplayName("minting the instance id leaves ping_seq at 0")
     void get_mintsWithPingSeqZero() {
-        installIds.get();
+        instanceIds.get();
 
         assertEquals(
                 0L,
-                jdbc.sql("SELECT ping_seq FROM telemetry_install")
+                jdbc.sql("SELECT ping_seq FROM telemetry_instance")
                         .query(Long.class)
                         .single());
     }

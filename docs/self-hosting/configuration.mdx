@@ -170,8 +170,8 @@ backend sends there and fetches from there.
 | Field | Example | What it is |
 | --- | --- | --- |
 | `contract_version` | `1` | Schema version of this payload. |
-| `install_id` | a v4 UUID | Generated once at first boot. Identifies an install, never a person or an org. |
-| `ping_seq` | `41` | How many pings this install has sent before this one. |
+| `instance_id` | a v4 UUID | Generated once at first boot. Identifies an instance, never a person or an org. |
+| `ping_seq` | `41` | How many pings this instance has sent before this one. |
 | `sent_at` | an ISO-8601 UTC timestamp | When the ping was generated. |
 | `app_version` | `"2026.9.1"` | The running app's version. |
 | `edition` | `"open"` | Which build sent the ping. |

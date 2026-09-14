@@ -16,9 +16,9 @@
 -- value (job.kind, the three annotation subject_kind grains, eval_case.detector,
 -- retention_policy.data_class, metric_rollup.metric, the model lane, the alert payload keys,
 -- the three open detection tables: secret_leak_detection, malformed_output_detection,
--- user_classifier_detection), plus the FK graph they all hang off. The day a migration renames
--- one of those values, the row it has to move is already here and only the assertion needs
--- writing. `prj_fix`/`cls_fix`/`org_fix` below are also used as FK anchors by fixture rows loaded
+-- user_classifier_detection, and the telemetry identity row), plus the FK graph they all hang
+-- off. The day a migration renames one of those values, the row it has to move is already here
+-- and only the assertion needs writing. `prj_fix`/`cls_fix`/`org_fix` below are also used as FK anchors by fixture rows loaded
 -- elsewhere in the pipeline, so keep their ids stable.
 --
 -- Consequence for anyone editing it: adding a rename to a release means adding an
@@ -200,3 +200,9 @@ INSERT INTO llm_call (id, project_id, lane, model, service_tier, funding, input_
                       cost_usd, created_at, subject_kind, subject_id)
 VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', 'platform',
         800, 120, 0.0002400000, '2026-08-01T00:00:00Z', NULL, NULL);
+
+-- ---------------------------------------------------------------- telemetry identity
+-- The singleton the heartbeat reads its UUID from, as the baseline shapes it (ping_seq arrives with a
+-- later changeset). A table or column rename that lost this row would hand the instance a new identity.
+INSERT INTO telemetry_install (singleton, install_id, created_at)
+VALUES (true, '3f2504e0-4f89-41d3-9a0c-0305e82c3301', '2026-08-01T00:00:00Z');

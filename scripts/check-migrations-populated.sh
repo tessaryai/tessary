@@ -365,6 +365,7 @@ expect "retention_policy both classes"        2 "SELECT count(DISTINCT data_clas
                                                    WHERE data_class IN ('traces','detections')"
 expect "alert_event payload classifier keys"  1 "SELECT count(*) FROM alert_event WHERE payload_json LIKE '%\"classifiers\"%' AND payload_json LIKE '%\"classifier_key\"%'"
 expect "pre_deploy_check rows"                1 "SELECT count(*) FROM pre_deploy_check"
+expect "telemetry_install row"                1 "SELECT count(*) FROM telemetry_install"
 # The old six-table detection UNION view is gone; these are its three open arms, asked
 # directly. All three fixture rows are span-grain (see scripts/lib/populated-fixture.sql), which
 # is the fact this checks rather than assuming.
@@ -417,6 +418,16 @@ fi
 #     skip "Phase A" "<the schema fact> is absent, the migration has not landed"
 #   fi
 #
+
+echo
+echo "0008: telemetry_install becomes telemetry_instance"
+if [ "$(q "SELECT to_regclass('public.telemetry_instance') IS NOT NULL")" = "t" ]; then
+  expect "telemetry_install gone"               t "SELECT to_regclass('public.telemetry_install') IS NULL"
+  expect "instance_id kept the fixture UUID"    3f2504e0-4f89-41d3-9a0c-0305e82c3301 "SELECT instance_id FROM telemetry_instance"
+  expect "ping_seq survived the rename"         0 "SELECT ping_seq FROM telemetry_instance"
+else
+  skip "0008 telemetry instance rename" "telemetry_instance is absent, 0008 has not landed"
+fi
 
 # ---------------------------------------------------------------- summary
 
