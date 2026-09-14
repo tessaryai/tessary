@@ -52,3 +52,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0008-telemetry-instance.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0009-secret-leak-finding-confidence.sql
+      relativeToChangelogFile: false

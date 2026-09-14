@@ -454,7 +454,11 @@ public class FindingRepository {
                     THEN EXCLUDED.sample_count ELSE finding.sample_count END,
                 payload = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
-                    THEN EXCLUDED.payload ELSE finding.payload END,
+                    THEN EXCLUDED.payload ELSE finding.payload END
+                    -- High confidence is sticky across windows, in either arrival order: one high-band
+                    -- detection is enough to call the whole facet a real credential.
+                    || CASE WHEN finding.payload ->> 'confidence' = 'high' OR EXCLUDED.payload ->> 'confidence' = 'high'
+                            THEN '{"confidence": "high"}'::jsonb ELSE '{}'::jsonb END,
                 last_seen_at = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
                     THEN EXCLUDED.last_seen_at ELSE finding.last_seen_at END,
@@ -695,8 +699,7 @@ public class FindingRepository {
         MACHINE_OR_HUMAN("(triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "' OR status = '"
                 + FindingRow.Status.BLOCKED + "')"),
         MACHINE_ONLY("triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"),
-        HUMAN_RECURRENCE("(status = '" + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0)"),
-        NONE("TRUE");
+        HUMAN_RECURRENCE("(status = '" + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0)");
 
         private final String sql;
 
@@ -740,6 +743,22 @@ public class FindingRepository {
                 .param("classifiers", classifierKeys)
                 .param("since", seenSince)
                 .param("limit", limit)
+                .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /**
+     * Every live finding of these classifiers, with no recency window and no cap. For a source whose
+     * findings stay live until a person closes them: a window or a {@code LIMIT} would drop a finding
+     * out of the reconciler's live set, which it reads as a recovery.
+     */
+    public List<FindingRow> listLive(String projectId, Collection<String> classifierKeys) {
+        if (classifierKeys.isEmpty()) return List.of();
+        return jdbc.sql("SELECT " + COLS + " FROM finding"
+                        + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
+                        + " ORDER BY last_seen_at DESC")
+                .param("pid", projectId)
+                .param("classifiers", classifierKeys)
                 .query((rs, n) -> map(rs))
                 .list();
     }

@@ -162,6 +162,24 @@ public record FindingRow(
     }
 
     /**
+     * A faceted finding's detection band, carried in {@link #payloadJson}. Recorded when the finding is
+     * filed rather than recomputed from detection rows, because those age out and a leaked credential's
+     * finding must not read as low confidence once they do.
+     */
+    public static final class Confidence {
+        private Confidence() {}
+
+        public static final String PAYLOAD_KEY = "confidence";
+        public static final String HIGH = "high";
+        public static final String LOW = "low";
+    }
+
+    /** Whether this finding has ever counted a high-confidence detection. */
+    public boolean highConfidence() {
+        return Confidence.HIGH.equals(payloadText(Confidence.PAYLOAD_KEY));
+    }
+
+    /**
      * The behaviour-family cause vocabulary, carried in {@link #payloadJson}. Persisted strings,
      * never renamed: {@link #classifierKey} is what shared readers route on, and these say what
      * the classifier itself called the shape it saw.
