@@ -681,19 +681,22 @@ public class FindingRepository {
     /**
      * The survived-analysis predicate, PARAMETERIZED per classifier gate rather than unified.
      *
-     * <p>Three real variants exist and collapsing them would silently change what a case means for two
-     * of the three detectors. {@link #MACHINE_OR_HUMAN} is metric drift and tool error: Layer 2 ruled it
+     * <p>Four real variants exist and collapsing them would silently change what a case means for three
+     * of the four detectors. {@link #MACHINE_OR_HUMAN} is metric drift and tool error: Layer 2 ruled it
      * a deviation, or a human pressed <em>Real deviation</em> (which sets BLOCKED and zeroes the
      * recurrence counter, so gating the human arm on recurrences would hide a just-confirmed regression
      * until its bucket shifted again). {@link #MACHINE_ONLY} is conformance, where a human verb RESOLVES
      * the row instead of marking it, so there is no blocked arm to read. {@link #HUMAN_RECURRENCE} is
      * behaviour drift's findings-page gate, which requires the cause to have recurred SINCE the ruling.
+     * {@link #NONE} is secret leak's: a high-confidence credential leak is not a claim Layer 2 audits,
+     * it is a fact {@code SecretLeakCaseSource} opens a case for directly.
      */
     public enum SurvivalGate {
         MACHINE_OR_HUMAN("(triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "' OR status = '"
                 + FindingRow.Status.BLOCKED + "')"),
         MACHINE_ONLY("triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"),
-        HUMAN_RECURRENCE("(status = '" + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0)");
+        HUMAN_RECURRENCE("(status = '" + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0)"),
+        NONE("TRUE");
 
         private final String sql;
 

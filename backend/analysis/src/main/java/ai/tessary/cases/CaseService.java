@@ -17,8 +17,11 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.malformed.MalformedOutputDetailService;
+import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
@@ -80,6 +83,13 @@ public class CaseService {
     private final ClassifierService classifiers;
     /** Cleared when a tool-error case is closed by hand; see {@link #resolve}. */
     private final ToolErrorStateRepository toolErrorStates;
+    /** Same reason as {@link #toolErrorStates}, for a malformed-output case: it shares tool_error's
+     *  CUSUM engine and so needs the same accumulator reset when a human closes the case by hand. */
+    private final MalformedOutputRateRepository malformedOutputRates;
+    /** "How outputs broke" — the same builder the malformed-output finding page reads. */
+    private final MalformedOutputDetailService malformedOutputDetail;
+    /** "When it leaked" — the same builder the secret-leak finding page reads. */
+    private final SecretLeakDetailService secretLeakDetail;
 
     public CaseService(
             CaseRepository cases,
@@ -94,7 +104,10 @@ public class CaseService {
             FindingEvidenceRepository findingEvidence,
             FindingService drift,
             ClassifierService classifiers,
-            ToolErrorStateRepository toolErrorStates) {
+            ToolErrorStateRepository toolErrorStates,
+            MalformedOutputRateRepository malformedOutputRates,
+            MalformedOutputDetailService malformedOutputDetail,
+            SecretLeakDetailService secretLeakDetail) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -108,6 +121,9 @@ public class CaseService {
         this.drift = drift;
         this.classifiers = classifiers;
         this.toolErrorStates = toolErrorStates;
+        this.malformedOutputRates = malformedOutputRates;
+        this.malformedOutputDetail = malformedOutputDetail;
+        this.secretLeakDetail = secretLeakDetail;
     }
 
     // ---- reads -------------------------------------------------------------------------------
@@ -244,6 +260,8 @@ public class CaseService {
                 rca,
                 shiftDetail(finding),
                 rateDetail(finding),
+                finding == null ? null : malformedOutputDetail.detail(finding),
+                finding == null ? null : secretLeakDetail.detail(finding),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
@@ -288,10 +306,23 @@ public class CaseService {
         return findings.findById(projectId, ref).orElse(null);
     }
 
-    /** No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
-     *  rather than a button: there is nothing here for "move the bar" to move. */
+    /**
+     * No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
+     * rather than a button: there is nothing here for "move the bar" to move.
+     *
+     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: absorb
+     * delegates to {@code FindingService.resolve(…, "expected")}, which for every other detector reaches
+     * {@code BehaviorTriageSource.resolve()}'s correction loop — and that loop only handles
+     * {@code DISTRIBUTION_SHIFT}/{@code RATE_SHIFT} causes or a finding with a non-null {@code
+     * profileId()}. Both new causes are {@code ARMED_WINDOW}/{@code MALFORMED_RATE} with a null
+     * profile id, so the press would 404 today. Excluded here rather than left to throw: a case page is
+     * not worth a broken button on it. Fixing the correction loop for these two causes is outside this
+     * step's scope.
+     */
     private static boolean absorbable(CaseRow row) {
-        return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector());
+        return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
+                && !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
+                && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector());
     }
 
     /**
@@ -388,6 +419,13 @@ public class CaseService {
         // requires becomes the note on the reset.
         if (CaseRow.Detector.TOOL_ERROR.equals(row.detector())) {
             toolErrorStates.reset(projectId, row.subjectId(), actor, reason, now.toString());
+        }
+        // Same claim, same reason, for the call site behind a malformed-output case: it replays through
+        // tool_error's own engine (MalformedOutputRateService), so its accumulator needs the identical
+        // reset or the next sweep would re-derive the pre-fix rate from evidence this close just said
+        // was dealt with.
+        if (CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())) {
+            malformedOutputRates.states().reset(projectId, row.subjectId(), actor, reason, now.toString());
         }
         return CaseView.of(require(projectId, id));
     }

@@ -46,3 +46,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0006-price-book-digest.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0007-case-detector-secret-leak-malformed-output.sql
+      relativeToChangelogFile: false

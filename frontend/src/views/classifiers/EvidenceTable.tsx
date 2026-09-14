@@ -50,7 +50,20 @@ const ROLE_HINT: Record<string, string> = {
   changepoint: "Where the classifier says the behavior changed.",
 };
 
-type ColumnKey = "role" | "name" | "kind" | "status" | "started" | "latency" | "tokens" | "cost" | "model" | "trace";
+type ColumnKey =
+  | "role"
+  | "name"
+  | "kind"
+  | "status"
+  | "key"
+  | "storedAs"
+  | "violation"
+  | "started"
+  | "latency"
+  | "tokens"
+  | "cost"
+  | "model"
+  | "trace";
 type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean };
 
 /** Declaration order is display order. */
@@ -59,6 +72,9 @@ const COLUMNS: ColumnDef[] = [
   { key: "name", label: "Name" },
   { key: "kind", label: "Kind" },
   { key: "status", label: "Status" },
+  { key: "key", label: "Key" },
+  { key: "storedAs", label: "Stored as" },
+  { key: "violation", label: "Violation" },
   { key: "started", label: "Start time" },
   { key: "latency", label: "Latency (ms)", numeric: true },
   { key: "tokens", label: "Total tokens", numeric: true },
@@ -68,6 +84,14 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 const DEFAULT_VISIBLE: ColumnKey[] = ["role", "name", "status", "started", "latency", "trace"];
+
+/** How a masked-key value is read out. Only "raw" is ever coloured — a stored credential is the one
+ *  fact on this table worth a reader's alarm. */
+const STORED_AS_LABEL: Record<string, string> = {
+  redacted: "Redacted",
+  raw: "Unredacted",
+  unknown: "Unknown",
+};
 
 export function EvidenceTable({ findingId, basePath }: { findingId: string; basePath: string }) {
   const { api } = useTenant();
@@ -83,9 +107,22 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
     enabled: findingId !== "",
   });
 
-  const columns = useMemo(() => COLUMNS.filter((c) => visible.has(c.key)), [visible]);
   const pages = q.data?.pages ?? [];
   const rows = pages.flatMap((p) => p.rows ?? []);
+  // Forward-only per decision #2: a secret-leak finding armed before the masked-key rework carries
+  // no secretKey on any row, and the two columns would be a header over an empty column. Same for a
+  // malformed-output finding armed before the structured-violation rework and its Violation column.
+  const hasSecretKeys = useMemo(() => rows.some((r) => r.secretKey != null), [rows]);
+  const hasViolations = useMemo(() => rows.some((r) => r.violation != null), [rows]);
+  const columns = useMemo(
+    () =>
+      COLUMNS.filter((c) => {
+        if (c.key === "key" || c.key === "storedAs") return hasSecretKeys;
+        if (c.key === "violation") return hasViolations;
+        return visible.has(c.key);
+      }),
+    [visible, hasSecretKeys, hasViolations],
+  );
   // Recorded counts, not live ones: the question a footer answers is "how big is the claim", and a
   // ref whose substrate aged out was still part of what the detector measured.
   const recorded = pages[0]?.recordedCounts ?? {};
@@ -216,6 +253,20 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
       return row.name ? <span className="font-mono">{row.name}</span> : NONE;
     case "kind":
       return row.kind ?? NONE;
+    case "key":
+      return row.secretKey ? <span className="font-mono">{row.secretKey}</span> : NONE;
+    case "storedAs":
+      return row.storedAs ? (
+        <span className={row.storedAs === "raw" ? "text-error" : "text-muted"}>
+          {STORED_AS_LABEL[row.storedAs] ?? row.storedAs}
+        </span>
+      ) : (
+        NONE
+      );
+    // A schema violation is the anomaly this row exists to report, so it is always coloured, not just
+    // on a status mismatch — every row here failed.
+    case "violation":
+      return row.violation ? <span className="font-mono text-error">{row.violation}</span> : NONE;
     // Status carries the one bit a reader scans for on a tool-error finding, so it is coloured rather
     // than printed: three error rows in a page of successes should be findable without reading.
     case "status":

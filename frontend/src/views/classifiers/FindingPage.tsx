@@ -32,6 +32,8 @@ import {
   toneTextClass,
 } from "./shiftStory";
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
+import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
+import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
 import { EvidenceTable } from "./EvidenceTable";
 // This build's baseline renderer returns null by default.
 import { paid } from "@paid";
@@ -51,6 +53,12 @@ export function FindingPage() {
    * these from the slugs instead.
    */
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
+  /** Absolute, not `../traces/...`: these hand-build the href for a plain `<a>` rather than a
+   *  react-router `<Link>` (the timeline and the failing-output viewer render dozens of these off
+   *  data, not JSX), and a relative href on a plain anchor resolves against the URL rather than the
+   *  route tree — exactly the mismatch this page's own top note warns `navigate()` about. */
+  const traceLink = (traceId: string, spanId?: string | null) =>
+    `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`;
 
   const detailQ = useQuery({
     queryKey: ["behavior-finding", api.base, findingId],
@@ -85,9 +93,12 @@ export function FindingPage() {
 
   const shift = detail.metric;
   const rate = detail.toolError;
-  /* Both tell a before-and-after story with a figure, pins and a ruling, and both put their verbs
-     behind triage. The rest of the detectors keep the older layout until they get a story of their own. */
-  const story = shift ?? rate;
+  const secretLeak = detail.secretLeak;
+  const malformedOutput = detail.malformedOutput;
+  /* All four tell a before-and-after story with a figure, pins and a ruling, and all four put their
+     verbs behind triage. The rest of the detectors keep the older layout until they get a story of
+     their own. */
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput;
 
   return (
     <div style={CONTAINER}>
@@ -95,6 +106,24 @@ export function FindingPage() {
         <ShiftHeader shift={shift} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
       ) : rate ? (
         <RateHeader rate={rate} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
+      ) : secretLeak ? (
+        <SecretHeader
+          secretLeak={secretLeak}
+          finding={finding}
+          basePath={basePath}
+          inFlight={inFlight}
+          busy={busy}
+          onAnalyze={() => analyzeM.mutate()}
+        />
+      ) : malformedOutput ? (
+        <MalformedHeader
+          rate={malformedOutput.rate}
+          finding={finding}
+          basePath={basePath}
+          inFlight={inFlight}
+          busy={busy}
+          onAnalyze={() => analyzeM.mutate()}
+        />
       ) : (
         <>
           <PageHeader
@@ -182,6 +211,45 @@ export function FindingPage() {
         </section>
       )}
       {rate && <ToolErrorEvidence rate={rate} />}
+
+      {secretLeak && (
+        <section
+          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+        >
+          <div className="flex items-baseline gap-3">
+            <h2 className="font-mono text-label uppercase text-muted">When it leaked</h2>
+            <span className="text-subtle text-small">one dot per leaking output, one lane per key</span>
+          </div>
+          <LeakTimeline secretLeak={secretLeak} />
+          <LeakPins secretLeak={secretLeak} linkToTrace={traceLink} />
+        </section>
+      )}
+
+      {malformedOutput && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
+              <span className="text-subtle text-small">share of outputs that failed their schema</span>
+            </div>
+            <MalformedRate rate={malformedOutput.rate} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-1.5">
+              <h2 className="font-mono text-label uppercase text-muted">How outputs broke</h2>
+              <span className="text-subtle text-small">
+                each schema field with its failures, beside one failing output
+              </span>
+            </div>
+            <HowOutputsBroke findingId={findingId} detail={malformedOutput} linkToTrace={traceLink} />
+          </section>
+        </>
+      )}
+
       {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
           the two `!detail.baseline` siblings below decide what renders in its place when there
           isn't one. */}

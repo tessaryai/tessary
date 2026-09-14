@@ -9,6 +9,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
 import jakarta.validation.Valid;
@@ -91,6 +92,26 @@ public class FindingController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(service.findingEvidenceSpans(
                 r.project().id(), id, role, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
+    }
+
+    /**
+     * One field's failing outputs since onset — what a {@code malformed_rate} finding's "How outputs
+     * broke" renders on the right once a reader selects a row of the schema tree. {@code field} is a
+     * declared field's collapsed path ({@code items[].sku}), or {@code not_json} / {@code other} for
+     * the two buckets no declared field owns.
+     */
+    @GetMapping("/{id}/malformed-outputs")
+    public ApiResponse<MalformedOutputEvidence.FailingOutputPage> malformedOutputs(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @RequestParam String field,
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) String cursor) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(
+                service.malformedOutputs(r.project().id(), id, field, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
     }
 
     /**

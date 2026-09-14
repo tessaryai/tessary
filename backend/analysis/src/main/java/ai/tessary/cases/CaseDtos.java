@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
@@ -253,6 +255,11 @@ public final class CaseDtos {
      * @param toolError the same for a {@code rate_shift} finding, inlined for the same reason as
      *     {@code rca}. Both null is the normal state for a detector whose shift has no drawable
      *     shape; render that as the fact it is, not as a missing chart.
+     * @param malformedOutput "How outputs broke" for a {@code malformed_rate} case: the rate in
+     *     {@code toolError}'s own shape, the declared schema annotated with per-field failure
+     *     counts, and the not-JSON / pre-rework buckets. Null for every other detector.
+     * @param secretLeak "When it leaked" for a {@code secret_leak} case: the rule, the leak count,
+     *     and the per-key and per-leak breakdowns. Null for every other detector.
      */
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
@@ -266,6 +273,8 @@ public final class CaseDtos {
             @Nullable RcaReportView rca,
             @Nullable ShiftDetail metric,
             @JsonProperty("tool_error") @Nullable RateDetail toolError,
+            @JsonProperty("malformed_output") @Nullable MalformedDetail malformedOutput,
+            @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}

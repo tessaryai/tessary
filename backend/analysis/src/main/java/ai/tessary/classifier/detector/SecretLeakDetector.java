@@ -4,6 +4,7 @@ package ai.tessary.classifier.detector;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.ingest.RedactionStamp;
+import ai.tessary.redaction.CredentialMasking;
 import ai.tessary.redaction.GitleaksCorpus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,8 +42,10 @@ import org.jspecify.annotations.Nullable;
  * {@link #LOW_BAND_RULES} whose shape still turns up on text that is not a leak, and a bare redaction token.
  * Only HIGH counts toward the classifier's arming bar; LOW stays listed for anyone looking.
  *
- * <p>Evidence names the rule and never carries the credential. Reading the stamp, there is none to carry;
- * reading raw output, it keeps four characters and the length.
+ * <p>Evidence names the rule and never carries the credential. It also names, and masks, which key leaked:
+ * reading the stamp, the mask travels with it when the stamp carries one; reading raw output, this
+ * computes {@link CredentialMasking#maskedKey}. Either way what reaches evidence is a provider prefix and
+ * four trailing characters, never the credential itself.
  *
  * <p>This detector deliberately ignores {@code config_json}: the corpus is the product's opinion of what a
  * credential looks like, not per-project state. A documented carve-out from the convention {@link
@@ -120,12 +123,12 @@ public final class SecretLeakDetector implements BuiltInDetector {
                     best.ruleId(),
                     band(best.ruleId(), best.anchored()),
                     Source.OUTPUT,
-                    match.substring(0, Math.min(4, match.length())) + "…(" + match.length() + " chars)");
+                    CredentialMasking.maskedKey(match));
         }
 
         for (Map.Entry<String, Pattern> marker : REDACTION_MARKERS.entrySet()) {
             Matcher m = marker.getValue().matcher(haystack);
-            if (m.find()) return fired(marker.getKey(), Detection.Confidence.LOW, Source.MARKER, m.group());
+            if (m.find()) return fired(marker.getKey(), Detection.Confidence.LOW, Source.MARKER, null);
         }
         return Detection.none();
     }
@@ -139,18 +142,23 @@ public final class SecretLeakDetector implements BuiltInDetector {
         } catch (JsonProcessingException e) {
             return null;
         }
-        String low = null;
+        String lowRule = null;
+        String lowMasked = null;
         for (JsonNode stamp : stamps) {
             if (!RedactionStamp.OUTPUT.equals(stamp.path("field").asText())) continue;
             String rule = stamp.path("rule").asText(null);
             if (rule == null) continue;
+            String masked = stamp.path("masked").asText(null);
             if (Detection.Confidence.HIGH.equals(
                     band(rule, stamp.path("anchored").asBoolean(false)))) {
-                return fired(rule, Detection.Confidence.HIGH, Source.REDACTION, null);
+                return fired(rule, Detection.Confidence.HIGH, Source.REDACTION, masked);
             }
-            if (low == null) low = rule;
+            if (lowRule == null) {
+                lowRule = rule;
+                lowMasked = masked;
+            }
         }
-        return low == null ? null : fired(low, Detection.Confidence.LOW, Source.REDACTION, null);
+        return lowRule == null ? null : fired(lowRule, Detection.Confidence.LOW, Source.REDACTION, lowMasked);
     }
 
     /** The first HIGH finding, or the first finding when none is HIGH. */
@@ -165,11 +173,30 @@ public final class SecretLeakDetector implements BuiltInDetector {
         return anchored && !LOW_BAND_RULES.contains(rule) ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
     }
 
-    private Detection fired(String rule, String confidence, String source, @Nullable String matchRedacted) {
+    /** What {@link #Source} says about whether the credential itself is still sitting in stored output. */
+    private static String storedAs(String source) {
+        return switch (source) {
+            case Source.REDACTION, Source.MARKER -> Stored.REDACTED;
+            case Source.OUTPUT -> Stored.RAW;
+            default -> Stored.UNKNOWN;
+        };
+    }
+
+    /** Evidence's {@code stored} member: whether the credential itself is still sitting in stored output. */
+    static final class Stored {
+        private Stored() {}
+
+        static final String REDACTED = "redacted";
+        static final String RAW = "raw";
+        static final String UNKNOWN = "unknown";
+    }
+
+    private Detection fired(String rule, String confidence, String source, @Nullable String masked) {
         Map<String, String> evidence = new LinkedHashMap<>();
         evidence.put("pattern", rule);
         evidence.put("source", source);
-        if (matchRedacted != null) evidence.put("match_redacted", matchRedacted);
+        if (masked != null) evidence.put("masked", masked);
+        evidence.put("stored", storedAs(source));
         String json;
         try {
             json = mapper.writeValueAsString(evidence);

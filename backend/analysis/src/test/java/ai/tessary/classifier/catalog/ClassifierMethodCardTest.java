@@ -47,8 +47,8 @@ class ClassifierMethodCardTest {
     /** The armed-signal family shares one card, rendered with the key of the classifier that fired. */
     @Test
     void anArmedSignalCardNamesItsOwnClassifier() {
-        String card = ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.SECRET_LEAK);
+        String card = ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.FRUSTRATION);
         assertNotNull(card);
-        assertTrue(card.contains(BuiltInDetector.Kind.SECRET_LEAK), "the shared card is rendered with its own key");
+        assertTrue(card.contains(BuiltInDetector.Kind.FRUSTRATION), "the shared card is rendered with its own key");
     }
 }

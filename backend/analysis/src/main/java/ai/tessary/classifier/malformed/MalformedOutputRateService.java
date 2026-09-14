@@ -69,7 +69,7 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
      * because every call site is re-evaluated whenever the sweep catches up, so a recovered one stops refreshing
      * within minutes.
      */
-    static final Duration QUIET_WINDOW = Duration.ofHours(6);
+    public static final Duration QUIET_WINDOW = Duration.ofHours(6);
 
     /** Failing spans kept on a finding for a reader to open. */
     static final int MAX_WITNESSES = 50;

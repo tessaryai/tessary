@@ -9,12 +9,16 @@ import ai.tessary.pipeline.CallSiteFact;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.networknt.schema.JsonNodePath;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
 import com.networknt.schema.resource.DisallowSchemaLoader;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -126,7 +130,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         try {
             node = mapper.readTree(output);
         } catch (JsonProcessingException e) {
-            return Detection.fired(Detection.Severity.WARN, evidence("not_json", List.of()));
+            return Detection.fired(Detection.Severity.WARN, notJsonEvidence());
         }
         String assistantText = assistantTextFromMessageEnvelope(node);
         if (assistantText != null) {
@@ -136,7 +140,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
             try {
                 node = mapper.readTree(assistantText);
             } catch (JsonProcessingException e) {
-                return Detection.fired(Detection.Severity.WARN, evidence("not_json", List.of()));
+                return Detection.fired(Detection.Severity.WARN, notJsonEvidence());
             }
         }
         Set<ValidationMessage> violations;
@@ -148,12 +152,52 @@ public final class MalformedOutputDetector implements BuiltInDetector {
             return Detection.none();
         }
         if (violations.isEmpty()) return Detection.none();
-        List<String> messages = violations.stream()
-                .map(ValidationMessage::getMessage)
-                .sorted()
+        List<Violation> ordered = violations.stream()
+                .map(MalformedOutputDetector::toViolation)
+                .sorted(Comparator.comparing(Violation::field).thenComparing(Violation::message))
                 .limit(MAX_VIOLATIONS_IN_EVIDENCE)
                 .toList();
-        return Detection.fired(Detection.Severity.WARN, evidence("schema_violation", messages));
+        return Detection.fired(Detection.Severity.WARN, violationEvidence(ordered));
+    }
+
+    /**
+     * One schema violation, in the vocabulary the finding and case pages read back: {@code field}
+     * collapses every array index to {@code []} so a violation on {@code items[2].sku} and one on
+     * {@code items[5].sku} count against the same declared field, matching how {@code call_site.output_schema}
+     * is flattened for display. {@code path} is the same field, spelled as a JSON path for a reader who wants
+     * to paste it somewhere.
+     */
+    private record Violation(String path, String field, String keyword, String message) {}
+
+    /**
+     * {@code required}'s own instance location is the object missing the property, not the property
+     * itself — {@link ValidationMessage#getProperty()} carries the missing name instead, so it is appended
+     * to the parent's collapsed path here rather than read off the location.
+     */
+    private static Violation toViolation(ValidationMessage vm) {
+        String field = collapsedPath(vm.getInstanceLocation());
+        String keyword = vm.getType();
+        String property = vm.getProperty();
+        if ("required".equals(keyword) && property != null && !property.isBlank()) {
+            field = field.isEmpty() ? property : field + "." + property;
+        }
+        String path = field.isEmpty() ? "$" : "$." + field;
+        return new Violation(path, field, keyword, vm.getMessage());
+    }
+
+    /** {@code items[2].sku} → {@code items[].sku}: every array index collapses to an empty pair of brackets. */
+    private static String collapsedPath(JsonNodePath location) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < location.getNameCount(); i++) {
+            Object element = location.getElement(i);
+            if (element instanceof Integer) {
+                sb.append("[]");
+            } else {
+                if (sb.length() > 0) sb.append('.');
+                sb.append(element);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -167,8 +211,12 @@ public final class MalformedOutputDetector implements BuiltInDetector {
      * {@link ContentExtractor#flattenContentText} so the detector and the judge agree on how a
      * message's content collapses to text. Only a role-tagged <em>array</em> counts as an envelope —
      * a bare object payload that happens to have a {@code role} property is validated verbatim.
+     *
+     * <p>Public so the finding page's failing-outputs read ({@code MalformedOutputDetailService}) unwraps
+     * a stored output the identical way before re-validating and rendering it — the document a reader
+     * sees must be the one this detector actually judged, not the envelope around it.
      */
-    private static @Nullable String assistantTextFromMessageEnvelope(JsonNode node) {
+    public static @Nullable String assistantTextFromMessageEnvelope(JsonNode node) {
         if (!ContentExtractor.isMessageEnvelope(node)) return null;
         for (int i = node.size() - 1; i >= 0; i--) {
             JsonNode msg = node.get(i);
@@ -192,13 +240,25 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         }
     }
 
-    private String evidence(String reason, List<String> violations) {
+    private String notJsonEvidence() {
+        return "{\"reason\":\"not_json\"}";
+    }
+
+    private String violationEvidence(List<Violation> violations) {
+        ObjectNode root = mapper.createObjectNode();
+        root.put("reason", "schema_violation");
+        ArrayNode arr = root.putArray("violations");
+        for (Violation v : violations) {
+            ObjectNode n = arr.addObject();
+            n.put("path", v.path());
+            n.put("field", v.field());
+            n.put("keyword", v.keyword());
+            n.put("message", v.message());
+        }
         try {
-            return violations.isEmpty()
-                    ? mapper.writeValueAsString(Map.of("reason", reason))
-                    : mapper.writeValueAsString(Map.of("reason", reason, "violations", violations));
+            return mapper.writeValueAsString(root);
         } catch (JsonProcessingException e) {
-            return "{\"reason\":\"" + reason + "\"}";
+            return "{\"reason\":\"schema_violation\"}";
         }
     }
 }

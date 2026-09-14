@@ -812,7 +812,12 @@ public class McpToolRegistry {
      */
     private static BehaviorFindingDetailView withoutTriage(BehaviorFindingDetailView detail) {
         return new BehaviorFindingDetailView(
-                detail.finding().withoutTriage(), detail.metric(), detail.toolError(), detail.baseline());
+                detail.finding().withoutTriage(),
+                detail.metric(),
+                detail.toolError(),
+                detail.baseline(),
+                detail.malformedOutput(),
+                detail.secretLeak());
     }
 
     /** See {@link #withoutTriage}: the same firewall applies here. */
@@ -896,7 +901,16 @@ public class McpToolRegistry {
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
             @Nullable String model,
-            @Nullable String callSiteId) {
+            @Nullable String callSiteId,
+            /** The masked key that leaked and whether it is still stored raw — already masked, never
+             *  the credential itself, so kept alongside the measurements rather than dropped with the
+             *  previews. Set only on a secret-leak finding's evidence. */
+            @Nullable String secretKey,
+            @Nullable String storedAs,
+            /** The schema-violation message this row's own output failed with — already a plain message,
+             *  never a credential, so kept alongside the measurements rather than dropped with the
+             *  previews. Set only on a malformed-output finding's evidence. */
+            @Nullable String violation) {
 
         static EvidenceSpan of(BehaviorDtos.EvidenceSpanView v) {
             return new EvidenceSpan(
@@ -915,7 +929,10 @@ public class McpToolRegistry {
                     v.totalTokens(),
                     v.totalCost(),
                     v.model(),
-                    v.callSiteId());
+                    v.callSiteId(),
+                    v.secretKey(),
+                    v.storedAs(),
+                    v.violation());
         }
     }
 
@@ -1100,6 +1117,8 @@ public class McpToolRegistry {
                     detail.rca(),
                     detail.metric(),
                     detail.toolError(),
+                    detail.malformedOutput(),
+                    detail.secretLeak(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());

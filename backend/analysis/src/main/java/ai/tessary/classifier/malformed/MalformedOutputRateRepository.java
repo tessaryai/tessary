@@ -4,9 +4,14 @@ package ai.tessary.classifier.malformed;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -79,6 +84,176 @@ public class MalformedOutputRateRepository {
                         rs.getLong("checked"),
                         rs.getLong("malformed")))
                 .list();
+    }
+
+    /** The bucket a not-JSON detection's failures count under: the whole output, no schema field. */
+    public static final String FIELD_NOT_JSON = "not_json";
+
+    /**
+     * The bucket a detection written before the structured-violation rework counts under: its {@code
+     * violations} array holds plain strings, not {@code {field, keyword, message}} objects, so which
+     * declared field it hit cannot be recovered.
+     */
+    public static final String FIELD_OTHER = "other";
+
+    /**
+     * A detection's evidence matches {@code :field} when it is the not-JSON bucket, the pre-rework
+     * catch-all, a structured violation whose own {@code field} equals it, or (also under the "other"
+     * bucket) a structured violation whose instance location is the document root, so its collapsed
+     * path is empty rather than absent. Shared between {@link #fieldFailureCounts} and {@link
+     * #failingOutputs} so the two can never disagree about which detections a field owns.
+     */
+    private static final String FIELD_MATCH = """
+            ( (:field = 'not_json' AND d.evidence->>'reason' = 'not_json')
+           OR (:field <> 'not_json' AND EXISTS (
+                 SELECT 1 FROM jsonb_array_elements(COALESCE(d.evidence->'violations', '[]'::jsonb)) v(value)
+                WHERE (:field = 'other' AND (jsonb_typeof(v.value) <> 'object' OR COALESCE(v.value ->> 'field', '') = ''))
+                   OR (:field <> 'other' AND jsonb_typeof(v.value) = 'object' AND NULLIF(v.value ->> 'field', '') = :field)
+              )) )
+            """;
+
+    /**
+     * Distinct failing outputs since {@code since}, one count per declared field plus the {@link
+     * #FIELD_NOT_JSON} and {@link #FIELD_OTHER} buckets — what "How outputs broke" annotates the schema
+     * tree with. A span counts once per field even if the same violation fired on it more than once in
+     * its history, and once under EACH field it violates, since one output can break more than one field.
+     */
+    private record FieldCount(String field, long failing) {}
+
+    public Map<String, Long> fieldFailureCounts(
+            String projectId, String classifierId, String callSiteId, String since) {
+        List<FieldCount> rows = jdbc.sql("""
+                        SELECT
+                          CASE
+                            WHEN d.evidence ->> 'reason' = 'not_json' THEN 'not_json'
+                            WHEN jsonb_typeof(v.value) = 'object' THEN COALESCE(NULLIF(v.value ->> 'field', ''), 'other')
+                            ELSE 'other'
+                          END AS field,
+                          COUNT(DISTINCT (d.subject_trace_id, d.subject_span_id)) AS failing
+                        FROM malformed_output_detection d
+                        JOIN span s
+                          ON s.project_id = d.project_id AND s.trace_id = d.subject_trace_id AND s.id = d.subject_span_id
+                        LEFT JOIN LATERAL jsonb_array_elements(COALESCE(d.evidence -> 'violations', '[]'::jsonb)) v(value)
+                          ON TRUE
+                        WHERE d.project_id = :pid AND d.classifier_id = :cid AND s.call_site_id = :callSite
+                          AND s.started_at >= CAST(:since AS timestamptz)
+                        GROUP BY 1
+                        """)
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("callSite", callSiteId)
+                .param("since", since)
+                .query((rs, n) -> new FieldCount(rs.getString("field"), rs.getLong("failing")))
+                .list();
+        Map<String, Long> out = new LinkedHashMap<>();
+        for (FieldCount row : rows) out.put(row.field(), row.failing());
+        return out;
+    }
+
+    /**
+     * One failing output: enough to fetch its payload and place it on a trace. {@code detectionId} is
+     * {@code malformed_output_detection.id}, carried only to reseed {@link Cursor} — a span id is unique
+     * within its trace but not across the whole population this pages over. {@code evidenceJson} is the
+     * detection's own {@code {reason, violations}} blob, read back for the field's own violation message.
+     */
+    public record DetectionRow(
+            String traceId,
+            String spanId,
+            @Nullable String name,
+            String startedAt,
+            String detectionId,
+            @Nullable String evidenceJson) {}
+
+    /** A page of {@link DetectionRow}s, the population size the field owns, and the cursor past this page. */
+    public record DetectionPage(
+            List<DetectionRow> rows, long total, @Nullable String nextCursor) {}
+
+    /**
+     * One field's failing outputs since {@code since}, newest first — what a reader pages through after
+     * selecting a schema field (or {@link #FIELD_NOT_JSON} / {@link #FIELD_OTHER}) on the finding page.
+     *
+     * <p>Keyset on {@code (started_at, id)}, over-fetched by one exactly as {@link
+     * ai.tessary.classifier.finding.FindingEvidenceRepository#spanPage} is: a next page needs no separate
+     * count. {@link #total} is a second, uncursored read of the same {@link #FIELD_MATCH} population — it
+     * rides every page because a reader mid-page ("i of n") needs it beside the row they're looking at.
+     */
+    public DetectionPage failingOutputs(
+            String projectId,
+            String classifierId,
+            String callSiteId,
+            String since,
+            String field,
+            int limit,
+            @Nullable String cursor) {
+        long total = jdbc.sql("SELECT COUNT(*) FROM malformed_output_detection d "
+                        + "JOIN span s ON s.project_id = d.project_id AND s.trace_id = d.subject_trace_id "
+                        + "AND s.id = d.subject_span_id "
+                        + "WHERE d.project_id = :pid AND d.classifier_id = :cid AND s.call_site_id = :callSite "
+                        + "AND s.started_at >= CAST(:since AS timestamptz) AND " + FIELD_MATCH)
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("callSite", callSiteId)
+                .param("since", since)
+                .param("field", field)
+                .query(Long.class)
+                .single();
+
+        Cursor key = Cursor.decode(cursor);
+        StringBuilder sql = new StringBuilder(
+                "SELECT d.id, d.subject_trace_id, d.subject_span_id, s.name, s.started_at, d.evidence::text AS evidence "
+                        + "FROM malformed_output_detection d "
+                        + "JOIN span s ON s.project_id = d.project_id AND s.trace_id = d.subject_trace_id "
+                        + "AND s.id = d.subject_span_id "
+                        + "WHERE d.project_id = :pid AND d.classifier_id = :cid AND s.call_site_id = :callSite "
+                        + "AND s.started_at >= CAST(:since AS timestamptz) AND "
+                        + FIELD_MATCH);
+        if (key != null) {
+            sql.append(" AND (s.started_at, d.id) < (CAST(:cStartedAt AS timestamptz), :cId)");
+        }
+        sql.append(" ORDER BY s.started_at DESC, d.id DESC LIMIT :n");
+
+        var spec = jdbc.sql(sql.toString())
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("callSite", callSiteId)
+                .param("since", since)
+                .param("field", field)
+                .param("n", limit + 1);
+        if (key != null) {
+            spec = spec.param("cStartedAt", key.startedAt()).param("cId", key.id());
+        }
+        List<DetectionRow> rows = spec.query((rs, n) -> new DetectionRow(
+                        rs.getString("subject_trace_id"),
+                        rs.getString("subject_span_id"),
+                        rs.getString("name"),
+                        rs.getObject("started_at", OffsetDateTime.class)
+                                .toInstant()
+                                .toString(),
+                        rs.getString("id"),
+                        rs.getString("evidence")))
+                .list();
+        if (rows.size() <= limit) return new DetectionPage(rows, total, null);
+        List<DetectionRow> page = rows.subList(0, limit);
+        return new DetectionPage(List.copyOf(page), total, Cursor.encode(page.get(page.size() - 1)));
+    }
+
+    private record Cursor(String startedAt, String id) {
+        static @Nullable Cursor decode(@Nullable String cursor) {
+            if (cursor == null || cursor.isBlank()) return null;
+            try {
+                String raw = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+                int sep = raw.indexOf('');
+                if (sep < 0) return null;
+                return new Cursor(raw.substring(0, sep), raw.substring(sep + 1));
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        static String encode(DetectionRow last) {
+            String raw = last.startedAt() + '' + last.detectionId();
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     /**

@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.ingest.PreviewCursor;
+import ai.tessary.redaction.CredentialMasking;
 import ai.tessary.tenant.Ids;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -335,10 +336,29 @@ public class FindingEvidenceRepository {
             /**
              * The first {@link #PREVIEW_CHARS} characters of what the span was given and what it
              * returned, or null where the payload was never written or has aged out. Truncated in SQL
-             * rather than Java, since a single LLM span's output can run to megabytes.
+             * rather than Java, since a single LLM span's output can run to megabytes; masked in Java by
+             * {@link ai.tessary.redaction.CredentialMasking#mask}, since a project with redaction disabled
+             * can store one raw.
              */
             @Nullable String inputPreview,
-            @Nullable String outputPreview) {}
+            @Nullable String outputPreview,
+            /**
+             * The masked key that leaked, and whether it is still sitting in stored output unredacted:
+             * {@code secret_leak_detection.evidence ->> 'masked'} / {@code 'stored'}, joined on this
+             * ref's trace/span. Null on any finding that is not a secret-leak facet — see
+             * {@link #spanPage}'s {@code secretLeak} parameter — and on a leak the join found no
+             * detection row for.
+             */
+            @Nullable String secretKey,
+            @Nullable String storedAs,
+            /**
+             * The schema-violation message this row's own output failed with: {@code "not JSON"} for a
+             * not-JSON detection, else the first structured violation's {@code message}. Joined from
+             * {@code malformed_output_detection} on this ref's trace/span. Null on any finding that is
+             * not a malformed-output facet — see {@link #spanPage}'s {@code malformedOutput} parameter —
+             * and on a row the join found no detection for.
+             */
+            @Nullable String violation) {}
 
     /** A page of {@link SpanRef}s and the cursor that resumes after it, null when this was the last. */
     public record SpanPage(List<SpanRef> rows, @Nullable String nextCursor) {}
@@ -366,16 +386,35 @@ public class FindingEvidenceRepository {
      * keyset page of at most {@code limit} spans, 1:1 on the span primary key, with columns truncated in
      * SQL so a page costs {@code limit × 2 × PREVIEW_CHARS} however large the payloads behind it are. The
      * previews are for the table; the MCP door drops them and sends callers to {@code get_span}.
+     *
+     * @param secretLeak true exactly for a secret-leak finding's own page: only then is {@code
+     *     secret_leak_detection} joined for {@link SpanRef#secretKey} / {@link SpanRef#storedAs}, so a
+     *     span that happens to carry an unrelated leak on some other finding's page stays silent about it
+     * @param malformedOutput true exactly for a malformed-output finding's own page: only then is
+     *     {@code malformed_output_detection} joined for {@link SpanRef#violation}, for the same reason
      */
     public SpanPage spanPage(
-            String projectId, String findingId, @Nullable String role, int limit, @Nullable String cursor) {
+            String projectId,
+            String findingId,
+            @Nullable String role,
+            int limit,
+            @Nullable String cursor,
+            boolean secretLeak,
+            boolean malformedOutput) {
         Key key = decodeCursor(cursor);
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
                 + " s.name, s.kind, s.status, s.level, s.error_type, s.started_at, s.latency_ms,"
                 + " s.total_tokens, s.total_cost, s.provided_model_name, s.call_site_id,"
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
-                + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview"
+                + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview,"
+                + (secretLeak
+                        ? " ld.evidence ->> 'masked' AS secret_key, ld.evidence ->> 'stored' AS stored_as"
+                        : " NULL::text AS secret_key, NULL::text AS stored_as")
+                + (malformedOutput
+                        ? " , CASE WHEN md.evidence ->> 'reason' = 'not_json' THEN 'not JSON'"
+                                + "        ELSE md.evidence -> 'violations' -> 0 ->> 'message' END AS violation"
+                        : " , NULL::text AS violation")
                 + " FROM finding_evidence e"
                 + " LEFT JOIN LATERAL ("
                 + "   SELECT sp.* FROM span sp"
@@ -389,6 +428,18 @@ public class FindingEvidenceRepository {
                 + "    LIMIT 1) s ON true"
                 + " LEFT JOIN span_payload pl ON pl.project_id = s.project_id"
                 + "   AND pl.trace_id = s.trace_id AND pl.span_id = s.id"
+                + (secretLeak
+                        ? " LEFT JOIN LATERAL (SELECT sld.evidence FROM secret_leak_detection sld"
+                                + "   WHERE sld.project_id = e.project_id AND sld.subject_trace_id = e.trace_id"
+                                + "     AND sld.subject_span_id = e.span_id"
+                                + "   ORDER BY sld.created_at DESC LIMIT 1) ld ON true"
+                        : "")
+                + (malformedOutput
+                        ? " LEFT JOIN LATERAL (SELECT mod.evidence FROM malformed_output_detection mod"
+                                + "   WHERE mod.project_id = e.project_id AND mod.subject_trace_id = e.trace_id"
+                                + "     AND mod.subject_span_id = e.span_id"
+                                + "   ORDER BY mod.created_at DESC LIMIT 1) md ON true"
+                        : "")
                 + " WHERE e.project_id = :pid AND e.finding_id = :fid");
         if (role != null) sql.append(" AND e.role = :role");
         if (key != null) {
@@ -598,8 +649,11 @@ public class FindingEvidenceRepository {
                         : rs.getBigDecimal("total_cost").doubleValue(),
                 rs.getString("provided_model_name"),
                 rs.getString("call_site_id"),
-                rs.getString("input_preview"),
-                rs.getString("output_preview"));
+                CredentialMasking.mask(rs.getString("input_preview")),
+                CredentialMasking.mask(rs.getString("output_preview")),
+                rs.getString("secret_key"),
+                rs.getString("stored_as"),
+                rs.getString("violation"));
     }
 
     private int countFor(String findingId, String role) {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A credential redaction removed from a span on the way in: which corpus rule matched, in which field, and
  * whether that rule anchors on a literal the provider stamps into the credential.
@@ -14,8 +16,15 @@ package ai.tessary.ingest;
  * @param field {@link #INPUT}, {@link #OUTPUT} or {@link #ATTRIBUTES}
  * @param anchored whether the rule matched on a literal the provider puts in the credential, rather than on a
  *     vendor name near a random-looking string
+ * @param masked {@code ai.tessary.redaction.CredentialMasking#maskedKey}, computed from the raw match before
+ *     it was replaced. Forward-only: null on a stamp written before this field existed, which a reader
+ *     degrades to an unknown key rather than treating as a broken row.
  */
-public record RedactionStamp(String rule, String field, boolean anchored) {
+public record RedactionStamp(
+        String rule,
+        String field,
+        boolean anchored,
+        @Nullable String masked) {
 
     /** The span's input, or its input messages. */
     public static final String INPUT = "input";

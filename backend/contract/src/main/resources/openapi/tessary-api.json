@@ -672,6 +672,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseFailingOutputPage" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FailingOutputPage"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseFindingEvidenceSpanPage" : {
         "properties" : {
           "data" : {
@@ -2324,10 +2345,30 @@
           "finding" : {
             "$ref" : "#/components/schemas/BehaviorFindingView"
           },
+          "malformedOutput" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/MalformedDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "metric" : {
             "anyOf" : [
               {
                 "$ref" : "#/components/schemas/ShiftDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "secretLeak" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/SecretLeakDetail"
               },
               {
                 "type" : "null"
@@ -2348,7 +2389,9 @@
         "required" : [
           "baseline",
           "finding",
+          "malformedOutput",
           "metric",
+          "secretLeak",
           "toolError"
         ],
         "type" : "object"
@@ -2892,6 +2935,16 @@
               "null"
             ]
           },
+          "malformed_output" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/MalformedDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "metric" : {
             "anyOf" : [
               {
@@ -2931,6 +2984,16 @@
               }
             ]
           },
+          "secret_leak" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/SecretLeakDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "tool_error" : {
             "anyOf" : [
               {
@@ -2949,11 +3012,13 @@
           "events",
           "exemplars",
           "finding_id",
+          "malformed_output",
           "metric",
           "rca",
           "rca_available",
           "rca_report_id",
           "ruling",
+          "secret_leak",
           "tool_error"
         ],
         "type" : "object"
@@ -4344,6 +4409,12 @@
           "role" : {
             "type" : "string"
           },
+          "secretKey" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "sessionId" : {
             "type" : [
               "string",
@@ -4368,6 +4439,12 @@
               "null"
             ]
           },
+          "storedAs" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "totalCost" : {
             "format" : "double",
             "type" : [
@@ -4387,6 +4464,12 @@
               "string",
               "null"
             ]
+          },
+          "violation" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -4401,13 +4484,16 @@
           "outputPreview",
           "rank",
           "role",
+          "secretKey",
           "sessionId",
           "spanId",
           "startedAt",
           "status",
+          "storedAs",
           "totalCost",
           "totalTokens",
-          "traceId"
+          "traceId",
+          "violation"
         ],
         "type" : "object"
       },
@@ -4530,6 +4616,80 @@
         "required" : [
           "facets",
           "field"
+        ],
+        "type" : "object"
+      },
+      "FailingOutputPage" : {
+        "properties" : {
+          "nextCursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "rows" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FailingOutputView"
+            },
+            "type" : "array"
+          },
+          "total" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "nextCursor",
+          "rows",
+          "total"
+        ],
+        "type" : "object"
+      },
+      "FailingOutputView" : {
+        "properties" : {
+          "document" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "highlightLines" : {
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : "array"
+          },
+          "message" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "name" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "spanId" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "document",
+          "highlightLines",
+          "message",
+          "name",
+          "spanId",
+          "startedAt",
+          "traceId"
         ],
         "type" : "object"
       },
@@ -5446,6 +5606,34 @@
         "required" : [
           "email",
           "password"
+        ],
+        "type" : "object"
+      },
+      "MalformedDetail" : {
+        "properties" : {
+          "fields" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SchemaFieldView"
+            },
+            "type" : "array"
+          },
+          "notJson" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "other" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rate" : {
+            "$ref" : "#/components/schemas/RateDetail"
+          }
+        },
+        "required" : [
+          "fields",
+          "notJson",
+          "other",
+          "rate"
         ],
         "type" : "object"
       },
@@ -7397,6 +7585,39 @@
         ],
         "type" : "object"
       },
+      "SchemaFieldView" : {
+        "properties" : {
+          "depth" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failing" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "boolean"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "depth",
+          "failing",
+          "name",
+          "path",
+          "required",
+          "type"
+        ],
+        "type" : "object"
+      },
       "SearchHit" : {
         "properties" : {
           "id" : {
@@ -7524,6 +7745,124 @@
         "required" : [
           "next_cursor",
           "rows"
+        ],
+        "type" : "object"
+      },
+      "SecretLeakDetail" : {
+        "properties" : {
+          "confidence" : {
+            "type" : "string"
+          },
+          "firstAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "keys" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SecretLeakKeyView"
+            },
+            "type" : "array"
+          },
+          "lastAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "leakCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "leaks" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SecretLeakLeakView"
+            },
+            "type" : "array"
+          },
+          "rule" : {
+            "type" : "string"
+          },
+          "traceCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "confidence",
+          "firstAt",
+          "keys",
+          "lastAt",
+          "leakCount",
+          "leaks",
+          "rule",
+          "traceCount"
+        ],
+        "type" : "object"
+      },
+      "SecretLeakKeyView" : {
+        "properties" : {
+          "lastAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "leaks" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "masked" : {
+            "type" : "string"
+          },
+          "storedRaw" : {
+            "type" : "boolean"
+          },
+          "traces" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "lastAt",
+          "leaks",
+          "masked",
+          "storedRaw",
+          "traces"
+        ],
+        "type" : "object"
+      },
+      "SecretLeakLeakView" : {
+        "properties" : {
+          "at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "masked" : {
+            "type" : "string"
+          },
+          "spanId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "stored" : {
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "at",
+          "masked",
+          "spanId",
+          "stored",
+          "traceId"
         ],
         "type" : "object"
       },
@@ -13506,6 +13845,86 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseFindingEvidenceSpanPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "finding-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/malformed-outputs" : {
+      "get" : {
+        "operationId" : "FindingController_malformedOutputs",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "field",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "limit",
+            "required" : false,
+            "schema" : {
+              "default" : 10,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "cursor",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseFailingOutputPage"
                 }
               }
             },

@@ -231,7 +231,7 @@ class TriageSourceAbsenceTest {
 
     @SuppressWarnings("NullAway") // deliberate: the injected repositories are unreachable on these paths
     private static FindingService service(List<TriageSource> sources) {
-        return new FindingService(null, null, null, null, sources);
+        return new FindingService(null, null, null, null, sources, null); // MalformedOutputDetailService unreached
     }
 
     /**
@@ -262,7 +262,9 @@ class TriageSourceAbsenceTest {
                 annotations,
                 substrate,
                 TestObjectProvider.of(causeResolvers),
-                null); // ObjectMapper: the two metric/tool-error branches only
+                null, // ObjectMapper: the two metric/tool-error branches only
+                null, // MalformedOutputDetailService: the malformed_rate branch only
+                null); // SecretLeakDetailService: the secret_leak branch only
     }
 
     /** The triage worker with only the collaborators {@code triageForTest} reaches. */
@@ -465,7 +467,7 @@ class TriageSourceAbsenceTest {
 
         @Override
         public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
-            return Optional.of(new BehaviorFindingDetailView(claimed(), null, null, null));
+            return Optional.of(new BehaviorFindingDetailView(claimed(), null, null, null, null, null));
         }
 
         @Override

@@ -88,6 +88,20 @@ public record CaseRow(
          * detectors: only a Layer-2 ruling of deviation reaches Triage.
          */
         public static final String SOP_CONFORMANCE = "sop_conformance";
+
+        /**
+         * A high-confidence secret-leak finding, opened directly with no triage gate: a credential
+         * sitting in a stored output is a fact to rotate, not a claim to audit. See {@link
+         * ai.tessary.classifier.secretleak}.
+         */
+        public static final String SECRET_LEAK = "secret_leak";
+
+        /**
+         * A call site's declared-schema failure rate that survived triage. Same gate as
+         * {@link #TOOL_ERROR}: the detector's findings stream unbudgeted, and only a triage ruling of
+         * {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
+         */
+        public static final String MALFORMED_OUTPUT = "malformed_output";
     }
 
     /** {@code subject_kind} values: what the case is about. */
@@ -118,6 +132,22 @@ public record CaseRow(
          * causes to explain, but one obligation to page about.
          */
         public static final String SOP_RULE = "sop_rule";
+
+        /**
+         * A call site whose outputs are failing their declared schema — {@code malformed_rate}'s
+         * subject. The call site rather than the classifier, for the {@link #TOOL} reason: the schema
+         * a call site is failing belongs to it, and a second call site failing its own schema is a
+         * second thing to fix, not the same one recurring.
+         */
+        public static final String CALL_SITE = "call_site";
+
+        /**
+         * One secret-detection rule at one call site — {@code armed_window}'s secret-leak subject, the
+         * facet {@code ClassifierArming} keys a leak finding on. A leaked AWS key from one call site
+         * and a leaked GitHub token from another are two credentials to rotate, so the pattern-and-place
+         * pair is the subject, not the classifier that happened to notice either.
+         */
+        public static final String SECRET_PATTERN = "secret_pattern";
     }
 
     /** {@code state} values. Muted is live, not closed: see {@code ux_eval_case_live}. */

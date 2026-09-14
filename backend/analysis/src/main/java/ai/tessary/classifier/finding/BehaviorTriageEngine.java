@@ -581,6 +581,16 @@ public class BehaviorTriageEngine {
                         + "outputs means the agent changed. Inputs that moved with the measure means the "
                         + "traffic did. Both readings are checkable against the `member` refs — and "
                         + "`baseline` on a `:pinned` finding. Check them.\n";
+            case FindingRow.Cause.ARMED_WINDOW ->
+                "This is an ARMED WINDOW: enough individual observations tripped the detector inside one "
+                        + "window. Each `witness` is one of them. The question is whether they are real: for a "
+                        + "secret leak, a live credential rather than a documented example, a placeholder or "
+                        + "text the user supplied. `method.md` states what the detector matches.\n";
+            case FindingRow.Cause.MALFORMED_RATE ->
+                "This is a MALFORMED RATE: the share of one call site's outputs failing its declared schema "
+                        + "has risen above its fitted rate, in `state.json` as `baseline_rate` against "
+                        + "`current_rate`. Some failures are normal. The question is whether the rise is real "
+                        + "and whether the agent or the schema changed. Read the `witness` violations.\n";
             default -> "";
         };
     }

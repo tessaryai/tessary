@@ -317,8 +317,9 @@ export type SearchResults = S["GlobalSearchView"];
 /**
  * The cause kinds the findings surface carries. Behaviour drift's three (`novelty`/`omission` are
  * high confidence, `surprisal` is low), metric drift's `distribution_shift`, tool error's
- * `rate_shift`, and `sop_conformance`: a conformance finding rendered in the same shape (its
- * causeKey is the SOP rule slug, its traceCount the tested window's activations).
+ * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, and
+ * `sop_conformance`: a conformance finding rendered in the same shape (its causeKey is the SOP
+ * rule slug, its traceCount the tested window's activations).
  */
 export type BehaviorCauseKind =
   | "novelty"
@@ -326,6 +327,8 @@ export type BehaviorCauseKind =
   | "omission"
   | "distribution_shift"
   | "rate_shift"
+  | "armed_window"
+  | "malformed_rate"
   | "sop_conformance";
 
 /** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */
@@ -417,6 +420,25 @@ export type BehaviorFindingDetail = Omit<S["BehaviorFindingDetailView"], "findin
 export type EvidenceRef = S["EvidenceRefView"];
 export type EvidenceSpan = S["EvidenceSpanView"];
 export type EvidenceSpanPage = S["FindingEvidenceSpanPage"];
+
+/**
+ * A `malformed_rate` finding's "How outputs broke": the rate, the declared schema annotated with a
+ * failure count per field, and the two buckets no declared field owns (`notJson`, `other`).
+ */
+export type MalformedOutputDetail = S["MalformedDetail"];
+export type MalformedOutputSchemaField = S["SchemaFieldView"];
+
+/** One failing output for a selected schema field, and the page it came from. */
+export type MalformedOutputRow = S["FailingOutputView"];
+export type MalformedOutputPage = S["FailingOutputPage"];
+
+/**
+ * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
+ * two breakdowns the page renders — one masked key at a time, and one leak at a time.
+ */
+export type SecretLeakDetail = S["SecretLeakDetail"];
+export type SecretLeakKey = S["SecretLeakKeyView"];
+export type SecretLeakLeak = S["SecretLeakLeakView"];
 
 /**
  * One finding, with the triage fields narrowed to the vocabulary the server writes.

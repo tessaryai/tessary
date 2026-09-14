@@ -76,6 +76,10 @@ export function detectorLabel(detector: string): string {
       return "Tool errors";
     case "sop_conformance":
       return "SOP conformance";
+    case "secret_leak":
+      return "Secret leak";
+    case "malformed_output":
+      return "Malformed output";
     default:
       return detector;
   }

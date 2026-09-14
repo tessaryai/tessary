@@ -307,6 +307,8 @@ class McpCaseToolsTest {
                 // detector whose shift has no drawable shape sends both as null anyway.
                 null,
                 null,
+                null,
+                null,
                 true,
                 true,
                 true);
