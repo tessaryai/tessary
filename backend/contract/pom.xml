@@ -24,7 +24,7 @@
         <dependency>
             <groupId>ai.tessary</groupId>
             <artifactId>shared</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jspecify</groupId>
