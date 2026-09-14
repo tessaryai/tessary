@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.ingest.PreviewCursor;
+import ai.tessary.redaction.GitleaksCorpus;
 import ai.tessary.tenant.Ids;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -335,7 +336,8 @@ public class FindingEvidenceRepository {
             /**
              * The first {@link #PREVIEW_CHARS} characters of what the span was given and what it
              * returned, or null where the payload was never written or has aged out. Truncated in SQL
-             * rather than Java, since a single LLM span's output can run to megabytes.
+             * rather than Java, since a single LLM span's output can run to megabytes; masked in Java by
+             * {@link #maskCredentials}, since a project with redaction disabled can store one raw.
              */
             @Nullable String inputPreview,
             @Nullable String outputPreview) {}
@@ -598,8 +600,37 @@ public class FindingEvidenceRepository {
                         : rs.getBigDecimal("total_cost").doubleValue(),
                 rs.getString("provided_model_name"),
                 rs.getString("call_site_id"),
-                rs.getString("input_preview"),
-                rs.getString("output_preview"));
+                maskCredentials(rs.getString("input_preview")),
+                maskCredentials(rs.getString("output_preview")));
+    }
+
+    /**
+     * A preview with every gitleaks-recognised credential replaced by its masked form (up to four leading
+     * characters, {@code …}, up to four trailing), so a project with redaction disabled never hands a raw
+     * credential to a browser or an MCP client through this table. Cheap by construction: a preview is at
+     * most {@link #PREVIEW_CHARS} characters, the same corpus scan the ingest path already runs on whole
+     * payloads.
+     */
+    private static @Nullable String maskCredentials(@Nullable String preview) {
+        if (preview == null || preview.isEmpty()) return preview;
+        List<GitleaksCorpus.Finding> findings = GitleaksCorpus.get().find(preview);
+        if (findings.isEmpty()) return preview;
+        StringBuilder out = new StringBuilder(preview.length());
+        int cursor = 0;
+        for (GitleaksCorpus.Finding f : findings) {
+            if (f.start() < cursor) continue;
+            out.append(preview, cursor, f.start());
+            out.append(maskSecret(preview.substring(f.start(), f.end())));
+            cursor = f.end();
+        }
+        out.append(preview, cursor, preview.length());
+        return out.toString();
+    }
+
+    /** {@code prefix…suffix}, or a bare ellipsis when the secret is too short to leave a gap between them. */
+    private static String maskSecret(String secret) {
+        if (secret.length() <= 8) return "…";
+        return secret.substring(0, 4) + "…" + secret.substring(secret.length() - 4);
     }
 
     private int countFor(String findingId, String role) {
