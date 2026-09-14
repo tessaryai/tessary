@@ -167,11 +167,15 @@ export function CasePage() {
   const live = c.state !== "resolved";
   const cause = causeLine(c);
 
-  // The window the spell spans. The rate blob's own window wins where it has one — it is what the
+  // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
-  const openedAt = detail.tool_error?.onsetAt ?? c.onset_at;
+  const openedAt =
+    detail.tool_error?.onsetAt ?? detail.malformed_output?.rate?.onsetAt ?? detail.secret_leak?.firstAt ?? c.onset_at;
   const closedAt =
-    detail.tool_error?.windowClosedAt ?? (c.state === "resolved" ? c.resolved_at : c.last_seen_at);
+    detail.tool_error?.windowClosedAt ??
+    detail.malformed_output?.rate?.windowClosedAt ??
+    detail.secret_leak?.lastAt ??
+    (c.state === "resolved" ? c.resolved_at : c.last_seen_at);
 
   return (
     <div className="pt-7 px-10 pb-14">
