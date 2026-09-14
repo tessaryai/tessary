@@ -2935,6 +2935,16 @@
               "null"
             ]
           },
+          "malformed_output" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/MalformedDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "metric" : {
             "anyOf" : [
               {
@@ -2974,6 +2984,16 @@
               }
             ]
           },
+          "secret_leak" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/SecretLeakDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "tool_error" : {
             "anyOf" : [
               {
@@ -2992,11 +3012,13 @@
           "events",
           "exemplars",
           "finding_id",
+          "malformed_output",
           "metric",
           "rca",
           "rca_available",
           "rca_report_id",
           "ruling",
+          "secret_leak",
           "tool_error"
         ],
         "type" : "object"

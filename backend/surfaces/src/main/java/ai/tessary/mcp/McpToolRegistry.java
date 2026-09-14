@@ -1112,6 +1112,8 @@ public class McpToolRegistry {
                     detail.rca(),
                     detail.metric(),
                     detail.toolError(),
+                    detail.malformedOutput(),
+                    detail.secretLeak(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());

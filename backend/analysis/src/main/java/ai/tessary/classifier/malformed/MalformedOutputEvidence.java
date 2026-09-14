@@ -23,6 +23,10 @@ public final class MalformedOutputEvidence {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** {@link ai.tessary.cases.CaseKey#metric} for a malformed-output case — the {@code eval_case} tuple's
+     *  last segment, matching {@link ai.tessary.classifier.toolerror.ToolErrorEvidence#MEASURE}'s role. */
+    public static final String MEASURE = "malformed_output_rate";
+
     private MalformedOutputEvidence() {}
 
     /** One field of the declared schema, flattened and annotated with its own failure count. */

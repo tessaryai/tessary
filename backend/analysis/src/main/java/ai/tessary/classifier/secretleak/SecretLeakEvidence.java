@@ -13,6 +13,10 @@ import org.jspecify.annotations.Nullable;
  */
 public final class SecretLeakEvidence {
 
+    /** {@code eval_case.metric} for a secret-leak case. A facet's {@code (detector, subject_kind,
+     *  subject_id)} triple is already unique, so this is a stable marker rather than a real measure. */
+    public static final String MEASURE = "leak_count";
+
     private SecretLeakEvidence() {}
 
     /**

@@ -2569,11 +2569,13 @@ export interface components {
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
             finding_id: string | null;
+            malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             rca: components["schemas"]["RcaReportView"] | null;
             rca_available: boolean;
             rca_report_id: string | null;
             ruling: components["schemas"]["CaseRulingView"] | null;
+            secret_leak: components["schemas"]["SecretLeakDetail"] | null;
             tool_error: components["schemas"]["RateDetail"] | null;
         };
         CaseEventView: {
