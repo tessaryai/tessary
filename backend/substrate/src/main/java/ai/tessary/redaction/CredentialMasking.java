@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Masks every gitleaks-recognised credential in a text with its {@code prefix…suffix} form, for a
+ * Masks every gitleaks-recognised credential in a text with its {@link #maskedKey} form, for a
  * surface that must never hand a raw credential to a browser or MCP client on a project that has
  * redaction disabled (or on text captured before a redaction rule existed). Cheap by construction:
  * one corpus scan over the text, same as the ingest path already runs on whole payloads.
@@ -25,17 +25,11 @@ public final class CredentialMasking {
         for (GitleaksCorpus.Finding f : findings) {
             if (f.start() < cursor) continue;
             out.append(text, cursor, f.start());
-            out.append(maskSecret(text.substring(f.start(), f.end())));
+            out.append(maskedKey(text.substring(f.start(), f.end())));
             cursor = f.end();
         }
         out.append(text, cursor, text.length());
         return out.toString();
-    }
-
-    /** {@code prefix…suffix}, or a bare ellipsis when the secret is too short to leave a gap between them. */
-    private static String maskSecret(String secret) {
-        if (secret.length() <= 8) return "…";
-        return secret.substring(0, 4) + "…" + secret.substring(secret.length() - 4);
     }
 
     /**
@@ -53,20 +47,19 @@ public final class CredentialMasking {
      * credential a caller already isolated, so its own key can be told apart from another leaking one
      * without reconstructing either.
      *
-     * <p>Guarded the same way {@link #maskSecret} is: a prefix and a suffix window only ever reveal a
-     * caller-recognisable sliver, never the whole credential. When the match is too short for a 4+4
-     * window to leave anything hidden, only the provider prefix (or nothing) survives.
+     * <p>{@link #mask} uses the same form, so a short credential inside free text is never shown with
+     * 4 characters at each end either: at least 8 characters stay hidden or the suffix is withheld.
      */
     public static String maskedKey(String rawMatch) {
         if (rawMatch.isEmpty()) return "…";
         Matcher m = PROVIDER_PREFIX.matcher(rawMatch);
         boolean providerPrefix = m.lookingAt();
         String prefix = providerPrefix ? m.group() : rawMatch.substring(0, Math.min(4, rawMatch.length()));
-        // At least 4 characters must sit between the prefix and the suffix, or a suffix is not shown at
-        // all: two 4-character windows over a short match otherwise cover the whole credential, only
-        // cosmetically split by the ellipsis. A recognisable provider prefix is a known constant, not
-        // part of the secret, so it still surfaces on its own when the suffix is withheld.
-        if (rawMatch.length() - prefix.length() < 8) return (providerPrefix ? prefix : "") + "…";
+        // At least 8 characters must stay hidden between the prefix and the suffix, or the suffix is
+        // withheld: two 4-character windows over a short match otherwise reveal most of the credential.
+        // A recognisable provider prefix is a known constant, not part of the secret, so it still
+        // surfaces on its own when the suffix is withheld.
+        if (rawMatch.length() - prefix.length() < 12) return (providerPrefix ? prefix : "") + "…";
         String suffix = rawMatch.substring(rawMatch.length() - 4);
         return prefix + "…" + suffix;
     }
