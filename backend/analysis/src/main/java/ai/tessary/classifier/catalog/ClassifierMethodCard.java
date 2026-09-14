@@ -166,6 +166,50 @@ public final class ClassifierMethodCard {
             - No `exemplar`: the population is the claim, and every member of it is equally a way in.
             """;
 
+    private static final String SECRET_LEAK = """
+            ## secret_leak — a credential rule matched in one call site's output
+
+            **Measures** whether an output contains a credential, using the gitleaks rule corpus. It reads
+            redaction's record of what it replaced first, then scans the stored output, then looks for a
+            bare `[REDACTED_*]` marker.
+
+            **Compares against** nothing. One HIGH-confidence match opens the finding, per call site and
+            rule (the cause key's pattern). HIGH means a rule anchored on a provider format such as
+            `AKIA`; JWT, curl auth and Kubernetes secret rules stay LOW and never open one.
+
+            **Evidence**
+            - `witness` — the spans whose output matched, capped at 50. `get_finding_evidence` gives each
+              its masked key (`secret_key`) and whether the stored copy is `redacted` or `raw`
+              (`stored_as`).
+
+            **Absent roles**
+            - No `member` or `baseline`: nothing is a rate or a comparison, so no population or before
+              side exists.
+            - No `exemplar`, for the same reason as tool_error.
+            """;
+
+    private static final String MALFORMED_OUTPUT = """
+            ## malformed_output — a Bernoulli CUSUM over one call site's schema failures
+
+            **Measures** the fraction of a call site's outputs that fail its declared output schema, read
+            from the connected repository. An output fails when it is not JSON or violates the schema.
+            For a gen_ai message envelope, the final assistant message is what gets validated. Only call
+            sites with a declared schema are counted.
+
+            **Compares against** that call site's fitted in-control rate: `baseline_rate` over
+            `baseline_calls` in `state.json`, against `current_rate` over `calls_since_onset` now. Same
+            engine as tool_error, folded hour by hour.
+
+            **Evidence**
+            - `witness` — failing outputs since onset, capped at 50. `get_finding_evidence` gives each
+              its `violation` message.
+
+            **Absent roles**
+            - No `member`: the denominator is `calls_since_onset` in `state.json`, not enumerated rows.
+            - No `baseline`: the reference is a fitted rate, as with tool_error.
+            - No `exemplar`, for the same reason as tool_error.
+            """;
+
     /**
      * Cards for the classifiers that write findings through a detector of their own. The armed-signal
      * family shares one shape and is rendered from {@link #ARMED_SIGNAL} with its key substituted.
@@ -175,7 +219,9 @@ public final class ClassifierMethodCard {
             BuiltInDetector.Kind.DURATION_DRIFT, METRIC_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT, METRIC_DRIFT,
             BuiltInDetector.Kind.BEHAVIOR_DRIFT, BEHAVIOR_DRIFT,
-            BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE);
+            BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE,
+            BuiltInDetector.Kind.SECRET_LEAK, SECRET_LEAK,
+            BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT);
 
     /**
      * The card for one classifier key, or null when the key names nothing this knows about — a
@@ -190,9 +236,6 @@ public final class ClassifierMethodCard {
     }
 
     /** The built-in detectors that file through {@code ClassifierArming} rather than their own sweep. */
-    static final java.util.Set<String> ARMED_SIGNAL_KEYS = java.util.Set.of(
-            BuiltInDetector.Kind.FRUSTRATION,
-            BuiltInDetector.Kind.SECRET_LEAK,
-            BuiltInDetector.Kind.MALFORMED_OUTPUT,
-            BuiltInDetector.Kind.GROUNDEDNESS);
+    static final java.util.Set<String> ARMED_SIGNAL_KEYS =
+            java.util.Set.of(BuiltInDetector.Kind.FRUSTRATION, BuiltInDetector.Kind.GROUNDEDNESS);
 }
