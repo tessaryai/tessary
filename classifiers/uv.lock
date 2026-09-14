@@ -186,7 +186,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "1.4.0"
+version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -197,9 +197,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/6d/793f5cfe2cd444c43b4eeb4cb7c3cc55ebcb38929fdfe81aa1f2fced7326/anthropic-1.4.0.tar.gz", hash = "sha256:f0d017e901e48b343520b5d458f8240c283c8d850bf6d119834c622207e0a74c", size = 1150831, upload-time = "2026-09-04T22:20:31.355Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/43/6f3f6006f5216d43a059a1a856d275ef6536cdfa94883b64cc04d7873cb7/anthropic-1.5.0.tar.gz", hash = "sha256:b25f87f5758861f25993383a5c9bf274eb6e0f1b010c84019ad91854cb4e1bc6", size = 1156657, upload-time = "2026-09-10T17:45:35.93Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dd/e3/34a88f0e1e854022a352d67f72ca9baa8b952d4541315088411ba2bfbc2a/anthropic-1.4.0-py3-none-any.whl", hash = "sha256:590e85bff75b713a123b03f586d68f02266b5fdc49f70dd75f721ced93a4716c", size = 1300390, upload-time = "2026-09-04T22:20:33.078Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/1c/c32fce35ca0be0205f2377d2238e3ed73dea5abc2be09d15fbd032091d60/anthropic-1.5.0-py3-none-any.whl", hash = "sha256:d9ce04b29ad1f7025dda3e3bc478cde8d2924d2de5417d2d4a4bb0378ecbc2a6", size = 1235236, upload-time = "2026-09-10T17:45:34.216Z" },
 ]
 
 [[package]]
@@ -533,75 +533,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b", size = 22484, upload-time = "2026-04-14T04:09:18.638Z" },
 ]
-
-[[package]]
-name = "tessary-classifiers"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "boto3" },
-    { name = "datasets" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-
-[package.optional-dependencies]
-annotation = [
-    { name = "argilla" },
-]
-anthropic = [
-    { name = "anthropic" },
-]
-otlp = [
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
-]
-quality = [
-    { name = "cleanlab" },
-    { name = "nltk" },
-    { name = "scikit-learn" },
-    { name = "statsmodels" },
-]
-train = [
-    { name = "accelerate" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "optimum", extra = ["onnxruntime"] },
-    { name = "scikit-learn" },
-    { name = "torch" },
-    { name = "transformers" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", marker = "extra == 'train'", specifier = ">=0.34" },
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40" },
-    { name = "argilla", marker = "extra == 'annotation'", specifier = ">=2.8" },
-    { name = "boto3", specifier = ">=1.34" },
-    { name = "cleanlab", marker = "extra == 'quality'", specifier = ">=2.9" },
-    { name = "datasets", specifier = ">=3.0" },
-    { name = "nltk", marker = "extra == 'quality'", specifier = ">=3.9" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "onnx", marker = "extra == 'train'", specifier = ">=1.16" },
-    { name = "onnxruntime", marker = "extra == 'train'", specifier = ">=1.19" },
-    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.27" },
-    { name = "opentelemetry-sdk", marker = "extra == 'otlp'", specifier = ">=1.27" },
-    { name = "optimum", extras = ["onnxruntime"], marker = "extra == 'train'", specifier = ">=1.23" },
-    { name = "scikit-learn", marker = "extra == 'quality'", specifier = ">=1.5" },
-    { name = "scikit-learn", marker = "extra == 'train'", specifier = ">=1.5" },
-    { name = "statsmodels", marker = "extra == 'quality'", specifier = ">=0.14" },
-    { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
-    { name = "transformers", marker = "extra == 'train'", specifier = ">=4.48" },
-]
-provides-extras = ["anthropic", "quality", "annotation", "otlp", "train"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "filelock"
@@ -2912,6 +2843,75 @@ sdist = { url = "https://files.pythonhosted.org/packages/46/79/cf31d7a93a8fdc6aa
 wheels = [
     { url = "https://files.pythonhosted.org/packages/33/d1/8bb87d21e9aeb323cc03034f5eaf2c8f69841e40e4853c2627edf8111ed3/termcolor-3.3.0-py3-none-any.whl", hash = "sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5", size = 7734, upload-time = "2025-12-29T12:55:20.718Z" },
 ]
+
+[[package]]
+name = "tessary-classifiers"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "boto3" },
+    { name = "datasets" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.optional-dependencies]
+annotation = [
+    { name = "argilla" },
+]
+anthropic = [
+    { name = "anthropic" },
+]
+otlp = [
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+]
+quality = [
+    { name = "cleanlab" },
+    { name = "nltk" },
+    { name = "scikit-learn" },
+    { name = "statsmodels" },
+]
+train = [
+    { name = "accelerate" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "optimum", extra = ["onnxruntime"] },
+    { name = "scikit-learn" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", marker = "extra == 'train'", specifier = ">=0.34" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40" },
+    { name = "argilla", marker = "extra == 'annotation'", specifier = ">=2.8" },
+    { name = "boto3", specifier = ">=1.34" },
+    { name = "cleanlab", marker = "extra == 'quality'", specifier = ">=2.9" },
+    { name = "datasets", specifier = ">=3.0" },
+    { name = "nltk", marker = "extra == 'quality'", specifier = ">=3.9" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "onnx", marker = "extra == 'train'", specifier = ">=1.16" },
+    { name = "onnxruntime", marker = "extra == 'train'", specifier = ">=1.19" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.27" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otlp'", specifier = ">=1.27" },
+    { name = "optimum", extras = ["onnxruntime"], marker = "extra == 'train'", specifier = ">=1.23" },
+    { name = "scikit-learn", marker = "extra == 'quality'", specifier = ">=1.5" },
+    { name = "scikit-learn", marker = "extra == 'train'", specifier = ">=1.5" },
+    { name = "statsmodels", marker = "extra == 'quality'", specifier = ">=0.14" },
+    { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
+    { name = "transformers", marker = "extra == 'train'", specifier = ">=4.48" },
+]
+provides-extras = ["anthropic", "quality", "annotation", "otlp", "train"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "threadpoolctl"
