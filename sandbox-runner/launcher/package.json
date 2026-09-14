@@ -14,6 +14,6 @@
   },
   "packageManager": "pnpm@11.15.1",
   "dependencies": {
-    "e2b": "^2.46.1"
+    "e2b": "^2.49.1"
   }
 }
