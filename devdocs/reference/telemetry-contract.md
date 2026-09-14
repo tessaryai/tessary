@@ -5,7 +5,7 @@
 > `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`) implement §1, §3 and §5 of this contract.
 > The server is `tessaryai/tessary-home`; §1 matches its `POST /v1/ping` route, and
 > `TelemetryHeartbeatTest` validates the real payload against a copy of that repository's
-> `contracts/ping.v1.schema.json`. Until `home.tessary.ai` is deployed the client's POSTs fail,
+> `contracts/ping.v1.schema.json`. `home.tessary.ai` is deployed; a ping that fails still fails
 > harmlessly (see §1's error handling). The
 > Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.analytics`,
 > `frontend/src/lib/mixpanel.ts`) is gone outright, not superseded gradually — deleted in the same
@@ -18,6 +18,12 @@ Anonymous ping, opt-out, disclosed in the README.
 `POST https://home.tessary.ai/v1/ping`, JSON, sent from the backend process (see §4, Scope). The
 first five fields are required by home; home answers 400 without them. The rest are optional there
 and always sent here. Home strips any field it does not know.
+
+**Request header `x-amz-content-sha256`, required.** Lowercase hex SHA-256 of the exact body bytes.
+Home's CloudFront signs every request to its Lambda origin but does not hash a POST body, so the
+sender supplies the hash; a ping without the header, or with one that does not match the body,
+is answered 403 at the edge and never reaches the handler. `HomeTessaryClient.postJson` computes
+it from the same bytes it sends.
 
 | Field | Type | Example | Purpose |
 |---|---|---|---|
@@ -179,5 +185,9 @@ The `home.tessary.ai` service itself lives outside this repo, in `tessaryai/tess
   `project_count_bucket` and `trace_volume_bucket` were replaced by the route's `counts` object
   (`projects`, `spans`, `findings`, `cases`), plus `counts.l1`. Not a version bump under §5: no server ever accepted the earlier shape, so no
   consumer saw it. Frequency went from 24 hours to 6.
+- 2026-09-14 — §1: pings carry `x-amz-content-sha256`, the body's SHA-256. `home.tessary.ai` went
+  live with IAM-signed origin requests, and CloudFront does not hash a POST body for a Lambda
+  origin, so without the header every ping was refused 403 at the edge. Not a version bump under
+  §5: a transport header, not a payload field.
 - 2026-09-13 — §1a: the instance checks home's price book manifest on the same 6-hour tick and imports
   a new book when the digest changes. The ping gains `price_book.digest` and `price_book.schema_max`.

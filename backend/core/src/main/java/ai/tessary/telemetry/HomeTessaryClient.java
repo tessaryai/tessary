@@ -8,7 +8,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import org.springframework.stereotype.Component;
 
 /**
@@ -49,14 +52,27 @@ public class HomeTessaryClient {
      * a future license-check client reuse this same class untouched.
      */
     public int postJson(String path, String json) throws IOException, InterruptedException {
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE_URL + path))
-                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
+                // home's CloudFront signs each request to its Lambda origin but does not hash a POST body,
+                // so the sender supplies the hash. Without it, or with one that does not match these exact
+                // bytes, the edge answers 403 and the handler never sees the ping.
+                .header("x-amz-content-sha256", sha256Hex(body))
                 .timeout(Duration.ofSeconds(10))
                 .build();
         HttpResponse<Void> res = http.send(req, HttpResponse.BodyHandlers.discarding());
         return res.statusCode();
+    }
+
+    static String sha256Hex(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every Java platform", e);
+        }
     }
 
     /** A GET's status and body. The body is empty for anything but a 200. */
