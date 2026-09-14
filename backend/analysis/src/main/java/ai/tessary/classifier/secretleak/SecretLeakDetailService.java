@@ -54,7 +54,7 @@ public class SecretLeakDetailService {
 
         return new SecretLeakDetail(
                 rule,
-                summary != null && summary.anyHigh() ? "high" : "low",
+                finding.highConfidence() ? FindingRow.Confidence.HIGH : FindingRow.Confidence.LOW,
                 summary == null ? finding.sampleCount() : summary.leakCount(),
                 summary == null ? 0 : summary.traceCount(),
                 summary == null ? null : str(summary.firstAt()),

@@ -223,7 +223,8 @@ public class ClassifierDetectionWriteRepository {
             String facet,
             long windowStartEpochSecond,
             long observed,
-            Instant lastSeenAt) {}
+            Instant lastSeenAt,
+            boolean anyHigh) {}
 
     private record WindowKey(String callSiteId, String facet, long windowStartEpochSecond) {}
 
@@ -301,7 +302,7 @@ public class ClassifierDetectionWriteRepository {
         return jdbc.sql("SELECT s.call_site_id, d.evidence ->> :facetKey AS facet, " + EVENT_WINDOW
                         + " AS window_start, "
                         + (distinctSessions ? "COUNT(DISTINCT d.subject_session_id)" : "COUNT(*)") + " AS observed,"
-                        + " MAX(s.started_at) AS last_seen_at"
+                        + " MAX(s.started_at) AS last_seen_at, BOOL_OR(d.confidence = 'high') AS any_high"
                         + " FROM " + table + " d" + SPAN_JOIN
                         + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
                         + " AND (COALESCE(s.call_site_id, ''), d.evidence ->> :facetKey, " + EVENT_WINDOW
@@ -318,7 +319,8 @@ public class ClassifierDetectionWriteRepository {
                         rs.getString("facet"),
                         rs.getLong("window_start"),
                         rs.getLong("observed"),
-                        rs.getObject("last_seen_at", OffsetDateTime.class).toInstant()))
+                        rs.getObject("last_seen_at", OffsetDateTime.class).toInstant(),
+                        rs.getBoolean("any_high")))
                 .list();
     }
 
@@ -340,8 +342,7 @@ public class ClassifierDetectionWriteRepository {
         String table = tableFor(detectorKind);
         if (table == null) return null;
         return jdbc.sql("SELECT count(*) AS n, count(DISTINCT d.subject_trace_id) AS traces,"
-                        + " min(s.started_at) AS first_at, max(s.started_at) AS last_at,"
-                        + " bool_or(d.confidence = 'high') AS any_high"
+                        + " min(s.started_at) AS first_at, max(s.started_at) AS last_at"
                         + " FROM " + table + " d" + SPAN_JOIN
                         + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
                         + " AND d.evidence ->> 'pattern' = :pattern"
@@ -356,8 +357,7 @@ public class ClassifierDetectionWriteRepository {
                         rs.getLong("n"),
                         rs.getLong("traces"),
                         instantOrNull(rs, "first_at"),
-                        instantOrNull(rs, "last_at"),
-                        rs.getBoolean("any_high")))
+                        instantOrNull(rs, "last_at")))
                 .optional()
                 .filter(s -> s.leakCount() > 0)
                 .orElse(null);
@@ -443,8 +443,7 @@ public class ClassifierDetectionWriteRepository {
             long leakCount,
             long traceCount,
             @Nullable Instant firstAt,
-            @Nullable Instant lastAt,
-            boolean anyHigh) {}
+            @Nullable Instant lastAt) {}
 
     /** One masked key's aggregate within a secret-leak facet: see {@link #secretLeakKeys}. */
     public record SecretLeakKeySummary(

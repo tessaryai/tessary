@@ -198,7 +198,7 @@ public class ClassifierArming {
                 signal.name(),
                 observed,
                 /* callSiteId */ null, // a classifier is project-wide; it implicates no single call site
-                payload(signal.classifierKey(), config, observed, windowStart, windowEnd, null, null),
+                payload(signal.classifierKey(), config, observed, windowStart, windowEnd, null, null, null),
                 quietBefore,
                 at);
 
@@ -291,7 +291,8 @@ public class ClassifierArming {
                             windowStart,
                             windowEnd,
                             w.callSiteId(),
-                            w.facet()),
+                            w.facet(),
+                            w.anyHigh() ? FindingRow.Confidence.HIGH : FindingRow.Confidence.LOW),
                     windowStart.minusSeconds(win * QUIET_WINDOWS).toString(),
                     at);
             List<FindingEvidenceRepository.Ref> refs = witnesses.getOrDefault(
@@ -381,7 +382,8 @@ public class ClassifierArming {
             Instant start,
             Instant end,
             @Nullable String callSiteId,
-            @Nullable String facet) {
+            @Nullable String facet,
+            @Nullable String confidence) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("cause_kind", FindingRow.Cause.ARMED_WINDOW);
         body.put("native_cause_key", facet == null ? classifierKey : facet);
@@ -395,6 +397,7 @@ public class ClassifierArming {
             body.put("facet", facet);
             if (callSiteId != null) body.put("call_site_id", callSiteId);
         }
+        if (confidence != null) body.put(FindingRow.Confidence.PAYLOAD_KEY, confidence);
         try {
             return mapper.writeValueAsString(body);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {

@@ -3,13 +3,11 @@ package ai.tessary.cases;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,37 +16,31 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * High-confidence secret leaks, opened with no triage gate. Design contract: the task's decision #1 —
- * a leaked credential is a fact to rotate, not a claim for Layer 2 to audit, so this is the one case
- * source in the slice that reads {@link SurvivalGate#NONE} instead of a ruling.
+ * High-confidence secret leaks, opened with no triage gate. A leaked credential is a fact to rotate, not
+ * a claim for Layer 2 to audit, so this is the one case source that reads no ruling.
  *
  * <p><b>Confidence, not the gate, is the bar.</b> {@code ClassifierArming} already files a finding for
  * every facet (one rule at one call site) that crosses its window threshold, low-confidence matches
  * included, since the finding is also how the Classifiers page shows discovery-mode hits. This source
- * only opens a case for the subset {@link SecretLeakDetailService#detail} reports {@code high}
- * confidence — the same band {@code ClassifierArming.Config#highOnly} may already be counting on, and
- * the same word the finding page's subtitle shows.
+ * only opens a case for the subset recorded {@code high} on the finding itself, the same word the
+ * finding page's subtitle shows.
+ *
+ * <p><b>A leak never recovers on its own.</b> A credential that stopped appearing in output is still
+ * exposed until someone rotates it, so the live set is every live high-confidence finding: no recency
+ * window and no cap, either of which would drop a facet out of the set and let the reconciler close its
+ * case as recovered. That also covers a leak discovered long after it happened, which arming files on
+ * event time. The case closes when a person resolves it, which resolves the finding with it (see
+ * {@code CaseService#resolve}); a later leak of the same facet files a new finding and reopens or
+ * opens a case from there.
  *
  * <p>One case per (rule, call site) facet, matching the finding's own scope: a leaked AWS key from one
  * call site and a leaked GitHub token from another are two credentials to rotate, so they never share a
- * case, and a rule the classifier stops seeing recovers on its own once its last witness ages past the
- * quiet window.
+ * case.
  */
 @Component
 public class SecretLeakCaseSource implements CaseSource {
 
-    /** Bound on one pass's live set, mirroring the other sources. */
-    private static final int LIVE_SET_CAP = 200;
-
     private static final List<String> SECRET_LEAK_CLASSIFIERS = List.of(BuiltInDetector.Kind.SECRET_LEAK);
-
-    /**
-     * How long a facet may go unrefreshed before its case counts as recovered. Twice
-     * {@code ClassifierArming}'s own built-in default window (24h), the same margin the write side
-     * gives a spell before starting a new one — approximate for a project that has re-armed the
-     * classifier at a different window, generously rather than closing a live leak early.
-     */
-    private static final Duration QUIET_WINDOW = Duration.ofHours(48);
 
     private final FindingRepository findings;
     private final SecretLeakDetailService detail;
@@ -65,14 +57,13 @@ public class SecretLeakCaseSource implements CaseSource {
 
     @Override
     public List<CaseDetection> detect(String projectId) {
-        String seenSince = Instant.now().minus(QUIET_WINDOW).toString();
         List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, SECRET_LEAK_CLASSIFIERS, SurvivalGate.NONE, seenSince, LIVE_SET_CAP)) {
+        for (FindingRow finding : findings.listLive(projectId, SECRET_LEAK_CLASSIFIERS)) {
+            // A low-confidence facet is still a legitimate finding on the Classifiers page, but nothing a
+            // person needs paged on it for. Checked before the detail read, which costs three queries.
+            if (!finding.highConfidence()) continue;
             SecretLeakDetail read = detail.detail(finding);
-            // Confidence is the bar here, not the gate: a low-confidence facet is still a legitimate
-            // finding on the Classifiers page, but nothing a person needs paged on it for.
-            if (read == null || !"high".equals(read.confidence())) continue;
+            if (read == null) continue;
             out.add(toDetection(finding, read));
         }
         return out;

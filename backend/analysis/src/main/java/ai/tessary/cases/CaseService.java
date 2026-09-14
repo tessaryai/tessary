@@ -427,6 +427,14 @@ public class CaseService {
         if (CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())) {
             malformedOutputRates.states().reset(projectId, row.subjectId(), actor, reason, now.toString());
         }
+        // A secret-leak finding stays live until a person closes it, since SecretLeakCaseSource has no
+        // recency window. Left open, it would be listed again next pass and, once the reopen window
+        // lapsed, open a fresh case for a credential already rotated. A later leak of the same facet
+        // files a new finding, so resolving this one does not silence the rule.
+        String findingId = row.findingId();
+        if (CaseRow.Detector.SECRET_LEAK.equals(row.detector()) && findingId != null && !findingId.isBlank()) {
+            findings.setStatus(projectId, findingId, FindingRow.Status.RESOLVED, now.toString());
+        }
         return CaseView.of(require(projectId, id));
     }
 
