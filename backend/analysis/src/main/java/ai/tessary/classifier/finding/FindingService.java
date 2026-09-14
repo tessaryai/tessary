@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierService;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -186,7 +187,9 @@ public class FindingService {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         Map<String, Long> recorded = new LinkedHashMap<>();
         for (String r : FindingEvidenceRow.Role.ALL) recorded.put(r, finding.evidenceCount(r));
-        FindingEvidenceRepository.SpanPage page = evidence.spanPage(projectId, findingId, role, limit, cursor);
+        boolean secretLeak = BuiltInDetector.Kind.SECRET_LEAK.equals(finding.classifierKey());
+        FindingEvidenceRepository.SpanPage page =
+                evidence.spanPage(projectId, findingId, role, limit, cursor, secretLeak);
         return new BehaviorDtos.FindingEvidenceSpanPage(
                 page.rows().stream().map(BehaviorDtos.EvidenceSpanView::of).toList(),
                 page.nextCursor(),

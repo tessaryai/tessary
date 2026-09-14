@@ -26,7 +26,7 @@ import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -304,8 +304,8 @@ public class RedactionService {
         Set<RedactionStamp> stamps = new LinkedHashSet<>();
         List<RedactionStamp> earlier = e.redactions();
         if (earlier != null) stamps.addAll(earlier);
-        Consumer<GitleaksCorpus.Finding> input = stampInto(stamps, RedactionStamp.INPUT);
-        Consumer<GitleaksCorpus.Finding> output = stampInto(stamps, RedactionStamp.OUTPUT);
+        BiConsumer<GitleaksCorpus.Finding, String> input = stampInto(stamps, RedactionStamp.INPUT);
+        BiConsumer<GitleaksCorpus.Finding, String> output = stampInto(stamps, RedactionStamp.OUTPUT);
         return new RawEntry(
                 e.sourceExternalId(),
                 e.sourceUrl(),
@@ -325,8 +325,9 @@ public class RedactionService {
                 stamps.isEmpty() ? null : List.copyOf(stamps));
     }
 
-    private static Consumer<GitleaksCorpus.Finding> stampInto(Set<RedactionStamp> stamps, String field) {
-        return f -> stamps.add(new RedactionStamp(f.ruleId(), field, f.anchored()));
+    private static BiConsumer<GitleaksCorpus.Finding, String> stampInto(Set<RedactionStamp> stamps, String field) {
+        return (f, rawMatch) ->
+                stamps.add(new RedactionStamp(f.ruleId(), field, f.anchored(), CredentialMasking.maskedKey(rawMatch)));
     }
 
     /**
@@ -345,7 +346,7 @@ public class RedactionService {
      * through two different redactors would stop being identical the moment a rule fired on both.
      */
     private @Nullable String redact(
-            @Nullable String text, List<CompiledRule> rules, Consumer<GitleaksCorpus.Finding> matched) {
+            @Nullable String text, List<CompiledRule> rules, BiConsumer<GitleaksCorpus.Finding, String> matched) {
         return RedactionEngine.applyToJson(text, rules, matched);
     }
 
@@ -365,7 +366,7 @@ public class RedactionService {
     private @Nullable Map<String, Object> redactMetadata(
             @Nullable Map<String, Object> metadata,
             List<CompiledRule> rules,
-            Consumer<GitleaksCorpus.Finding> matched) {
+            BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (metadata == null || metadata.isEmpty()) return metadata;
         Map<String, Object> out = new LinkedHashMap<>(metadata.size());
         boolean changed = false;

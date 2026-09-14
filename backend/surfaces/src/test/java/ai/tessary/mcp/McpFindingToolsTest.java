@@ -197,7 +197,8 @@ class McpFindingToolsTest {
                 base.metric(),
                 base.toolError(),
                 base.baseline(),
-                base.malformedOutput());
+                base.malformedOutput(),
+                base.secretLeak());
     }
 
     // ---- registration --------------------------------------------------------------------------
@@ -383,7 +384,9 @@ class McpFindingToolsTest {
                                 "claude-opus-5",
                                 "otto-von-bismarck",
                                 "what the span was given",
-                                "what it returned"),
+                                "what it returned",
+                                null,
+                                null),
                         new EvidenceSpanView(
                                 FindingEvidenceRow.Role.MEMBER,
                                 3,
@@ -402,7 +405,9 @@ class McpFindingToolsTest {
                                 null,
                                 "otto-von-bismarck",
                                 "tool input",
-                                "tool output")),
+                                "tool output",
+                                null,
+                                null)),
                 nextCursor,
                 counts(120, 0),
                 counts(120, 0));

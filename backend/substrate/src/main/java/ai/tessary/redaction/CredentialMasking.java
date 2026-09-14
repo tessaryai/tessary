@@ -2,6 +2,8 @@
 package ai.tessary.redaction;
 
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -34,5 +36,28 @@ public final class CredentialMasking {
     private static String maskSecret(String secret) {
         if (secret.length() <= 8) return "…";
         return secret.substring(0, 4) + "…" + secret.substring(secret.length() - 4);
+    }
+
+    /**
+     * A single credential's provider-shaped separator: the run of letters and digits gitleaks anchors
+     * rules on ({@code AKIA}, {@code ghp_}, {@code xoxb-}, {@code sk-}), up to and including the
+     * separator that ends it. Matched at the start of the raw credential only.
+     */
+    private static final Pattern PROVIDER_PREFIX = Pattern.compile("^[A-Za-z][A-Za-z0-9]{1,7}[_-]");
+
+    /**
+     * The masked form of one matched credential, for a surface that names a specific leaking key rather
+     * than scrubbing free text: the recognisable provider prefix ({@code AKIA}, {@code ghp_}) when the
+     * shape has one, else the first 4 characters, plus "…" plus the last 4 characters. Distinct from
+     * {@link #mask}, which scrubs every credential inside a block of prose for display; this names ONE
+     * credential a caller already isolated, so its own key can be told apart from another leaking one
+     * without reconstructing either.
+     */
+    public static String maskedKey(String rawMatch) {
+        if (rawMatch.isEmpty()) return "…";
+        Matcher m = PROVIDER_PREFIX.matcher(rawMatch);
+        String prefix = m.lookingAt() ? m.group() : rawMatch.substring(0, Math.min(4, rawMatch.length()));
+        String suffix = rawMatch.length() <= 4 ? rawMatch : rawMatch.substring(rawMatch.length() - 4);
+        return prefix + "…" + suffix;
     }
 }

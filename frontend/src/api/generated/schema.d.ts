@@ -2458,6 +2458,7 @@ export interface components {
             finding: components["schemas"]["BehaviorFindingView"];
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
+            secretLeak: components["schemas"]["SecretLeakDetail"] | null;
             toolError: components["schemas"]["RateDetail"] | null;
         };
         BehaviorFindingView: {
@@ -2899,10 +2900,12 @@ export interface components {
             /** Format: int32 */
             rank: number | null;
             role: string;
+            secretKey: string | null;
             sessionId: string | null;
             spanId: string | null;
             startedAt: string | null;
             status: string | null;
+            storedAs: string | null;
             /** Format: double */
             totalCost: number | null;
             /** Format: int64 */
@@ -3657,6 +3660,34 @@ export interface components {
         SearchView: {
             next_cursor: string | null;
             rows: components["schemas"]["SearchRow"][];
+        };
+        SecretLeakDetail: {
+            confidence: string;
+            firstAt: string | null;
+            keys: components["schemas"]["SecretLeakKeyView"][];
+            lastAt: string | null;
+            /** Format: int64 */
+            leakCount: number;
+            leaks: components["schemas"]["SecretLeakLeakView"][];
+            rule: string;
+            /** Format: int64 */
+            traceCount: number;
+        };
+        SecretLeakKeyView: {
+            lastAt: string | null;
+            /** Format: int64 */
+            leaks: number;
+            masked: string;
+            storedRaw: boolean;
+            /** Format: int64 */
+            traces: number;
+        };
+        SecretLeakLeakView: {
+            at: string | null;
+            masked: string;
+            spanId: string | null;
+            stored: string;
+            traceId: string;
         };
         SelectInstallationRequest: {
             /** Format: int64 */

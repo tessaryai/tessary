@@ -430,6 +430,14 @@ export type MalformedOutputRow = S["FailingOutputView"];
 export type MalformedOutputPage = S["FailingOutputPage"];
 
 /**
+ * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
+ * two breakdowns the page renders — one masked key at a time, and one leak at a time.
+ */
+export type SecretLeakDetail = S["SecretLeakDetail"];
+export type SecretLeakKey = S["SecretLeakKeyView"];
+export type SecretLeakLeak = S["SecretLeakLeakView"];
+
+/**
  * One finding, with the triage fields narrowed to the vocabulary the server writes.
  *
  * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never

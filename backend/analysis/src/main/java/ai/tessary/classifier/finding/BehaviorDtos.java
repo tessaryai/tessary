@@ -5,6 +5,7 @@ import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -134,7 +135,13 @@ public final class BehaviorDtos {
             /** The head of what the span was given and what it returned: see
              *  {@code FindingEvidenceRepository.SpanRef}. Null where the payload aged out. */
             @Nullable String inputPreview,
-            @Nullable String outputPreview) {
+            @Nullable String outputPreview,
+            /**
+             * The masked key that leaked and whether it is still stored raw, filled only on a
+             * secret-leak finding's evidence table — see {@code FindingEvidenceRepository.SpanRef}.
+             */
+            @Nullable String secretKey,
+            @Nullable String storedAs) {
 
         public static EvidenceSpanView of(FindingEvidenceRepository.SpanRef r) {
             return new EvidenceSpanView(
@@ -155,7 +162,9 @@ public final class BehaviorDtos {
                     r.model(),
                     r.callSiteId(),
                     r.inputPreview(),
-                    r.outputPreview());
+                    r.outputPreview(),
+                    r.secretKey(),
+                    r.storedAs());
         }
     }
 
@@ -178,11 +187,12 @@ public final class BehaviorDtos {
      * and for a rate shift the signature that took over), so this view renders the numbers
      * themselves rather than a prose summary of them.
      *
-     * <p>Exactly one of {@code metric}, {@code toolError} and {@code malformedOutput} is set, chosen by
-     * cause kind, and all three are null for a behaviour-drift cause (which carries no measured shift)
-     * or for any finding whose blob is missing or unreadable. A caller renders the finding regardless:
-     * the headline and the verdict don't depend on the evidence parsing, and a page that vanished
-     * because one column was malformed would be a worse failure than a page with no chart on it.
+     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput} and {@code
+     * secretLeak} is set, chosen by cause kind, and all four are null for a behaviour-drift cause
+     * (which carries no measured shift) or for any finding whose blob is missing or unreadable. A
+     * caller renders the finding regardless: the headline and the verdict don't depend on the evidence
+     * parsing, and a page that vanished because one column was malformed would be a worse failure than
+     * a page with no chart on it.
      */
     public record BehaviorFindingDetailView(
             BehaviorFindingView finding,
@@ -201,14 +211,21 @@ public final class BehaviorDtos {
              * it is supplied by the caller rather than derived here — see {@link
              * ai.tessary.classifier.malformed.MalformedOutputDetailService#detail}.
              */
-            @Nullable MalformedDetail malformedOutput) {
+            @Nullable MalformedDetail malformedOutput,
+            /**
+             * Set exactly on a {@code secret_leak} facet's {@code armed_window} finding: the rule, the
+             * leak count, and the per-key and per-leak breakdowns. Also DB-backed rather than payload
+             * alone — see {@link ai.tessary.classifier.secretleak.SecretLeakDetailService#detail}.
+             */
+            @Nullable SecretLeakDetail secretLeak) {
 
-        /** For a caller with no malformed-output detail to attach — every cause but {@code malformed_rate}. */
+        /** For a caller with no malformed-output or secret-leak detail to attach. */
         public static BehaviorFindingDetailView of(FindingRow row) {
-            return of(row, null);
+            return of(row, null, null);
         }
 
-        public static BehaviorFindingDetailView of(FindingRow row, @Nullable MalformedDetail malformedOutput) {
+        public static BehaviorFindingDetailView of(
+                FindingRow row, @Nullable MalformedDetail malformedOutput, @Nullable SecretLeakDetail secretLeak) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
                     BehaviorFindingView.of(row),
@@ -217,7 +234,8 @@ public final class BehaviorDtos {
                             : null,
                     FindingRow.Cause.RATE_SHIFT.equals(row.causeKind()) ? ToolErrorEvidence.detail(evidence) : null,
                     null,
-                    malformedOutput);
+                    malformedOutput,
+                    secretLeak);
         }
     }
 

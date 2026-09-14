@@ -59,7 +59,8 @@ class SecretLeakDetectorTest {
         JsonNode evidence = evidence(d);
         assertEquals("aws-access-token", evidence.path("pattern").asText(), "named by the rule, not by the token");
         assertEquals("redaction", evidence.path("source").asText());
-        assertTrue(evidence.path("match_redacted").isMissingNode(), "there is no credential left to excerpt");
+        assertEquals("redacted", evidence.path("stored").asText());
+        assertTrue(evidence.path("masked").isMissingNode(), "the fixture stamp carries no masked key");
     }
 
     @Test
@@ -106,7 +107,8 @@ class SecretLeakDetectorTest {
         JsonNode evidence = evidence(d);
         assertEquals("aws-access-token", evidence.path("pattern").asText());
         assertEquals("output", evidence.path("source").asText());
-        assertEquals("AKIA…(20 chars)", evidence.path("match_redacted").asText(), "four characters and a length");
+        assertEquals("raw", evidence.path("stored").asText());
+        assertEquals("AKIA…ZAM2", evidence.path("masked").asText(), "provider prefix and the last 4 characters");
     }
 
     @Test
@@ -153,7 +155,9 @@ class SecretLeakDetectorTest {
             Detection d = detect("the value was " + token);
             assertTrue(d.fired(), token);
             assertEquals(Detection.Confidence.LOW, d.confidence(), token);
-            assertEquals("marker", evidence(d).path("source").asText(), token);
+            JsonNode evidence = evidence(d);
+            assertEquals("marker", evidence.path("source").asText(), token);
+            assertEquals("unknown", evidence.path("stored").asText(), token);
         }
     }
 

@@ -12,6 +12,7 @@ import ai.tessary.classifier.debug.ClassifierDebugContributor;
 import ai.tessary.classifier.debug.ClassifierDebugService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
+import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorService;
@@ -136,6 +137,11 @@ class AbsentAdapterContextTest {
         @Bean
         MalformedOutputDetailService malformedOutputs() {
             return mock(MalformedOutputDetailService.class);
+        }
+
+        @Bean
+        SecretLeakDetailService secretLeaks() {
+            return mock(SecretLeakDetailService.class);
         }
     }
 

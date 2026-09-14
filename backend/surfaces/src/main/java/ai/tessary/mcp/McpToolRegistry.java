@@ -816,7 +816,8 @@ public class McpToolRegistry {
                 detail.metric(),
                 detail.toolError(),
                 detail.baseline(),
-                detail.malformedOutput());
+                detail.malformedOutput(),
+                detail.secretLeak());
     }
 
     /** See {@link #withoutTriage}: the same firewall applies here. */
@@ -900,7 +901,12 @@ public class McpToolRegistry {
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
             @Nullable String model,
-            @Nullable String callSiteId) {
+            @Nullable String callSiteId,
+            /** The masked key that leaked and whether it is still stored raw — already masked, never
+             *  the credential itself, so kept alongside the measurements rather than dropped with the
+             *  previews. Set only on a secret-leak finding's evidence. */
+            @Nullable String secretKey,
+            @Nullable String storedAs) {
 
         static EvidenceSpan of(BehaviorDtos.EvidenceSpanView v) {
             return new EvidenceSpan(
@@ -919,7 +925,9 @@ public class McpToolRegistry {
                     v.totalTokens(),
                     v.totalCost(),
                     v.model(),
-                    v.callSiteId());
+                    v.callSiteId(),
+                    v.secretKey(),
+                    v.storedAs());
         }
     }
 

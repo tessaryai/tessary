@@ -402,7 +402,7 @@ class RedactionEngineTest {
         String out = RedactionEngine.apply(
                 "deploy with AKIA" + "QYLPMN5HHHFPZAM2 then ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5",
                 builtInChain(),
-                found::add);
+                (f, raw) -> found.add(f));
         assertEquals("deploy with [REDACTED_SECRET] then [REDACTED_SECRET]", out);
         assertEquals(
                 List.of("aws-access-token", "github-pat"),
@@ -417,7 +417,7 @@ class RedactionEngineTest {
                 "{\"messages\":[{\"role\":\"assistant\",\"content\":\"key is AKIA"
                         + "QYLPMN5HHHFPZAM2\"}],\"n\":1234567890}",
                 builtInChain(),
-                found::add);
+                (f, raw) -> found.add(f));
         assertEquals(
                 "{\"messages\":[{\"role\":\"assistant\",\"content\":\"key is [REDACTED_SECRET]\"}],\"n\":1234567890}",
                 out);
@@ -429,7 +429,7 @@ class RedactionEngineTest {
         List<GitleaksCorpus.Finding> found = new ArrayList<>();
         String text = "the secret to a good token is patience";
         CompiledRule corpus = builtInChain().get(0);
-        assertSame(text, RedactionEngine.apply(text, List.of(corpus), found::add));
+        assertSame(text, RedactionEngine.apply(text, List.of(corpus), (f, raw) -> found.add(f)));
         assertEquals(List.of(), found);
     }
 

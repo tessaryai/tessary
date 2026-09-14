@@ -2,8 +2,11 @@
 package ai.tessary.classifier;
 
 import ai.tessary.detection.DetectionTableRegistry;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -318,4 +321,144 @@ public class ClassifierDetectionWriteRepository {
                         rs.getObject("last_seen_at", OffsetDateTime.class).toInstant()))
                 .list();
     }
+
+    /**
+     * A secret-leak facet's population since its finding's onset: how many detections, across how many
+     * traces, first to last by the span's own clock, and whether any of them is HIGH band. Null when the
+     * facet has no detection table or its population has aged out from under the span join entirely.
+     *
+     * <p>Scoped by call site AND facet together, the same pair {@code ClassifierArming} files one finding
+     * per: a project-wide count here would mix a leak at one call site into another's numbers.
+     */
+    public @Nullable SecretLeakSummary secretLeakSummary(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            String pattern,
+            @Nullable String callSiteId,
+            Instant sinceOnset) {
+        String table = tableFor(detectorKind);
+        if (table == null) return null;
+        return jdbc.sql("SELECT count(*) AS n, count(DISTINCT d.subject_trace_id) AS traces,"
+                        + " min(s.started_at) AS first_at, max(s.started_at) AS last_at,"
+                        + " bool_or(d.confidence = 'high') AS any_high"
+                        + " FROM " + table + " d" + SPAN_JOIN
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND d.evidence ->> 'pattern' = :pattern"
+                        + " AND s.call_site_id IS NOT DISTINCT FROM CAST(:callSiteId AS text)"
+                        + " AND s.started_at >= :onset")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("pattern", pattern)
+                .param("callSiteId", callSiteId)
+                .param("onset", OffsetDateTime.ofInstant(sinceOnset, ZoneOffset.UTC))
+                .query((rs, n) -> new SecretLeakSummary(
+                        rs.getLong("n"),
+                        rs.getLong("traces"),
+                        instantOrNull(rs, "first_at"),
+                        instantOrNull(rs, "last_at"),
+                        rs.getBoolean("any_high")))
+                .optional()
+                .filter(s -> s.leakCount() > 0)
+                .orElse(null);
+    }
+
+    /**
+     * Every masked key this facet has leaked as, newest-leaking-first: how many leaks and how many
+     * traces each key accounts for, when it last leaked, and whether any instance of it is still sitting
+     * in stored output unredacted. A key the redaction stamp or the raw-output reading could not name
+     * groups under {@code unknown} rather than being dropped, per the forward-only degrade.
+     */
+    public List<SecretLeakKeySummary> secretLeakKeys(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            String pattern,
+            @Nullable String callSiteId,
+            Instant sinceOnset) {
+        String table = tableFor(detectorKind);
+        if (table == null) return List.of();
+        return jdbc.sql("SELECT COALESCE(d.evidence ->> 'masked', 'unknown') AS masked,"
+                        + " count(*) AS n, count(DISTINCT d.subject_trace_id) AS traces,"
+                        + " max(s.started_at) AS last_at,"
+                        + " bool_or(d.evidence ->> 'stored' = 'raw') AS stored_raw"
+                        + " FROM " + table + " d" + SPAN_JOIN
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND d.evidence ->> 'pattern' = :pattern"
+                        + " AND s.call_site_id IS NOT DISTINCT FROM CAST(:callSiteId AS text)"
+                        + " AND s.started_at >= :onset"
+                        + " GROUP BY 1 ORDER BY max(s.started_at) DESC")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("pattern", pattern)
+                .param("callSiteId", callSiteId)
+                .param("onset", OffsetDateTime.ofInstant(sinceOnset, ZoneOffset.UTC))
+                .query((rs, n) -> new SecretLeakKeySummary(
+                        rs.getString("masked"),
+                        rs.getLong("n"),
+                        rs.getLong("traces"),
+                        instantOrNull(rs, "last_at"),
+                        rs.getBoolean("stored_raw")))
+                .list();
+    }
+
+    /**
+     * What {@code secret_leak_detection} recorded for each of a finding's own witnesses — the bounded
+     * set {@code ClassifierArming} already pinned, joined here for the mask, whether it is still stored
+     * raw, and the span's own time. A witness whose span has aged out of the join drops out rather than
+     * appearing with nulls: {@link #secretLeakSummary} and {@link #secretLeakKeys} are the full-population
+     * counts, this is only the instances a reader can still open.
+     */
+    public List<SecretLeakWitness> secretLeakWitnesses(
+            String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans) {
+        String table = tableFor(detectorKind);
+        if (table == null || spans.isEmpty()) return List.of();
+        List<Object[]> keys =
+                spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
+        return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, s.started_at,"
+                        + " d.evidence ->> 'masked' AS masked, d.evidence ->> 'stored' AS stored"
+                        + " FROM " + table + " d" + SPAN_JOIN
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND (d.subject_trace_id, d.subject_span_id) IN (:spans)"
+                        + " ORDER BY s.started_at DESC NULLS LAST")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("spans", keys)
+                .query((rs, n) -> new SecretLeakWitness(
+                        rs.getString("subject_trace_id"),
+                        rs.getString("subject_span_id"),
+                        instantOrNull(rs, "started_at"),
+                        rs.getString("masked"),
+                        rs.getString("stored")))
+                .list();
+    }
+
+    private static @Nullable Instant instantOrNull(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime v = rs.getObject(column, OffsetDateTime.class);
+        return v == null ? null : v.toInstant();
+    }
+
+    /** A secret-leak facet's population since onset: see {@link #secretLeakSummary}. */
+    public record SecretLeakSummary(
+            long leakCount,
+            long traceCount,
+            @Nullable Instant firstAt,
+            @Nullable Instant lastAt,
+            boolean anyHigh) {}
+
+    /** One masked key's aggregate within a secret-leak facet: see {@link #secretLeakKeys}. */
+    public record SecretLeakKeySummary(
+            String masked,
+            long leaks,
+            long traces,
+            @Nullable Instant lastAt,
+            boolean storedRaw) {}
+
+    /** One witness leak, joined to what {@code secret_leak_detection} recorded: see {@link #secretLeakWitnesses}. */
+    public record SecretLeakWitness(
+            String traceId,
+            @Nullable String spanId,
+            @Nullable Instant at,
+            @Nullable String masked,
+            @Nullable String stored) {}
 }

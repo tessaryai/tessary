@@ -439,7 +439,7 @@ class ClassifierArmingIntegrationTest {
                 span.spanId(),
                 "critical",
                 confidence,
-                "{\"pattern\":\"" + pattern + "\",\"match_redacted\":\"AKIA…(20 chars)\"}");
+                "{\"pattern\":\"" + pattern + "\",\"source\":\"output\",\"masked\":\"AKIA…ZAM2\",\"stored\":\"raw\"}");
         return FindingEvidenceRepository.Ref.span(span.traceId(), span.spanId());
     }
 

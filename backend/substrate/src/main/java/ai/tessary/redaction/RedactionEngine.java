@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -51,7 +51,7 @@ public final class RedactionEngine {
     /**
      * A built-in rule backed by the {@link GitleaksCorpus} rather than a single regex. It is the one kind of
      * rule that reports what it matched, because a credential redacted on the way in is the record a leak
-     * detector reads afterwards: see {@link #apply(String, List, Consumer)}.
+     * detector reads afterwards: see {@link #apply(String, List, BiConsumer)}.
      */
     public record CorpusRule(String name, GitleaksCorpus corpus, String replacement) implements CompiledRule {}
 
@@ -92,7 +92,9 @@ public final class RedactionEngine {
      * matched}. Regex rules report nothing: what they remove is named only by their replacement token.
      */
     public static @Nullable String apply(
-            @Nullable String text, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            @Nullable String text,
+            List<CompiledRule> rules,
+            @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
         String out = text;
         for (CompiledRule rule : rules) {
@@ -109,7 +111,7 @@ public final class RedactionEngine {
 
     /** Replace each corpus finding's span with the rule's token, left to right; the same reference if none. */
     private static String replaceFindings(
-            String text, CorpusRule rule, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            String text, CorpusRule rule, @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         List<GitleaksCorpus.Finding> findings = rule.corpus().find(text);
         if (findings.isEmpty()) return text;
         StringBuilder out = new StringBuilder(text.length());
@@ -117,7 +119,7 @@ public final class RedactionEngine {
         for (GitleaksCorpus.Finding f : findings) {
             out.append(text, cursor, f.start()).append(rule.replacement());
             cursor = f.end();
-            if (matched != null) matched.accept(f);
+            if (matched != null) matched.accept(f, text.substring(f.start(), f.end()));
         }
         return out.append(text, cursor, text.length()).toString();
     }
@@ -180,7 +182,9 @@ public final class RedactionEngine {
 
     /** {@link #applyToTextParts(String, List)}, reporting corpus findings to {@code matched}. */
     public static @Nullable String applyToTextParts(
-            @Nullable String text, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            @Nullable String text,
+            List<CompiledRule> rules,
+            @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (text == null || text.isEmpty() || rules.isEmpty()) return text;
 
         StringBuilder out = null; // allocated lazily: most fields contain no payload at all
@@ -272,7 +276,9 @@ public final class RedactionEngine {
 
     /** {@link #applyToJson(String, List)}, reporting corpus findings to {@code matched}. */
     public static @Nullable String applyToJson(
-            @Nullable String json, List<CompiledRule> rules, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            @Nullable String json,
+            List<CompiledRule> rules,
+            @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (json == null || json.isEmpty() || rules.isEmpty()) return json;
         if (json.length() > MAX_JSON_PARSE_CHARS) return applyToTextParts(json, rules, matched);
         JsonNode root = parseContainer(json);
@@ -311,7 +317,10 @@ public final class RedactionEngine {
      * allocates nothing at all, matching {@link #apply}'s contract.
      */
     private static @Nullable JsonNode redactNode(
-            JsonNode node, List<CompiledRule> rules, int depth, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            JsonNode node,
+            List<CompiledRule> rules,
+            int depth,
+            @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (depth >= MAX_JSON_DEPTH) return null;
         if (node.isObject()) {
             ObjectNode copy = null;
@@ -347,7 +356,10 @@ public final class RedactionEngine {
 
     /** A string leaf: recursed into when it is itself a JSON container, redacted as text otherwise. */
     private static String redactStringLeaf(
-            String text, List<CompiledRule> rules, int depth, @Nullable Consumer<GitleaksCorpus.Finding> matched) {
+            String text,
+            List<CompiledRule> rules,
+            int depth,
+            @Nullable BiConsumer<GitleaksCorpus.Finding, String> matched) {
         if (depth + 1 < MAX_JSON_DEPTH && text.length() <= MAX_JSON_PARSE_CHARS) {
             JsonNode nested = parseContainer(text);
             if (nested != null) {
