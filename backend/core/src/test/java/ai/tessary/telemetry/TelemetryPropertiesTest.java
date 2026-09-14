@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link TelemetryProperties#isEnabled()} is on-by-default — the ONE fact everything
- * downstream in {@code TelemetryHeartbeat} gates on before touching {@link InstallIdRepository} or
+ * downstream in {@code TelemetryHeartbeat} gates on before touching {@link InstanceIdRepository} or
  * {@link HomeTessaryClient} at all (see that class's own gate-order test in {@code surfaces}, where the
  * repositories/HTTP client actually live). This test covers only the binding itself: default true,
  * and the setter this package's one {@code @ConfigurationProperties} class exposes for

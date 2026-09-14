@@ -51,7 +51,7 @@ import org.mockito.InOrder;
  */
 class TelemetryHeartbeatTest {
 
-    private static final String INSTALL_ID = "3f1c2a9e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+    private static final String INSTANCE_ID = "3f1c2a9e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -71,10 +71,10 @@ class TelemetryHeartbeatTest {
     }
 
     private TelemetryHeartbeat heartbeat(
-            TelemetryProperties props, InstallIdRepository installIds, HomeTessaryClient client) {
+            TelemetryProperties props, InstanceIdRepository instanceIds, HomeTessaryClient client) {
         return new TelemetryHeartbeat(
                 props,
-                installIds,
+                instanceIds,
                 client,
                 projects,
                 findings,
@@ -89,7 +89,7 @@ class TelemetryHeartbeatTest {
     /**
      * The one gate this whole subsystem hangs off: {@link TelemetryProperties#isEnabled()} must be checked
      * BEFORE anything else in {@link TelemetryHeartbeat#tick()} runs — no DB read (not even the harmless
-     * {@link InstallIdRepository}, which itself writes on first call), no HTTP client touch. This is what
+     * {@link InstanceIdRepository}, which itself writes on first call), no HTTP client touch. This is what
      * makes devdocs/reference/telemetry-contract.md §3's "zero outbound calls, including DNS resolution,
      * when disabled" true.
      */
@@ -97,19 +97,19 @@ class TelemetryHeartbeatTest {
     void disabledTelemetryTouchesNothingDownstream() {
         TelemetryProperties props = new TelemetryProperties();
         props.setEnabled(false);
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
-        heartbeat(props, installIds, client).tick();
+        heartbeat(props, instanceIds, client).tick();
 
-        verifyNoInteractions(installIds, client, projects, findings, cases, rollups, priceBooks, fetcher);
+        verifyNoInteractions(instanceIds, client, projects, findings, cases, rollups, priceBooks, fetcher);
     }
 
     @Test
     void postsAPayloadHomesSchemaAcceptsToV1Ping() throws Exception {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
-        when(installIds.nextPingSeq()).thenReturn(7L);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        when(instanceIds.nextPingSeq()).thenReturn(7L);
         when(projects.countAll()).thenReturn(3L);
         when(rollups.installLifetimeTotal(UsageUnit.INGESTED_SPANS)).thenReturn(1_204_551L);
         when(findings.countAll()).thenReturn(88L);
@@ -119,7 +119,7 @@ class TelemetryHeartbeatTest {
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenReturn(204);
 
-        heartbeat(new TelemetryProperties(), installIds, client).tick();
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(client).postJson(eq("/v1/ping"), body.capture());
@@ -128,7 +128,7 @@ class TelemetryHeartbeatTest {
         Set<ValidationMessage> violations = homePingSchema().validate(sent);
         assertTrue(violations.isEmpty(), "home would answer 400: " + violations);
         assertEquals(1, sent.get("contract_version").asInt());
-        assertEquals(INSTALL_ID, sent.get("install_id").asText());
+        assertEquals(INSTANCE_ID, sent.get("instance_id").asText());
         assertEquals(7L, sent.get("ping_seq").asLong());
         assertEquals("open", sent.get("edition").asText());
         JsonNode counts = sent.get("counts");
@@ -145,11 +145,11 @@ class TelemetryHeartbeatTest {
 
     @Test
     void checksThePriceBookAfterPinging() throws Exception {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
-        heartbeat(new TelemetryProperties(), installIds, client).tick();
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
 
         InOrder order = inOrder(client, fetcher);
         order.verify(client).postJson(eq("/v1/ping"), anyString());
@@ -158,10 +158,10 @@ class TelemetryHeartbeatTest {
 
     @Test
     void aFailedPingStillChecksThePriceBook() throws Exception {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenThrow(new IllegalStateException("database unavailable"));
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
 
-        heartbeat(new TelemetryProperties(), installIds, mock(HomeTessaryClient.class))
+        heartbeat(new TelemetryProperties(), instanceIds, mock(HomeTessaryClient.class))
                 .tick();
 
         verify(fetcher).refresh();
@@ -169,19 +169,19 @@ class TelemetryHeartbeatTest {
 
     @Test
     void aFailedPriceBookCheckNeverEscapesTheTick() {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
         when(fetcher.refresh()).thenThrow(new IllegalStateException("boom"));
 
-        assertDoesNotThrow(() -> heartbeat(new TelemetryProperties(), installIds, mock(HomeTessaryClient.class))
+        assertDoesNotThrow(() -> heartbeat(new TelemetryProperties(), instanceIds, mock(HomeTessaryClient.class))
                 .tick());
     }
 
     @Test
     void anInstallHoldingNoDigestOmitsItButStillSaysWhatItCanParse() throws Exception {
         ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstallIdRepository.class), mock(HomeTessaryClient.class))
-                .payload(INSTALL_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
+                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
+                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
 
         assertFalse(payload.path("price_book").has("digest"));
         assertEquals(
@@ -205,43 +205,43 @@ class TelemetryHeartbeatTest {
     @Test
     void aFailedCountDropsOnlyTheCounts() throws Exception {
         // A partial counts object would read as zero for whatever was missing, so it goes out whole or not at all.
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
         when(projects.countAll()).thenReturn(3L);
         when(findings.countAll()).thenThrow(new IllegalStateException("statement timeout"));
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenReturn(204);
 
-        heartbeat(new TelemetryProperties(), installIds, client).tick();
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
         assertFalse(sent.has("counts"));
         assertTrue(homePingSchema().validate(sent).isEmpty());
-        assertNull(heartbeat(new TelemetryProperties(), installIds, client).counts());
+        assertNull(heartbeat(new TelemetryProperties(), instanceIds, client).counts());
     }
 
     @Test
-    void readsTheInstallIdBeforeTakingAPingSeq() throws Exception {
+    void readsTheInstanceIdBeforeTakingAPingSeq() throws Exception {
         // nextPingSeq updates the singleton row, which only exists once get() has minted it.
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
-        heartbeat(new TelemetryProperties(), installIds, client).tick();
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
 
-        InOrder order = inOrder(installIds);
-        order.verify(installIds).get();
-        order.verify(installIds).nextPingSeq();
+        InOrder order = inOrder(instanceIds);
+        order.verify(instanceIds).get();
+        order.verify(instanceIds).nextPingSeq();
     }
 
     @Test
     void sendsOnlyTheFieldsTheContractNames() {
         ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstallIdRepository.class), mock(HomeTessaryClient.class))
+                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
                 .payload(
-                        INSTALL_ID,
+                        INSTANCE_ID,
                         0,
                         Instant.parse("2026-09-13T07:20:00.123456Z"),
                         mapper.createObjectNode(),
@@ -250,7 +250,7 @@ class TelemetryHeartbeatTest {
         assertEquals(
                 Set.of(
                         "contract_version",
-                        "install_id",
+                        "instance_id",
                         "ping_seq",
                         "sent_at",
                         "app_version",
@@ -269,8 +269,8 @@ class TelemetryHeartbeatTest {
     @Test
     void theFirstPingIsSequenceZeroAndStillValid() throws Exception {
         ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstallIdRepository.class), mock(HomeTessaryClient.class))
-                .payload(INSTALL_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
+                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
+                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
 
         assertTrue(homePingSchema().validate(payload).isEmpty());
     }
@@ -281,7 +281,7 @@ class TelemetryHeartbeatTest {
         // before /v1 (no ping_seq, `timestamp` instead of `sent_at`) is exactly what home answers 400 to.
         ObjectNode old = mapper.createObjectNode();
         old.put("contract_version", 1);
-        old.put("install_id", INSTALL_ID);
+        old.put("instance_id", INSTANCE_ID);
         old.put("app_version", "dev");
         old.put("timestamp", "2026-09-13T07:20:00Z");
 
@@ -293,23 +293,23 @@ class TelemetryHeartbeatTest {
 
     @Test
     void aFailedSendNeverEscapesTheTick() throws Exception {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenReturn(INSTALL_ID);
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
 
         assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), installIds, client).tick());
+                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
     }
 
     @Test
     void aRepositoryFailureNeverEscapesTheTick() {
-        InstallIdRepository installIds = mock(InstallIdRepository.class);
-        when(installIds.get()).thenThrow(new IllegalStateException("database unavailable"));
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
         assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), installIds, client).tick());
+                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
         verifyNoInteractions(client);
     }
 

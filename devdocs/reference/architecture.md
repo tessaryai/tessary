@@ -293,7 +293,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 | `product` | `pipeline`, `gate`, `sop` (the `SopIntake` seam only), `sopcompile`, `plan` |
 | `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage`, `vitals` |
 | `tenancy` | `tenant`, `auth`, `edition`, `featureflags`, `version` |
-| `core` | `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `telemetry` (the transport/config/install-id half — see `surfaces`'s `telemetry` above), `llmspi`, the Liquibase changelog, the schema-column generator |
+| `core` | `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `telemetry` (the transport/config/instance-id half — see `surfaces`'s `telemetry` above), `llmspi`, the Liquibase changelog, the schema-column generator |
 | `test-support` | `TestPostgres` + its context initializer; test scope everywhere |
 | `contract` | `open/contract` — the checked-in canonical OpenAPI spec |
 | `shared` | `open/{errors,jobqueue,media,obs}`, `detection/` (per-classifier detection-table registry: `DetectionTable`, `DetectionTableRegistry`) |
@@ -348,7 +348,7 @@ holds. A package appears in exactly one module.
 | `sources/` | `substrate` | persistence + REST for `IngestionSource`. | — |
 | `storage/` | `substrate` | the streaming trace substrate (see *SPI-seam slices* above). | — |
 | `tenant/` | `tenancy` | orgs/projects/users, membership, API keys / MCP tokens (one `api_key` store via `ApiKeyService`), RBAC. Environments were removed: a project is the only scope below an org. | [auth-and-mcp.md](./auth-and-mcp.md) |
-| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics`: `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstallIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat` (the `@Scheduled` orchestrator: `POST /v1/ping`, then `pricing/PriceBookFetcher`'s price book check, every 6 hours, next to `MeteringWorker`). | [telemetry-contract.md](./telemetry-contract.md) |
+| `telemetry/` | `core` + `surfaces` | the `home.tessary.ai` heartbeat ping, replacing `analytics`: `core` holds `TelemetryProperties`/`HomeTessaryClient`/`InstanceIdRepository` (no `tenancy`/`substrate` dependency to build on), `surfaces` holds `TelemetryHeartbeat` (the `@Scheduled` orchestrator: `POST /v1/ping`, then `pricing/PriceBookFetcher`'s price book check, every 6 hours, next to `MeteringWorker`). | [telemetry-contract.md](./telemetry-contract.md) |
 | `traces/` | `substrate` | read-side trace explorer over the substrate. | — |
 | `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker were removed along with grading; nothing here caps anything now. | — |
 | `version/` | `tenancy` | project-version timeline (one row per commit SHA). | — |

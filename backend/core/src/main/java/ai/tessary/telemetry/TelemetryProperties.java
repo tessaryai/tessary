@@ -13,8 +13,8 @@ import org.springframework.stereotype.Component;
  * credential, so there is nothing else for this class to hold.
  *
  * <p><b>On by default (opt-out).</b> {@link #enabled} is the ONE gate the contract's §3
- * anonymity guarantee depends on: a caller must check it before touching {@link InstallIdRepository} or
- * {@link HomeTessaryClient} at all, not merely before sending — reading or minting an install id when
+ * anonymity guarantee depends on: a caller must check it before touching {@link InstanceIdRepository} or
+ * {@link HomeTessaryClient} at all, not merely before sending — reading or minting an instance id when
  * telemetry is off is itself an observable side effect the contract's "zero outbound calls, including
  * DNS resolution, when disabled" language forecloses.
  */

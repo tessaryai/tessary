@@ -31,8 +31,8 @@ per-event emitter several packages imported from below — with the
 from below any more: the ping is self-scheduled, not called per-request, so the whole "which packages
 import the emitter" question the old paragraph answered no longer has an object. The split itself is
 forced, not stylistic: `core` has no dependency on `tenancy` or `substrate` (by design — see its own
-pom), so the dumb transport, config, and install-id persistence (`TelemetryProperties`,
-`HomeTessaryClient`, `InstallIdRepository`) sit in `core` where `analytics` used to. The orchestrator
+pom), so the dumb transport, config, and instance-id persistence (`TelemetryProperties`,
+`HomeTessaryClient`, `InstanceIdRepository`) sit in `core` where `analytics` used to. The orchestrator
 (`TelemetryHeartbeat`) sits in `surfaces`, next to `MeteringWorker`, the existing precedent for a plain
 `@Scheduled` heartbeat with no dedicated executor. It has to sit above `core`: the install-wide
 counts it sends come from `tenancy` (projects), `analysis` (findings, cases) and `substrate` (the
