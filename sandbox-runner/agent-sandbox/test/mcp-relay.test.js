@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Coverage for mcp-relay.js: a small tools/call result passes through inline and untouched; a
- * large one is saved whole to checks/mcp/NNN-<tool>.json and replaced with a summary the agent can
- * act on (file, row count, field names, a few rows, and the cursor under either wire spelling);
- * everything that is not a tools/call result (initialize's instructions, a notification, a
- * rejected method) passes through unchanged.
+ * Coverage for mcp-relay.js: every tools/call result is saved whole to checks/mcp/NNN-<tool>.json.
+ * A small result comes back inline with its full data plus the saved path; a large one is replaced
+ * with a summary the agent can act on (file, row count, field names, a few rows, and the cursor
+ * under either wire spelling). Everything that is not a tools/call result (initialize's
+ * instructions, a notification, a rejected method) passes through unchanged.
  *
  * Run with: node --test test/mcp-relay.test.js
  *
@@ -58,7 +58,7 @@ async function callTool(relayUrl, id, name, extra = {}) {
   return { status: res.status, body: await res.json() };
 }
 
-test('a small tools/call result passes through inline, unchanged, and saves no file', async (t) => {
+test('a small tools/call result comes back inline in full, with its saved path added', async (t) => {
   const upstream = await startStubUpstream((reqBody, req, res) => {
     assert.equal(req.headers.authorization, 'Bearer test-token');
     res.writeHead(200, { 'content-type': 'application/json' }).end(
@@ -72,13 +72,16 @@ test('a small tools/call result passes through inline, unchanged, and saves no f
 
   const { status, body } = await callTool(relay.url, 1, 'get_finding_evidence');
   assert.equal(status, 200);
-  assert.deepEqual(JSON.parse(body.result.content[0].text), { rows: [{ id: 1 }], nextCursor: null });
-  assert.deepEqual(body.result.structuredContent, { rows: [{ id: 1 }], nextCursor: null });
-  assert.equal(
-    fs.readdirSync(path.join(workDir, 'checks', 'mcp')).length,
-    0,
-    'a result under the inline budget is never written to a file',
-  );
+  const expected = {
+    rows: [{ id: 1 }],
+    nextCursor: null,
+    file: path.join('checks', 'mcp', '001-get_finding_evidence.json'),
+  };
+  assert.deepEqual(JSON.parse(body.result.content[0].text), expected);
+  assert.deepEqual(body.result.structuredContent, expected);
+
+  const saved = JSON.parse(fs.readFileSync(path.join(workDir, expected.file), 'utf8'));
+  assert.deepEqual(saved, { rows: [{ id: 1 }], nextCursor: null }, 'the full result is saved verbatim, with no file field added');
 });
 
 test('a large tools/call result is saved to a file and replaced with a summary (nextCursor)', async (t) => {
@@ -144,6 +147,24 @@ test('sequential large calls number their files 001, 002, ... by tool', async (t
   const second = await callTool(relay.url, 11, 'get_trace');
   assert.equal(JSON.parse(first.body.result.content[0].text).file, path.join('checks', 'mcp', '001-get_finding_evidence.json'));
   assert.equal(JSON.parse(second.body.result.content[0].text).file, path.join('checks', 'mcp', '002-get_trace.json'));
+});
+
+test('the file sequence keeps incrementing across a mix of small and large calls', async (t) => {
+  const bigRows = Array.from({ length: 500 }, (_, i) => ({ id: i, value: 'x'.repeat(30) }));
+  const upstream = await startStubUpstream((reqBody, req, res) => {
+    const payload = reqBody.params.name === 'get_finding' ? { id: 'fnd-1' } : { rows: bigRows };
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(jsonRpcToolResult(reqBody.id, payload)));
+  });
+  t.after(() => upstream.close());
+  const workDir = tempWorkDir();
+  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  t.after(() => relay.close());
+
+  const small = await callTool(relay.url, 20, 'get_finding');
+  const large = await callTool(relay.url, 21, 'get_finding_evidence');
+  assert.equal(JSON.parse(small.body.result.content[0].text).file, path.join('checks', 'mcp', '001-get_finding.json'));
+  assert.equal(JSON.parse(large.body.result.content[0].text).file, path.join('checks', 'mcp', '002-get_finding_evidence.json'));
+  assert.equal(fs.readdirSync(path.join(workDir, 'checks', 'mcp')).length, 2, 'both calls saved a file, small included');
 });
 
 test('initialize (and anything not tools/call) passes through untouched, instructions intact', async (t) => {

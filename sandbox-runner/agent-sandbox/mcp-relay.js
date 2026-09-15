@@ -10,9 +10,10 @@
  * page that size would arrive at the agent silently cut off rather than as a page it could work
  * with. The relay sits between opencode and the real Tessary MCP server, on the SAME loopback
  * interface agent-stream.js already binds the opencode server to, and rewrites only the reply to a
- * `tools/call`: small results pass through untouched; large ones are saved whole to
- * `checks/mcp/NNN-<tool>.json` under the run's WORK dir and replaced with a summary the agent can
- * read at a glance and then go compute over with its own bash/jq/scripts.
+ * `tools/call`: every result is saved whole to `checks/mcp/NNN-<tool>.json` under the run's WORK
+ * dir, so the agent can script over any of them later. Small results still come back inline in
+ * full, with the saved path added; large ones come back as a summary the agent can read at a
+ * glance and then go compute over with its own bash/jq/scripts.
  *
  * Everything else — `initialize` (whose `instructions` field must reach the agent unchanged, see
  * agent-stream.js's caller), `tools/list`, notifications — is forwarded byte-for-byte. This file
@@ -56,6 +57,18 @@ function cursorOf(parsed) {
 function fieldNamesOf(rows) {
   const first = rows.find((r) => r && typeof r === 'object' && !Array.isArray(r));
   return first ? Object.keys(first) : [];
+}
+
+/**
+ * The full result plus where it was saved, for an inline (under-budget) reply: the agent gets
+ * everything the tool returned, and can also point a script at `file` instead of re-fetching. Row
+ * shapes keep their `rows`/cursor fields; a bare object gets `file` merged in; anything else (a
+ * bare array, a primitive) is wrapped rather than dropped.
+ */
+function withFile(parsed, workRelativeFile) {
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { ...parsed, file: workRelativeFile };
+  if (Array.isArray(parsed)) return { file: workRelativeFile, rows: parsed };
+  return { file: workRelativeFile, value: parsed };
 }
 
 /**
@@ -125,14 +138,13 @@ function startMcpRelay({ url, token, workDir }) {
     if (!respObj || typeof respObj !== 'object' || respObj.error) return respObj;
     const result = respObj.result;
     const payload = payloadOf(result);
-    if (payload === undefined) return respObj; // nothing JSON-shaped to summarize; pass through.
-    const compact = JSON.stringify(payload);
-    if (tokenEstimate(compact) <= INLINE_TOKEN_BUDGET) return respObj; // small enough as-is.
+    if (payload === undefined) return respObj; // nothing JSON-shaped to save; pass through.
     const relFile = saveResult(toolName, payload);
-    const summary = summarize(payload, relFile);
+    const compact = JSON.stringify(payload);
+    const body = tokenEstimate(compact) <= INLINE_TOKEN_BUDGET ? withFile(payload, relFile) : summarize(payload, relFile);
     const rewritten = { ...respObj, result: { ...result } };
-    if (result.structuredContent !== undefined) rewritten.result.structuredContent = summary;
-    rewritten.result.content = [{ type: 'text', text: JSON.stringify(summary) }];
+    if (result.structuredContent !== undefined) rewritten.result.structuredContent = body;
+    rewritten.result.content = [{ type: 'text', text: JSON.stringify(body) }];
     return rewritten;
   }
 
