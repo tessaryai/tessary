@@ -1,0 +1,85 @@
+---
+title: "Comparable Tools"
+description: "Where Tessary sits next to tracing and observability platforms, offline eval tools, and production agent monitoring products, and when teams run one of them alongside Tessary."
+---
+
+Most teams evaluating Tessary already run something in this space: a tracing platform, an eval tool, or a production monitoring product. This page describes the three categories Tessary is most often compared to, what a few named tools in each one do by their own account, and what Tessary does differently. It does not rank these tools against each other, and it is not a substitute for reading each tool's own docs.
+
+The short version: Tessary runs five deterministic classifiers against every trace your agents produce, at zero model-call cost, and escalates what they find through triage into an agentic RCA (root-cause analysis) run grounded in your connected repository. [How Tessary works](/concepts/how-it-works) covers that pipeline in full. The categories below solve adjacent problems, and a team running one of them commonly keeps it running alongside Tessary rather than replacing it.
+
+## Tracing and observability
+
+A tracing and observability platform captures what your agent did: the spans, the timing, the cost, and lets you search and dashboard over them. Tessary ingests the same kind of OTLP (OpenTelemetry Protocol) data, but its classifiers act on every trace as it arrives rather than waiting for someone to query a dashboard.
+
+### LangSmith
+
+[LangSmith](https://docs.langchain.com/langsmith) is LangChain's own observability platform. Per its docs, it gives visibility from individual traces to production-wide performance metrics, with dashboards, alerts on quality metrics, automated evals through LangSmith Engine, and feedback queues for inline annotation. Getting started requires an account at [smith.langchain.com](http://smith.langchain.com).
+
+Tessary's five classifiers run on every trace at zero model-call cost, rather than dashboards and alerts you configure and watch, and it self-hosts against one Postgres and pgvector datastore with no account or cloud call-home required to run. Its output is a triaged case plus an agentic RCA run grounded in your connected repository, not trace search and dashboards on their own. Tessary does not include LangSmith's dataset-building or prompt-iteration tooling, and the open edition ships no hosted-account-first product; everything is self-hostable.
+
+### Langfuse
+
+[Langfuse](https://langfuse.com/docs) is an open-source LLM engineering platform. Per its docs, it covers tracing through SDKs with sessions and agent-graph visualization, prompt management with versioning and no-code production deploys, evaluation tools including LLM-as-judge, code evaluators and human feedback, and monitoring dashboards with Slack, GitHub Actions, and webhook alerts on threshold breach.
+
+Langfuse's eval layer leans on LLM-as-judge scoring. Tessary's five shipped classifiers are deterministic, built from rule sets, JSON Schema validation, and CUSUM statistics, and they run on every trace rather than a sample; a model call only enters at triage and RCA, after a classifier has already fired. Tessary's self-hosted topology is deliberately one datastore, with nothing else in the stack holding data. Tessary does not include prompt management, versioning, or no-code prompt deployment, and it documents no Slack, GitHub Actions, or webhook threshold alerting.
+
+### Laminar
+
+[Laminar](https://laminar.sh/docs/) describes itself as an open-source, OpenTelemetry-native observability and debugging platform built for AI agents. Per its docs, it traces LLM calls, tool use, and custom functions, offers cached replay so each debugging iteration takes seconds, extracts structured events from traces through a feature called Signals, builds datasets from production traces, runs evals against those datasets locally or in CI, and provides SQL access and custom dashboards.
+
+Both Tessary and Laminar are OTel-native at ingestion, but Laminar's own launch material describes a multi-service stack (RabbitMQ, Postgres, ClickHouse, and Qdrant), while Tessary runs against a single Postgres and pgvector datastore. Tessary's classifiers run continuously and feed triaged cases and grounded RCA, rather than a Signals layer you query. Tessary does not include cached-replay debugging, a SQL or full-text search console, or a playground for replaying spans.
+
+## Offline evals
+
+An offline eval tool turns past failures into a regression suite: a dataset you can run a change against before it ships. Tessary does not build or run that kind of eval suite. Its classifiers watch live production traffic continuously, and its RCA run investigates a specific case rather than scoring a batch of stored examples.
+
+### Raindrop
+
+[Raindrop](https://www.raindrop.ai/docs) positions itself, in its own docs, primarily as production monitoring and issue discovery for AI agents, describing itself as "Sentry for AI agents": it logs every tool call, error, and recovery across production interactions, automatically detects failure modes like memory loss and user frustration, and offers natural-language search, custom Signals, a Triage Agent, and A/B testing. Raindrop separately ships [Workshop](https://github.com/raindrop-ai/workshop), an open-source local debugger where a coding agent reads traces, writes evals, and iterates until they pass. Workshop is the piece of Raindrop closest to offline evals; the core product is broader than that category.
+
+Tessary's classifiers are deterministic and shipped in the pipeline itself, rather than authored per incident by an agent, and RCA is structurally isolated from triage: it is never told a triage pass happened or what it concluded, an isolation enforced in three places (the dossier, the prompt, and the MCP tools it reads through). A hypothesis whose cited traces cannot be verified against the finding's own evidence is dropped rather than kept. Tessary does not include an A/B testing framework or a natural-language search console across historical interactions.
+
+### Latitude
+
+[Latitude](https://docs.latitude.so/) is an MIT-licensed, open-source platform. Per its docs, it captures traces, spans, and sessions, including model, tokens, latency, cost, and errors, groups recurring failure patterns from failed scores and human annotations into a feature called Signals, converts failing traces into regression datasets, and generates evaluations from signals to catch regressions after a deploy.
+
+Latitude's signal-to-eval loop is annotation and score driven. Tessary's classifiers fire without needing prior human-labeled scores, and a finding moves straight to agentic RCA with repo-grounded, evidence-checked hypotheses, rather than into a regression-dataset workflow. Tessary does not convert failing traces into regression test datasets or generate new evaluations from findings.
+
+## Production agent monitoring
+
+A production agent monitoring product watches a running agent for operational problems, sometimes from inside the request path itself. Tessary never sits in that path: it only receives what you export to it over OTLP.
+
+### Helicone
+
+[Helicone](https://docs.helicone.ai/) is a unified LLM API gateway. Per its docs, it proxies calls across more than 100 models and providers through an OpenAI-compatible endpoint, with logging, observability, and fallbacks built in, unified billing at no markup, and automatic provider failover.
+
+Tessary never sits in the call path between your agent and the model provider; it only receives what's exported over OTLP to your self-hosted instance, with PII (personally identifiable information) redaction running before storage. That's a different trust model from a gateway that proxies live traffic through a third party. Tessary does not act as an LLM gateway, unify billing across providers, or provide automatic provider failover, all of which follow from not sitting in the call path.
+
+### Datadog LLM Observability
+
+[Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/) is one module of Datadog's enterprise observability platform. Per its docs, it represents each request as a trace with spans for steps, inferences, and workflow operations, with dashboards for cost, latency, performance, and usage trends, anomaly detection, automatic sensitive-data-redaction scanning, prompt-injection detection, no-code-change framework integrations, and pricing metered per LLM span ingested.
+
+Datadog's LLM module sits inside a much broader enterprise APM (application performance monitoring) and infrastructure platform, with per-span metered pricing. Tessary is a single-purpose, self-hostable pipeline released under the Apache License 2.0, with no per-span metered pricing and no account or cloud dependency required to run. Tessary does not provide general infrastructure or APM observability beyond LLM traces, and it documents no compliance certification such as SOC2 or HIPAA.
+
+## Running Tessary alongside these tools
+
+These categories are not mutually exclusive, and adopting Tessary does not require giving up a tool already in place. A team that traces through LangSmith, Langfuse, or Laminar typically keeps using it for the trace search, dashboards, or prompt tooling it already provides, and adds Tessary for classifier coverage across every trace rather than the traces someone happens to go looking at. The same holds for an eval tool run in CI against a regression dataset: that catches known failure modes on a change you're about to ship, while Tessary's classifiers watch for the failure modes you have not yet written a test for.
+
+Before adopting Tessary alongside another tool, read [Open Edition](/open-edition) for what the open edition classifies, and where its self-hosting model, credential requirements, and current limits sit, since those apply whether or not another tool is also in the picture.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
+    The four-stage pipeline: ingest, classifiers and findings, triage and cases, and the agentic RCA run.
+  </Card>
+  <Card title="Open Edition" icon="box-open" href="/open-edition">
+    Which classifiers ship enabled, which need configuration, and the boundaries that apply to every edition.
+  </Card>
+  <Card title="Classifiers and findings" icon="radar" href="/concepts/classifiers-and-findings">
+    Which classifiers the open edition runs and what a finding records.
+  </Card>
+  <Card title="Root-cause analysis" icon="magnifying-glass" href="/concepts/root-cause-analysis">
+    What the agentic run reads, what it is deliberately not told, and what a connected repository adds.
+  </Card>
+</CardGroup>

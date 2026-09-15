@@ -47,7 +47,8 @@
           "concepts/call-sites",
           "concepts/classifiers-and-findings",
           "concepts/cases",
-          "concepts/root-cause-analysis"
+          "concepts/root-cause-analysis",
+          "concepts/comparable-tools"
         ]
       },
       {

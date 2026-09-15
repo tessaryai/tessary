@@ -40,3 +40,6 @@ exceptions:
   - GitHub
   - Slack
   - Docker
+  - LangSmith
+  - Datadog
+  - Observability

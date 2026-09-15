@@ -1,6 +1,6 @@
 # Published-docs claim coverage
 
-Every command block, URL and observable claim across the twenty-three
+Every command block, URL and observable claim across the twenty-four
 published pages is either **executed** by the setup rehearsal or **enumerated here as unexecuted,
 with a stated reason**. One row per page. This file is the enumeration half.
 
@@ -24,10 +24,10 @@ caught a published page resolving a path the export deletes, is a tombstone at t
 `# ---- 6. removed ----`, and what it protected is caught at export review instead. Rows below that
 name either one are describing what used to hold, not what runs.
 
-Fourteen of the twenty-three pages have **no executing instrument at all**, and there is no near-term
+Fifteen of the twenty-four pages have **no executing instrument at all**, and there is no near-term
 plan for one. `docs/open-edition.mdx` states which capabilities this build ships enabled, disabled, or absent, which needs an instrument that diffs the page against `CapabilityService`'s two sets. The five pages under `docs/instrument/` describe a client-side integration performed in
-the reader's own repository, in SDKs this tree does not build; the five under `docs/concepts/` are
-explanatory prose about stages the rehearsal never reaches; the three under `docs/reference/` are
+the reader's own repository, in SDKs this tree does not build; the six under `docs/concepts/` are
+explanatory prose about stages the rehearsal never reaches (or, for `comparable-tools.mdx`, about other companies' products); the three under `docs/reference/` are
 wire and surface contracts whose assertion needs an instrument that diffs a table against the code
 that reads it, which nothing here has. They are enumerated below one row each anyway, because the
 promise this file makes is enumeration, not coverage. Where such a page restates an observable that
@@ -58,6 +58,7 @@ row rather than claiming its own.
 | `docs/concepts/classifiers-and-findings.mdx` | Every claim. Which classifiers the open edition runs, what fitting a baseline means and why a new project waits, and what a finding records. | The `fitting` rung itself is executed, by `check-selfhost-quickstart.sh` through the `setup.mdx` row; what fitting *means*, and the open edition's classifier inventory, are not. Binding the inventory to the detectors the backend registers would be a separate instrument. `check-classifier-parity.sh` is not it: it pins the Python and Java implementations of a detector to each other, and never reads a published page. |
 | `docs/concepts/cases.mdx` | Every claim. What triage does, how related findings collapse onto one case, the states a case moves through, and where a case reaches you. | The gate ends at connected traces and a fitted baseline. No rehearsal produces a finding, so nothing produces a case, so nothing downstream of detection is on the executed path at all. This is the same boundary `deployment.mdx` and `upgrading.mdx` sit behind, reached from the other end. |
 | `docs/concepts/root-cause-analysis.mdx` | Every claim. What the agent is given, what the run is deliberately not told, where it runs, what the report returns, and what a run needs before it is useful. | A run needs a case, a connected repository and a sandbox microVM. The gate reaches none of the three. The "not told" claims are negatives of the kind noted above and would need an instrument that inspects what the run was handed, not what it returned. |
+| `docs/concepts/comparable-tools.mdx` | Every claim. Descriptions of LangSmith, Langfuse, Laminar, Raindrop, Latitude, Helicone and Datadog LLM Observability sourced from each tool's own docs, and every "Tessary does differently" and "Tessary does not do" line. | Comparison prose, not on any executed path. The Tessary-side claims restate what `open-edition.mdx` and `docs/self-hosting/deployment.mdx` already state and credit those rows rather than claiming their own; the competitor-side claims describe another company's product from its own docs and no instrument here can read those docs, let alone diff them against this page. Both sides would need re-verification whenever a cited tool's docs or this build's capabilities change. |
 | `docs/reference/api-keys.mdx` | The three scopes and their token prefixes, the two mint surfaces, the claim that both are rows in one key store, the token format, the constraints, and the per-scope error table. | The `setup.mdx` row already covers the connect gate minting a write-scoped key, which is one point in this table. The rest (prefix per scope, which surface reaches which route, and the code each wrongly scoped call returns) needs an instrument that calls the API once per scope, and nothing here does. |
 | `docs/reference/mcp-server.mdx` | Every claim. The `POST /mcp` endpoint, the credential it accepts, the read-only guarantee, all 19 tool signatures, the `~/.claude/mcp.json` block, the `tools/list` Check, and the error and known-limits tables. | No rehearsal starts an MCP client, so nothing calls a tool or counts the list. The read-only guarantee is the claim worth the most here and the one least suited to being read for: a tool that mutated would look identical on the page, so only a caller could tell. |
 | `docs/reference/ingestion-contract.mdx` | Every wire field across the tables, the accepted-but-not-consumed list, the attributes with no reader, the limits, and the invariants. | Same as the `span-requirements.mdx` row, from the receiving side. The limits are the one part a rehearsal could plausibly reach, by sending a batch past each one, and it does not: the emit step sends a single well-formed span and never approaches a clamp. |
