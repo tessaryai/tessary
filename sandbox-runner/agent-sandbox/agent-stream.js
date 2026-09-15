@@ -32,6 +32,11 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { Agent, fetch: undiciFetch } = require('undici');
+const { startMcpRelay } = require('./mcp-relay');
+
+// The custom opencode agent triage runs under (see runAgent's spec.systemPrompt branch). Chosen
+// with `body.agent` on every session.prompt call for that run, never on the RCA path.
+const TRIAGE_AGENT = 'tessary-triage';
 
 // How long the sandbox may run when the caller does not say. The launcher always passes the
 // run's real deadline; this only covers a direct/local invocation.
@@ -656,7 +661,7 @@ function toEnvelope(turns, structured, text) {
  *
  * @param {{model: string, prompt: string, jsonSchema?: object, mcp?: {url: string, token: string},
  *          permission?: object, rejectOn?: 'error'|'no-result'|'never', timeoutMs?: number,
- *          maxTurns?: number}} spec
+ *          maxTurns?: number, systemPrompt?: string}} spec
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: when set, the reply is schema-constrained and lands in `structured_output`.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
@@ -667,12 +672,21 @@ function toEnvelope(turns, structured, text) {
  *     is a file the agent wrote (codegen).
  *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
  *   - maxTurns: the operator-configured turn BUDGET (triage/RCA only; every other
- *     caller omits this). Passed to the SDK as `config.agent.build.maxSteps`, whose own doc
- *     comment ("Maximum number of agentic iterations before forcing text-only response") is the
- *     mechanism this relies on for a soft landing rather than a hard kill — set 2 LOWER than the
- *     budget so the forced text-only turn lands with margin, per the issue's "two turns before the
- *     cap" ask. NOT independently confirmed against a live run in the change that added this field
- *     — see that change's PR description.
+ *     caller omits this). Without systemPrompt, passed to the SDK as `config.agent.build.maxSteps`
+ *     (see the `steps` doc below for the with-systemPrompt case), whose own doc comment ("Maximum
+ *     number of agentic iterations before forcing text-only response") is the mechanism this
+ *     relies on for a soft landing rather than a hard kill — set 2 LOWER than the budget so the
+ *     forced text-only turn lands with margin, per the issue's "two turns before the cap" ask. NOT
+ *     independently confirmed against a live run in the change that added this field — see that
+ *     change's PR description.
+ *   - systemPrompt: triage only (RCA and every other caller omit it). When set, this run starts an
+ *     `mcp-relay` in front of `spec.mcp` (so opencode's own config carries no platform token — see
+ *     mcp-relay.js) and defines a custom opencode agent (`TRIAGE_AGENT`) whose `prompt` REPLACES
+ *     the provider's default system prompt, `steps` carries the same maxTurns-2 budget as
+ *     `build.maxSteps` above, and whose `permission` denies `task`/`skill` (sub-agents and skills
+ *     are not this lane's to run) while allowing `todowrite`. Selected on every `session.prompt`
+ *     call via `body.agent`. Omitting it (RCA) leaves every part of this function byte-for-byte
+ *     the same as before this field existed.
  * @returns {Promise<{startMs: number, turns: object[], resultRaw: string}>}
  */
 async function runAgent(spec) {
@@ -704,22 +718,50 @@ async function runAgent(spec) {
     },
     lsp: {},
   };
-  if (spec.mcp && spec.mcp.url && spec.mcp.token) {
-    // Config, never argv: the platform key must not be visible in the process table.
-    config.mcp = {
-      'tessary-evals': {
-        type: 'remote',
-        url: spec.mcp.url,
-        enabled: true,
-        headers: { Authorization: `Bearer ${spec.mcp.token}` },
+  // The turn budget as an opencode step count, shared by both branches below — 2 lower than the
+  // configured maxTurns so the forced text-only turn lands with margin (see the JSDoc).
+  const steps = Number.isFinite(spec.maxTurns) && spec.maxTurns > 0 ? Math.max(1, spec.maxTurns - 2) : undefined;
+
+  let relay = null;
+  if (spec.systemPrompt) {
+    // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
+    // it (see mcp-relay.js's header for why that split matters).
+    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
+      relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
+      config.mcp = {
+        'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
+      };
+    }
+    // The custom agent's `prompt` REPLACES the provider's default system prompt (verified against
+    // opencode source, see the research notes this change was built from). `task`/`skill` are
+    // denied because this lane runs no sub-agents and ships no skills of its own; `todowrite`
+    // stays allowed — the agent may still track its own steps.
+    config.agent = {
+      [TRIAGE_AGENT]: {
+        mode: 'primary',
+        prompt: spec.systemPrompt,
+        ...(steps !== undefined ? { steps } : {}),
+        permission: { task: 'deny', skill: 'deny', todowrite: 'allow' },
       },
     };
-  }
-  if (Number.isFinite(spec.maxTurns) && spec.maxTurns > 0) {
-    // See the JSDoc above for the mechanism and its margin. No prompt selects a
-    // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
-    // opencode's default agent identity, which is `build` — the one this config key names.
-    config.agent = { build: { maxSteps: Math.max(1, spec.maxTurns - 2) } };
+  } else {
+    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
+      // Config, never argv: the platform key must not be visible in the process table.
+      config.mcp = {
+        'tessary-evals': {
+          type: 'remote',
+          url: spec.mcp.url,
+          enabled: true,
+          headers: { Authorization: `Bearer ${spec.mcp.token}` },
+        },
+      };
+    }
+    if (steps !== undefined) {
+      // See the JSDoc above for the mechanism and its margin. No prompt selects a
+      // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
+      // opencode's default agent identity, which is `build` — the one this config key names.
+      config.agent = { build: { maxSteps: steps } };
+    }
   }
 
   const server = await startServer(config);
@@ -776,7 +818,11 @@ async function runAgent(spec) {
       const prompt = resume
         ? correction.trim() + (spec.jsonSchema ? schemaInstruction(spec.jsonSchema) : '')
         : (spec.jsonSchema ? spec.prompt + schemaInstruction(spec.jsonSchema) : spec.prompt) + correction;
-      const body = { model: splitModel(spec.model), parts: [{ type: 'text', text: prompt }] };
+      const body = {
+        model: splitModel(spec.model),
+        parts: [{ type: 'text', text: prompt }],
+        ...(spec.systemPrompt ? { agent: TRIAGE_AGENT } : {}),
+      };
 
       const reply = await client.session.prompt({ path: { id: sessionID }, body });
       const listed = await client.session.messages({ path: { id: sessionID } });
@@ -869,6 +915,7 @@ async function runAgent(spec) {
     return { startMs, turns: finalTurns, resultRaw: toEnvelope(finalTurns, structured, text) };
   } finally {
     server.close();
+    if (relay) relay.close();
   }
 }
 

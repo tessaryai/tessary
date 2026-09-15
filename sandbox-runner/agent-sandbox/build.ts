@@ -66,6 +66,7 @@ const RESOURCES = { cpuCount: 2, memoryMB: 2048 };
 const RECIPE_INPUTS = [
   'template.ts',
   'agent-stream.js',
+  'mcp-relay.js',
   'rca.js',
   'triage.js',
   'tessary-evals-validate',
@@ -218,9 +219,14 @@ async function verify(version: string) {
       ['bash is the exec shell', 'echo "$BASH_VERSION" | grep -q .'],
       ['opencode runs', 'opencode --version'],
       ['pyyaml is baked', 'python3 -c "import yaml"'],
+      ['jq runs', 'jq --version'],
       ['validator is on PATH', 'command -v tessary-evals-validate'],
       ['contract is baked', 'test -f /home/user/tessary-contract/validate.py'],
-      ['agent scripts are baked', 'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/agent-stream.js'],
+      [
+        'agent scripts are baked',
+        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/agent-stream.js'
+          + ' && test -f /home/user/mcp-relay.js',
+      ],
       ['native modules load', 'cd /home/user && node -e "require(\'re2\'); require(\'acorn\')"'],
     ];
     const failed: string[] = [];

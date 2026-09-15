@@ -217,7 +217,10 @@ public class BehaviorTriageEngine {
                     prompt,
                     BehaviorTriageVerdict.JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
-                    issued.plaintext());
+                    issued.plaintext(),
+                    // Phase 6 fills this in with the triage system prompt; every run until then
+                    // sends null and E2bTriageSandbox omits system_prompt from the sandbox request.
+                    null);
 
             Optional<TriageSandbox.SandboxRun> run = sandbox.run(req);
             if (run.isEmpty()) {

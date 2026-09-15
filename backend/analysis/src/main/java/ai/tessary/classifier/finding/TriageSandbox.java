@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs one Layer-2 triage ruling in an environment that can materialize a finding's dossier, run the
@@ -33,6 +34,10 @@ public interface TriageSandbox {
      * @param jsonSchema schema the agent's final answer is constrained to
      * @param mcpUrl this platform's MCP endpoint, the agent's only door to the substrate
      * @param mcpToken short-lived project-scoped key — sent to the launcher, never logged
+     * @param systemPrompt the triage agent's system prompt, replacing the provider default for
+     *     this run; {@code null} runs the sandbox exactly as it did before this field existed.
+     *     Filled in by {@link BehaviorTriageEngine} starting in a later phase — every call today
+     *     passes {@code null}.
      */
     record SandboxRequest(
             String projectId,
@@ -41,7 +46,8 @@ public interface TriageSandbox {
             String prompt,
             String jsonSchema,
             String mcpUrl,
-            String mcpToken) {}
+            String mcpToken,
+            @Nullable String systemPrompt) {}
 
     /** The agent's run: {@code resultText} is its final message (the schema-constrained JSON). */
     record SandboxRun(String resultText) {}

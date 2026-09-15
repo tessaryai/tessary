@@ -73,8 +73,9 @@ FROM node:24-alpine3.24
 
 # git + the agent's clone; python3/py3-pip run the baked bundle validator; make/g++/linux-headers
 # build re2 from source (a native addon with no Node 24 prebuild — see the header); bash because
-# the e2b SDK execs /bin/bash (see the header). Mirrored by
-# template.ts's `.runCmd('apk add ...')` — which is a raw runCmd because the builder has no
+# the e2b SDK execs /bin/bash (see the header); jq so triage's own checks/ scripts can shape MCP
+# JSON on the command line rather than reach for a scripting language for every breakdown. Mirrored
+# by template.ts's `.runCmd('apk add ...')` — which is a raw runCmd because the builder has no
 # apkInstall. The base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
 # (validate.py + pipeline_io.py, both of which `import yaml`) is a hard in-container crash without
 # this.
@@ -87,7 +88,7 @@ FROM node:24-alpine3.24
 # PIP_BREAK_SYSTEM_PACKAGES below exists precisely so the agent can `pip install` mid-run. "Delete
 # what you don't run" is the right rule and it simply does not reach anything here.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers
+    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers jq
 
 # PyYAML is the validator's only required third-party Python dep, baked at build time (no
 # per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
@@ -168,8 +169,10 @@ COPY --chown=node:node contract/output_format.md /home/user/tessary-contract/out
 COPY --chown=node:node contract/grader.schema.json /home/user/tessary-contract/grader.schema.json
 
 # Shared OpenCode runner required by rca.js/triage.js — must be baked beside them or their
-# `require('./agent-stream')` is a runtime crash.
+# `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
+# agent-stream.js itself, on the triage path only.
 COPY --chown=node:node sandbox-runner/agent-sandbox/agent-stream.js /home/user/agent-stream.js
+COPY --chown=node:node sandbox-runner/agent-sandbox/mcp-relay.js /home/user/mcp-relay.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/rca.js /home/user/rca.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/triage.js /home/user/triage.js
 

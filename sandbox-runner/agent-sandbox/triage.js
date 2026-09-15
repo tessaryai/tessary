@@ -5,8 +5,13 @@
  * or on the host in local mode, exactly like rca.js. The launcher injects the agent auth and
  * invokes:  node triage.js <input.json>
  *
- *   input.json : { files, prompt, json_schema, model, mcp: {url, token}|null, timeout_ms }
+ *   input.json : { files, prompt, json_schema, model, mcp: {url, token}|null, timeout_ms,
+ *                  system_prompt|null }
  *   stdout     : { raw: "<result envelope>", turns: [...], startMs }
+ *
+ * system_prompt, when the backend sends one (always, today — Phase 6 fills in its content),
+ * routes this run through agent-stream.js's custom triage agent and its own mcp-relay in front of
+ * `mcp` — see runAgent's JSDoc for `spec.systemPrompt`. null/absent runs exactly as before.
  *
  * NO CLONE, EVER. Triage audits one finding's CLAIM — is it true, was it measured over enough,
  * does the evidence carry it — and none of those questions is answered by source code. This lane
@@ -87,6 +92,7 @@ async function main() {
       rejectOn: 'error',
       timeoutMs: input.timeout_ms,
       maxTurns: input.max_turns,
+      systemPrompt: input.system_prompt,
     });
   } catch (e) {
     // F1: a failing run still spent tokens (agent-stream.js's `.turns` on the thrown error carries

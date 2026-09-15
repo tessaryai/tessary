@@ -66,14 +66,23 @@ function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
  * Install a fake @opencode-ai/sdk for one test. `messagesById(id, callCount)` returns the message
  * array `session.messages` answers with for that session id on its Nth call (1-based) — modelling
  * the real API, where messages() always returns a session's FULL history so far.
+ *
+ * Also records what runAgent handed the SDK: every `config` createOpencodeServer was started with
+ * (`serverConfigs`), and every `body` session.prompt was called with (`promptBodies`) — the two
+ * places the systemPrompt/no-systemPrompt split (custom triage agent vs. the RCA path) is visible.
  */
 function mockSdk({ messagesById }) {
   let sessionCounter = 0;
   const createCalls = [];
+  const serverConfigs = [];
+  const promptBodies = [];
   const callCountById = {};
   mock.module('@opencode-ai/sdk', {
     namedExports: {
-      createOpencodeServer: async () => ({ url: 'http://127.0.0.1:1', close() {} }),
+      createOpencodeServer: async (opts) => {
+        serverConfigs.push(opts && opts.config);
+        return { url: 'http://127.0.0.1:1', close() {} };
+      },
       createOpencodeClient: () => ({
         session: {
           create: async () => {
@@ -81,7 +90,10 @@ function mockSdk({ messagesById }) {
             createCalls.push(id);
             return { id };
           },
-          prompt: async () => ({}), // text is read back off messages(), not the reply itself
+          prompt: async ({ body }) => {
+            promptBodies.push(body);
+            return {}; // text is read back off messages(), not the reply itself
+          },
           messages: async ({ path: p }) => {
             callCountById[p.id] = (callCountById[p.id] || 0) + 1;
             return messagesById(p.id, callCountById[p.id]);
@@ -90,7 +102,7 @@ function mockSdk({ messagesById }) {
       }),
     },
   });
-  return { createCalls };
+  return { createCalls, serverConfigs, promptBodies };
 }
 
 test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => {
@@ -193,6 +205,71 @@ test('sumUsage: pure reducer over a turns[] array', () => {
     cache_creation_input_tokens: 0,
   });
   assert.deepEqual(sumUsage(undefined), sumUsage([]), 'a missing turns array (e.g. a run with no .turns) is safe');
+});
+
+test('systemPrompt: selects the custom triage agent and routes MCP through a loopback relay', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs, promptBodies } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+  });
+
+  // No mock of mcp-relay.js: it is cheap to run for real (binds a loopback port, does not touch
+  // the network until an actual tools/call arrives, which never happens here since the SDK client
+  // is mocked) — see agent-stream.js's runAgent for why the relay is only ever real here or in prod.
+  await runAgent({
+    model: 'anthropic/claude-sonnet-5',
+    prompt: 'rule on this finding',
+    systemPrompt: 'You are the triage agent. Goals: ...',
+    mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
+    maxTurns: 10,
+    timeoutMs: 1000,
+  });
+
+  assert.equal(serverConfigs.length, 1);
+  const config = serverConfigs[0];
+  const agentCfg = config.agent && config.agent['tessary-triage'];
+  assert.ok(agentCfg, 'the custom triage agent is defined');
+  assert.equal(agentCfg.mode, 'primary');
+  assert.equal(agentCfg.prompt, 'You are the triage agent. Goals: ...', 'prompt carries the system prompt verbatim');
+  assert.equal(agentCfg.steps, 8, 'steps is maxTurns - 2, the same margin build.maxSteps uses');
+  assert.deepEqual(agentCfg.permission, { task: 'deny', skill: 'deny', todowrite: 'allow' });
+  assert.equal(config.agent.build, undefined, 'no default-agent config leaks in alongside the custom one');
+
+  const mcpCfg = config.mcp && config.mcp['tessary-evals'];
+  assert.ok(mcpCfg, 'MCP is configured');
+  assert.match(mcpCfg.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/, 'points at the loopback relay, not the real endpoint');
+  assert.equal(mcpCfg.headers, undefined, 'no bearer token in opencode config — the relay holds it, not us');
+  assert.equal(mcpCfg.oauth, false);
+
+  assert.equal(promptBodies.length, 1);
+  assert.equal(promptBodies[0].agent, 'tessary-triage', 'the custom agent is selected on every session.prompt call');
+});
+
+test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs, promptBodies } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+  });
+
+  await runAgent({
+    model: 'anthropic/claude-sonnet-5',
+    prompt: 'investigate this finding',
+    mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
+    maxTurns: 10,
+    timeoutMs: 1000,
+  });
+
+  const config = serverConfigs[0];
+  assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'the RCA path still runs under opencode\'s default agent');
+  assert.deepEqual(config.mcp['tessary-evals'], {
+    type: 'remote',
+    url: 'https://tessary.example/mcp',
+    enabled: true,
+    headers: { Authorization: 'Bearer tsy_a_live-token' },
+  });
+  assert.equal(promptBodies[0].agent, undefined, 'no agent field — the session runs under whatever config.agent picks');
 });
 
 test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeric-only usage object', () => {

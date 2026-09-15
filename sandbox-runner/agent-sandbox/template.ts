@@ -73,13 +73,14 @@ export const template = Template()
   //
   // Then the packages: git + the agent's clone; python3/py3-pip run the baked bundle validator;
   // make/g++/linux-headers build re2 FROM SOURCE (no prebuild for Node 24's ABI — see the header);
-  // bash because THIS SDK execs /bin/bash and Alpine has none (see the header).
+  // bash because THIS SDK execs /bin/bash and Alpine has none (see the header); jq so triage's own
+  // checks/ scripts can shape MCP JSON on the command line.
   // A raw runCmd, not `.aptInstall`, because the builder has no apkInstall — see the header.
   // NOTE: the base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
   // (validate.py + pipeline_io.py, both of which `import yaml`) was previously a hard crash
   // in-VM, silently killing the observer's remediate+validate path. Install pip here and
   // PyYAML below.
-  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers', { user: 'root' })
+  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers jq', { user: 'root' })
   // PyYAML is the validator's only required third-party Python dep. Bake it at build time (no
   // per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
   // system environment PEP 668 externally-managed; PIP_BREAK_SYSTEM_PACKAGES below lets the agent
@@ -141,7 +142,9 @@ export const template = Template()
   .runCmd('chmod +x /usr/local/bin/tessary-evals-validate', { user: 'root' })
   .setWorkdir('/home/user')
   // Shared OpenCode runner required by rca.js/triage.js — must be baked beside them or their
-  // `require('./agent-stream')` is a runtime crash.
+  // `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
+  // agent-stream.js itself, on the triage path only.
   .copy('agent-stream.js', '/home/user/agent-stream.js')
+  .copy('mcp-relay.js', '/home/user/mcp-relay.js')
   .copy('rca.js', '/home/user/rca.js')
   .copy('triage.js', '/home/user/triage.js');
