@@ -4381,11 +4381,11 @@
               "null"
             ]
           },
-          "model" : {
-            "type" : [
-              "string",
-              "null"
-            ]
+          "models" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "name" : {
             "type" : [
@@ -4393,11 +4393,17 @@
               "null"
             ]
           },
+          "notRolledUp" : {
+            "type" : "boolean"
+          },
           "outputPreview" : {
             "type" : [
               "string",
               "null"
             ]
+          },
+          "partialCost" : {
+            "type" : "boolean"
           },
           "rank" : {
             "format" : "int32",
@@ -4426,6 +4432,9 @@
               "string",
               "null"
             ]
+          },
+          "staleTotals" : {
+            "type" : "boolean"
           },
           "startedAt" : {
             "type" : [
@@ -4479,14 +4488,17 @@
           "kind",
           "latencyMs",
           "level",
-          "model",
+          "models",
           "name",
+          "notRolledUp",
           "outputPreview",
+          "partialCost",
           "rank",
           "role",
           "secretKey",
           "sessionId",
           "spanId",
+          "staleTotals",
           "startedAt",
           "status",
           "storedAs",

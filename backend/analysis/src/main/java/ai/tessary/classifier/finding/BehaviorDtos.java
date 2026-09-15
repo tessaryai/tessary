@@ -128,9 +128,18 @@ public final class BehaviorDtos {
             @Nullable String errorType,
             @Nullable String startedAt,
             @Nullable Long latencyMs,
+            /** See {@code FindingEvidenceRepository.SpanRef#totalTokens}: this span's own total on a
+             *  single-step row, the trace rollup on a whole-run row. */
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            @Nullable String model,
+            /** The distinct models behind this row — see {@code FindingEvidenceRepository.SpanRef#models}. */
+            List<String> models,
+            /** True on a whole-run row whose trace has not rolled up yet. Always false on a single-step row. */
+            boolean notRolledUp,
+            /** True on a whole-run row whose trace carries unpriced spans. Always false on a single-step row. */
+            boolean partialCost,
+            /** True on a whole-run row whose trace rollup is not settled. Always false on a single-step row. */
+            boolean staleTotals,
             @Nullable String callSiteId,
             /** The head of what the span was given and what it returned: see
              *  {@code FindingEvidenceRepository.SpanRef}. Null where the payload aged out. */
@@ -164,7 +173,10 @@ public final class BehaviorDtos {
                     r.latencyMs(),
                     r.totalTokens(),
                     r.totalCost(),
-                    r.model(),
+                    r.models(),
+                    r.notRolledUp(),
+                    r.partialCost(),
+                    r.staleTotals(),
                     r.callSiteId(),
                     r.inputPreview(),
                     r.outputPreview(),

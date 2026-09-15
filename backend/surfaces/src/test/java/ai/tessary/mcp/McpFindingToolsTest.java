@@ -381,7 +381,10 @@ class McpFindingToolsTest {
                                 7293L,
                                 4120L,
                                 0.031,
-                                "claude-opus-5",
+                                List.of("claude-opus-5", "claude-haiku-5"),
+                                true,
+                                true,
+                                true,
                                 "otto-von-bismarck",
                                 "what the span was given",
                                 "what it returned",
@@ -403,7 +406,10 @@ class McpFindingToolsTest {
                                 84L,
                                 null,
                                 null,
-                                null,
+                                List.of(),
+                                false,
+                                false,
+                                false,
                                 "otto-von-bismarck",
                                 "tool input",
                                 "tool output",
@@ -447,7 +453,12 @@ class McpFindingToolsTest {
         assertTrue(first.get("spanId").isNull(), "a trace-grain row carries no span id");
         assertEquals(7293, first.get("latencyMs").asLong());
         assertEquals(4120, first.get("totalTokens").asLong());
-        assertEquals("claude-opus-5", first.get("model").asText());
+        List<String> models = new java.util.ArrayList<>();
+        first.get("models").forEach(m -> models.add(m.asText()));
+        assertEquals(List.of("claude-opus-5", "claude-haiku-5"), models);
+        assertTrue(first.get("notRolledUp").asBoolean(), "a whole-run row can flag its trace as not rolled up yet");
+        assertTrue(first.get("partialCost").asBoolean(), "a whole-run row can flag unpriced spans");
+        assertTrue(first.get("staleTotals").asBoolean(), "a whole-run row can flag an unsettled rollup");
         assertEquals("otto-von-bismarck", first.get("callSiteId").asText());
         JsonNode second = body.get("rows").get(1);
         assertEquals("trace-8", second.get("traceId").asText());
@@ -457,6 +468,8 @@ class McpFindingToolsTest {
         assertEquals("Timeout", second.get("errorType").asText());
         // A tool span has neither, and an empty cell is the honest answer rather than a zero.
         assertTrue(second.get("totalTokens").isNull(), "a tool span has no tokens");
+        assertEquals(0, second.get("models").size(), "a tool span carries no model");
+        assertFalse(second.get("notRolledUp").asBoolean(), "the flags are always false on a single-step row");
         assertEquals("cursor-2", body.get("nextCursor").asText());
         assertEquals(120, body.get("counts").get("member").asLong());
     }

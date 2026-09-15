@@ -2896,15 +2896,18 @@ export interface components {
             /** Format: int64 */
             latencyMs: number | null;
             level: string | null;
-            model: string | null;
+            models: string[];
             name: string | null;
+            notRolledUp: boolean;
             outputPreview: string | null;
+            partialCost: boolean;
             /** Format: int32 */
             rank: number | null;
             role: string;
             secretKey: string | null;
             sessionId: string | null;
             spanId: string | null;
+            staleTotals: boolean;
             startedAt: string | null;
             status: string | null;
             storedAs: string | null;

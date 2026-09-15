@@ -13,8 +13,11 @@ finding is about. The dossier states the claim; you go and check it.
   `rows`, in the detector's own stable order. Each row carries what was MEASURED on it, not
   just a pointer to it: `role`, `rank`, `sessionId`, `traceId`, `spanId`, `name`, `kind`,
   `status`, `level`, `errorType`, `startedAt`, `latencyMs`, `totalTokens`, `totalCost`,
-  `model`, `callSiteId`. Rank and compare on the page itself, and pick the rows you open from
-  the numbers. The payloads are NOT on this page; `get_span` is where a body comes from.
+  `models`, `callSiteId`. A row with no `spanId` is a whole run: `totalTokens`/`totalCost` are
+  the trace's rollup and `models` lists every model the run called; `notRolledUp`,
+  `partialCost` and `staleTotals` say when that rollup is not finished, is missing priced
+  spans, or can still change. Rank and compare on the page itself, and pick the rows you open
+  from the numbers. The payloads are NOT on this page; `get_span` is where a body comes from.
   Field names are camelCase on this surface, and the next page's token is `nextCursor`. No
   sampling. Page the whole role and compute over all of it.
 - `get_trace(trace_id)` and `get_span(trace_id, span_id)` — the bodies behind a ref. A span id

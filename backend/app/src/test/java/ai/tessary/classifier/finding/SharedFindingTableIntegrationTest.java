@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -228,6 +229,57 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
+     * A whole-run evidence row ({@code span_id IS NULL}) reads tokens and cost off the TRACE rollup,
+     * not the root span — a run's spend is the sum of every LLM call inside it, and the root step
+     * (an {@code agent} span) carries neither. It also reports every distinct model the run called,
+     * and mirrors the rollup's own caveats: not yet rolled up, missing priced spans, or still
+     * unsettled. Latency alone stays the root step's, per decision R2, since that is what the
+     * detector actually measured.
+     */
+    @Test
+    @DisplayName("a whole-run row reads tokens and cost from the trace rollup, every model, and the rollup flags")
+    void wholeRunEvidenceRowReadsTraceRollupAndModels() {
+        Project p = project("finding-evidence-whole-run");
+        String findingId = firing(p, "gram-whole-run");
+        String now = Instant.now().toString();
+        String traceId = "trace-whole-run";
+
+        jdbc.sql("""
+                INSERT INTO trace (project_id, id, started_at, event_ts, total_tokens, total_cost,
+                                    unpriced_spans, rolled_up_at, is_settled)
+                VALUES (:pid, :tid, now(), now(), 9000, 1.2345, 2, NULL, false)
+                """).param("pid", p.id()).param("tid", traceId).update();
+        insertRootSpan(p.id(), traceId, "span-root", null, "invoke_agent root", 4_000L);
+        insertLlmSpan(p.id(), traceId, "span-llm-1", "span-root", "claude-opus-5", false);
+        insertLlmSpan(p.id(), traceId, "span-llm-2", "span-root", "claude-haiku-5", false);
+        insertLlmSpan(p.id(), traceId, "span-llm-3", "span-root", "claude-opus-5", false);
+        insertLlmSpan(p.id(), traceId, "span-deleted", "span-root", "gpt-ghost", true);
+
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.trace(traceId)),
+                now);
+
+        var page = behaviorDrift.findingEvidenceSpans(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, 100, null);
+        assertEquals(1, page.rows().size());
+        var row = page.rows().get(0);
+        assertEquals(4_000L, row.latencyMs(), "latency stays the root step, not a trace-wide figure");
+        assertEquals(9000L, row.totalTokens(), "tokens come from the trace rollup, not the root span");
+        assertNotNull(row.totalCost(), "cost comes from the trace rollup, not the root span");
+        assertEquals(
+                1.2345, row.totalCost().doubleValue(), 1e-9, "cost comes from the trace rollup, not the root span");
+        assertEquals(
+                List.of("claude-haiku-5", "claude-opus-5"),
+                row.models(),
+                "every distinct model the run called, the deleted span's excluded: " + row.models());
+        assertTrue(row.notRolledUp(), "rolled_up_at is null");
+        assertTrue(row.partialCost(), "unpriced_spans > 0");
+        assertTrue(row.staleTotals(), "is_settled is false");
+    }
+
+    /**
      * One logical-root span, inserted straight in: the substrate fixtures build whole traces, and this
      * test needs an unnatural one — several logical roots in a single trace — to exercise the join.
      */
@@ -243,6 +295,21 @@ class SharedFindingTableIntegrationTest {
                 .param("parent", parentId)
                 .param("name", name)
                 .param("latency", latencyMs)
+                .update();
+    }
+
+    /** One LLM leaf span under {@code parentId}, carrying a model — what the whole-run models list reads. */
+    private void insertLlmSpan(
+            String projectId, String traceId, String spanId, String parentId, String model, boolean deleted) {
+        jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name,"
+                        + " provided_model_name, started_at, event_ts, is_deleted)"
+                        + " VALUES (:pid, :tid, :sid, :parent, 'llm', 'chat', :model, now(), now(), :deleted)")
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .param("sid", spanId)
+                .param("parent", parentId)
+                .param("model", model)
+                .param("deleted", deleted)
                 .update();
     }
 

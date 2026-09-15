@@ -733,8 +733,11 @@ public class McpToolRegistry {
                         + " 'baseline' is the reference window's rows; 'exemplar' / 'witness' / 'changepoint' are"
                         + " the reading aids). Each row carries what was MEASURED on it, not just a pointer to"
                         + " it: role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType,"
-                        + " startedAt, latencyMs, totalTokens, totalCost, model, callSiteId. So compare, rank and"
-                        + " pick rows from the page itself, and open only the ones you decided to open — the"
+                        + " startedAt, latencyMs, totalTokens, totalCost, models, callSiteId. On a whole-run"
+                        + " row (no spanId), totalTokens/totalCost are the trace's rollup and models lists"
+                        + " every model the run called; notRolledUp/partialCost/staleTotals flag a rollup"
+                        + " that has not finished, is missing priced spans, or can still change. So compare,"
+                        + " rank and pick rows from the page itself, and open only the ones you decided to open — the"
                         + " payloads are NOT here, and get_span (trace id plus span id) is where a body comes"
                         + " from. Call it with count_only=true first: that returns the"
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
@@ -900,7 +903,17 @@ public class McpToolRegistry {
             @Nullable Long latencyMs,
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            @Nullable String model,
+            /** The distinct models behind this row: one entry on a single-step row, every model the
+             *  run called on a whole-run row. */
+            List<String> models,
+            /** True on a whole-run row whose trace has not rolled up yet: {@code totalTokens} and
+             *  {@code totalCost} are not yet trustworthy. */
+            boolean notRolledUp,
+            /** True on a whole-run row whose trace carries unpriced spans: {@code totalCost} is a floor. */
+            boolean partialCost,
+            /** True on a whole-run row whose trace rollup is not settled: late spans can still change
+             *  the totals. */
+            boolean staleTotals,
             @Nullable String callSiteId,
             /** The masked key that leaked and whether it is still stored raw — already masked, never
              *  the credential itself, so kept alongside the measurements rather than dropped with the
@@ -928,7 +941,10 @@ public class McpToolRegistry {
                     v.latencyMs(),
                     v.totalTokens(),
                     v.totalCost(),
-                    v.model(),
+                    v.models(),
+                    v.notRolledUp(),
+                    v.partialCost(),
+                    v.staleTotals(),
                     v.callSiteId(),
                     v.secretKey(),
                     v.storedAs(),
