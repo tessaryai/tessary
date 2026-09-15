@@ -2,9 +2,9 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
-import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.config.ObserverProperties;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -33,13 +33,15 @@ import org.springframework.stereotype.Service;
  * Layer 2: audits one finding's claim, checking whether it is true, sampled over enough, and carried
  * by its evidence.
  *
- * <p>The dossier the agent gets is {@code finding.md} (what the detector asserts, over what, since
- * when, and how big each evidence role is) and {@code state.json} (the detector's own numbers,
- * verbatim). Everything else the agent needs, the traces, spans and sessions the claim is about, it
- * fetches itself through this platform's MCP surface with a short-lived project key minted per run
- * and revoked in a {@code finally}. The agent chooses its own sample rather than being handed a
- * pre-picked exemplar: it pages {@code get_finding_evidence}, decides how much to read, and states
- * what it took (rule 5).
+ * <p>The dossier the agent gets is {@code finding.md} (the finding's facts: the claim, where and since
+ * when it was seen, and how many evidence refs the detector recorded per role) and {@code method.md}
+ * (how this detector works and what its evidence means, including what a zero legitimately signifies).
+ * The claim's own numbers are not shipped as a file: the agent reads them off {@code get_finding}, the
+ * same door it pages evidence through, so the dossier never drifts out of step with what the surface
+ * actually reports. Everything the agent needs — the traces, spans and sessions the claim is about — it
+ * fetches itself through this platform's MCP surface with a short-lived project key minted per run and
+ * revoked in a {@code finally}. The agent chooses its own sample rather than being handed a pre-picked
+ * exemplar: it pages {@code get_finding_evidence}, decides how much to read, and states what it took.
  *
  * <p>The ruling is recorded on the finding and nothing else. It never re-pins a baseline, never writes
  * the allowlist, never resolves the finding: absorbing a shift moves the reference a whole population
@@ -54,96 +56,49 @@ public class BehaviorTriageEngine {
     /** The scope untagged traces collect under: no declared spec exists for it. */
     private static final String UNATTRIBUTED = BehaviorSubstrateRepository.UNATTRIBUTED;
 
-    /**
-     * The dossier file carrying the detector's own numbers. Named {@code state.json} and not
-     * {@code evidence.json}: it is a frozen copy of the detector's running state at the moment it
-     * fired, while "evidence" on this surface means the rows behind the claim, which live in
-     * {@code finding_evidence} and are reached through {@code get_finding_evidence}.
-     */
-    public static final String STATE_FILE = "state.json";
-
-    /**
-     * What {@code summary} is for, said in the prompt as well as bounded by the schema's
-     * {@code maxLength}: a model not told the field is a headline writes to the limit and gets
-     * truncated, which is worse than a long answer.
-     */
     /** Where this lane's prose lives: {@code analysis/src/main/resources/prompt-craft/triage/}. */
     private static final String TRIAGE = "triage";
 
-    private static final String SUMMARY_RULE = PromptCraft.text(TRIAGE, "summary_rule.md");
+    /**
+     * The whole system prompt, one copy for every classifier: the goals and invariants of the job, and
+     * nothing that changes per run — a finding's own facts live in {@code finding.md}/{@code method.md}
+     * and the user message instead, so this string is identical across every triage run and every model
+     * this lane offers, which is what makes it worth caching on the provider side.
+     */
+    static final String SYSTEM_PROMPT = PromptCraft.text(TRIAGE, "system_prompt.md");
 
     /**
-     * The check that runs before the work, in every prompt this class builds.
-     *
-     * <p>Triage rules on evidence it fetches for itself, so the read surface is a precondition of the
-     * task, not a convenience within it. When it is unreachable the run has nothing to rule on, so the
-     * check is stated first, before the rules that assume it passed, and {@code blocked} is offered
-     * wherever the verdicts are: a run that could not start fails and is retried rather than being
-     * recorded as a ruling it never actually made.
+     * opencode reserves a couple of turns of its own budget to force a text-only final answer once the
+     * agent's cap is hit (see {@code Agentic#maxTurns}'s javadoc for the mechanism); the number stated to
+     * the agent is the turns it actually gets to work with, not the raw config value.
      */
-    private static final String PREFLIGHT = PromptCraft.text(TRIAGE, "preflight.md");
-
-    /** Offered with the verdicts in every lane, because a prerequisite can fail in any of them. */
-    public static final String BLOCKED_OPTION =
-            "- `blocked` — a prerequisite failed and you could not read the evidence. Not a ruling: "
-                    + "it fails this run for a later retry. Name what was unreachable.\n\n";
-
-    /**
-     * The eight rules, verbatim in every prompt this class builds.
-     *
-     * <p>They are the specification for this layer, not prompt tuning: what triage is for (rule 1),
-     * the one question it is competent to answer (2), the two ways a comparison lies (3, 4), how it is
-     * obliged to work (5), the two things it must never do (6, 7), and what to do if the run is forced
-     * to stop before finishing: a low-confidence verdict, never silence (8). Change them here and every
-     * lane changes together, which is the point of there being one copy.
-     */
-    private static final String RULES = PromptCraft.text(TRIAGE, "rules.md");
-
-    /**
-     * How the agent reaches the substrate. Names the tools it may actually call, since a tool named
-     * here that the surface does not register costs a turn on {@code unknown tool}, and one the surface
-     * has that is not named here is one the agent will not think to use. Also states that the wire is
-     * camelCase ({@code nextCursor}) and that a zero in {@code counts} and {@code recordedCounts} under
-     * {@code baseline} is a real answer, not missing evidence.
-     */
-    private static final String MCP_DOOR = PromptCraft.text(TRIAGE, "mcp_door.md");
-
-    /**
-     * The workspace, and the contract that makes a computed answer trustworthy. The abort is stated at
-     * length on purpose: it is the one rule whose consequence the agent cannot observe, and the failure
-     * it prevents, a plausible ruling resting on a script that counted the wrong window, is the worst
-     * thing this lane can produce, because it is indistinguishable from a good one downstream.
-     */
-    private static final String CHECKS_RULE = PromptCraft.text(TRIAGE, "checks_rule.md");
-
-    /** What a citation is, on every lane. The downgrade is enforced in {@link BehaviorTriageVerdict}. */
-    private static final String CITATION_RULE = PromptCraft.text(TRIAGE, "citation_rule.md");
+    private static final int TURN_RESERVE = 2;
 
     private final Map<String, TriageSandbox> sandboxes;
     private final ClassifierProperties props;
+    private final ObserverProperties observerProps;
     private final ApiKeyService apiKeys;
     private final ProjectRepository projects;
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
-    private final FindingEvidenceRepository evidence;
 
     public BehaviorTriageEngine(
             List<TriageSandbox> sandboxList,
             ClassifierProperties props,
+            ObserverProperties observerProps,
             ApiKeyService apiKeys,
             ProjectRepository projects,
             OrgMembershipRepository memberships,
-            ObjectMapper mapper,
-            FindingEvidenceRepository evidence) {
+            ObjectMapper mapper) {
         Map<String, TriageSandbox> byKey = new HashMap<>();
         for (TriageSandbox s : sandboxList) byKey.put(s.key(), s);
         this.sandboxes = Map.copyOf(byKey);
         this.props = props;
+        this.observerProps = observerProps;
         this.apiKeys = apiKeys;
         this.projects = projects;
         this.memberships = memberships;
         this.mapper = mapper;
-        this.evidence = evidence;
     }
 
     /**
@@ -218,9 +173,7 @@ public class BehaviorTriageEngine {
                     BehaviorTriageVerdict.JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
                     issued.plaintext(),
-                    // Phase 6 fills this in with the triage system prompt; every run until then
-                    // sends null and E2bTriageSandbox omits system_prompt from the sandbox request.
-                    null);
+                    SYSTEM_PROMPT);
 
             Optional<TriageSandbox.SandboxRun> run = sandbox.run(req);
             if (run.isEmpty()) {
@@ -242,15 +195,6 @@ public class BehaviorTriageEngine {
             return verdict;
         } finally {
             revokeQuietly(issued.token().id(), projectId, findingId);
-        }
-    }
-
-    private @Nullable JsonNode readTree(@Nullable String json) {
-        if (json == null || json.isBlank()) return null;
-        try {
-            return mapper.readTree(json);
-        } catch (Exception e) {
-            return null;
         }
     }
 
@@ -283,56 +227,47 @@ public class BehaviorTriageEngine {
     // ---- the dossier ---------------------------------------------------------------------------
 
     /**
-     * The finding, as the two files the agent reads under {@code dossier/}. Files rather than one long
-     * prompt: an agent that can open, re-read and quote a file reasons over it better than one handed a
-     * wall of JSON it must hold in context, and the numbers stay verbatim rather than being paraphrased
-     * into prose on the way in.
+     * The finding, as the two files the agent reads under {@code dossier/}: {@code finding.md} (this
+     * finding's own facts) and {@code method.md} (how the detector that filed it works), when one
+     * exists. Files rather than one long prompt: an agent that can open, re-read and quote a file
+     * reasons over it better than one handed a wall of JSON it must hold in context.
+     *
+     * <p>No third file carrying the detector's numbers verbatim. The claim's numbers live in
+     * {@code get_finding}, one call away over the same MCP door the agent already pages evidence
+     * through, so there is exactly one place they can be read from and it cannot drift out of step
+     * with what {@code method.md} describes.
      */
     public Map<String, String> dossier(BehaviorTriageJobRow job, FindingRow finding) {
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("finding.md", findingFile(job, finding));
+        files.put("finding.md", findingFile(finding));
         methodCard(finding.classifierKey()).ifPresent(card -> files.put("method.md", card));
-        // A dedicated per-shape assembler when this classifier's payload matches one, otherwise
-        // DossierPayload.forAgent's strip-only pass. Either way the evidence-bias contract in
-        // DossierPayload's class javadoc holds.
-        String assembled = ClassifierDossierAssembler.assemble(
-                        mapper,
-                        evidence,
-                        finding.projectId(),
-                        finding.id(),
-                        evidenceCounts(finding),
-                        finding.payloadJson())
-                .orElseGet(() -> DossierPayload.forAgent(mapper, finding.payloadJson()));
-        if (assembled != null && !assembled.isBlank()) {
-            files.put(STATE_FILE, assembled);
-        }
         return files;
     }
 
-    /** {@link FindingRow#evidenceCount} for every role, read once for the dossier assembler. */
-    private static ClassifierDossierAssembler.EvidenceCounts evidenceCounts(FindingRow finding) {
-        return new ClassifierDossierAssembler.EvidenceCounts(
-                finding.evidenceCount(FindingEvidenceRow.Role.EXEMPLAR),
-                finding.evidenceCount(FindingEvidenceRow.Role.MEMBER),
-                finding.evidenceCount(FindingEvidenceRow.Role.BASELINE),
-                finding.evidenceCount(FindingEvidenceRow.Role.WITNESS),
-                finding.evidenceCount(FindingEvidenceRow.Role.CHANGEPOINT));
-    }
-
-    /** What fired, over how much traffic, since when, and how big each side of the evidence is. */
-    private String findingFile(BehaviorTriageJobRow job, FindingRow finding) {
+    /**
+     * Facts about this finding only: what fired, over what, since when, and how big each side of the
+     * evidence is. No detector method (that lives in {@code method.md}) and no cause explanation
+     * (that is the cause section of {@code method.md}) and no detector numbers beyond the one-sentence
+     * claim — those are frozen on {@code get_finding} once the finding is triaged.
+     */
+    private String findingFile(FindingRow finding) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n")
                 .append("- finding id: `")
                 .append(finding.id())
-                .append("` — the id every `get_finding_evidence` call takes\n")
-                .append("- classifier: `")
+                .append("`\n");
+        claimLine(finding).ifPresent(sb::append);
+        sb.append("- classifier: `")
                 .append(finding.classifierKey())
                 .append("`\n")
                 .append(callSiteLine(finding))
-                .append("- cause: ")
+                .append("- cause: `")
                 .append(finding.causeKind())
-                .append('\n')
+                .append('`')
+                .append(
+                        methodCard(finding.classifierKey()).isPresent()
+                                ? ". Read the matching section of `dossier/method.md`.\n"
+                                : "\n")
                 .append("- pattern: `")
                 .append(finding.causeKey())
                 .append("`\n")
@@ -344,21 +279,42 @@ public class BehaviorTriageEngine {
                 .append(finding.lastSeenAt())
                 .append('\n');
         windowLine(finding).ifPresent(sb::append);
-        // No exemplar trace id: handing the agent one trace as the way in would decide for it which
-        // instance the investigation is anchored on. The counts below plus get_finding_evidence are
-        // the door instead.
         sb.append('\n').append(evidenceCountsSection(finding));
-        sb.append('\n').append(causeExplanation(finding.causeKind()));
         return sb.toString();
     }
 
+    /**
+     * The finding's title from {@link FindingTitle}, dropped when the cause carries no magnitude (an
+     * omission, novelty or surprisal, or a payload {@link FindingTitle} could not read): the `pattern`
+     * line already shows the cause key in that case, and repeating it as a fake "claim" would be noise.
+     */
+    private static Optional<String> claimLine(FindingRow finding) {
+        String title = FindingTitle.of(finding);
+        if (title.equals(finding.nativeCauseKey())) return Optional.empty();
+        return Optional.of("- claim: " + title + "\n");
+    }
+
     /** The window the payload names, when it carries one: half of "do both sides measure the same thing". */
-    private Optional<String> windowLine(FindingRow finding) {
-        JsonNode window = readTreeOrMissing(finding.payloadJson()).path("window");
+    private static Optional<String> windowLine(FindingRow finding) {
+        JsonNode window = finding.payload().path("window");
         if (!window.isObject()) return Optional.empty();
-        return Optional.of("- window: " + window.path("opened_at").asText("?") + " → "
+        return Optional.of("- window: " + window.path("opened_at").asText("?") + " to "
                 + window.path("closed_at").asText("?")
                 + (window.hasNonNull("kind") ? " (" + window.path("kind").asText() + ")" : "") + '\n');
+    }
+
+    /** Which call site raised this, in the three shapes a finding's call site can take. */
+    private static String callSiteLine(FindingRow finding) {
+        String callSite = finding.callSiteId();
+        if (callSite == null || callSite.isBlank() || UNATTRIBUTED.equals(callSite)) {
+            return "- call site: none. The producer tagged no call site on these traces, so no declared "
+                    + "spec exists for them.\n";
+        }
+        if ("tool".equals(finding.payload().path("bucket").path("kind").asText(""))) {
+            return "- call site: `" + callSite + "`, the largest of the call sites this tool bucket "
+                    + "spans. Each evidence row carries its own `callSiteId`.\n";
+        }
+        return "- call site: `" + callSite + "`\n";
     }
 
     /**
@@ -367,21 +323,20 @@ public class BehaviorTriageEngine {
      * of forty is read whole, one of two hundred thousand is sampled and the sample stated.
      */
     private static String evidenceCountsSection(FindingRow finding) {
-        StringBuilder sb = new StringBuilder("## The evidence the detector recorded\n\n");
+        StringBuilder sb = new StringBuilder("## Evidence the detector recorded\n\n");
         for (String role : FindingEvidenceRow.Role.ALL) {
             sb.append("- `")
                     .append(role)
                     .append("`: ")
                     .append(finding.evidenceCount(role))
-                    .append(" ref(s)\n");
+                    .append(" row(s)\n");
         }
-        sb.append("\nThese are the counts written at finding-open. `get_finding_evidence(count_only=true)`"
-                + " gives them again beside what still survives in the substrate; a live count BELOW these"
-                + " is retention, not a lost write.\n");
+        sb.append("\nThese are the counts written when the finding opened. `get_finding_evidence` returns "
+                + "them again beside what still survives.\n");
         return sb.toString();
     }
 
-    // ---- the prompts ---------------------------------------------------------------------------
+    // ---- the user message ------------------------------------------------------------------------
 
     /** The classifier's method card, when one exists: absent for a user-authored classifier. */
     public static Optional<String> methodCard(@Nullable String classifierKey) {
@@ -389,152 +344,39 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * The behaviour/metric/tool-error ruling task: one claim, one question, and the outcomes phrased
-     * against the cause that fired.
+     * The per-run task: the finding id, the dossier file list, and the budget this run gets — the only
+     * things that change per finding or per deployment. Everything else the agent needs to know how to
+     * work is in {@link #SYSTEM_PROMPT}, which carries nothing per-run.
      */
     public String buildPrompt(BehaviorTriageJobRow job, FindingRow finding) {
+        boolean hasMethodCard = methodCard(finding.classifierKey()).isPresent();
+        ObserverProperties.Agentic agentic = observerProps.getAgentic();
+        int maxTurns = Math.max(0, agentic.getMaxTurns() - TURN_RESERVE);
+        long timeoutMinutes = agentic.getTimeoutMs() / 60_000L;
+
         StringBuilder sb = new StringBuilder();
-        sb.append("You are ruling on whether a classifier's CLAIM about production traffic is true.\n\n")
-                .append("A detector flagged something statistically atypical. Statistically atypical is not the ")
-                .append("same as real: a window can be too thin to mean anything, two windows can be measuring ")
-                .append("different populations, and evidence can fail to show what the payload says it shows. ")
-                .append("Your job is to audit the claim itself — not whether the behaviour it describes is good ")
-                .append("or bad.\n\n");
-
-        sb.append(whatYouHave(finding.id(), methodCard(finding.classifierKey()).isPresent()));
-
-        sb.append(rulingOptions());
-
-        sb.append(commonTail());
-        return sb.toString();
-    }
-
-    /** The dossier layout, the MCP door and the workspace: identical on every lane, because they are. */
-    public static String whatYouHave(String findingId, boolean hasMethodCard) {
-        StringBuilder sb = new StringBuilder("## What you have\n\n");
-        sb.append("What you have is the dossier below, and not one row of traffic. **Nothing you were given names an")
-                .append(" individual trace or span.** That is deliberate: an example we chose would decide")
-                .append(" which instance you anchored on, and you could not tell our pick from a draw you")
-                .append(" made yourself — so neither of us could correct for it. You take the sample, and")
-                .append(" you say which one you took.\n\n");
-        sb.append("`dossier/finding.md` — what the detector asserts, over what, since when, and how many")
-                .append(" evidence refs it recorded per role.\n");
+        sb.append("Rule on finding `").append(finding.id()).append("`.\n\n");
+        sb.append("The dossier is under `./dossier/`:\n");
+        sb.append("- `dossier/finding.md`\n");
         if (hasMethodCard) {
-            sb.append("`dossier/method.md` — how THIS detector works: what it measures, what it compared")
-                    .append(" against, and what an empty role legitimately means for it. Read it before you")
-                    .append(" read a zero as a missing write.\n");
+            sb.append("- `dossier/method.md`\n");
         }
-        sb.append("`dossier/")
-                .append(STATE_FILE)
-                .append("` — the detector's own numbers at the moment it fired, verbatim. Every dotted")
-                .append(" pointer you cite (`window.n_cur`, `rate.cur`) resolves in this file.\n\n");
-        sb.append("`")
-                .append(STATE_FILE)
-                .append("` is the CLAIM. The EVIDENCE is the rows behind it, and those are not in the")
-                .append(" dossier at all — they are behind MCP, enumerated, and yours to page. Two")
-                .append(" different things; do not cite one for the other.\n\n");
-        sb.append("The finding id is `").append(findingId).append("`.\n\n");
-        return sb.append(MCP_DOOR).append('\n').append(CHECKS_RULE).append('\n').toString();
-    }
-
-    /** Which call site raised this, so the agent knows whether a declared spec exists for it at all. */
-    private static String callSiteLine(FindingRow finding) {
-        String callSite = finding.callSiteId();
-        if (callSite == null || callSite.isBlank() || UNATTRIBUTED.equals(callSite)) {
-            return "- call site: none — the producer tagged no call site on these traces, so there is no "
-                    + "declared spec for them.\n";
+        sb.append('\n');
+        if (!hasMethodCard) {
+            sb.append("This detector has no method card; its rule is whatever its author configured.\n\n");
         }
-        return "- call site: `" + callSite + "`\n";
-    }
-
-    /**
-     * The two verdicts, defined by what each one means. No enumerated failure modes: an example in a
-     * verdict definition becomes the thing the agent pattern-matches for instead of reasoning about the
-     * actual case. What makes a ruling honest is rule 5, which forces it to compute, and
-     * {@code method.md}, which says how the detector works.
-     */
-    static String rulingOptions() {
-        return "## How to rule\n\n"
-                + "- `positive` — the claim holds: what the detector asserts really happened, and the "
-                + "evidence you examined carries it.\n"
-                + "- `negative` — the claim does not hold: the evidence, read for yourself, does not "
-                + "carry what the detector asserts.\n\n"
-                + BLOCKED_OPTION;
-    }
-
-    /**
-     * What every lane's prompt ends with, in order: the prerequisite check, the eight rules, the
-     * citation contract, the summary contract. One method rather than the same four appends written
-     * out per lane, so a test on this holds all three lanes together.
-     */
-    public static String commonTail() {
-        return PREFLIGHT + RULES + '\n' + CITATION_RULE + '\n' + SUMMARY_RULE;
-    }
-
-    /** Test seam: one cause's framing, without assembling a prompt around it. */
-    static String causeText(String causeKind) {
-        return causeExplanation(causeKind);
-    }
-
-    /** What the cause actually asserts, so the agent rules on the right claim. */
-    private static String causeExplanation(String causeKind) {
-        return switch (causeKind) {
-            case FindingRow.Cause.OMISSION ->
-                "This is an OMISSION: the listed step(s) appear in almost every other trace this agent "
-                        + "produces, and this trace performed none of them. Ask whether that step is required "
-                        + "for this kind of request, or whether it is legitimately conditional.\n";
-            case FindingRow.Cause.NOVELTY ->
-                "This is a NOVELTY: the listed action sequence is one the agent has not performed before. "
-                        + "New is not the same as wrong — ask whether this action is authorized here at all.\n";
-            case FindingRow.Cause.SURPRISAL ->
-                "This is a SURPRISAL: the listed transition is one the agent makes far more rarely than its "
-                        + "alternatives at that point. Rare is not wrong — ask whether this is an acceptable "
-                        + "path.\n";
-            case FindingRow.Cause.RATE_SHIFT ->
-                "This is a RATE SHIFT: one tool's failure rate has moved against its pinned in-control "
-                        + "rate, in `state.json` under `rate.ref`, against `rate.cur` now. No individual call "
-                        + "is being called wrong, and the tool failing sometimes is normal — the question is "
-                        + "whether these failures are a problem. The failing calls are evidence role "
-                        + "`witness` and the whole population is `member`; `method.md` states how the "
-                        + "detector reached this claim, and page the refs with get_finding_evidence.\n";
-            case FindingRow.Cause.DISTRIBUTION_SHIFT ->
-                "This is a DISTRIBUTION SHIFT: a whole population of turns (or tool calls) now sits "
-                        + "measurably away from where that same population sat before — slower, faster, more expensive "
-                        + "or cheaper. No individual trace is being called wrong, and a member of it is a MEMBER "
-                        + "of the shifted population rather than an anomaly in it: a forty-second research run "
-                        + "and a $0.40 turn are both routinely correct, which is why the bar is the reference "
-                        + "the cause key names — `:pinned` or `:previous`, both defined in `method.md` — "
-                        + "rather than any absolute limit. The question is whether "
-                        + "the AGENT changed — more retries, a bigger prompt, an extra hop, a model swap, a "
-                        + "prompt edit that stopped the cache hitting — or whether the TRAFFIC changed. The "
-                        + "workload block in `state.json` is what separates those two: it reports what users "
-                        + "asked for, then and now, beside the measure that moved. Flat inputs with moved "
-                        + "outputs means the agent changed. Inputs that moved with the measure means the "
-                        + "traffic did. Both readings are checkable against the `member` refs — and "
-                        + "`baseline` on a `:pinned` finding. Check them.\n";
-            case FindingRow.Cause.ARMED_WINDOW ->
-                "This is an ARMED WINDOW: enough individual observations tripped the detector inside one "
-                        + "window. Each `witness` is one of them. The question is whether they are real: for a "
-                        + "secret leak, a live credential rather than a documented example, a placeholder or "
-                        + "text the user supplied. `method.md` states what the detector matches.\n";
-            case FindingRow.Cause.MALFORMED_RATE ->
-                "This is a MALFORMED RATE: the share of one call site's outputs failing its declared schema "
-                        + "has risen above its fitted rate, in `state.json` as `baseline_rate` against "
-                        + "`current_rate`. Some failures are normal. The question is whether the rise is real "
-                        + "and whether the agent or the schema changed. Read the `witness` violations.\n";
-            default -> "";
-        };
-    }
-
-    private JsonNode readTreeOrMissing(@Nullable String json) {
-        JsonNode node = readTree(json);
-        return node == null ? mapper.missingNode() : node;
+        sb.append("You have ")
+                .append(maxTurns)
+                .append(" turns and ")
+                .append(timeoutMinutes)
+                .append(" minutes. Every tool call is a turn. Record your ruling before either runs out.\n");
+        return sb.toString();
     }
 
     /**
      * Serialize citations for {@code finding.triage_citations}. One shape whatever the citation is: a
      * dotted pointer into the evidence, an id the agent fetched, or a check script with the stdout it
-     * printed and the numbers it re-derived.
+     * printed.
      */
     public @Nullable String citationsJson(BehaviorTriageVerdict verdict) {
         if (verdict.citations().isEmpty()) return null;

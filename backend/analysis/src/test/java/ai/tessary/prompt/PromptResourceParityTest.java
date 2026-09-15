@@ -31,12 +31,7 @@ class PromptResourceParityTest {
     /** Constant name -> owning class, for everything that moved. */
     private static Map<String, Class<?>> pinned() {
         Map<String, Class<?>> m = new LinkedHashMap<>();
-        m.put("triage#SUMMARY_RULE", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("triage#PREFLIGHT", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("triage#RULES", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("triage#MCP_DOOR", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("triage#CHECKS_RULE", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("triage#CITATION_RULE", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
+        m.put("triage#SYSTEM_PROMPT", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
         m.put("rca#JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
         m.put("rca#RULES", ai.tessary.rca.AgenticRcaEngine.class);
         m.put("rca#MCP_DOOR", ai.tessary.rca.AgenticRcaEngine.class);

@@ -1,211 +1,281 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.catalog.ClassifierMethodCard;
+import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
+import ai.tessary.config.ClassifierProperties;
+import ai.tessary.config.ObserverProperties;
+import ai.tessary.tenant.ApiKeyService;
+import ai.tessary.tenant.OrgMembershipRepository;
+import ai.tessary.tenant.ProjectRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the tool names in triage's MCP door, the way {@code AgenticRcaPromptTest} pins RCA's.
+ * The triage system prompt (goals and invariants, one copy for every classifier) and the per-run
+ * dossier and user message {@link BehaviorTriageEngine} builds around it.
  *
- * <p><b>Why it exists.</b> Both engines splice a hand-written paragraph naming the tools the agent
- * should reach for, and both carry the same warning in their javadoc: a tool named here that the
- * surface has removed costs the agent a turn on {@code unknown tool}, and a reader the surface has
- * that the prompt omits is one it will never think to use. RCA's list survived the v0.27.0 read-only
- * cutover — which deleted six tools — precisely because a test held it. Triage's did not have one, so
- * it was the copy that would rot silently.
- *
- * <p>Deliberately a string test rather than a registry cross-check: the registry lives in
- * {@code surfaces}, which sits ABOVE {@code analysis} in the reactor, so this module cannot import it.
- * The names are duplicated on purpose and the duplication is the point — if the two lists disagree,
- * one of them is wrong and this says which.
+ * <p>The prompt no longer enumerates the MCP tool catalogue itself: the server's own {@code
+ * initialize} instructions already describe it (decision R8), and cutting the restatement is part of
+ * what shrank the fixed prose from 1,562 words to under 700. What is pinned here instead is the
+ * shape a model actually reasons from: the dossier carries only the finding's facts and the
+ * detector's method, the claim's own numbers are read live off {@code get_finding} rather than
+ * shipped as a file, and the budget in the user message is the config value, not a guess.
  */
 class BehaviorTriagePromptTest {
 
-    /** The six the read-only cutover deleted. Kept in step with {@code AgenticRcaPromptTest}'s set. */
-    private static final Set<String> REMOVED_TOOLS = Set.of(
-            "propose_grader_edit", "run_triage", "get_triage", "latest_triage", "list_rca_reports", "get_rca_report");
+    /** The job argument neither {@code dossier} nor {@code buildPrompt} reads; a fixed stand-in. */
+    private static final BehaviorTriageJobRow JOB = new BehaviorTriageJobRow(
+            "job-1",
+            "proj-1",
+            "fnd-1",
+            null,
+            BuiltInDetector.Kind.TOOL_ERROR,
+            "claimed",
+            null,
+            null,
+            0,
+            null,
+            "2026-08-01T00:00:00Z",
+            "2026-08-01T00:00:00Z",
+            null,
+            null);
 
-    /**
-     * What triage must be able to reach. {@code get_finding_evidence} is load-bearing: the dossier
-     * carries counts and a method card and no rows at all, so an agent that never calls it has read
-     * nothing and can only restate the claim back at us.
-     */
-    private static final List<String> EXPECTED_TOOLS = List.of(
-            "get_finding_evidence",
-            "get_trace",
-            "get_span",
-            "list_traces",
-            "list_spans",
-            "list_sessions",
-            "get_session",
-            "describe_dataset",
-            "query_count",
-            "query_facets",
-            "query_timeseries",
-            "query_search",
-            "get_finding",
-            "list_findings");
+    private static BehaviorTriageEngine engine() {
+        return engine(new ObserverProperties());
+    }
+
+    private static BehaviorTriageEngine engine(ObserverProperties observerProps) {
+        return new BehaviorTriageEngine(
+                List.of(),
+                new ClassifierProperties(),
+                observerProps,
+                mock(ApiKeyService.class),
+                mock(ProjectRepository.class),
+                mock(OrgMembershipRepository.class),
+                new ObjectMapper());
+    }
+
+    private static FindingRow finding(
+            String classifierKey,
+            String causeKey,
+            @Nullable String callSiteId,
+            @Nullable String payloadJson,
+            @Nullable String evidenceCountsJson) {
+        return new FindingRow(
+                "fnd-1",
+                "proj-1",
+                classifierKey,
+                causeKey,
+                FindingRow.SubjectKind.TOOL,
+                "search_docs",
+                null,
+                callSiteId,
+                FindingRow.Status.OPEN,
+                "2026-08-01T00:00:00Z",
+                "2026-08-02T00:00:00Z",
+                null,
+                null,
+                null,
+                128,
+                payloadJson,
+                evidenceCountsJson,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                "2026-08-01T00:00:00Z",
+                "2026-08-02T00:00:00Z");
+    }
+
+    private static String findingMd(BehaviorTriageEngine engine, FindingRow row) {
+        String md = engine.dossier(JOB, row).get("finding.md");
+        assertNotNull(md, "dossier() always writes finding.md");
+        return md;
+    }
+
+    // ---- the system prompt -----------------------------------------------------------------------
 
     @Test
-    void theMcpDoorNamesNoToolTheSurfaceRemoved() {
-        String door = BehaviorTriageEngine.whatYouHave("fnd-1", true);
+    void theSystemPromptDefinesBothVerdictsAndNoOthers() {
+        String prompt = BehaviorTriageEngine.SYSTEM_PROMPT;
 
-        for (String gone : REMOVED_TOOLS) {
-            assertFalse(
-                    door.contains(gone),
-                    "the door advertises " + gone + ", which the surface answers with `unknown tool` — the"
-                            + " agent plans a call and burns a turn on it");
-        }
+        assertTrue(prompt.contains("`positive`"), "positive has to be defined");
+        assertTrue(prompt.contains("`negative`"), "and so does negative");
+        assertTrue(prompt.contains("`blocked`"), "and the non-verdict for an unreachable surface");
+        assertFalse(prompt.contains("unclear"), "unclear is gone from the vocabulary");
     }
 
     @Test
-    void theMcpDoorNamesEveryReaderTriageNeeds() {
-        String door = BehaviorTriageEngine.whatYouHave("fnd-1", true);
+    void theSystemPromptNamesTheCoreCallsAndTheWorkspace() {
+        String prompt = BehaviorTriageEngine.SYSTEM_PROMPT;
 
-        for (String tool : EXPECTED_TOOLS) {
-            assertTrue(door.contains(tool), "the door never names " + tool + ", so the agent will not reach for it");
-        }
-        assertTrue(door.contains("fnd-1"), "the finding id is interpolated — it is what every evidence call takes");
-    }
-
-    /**
-     * The claims the tool_error card makes that a run has already been misled by the absence of.
-     *
-     * <p>Each of these three sentences exists because a triage run reasoned wrongly without it and said
-     * so in its ruling: it read `member` (426) against `n_cur` (336) as an inconsistency in the
-     * detector, read `patterns[].ref = 0` as "this failure never happened before" when the reference
-     * simply keeps no signatures, and had to discover for itself that three of five failures shared one
-     * timestamp. The card is where a method fact lives; a test is what stops it drifting back out.
-     */
-    @Test
-    void theToolErrorCardStatesTheThingsARunHasAlreadyBeenMisledBy() {
-        String card = ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.TOOL_ERROR);
-        assertNotNull(card);
-
-        assertTrue(card.contains("watermark"), "the two clocks go unstated and member > n_cur reads as a defect");
-        assertTrue(
-                card.contains("independent trial"),
-                "nothing says correlated calls each add evidence, so simultaneity looks not worth checking");
-        assertTrue(
-                card.contains("`patterns`"),
-                "nothing says what the patterns block describes, so a zero on its reference side reads as a"
-                        + " claim that the failure is new");
-    }
-
-    /**
-     * A verdict is defined by what it MEANS, never by a list of ways a claim can fail.
-     *
-     * <p>The bullets used to enumerate failure modes — "spread evenly across signatures that were always
-     * there", "the sample is too thin". Two of those named the before-side signature comparison the
-     * payload structurally cannot carry, and all of them narrow the agent to the list: an example in a
-     * verdict definition becomes the thing it pattern-matches for. The run that found three simultaneous
-     * calls behind one "rise" was told to look for no such thing.
-     */
-    /**
-     * The preflight, and the word that ends a run which fails it.
-     *
-     * <p>An agent that cannot reach the read surface has nothing to rule on, and until `blocked` existed
-     * its nearest available answer was `unclear` — which CLOSES the finding. One live run took it: it
-     * closed a finding and folded 7,191 calls into a detector's reference having read no rows at all,
-     * and said so in its own summary. The check has to be stated, and the way out of it has to be
-     * offered beside the verdicts, or the agent reaches for a ruling instead.
-     */
-    @Test
-    void everyLaneChecksItsPrerequisitesAndCanReportThemMissing() {
-        assertTrue(
-                BehaviorTriageEngine.rulingOptions().contains("`blocked`"),
-                "the verdicts must offer the non-verdict, or an agent that cannot read rules anyway");
-
-        // Every lane ends with this exact tail, so pinning it pins all three.
-        String tail = BehaviorTriageEngine.commonTail();
-        assertTrue(tail.contains("## Before you begin"), "every lane states the check before the work");
-        assertTrue(tail.contains("get_finding_evidence"), "and names a call that proves the surface answers");
-        assertTrue(tail.contains("`blocked`"), "and offers the word for when the surface does not answer");
-        assertTrue(
-                tail.indexOf("## Before you begin") < tail.indexOf("## The eight rules"),
-                "the check comes before the rules that assume it passed");
+        assertTrue(prompt.contains("get_finding_evidence"), "the rows are load-bearing");
+        assertTrue(prompt.contains("get_finding"), "and so is the claim's own numbers");
+        assertTrue(prompt.contains("checks/"), "the one directory the agent may write to");
+        assertTrue(prompt.contains("dossier/finding.md"), "the dossier files must be named");
+        assertTrue(prompt.contains("dossier/method.md"), "and both of them");
     }
 
     @Test
-    void theVerdictBulletsNameNoFailureModes() {
-        String prompt = BehaviorTriageEngine.rulingOptions();
-
-        assertTrue(prompt.contains("the claim holds"), "positive has to say what it means");
-        assertTrue(prompt.contains("the claim does not hold"), "and so does negative");
+    void theSystemPromptShipsNoStateFile() {
         assertFalse(
-                prompt.contains("unclear"), "unclear is gone from the vocabulary — only positive and negative rule");
-        for (String enumerated : List.of("spread evenly", "too thin", "rare before", "signature")) {
-            assertFalse(
-                    prompt.contains(enumerated),
-                    "the bullets name '" + enumerated + "' — a listed failure mode is the one the agent looks for");
-        }
+                BehaviorTriageEngine.SYSTEM_PROMPT.contains("state.json"),
+                "the claim's numbers now come from get_finding, not a shipped file");
     }
 
-    /**
-     * The rate-shift explanation frames the CAUSE and defers the METHOD to the card.
-     *
-     * <p>It used to assert that the shift "stayed moved — a sustained change, not a bad afternoon". A
-     * CUSUM tests no such thing: it fires when accumulated evidence crosses a threshold, and the run
-     * that read this sentence dutifully tested persistence, found a 26-hour burst inside a 16-day
-     * "sustained" spell, and ruled `negative` partly on a property we had invented for it.
-     */
     @Test
-    void theRateShiftExplanationClaimsNoPersistence() {
-        String text = BehaviorTriageEngine.causeText(FindingRow.Cause.RATE_SHIFT);
-
-        assertFalse(text.contains("sustained"), "the detector tests persistence nowhere");
-        assertFalse(text.contains("stayed moved"), "nor does it test that the rate is still elevated");
+    void theSystemPromptCarriesNothingPerRun() {
         assertFalse(
-                text.contains("rare before"),
-                "the reference keeps no per-signature counts, so this asks for a comparison that cannot be made");
-        assertTrue(text.contains("pinned in-control rate"), "what it does compare against");
+                BehaviorTriageEngine.SYSTEM_PROMPT.contains("fnd-1"),
+                "a finding id in the system prompt would mean it is not the same string on every run");
     }
 
-    /**
-     * The three documents, named. {@code method.md} was written to the dossier and mentioned in no
-     * prompt, so the agent had no reason to open the one file that says what an empty role means for the
-     * detector it is ruling on — which is the exact misreading the card exists to prevent.
-     */
-    @Test
-    void whatYouHaveNamesEveryFileTheDossierActuallyCarries() {
-        String door = BehaviorTriageEngine.whatYouHave("fnd-1", true);
+    // ---- the dossier ------------------------------------------------------------------------------
 
-        assertTrue(door.contains("dossier/finding.md"), "the claim file is unnamed");
-        assertTrue(door.contains("dossier/method.md"), "the method card is delivered but never announced");
-        assertTrue(door.contains("dossier/state.json"), "the detector's numbers are unnamed");
-        assertFalse(
-                door.contains("evidence.json"),
-                "`evidence` on this surface means the ROWS; naming the claim file that too is the collision"
-                        + " the rename removed");
+    @Test
+    void theDossierShipsOnlyFindingAndMethodMdWhenACardExists() {
+        FindingRow row =
+                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
+
+        assertEquals(
+                Set.of("finding.md", "method.md"), engine().dossier(JOB, row).keySet());
     }
 
-    /** A user-authored classifier has no method card, and the prompt must not promise a file that is absent. */
     @Test
-    void whatYouHaveOmitsTheMethodCardWhenThereIsNone() {
+    void theDossierShipsOnlyFindingMdWhenNoCardExists() {
+        FindingRow row = finding("user-authored-thing", "custom:1", null, null, null);
+
+        assertEquals(Set.of("finding.md"), engine().dossier(JOB, row).keySet());
+    }
+
+    @Test
+    void findingMdCarriesNoDetectorMethodOrCauseExplanation() {
+        FindingRow row =
+                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
+
+        String findingMd = findingMd(engine(), row);
+
+        assertFalse(findingMd.contains("RATE SHIFT"), "the cause explanation moved to the method card");
+        assertFalse(findingMd.contains("CUSUM"), "the method itself is method.md's job, not finding.md's");
+        assertTrue(findingMd.contains("Read the matching section of `dossier/method.md`"), findingMd);
+    }
+
+    @Test
+    void findingMdOmitsTheMethodPointerWhenThereIsNoCard() {
+        FindingRow row = finding("user-authored-thing", "custom:1", null, null, null);
+
+        String findingMd = findingMd(engine(), row);
+
         assertFalse(
-                BehaviorTriageEngine.whatYouHave("fnd-1", false).contains("dossier/method.md"),
+                findingMd.contains("dossier/method.md"),
                 "promising a file the dossier does not carry costs the agent a turn on a missing read");
     }
 
-    /**
-     * The property this whole layer rests on: we hand over counts and a door, never an instance. A
-     * prompt that names one trace decides which instance the investigation anchors on, and the agent
-     * cannot tell our pick from a draw it made itself.
-     */
     @Test
-    void whatYouHaveTellsTheAgentItWasGivenNoRows() {
-        String door = BehaviorTriageEngine.whatYouHave("fnd-1", true);
+    void findingMdStatesTheFactsButNotTheDetectorsNumbers() {
+        FindingRow row = finding(
+                BuiltInDetector.Kind.TOOL_ERROR,
+                "tool_error_rate:tool:search_docs:up",
+                "cs-checkout",
+                null,
+                "{\"member\": 426, \"witness\": 5}");
 
-        assertTrue(
-                door.contains("names an individual trace or span"),
-                "the no-example contract is the reason the dossier looks thin — say so, or it reads as a gap");
-        assertTrue(door.contains("You take the sample"), "and the agent has to know the draw is its own");
+        String findingMd = findingMd(engine(), row);
+
+        assertTrue(findingMd.contains("`fnd-1`"), "the finding id");
+        assertTrue(findingMd.contains("`" + BuiltInDetector.Kind.TOOL_ERROR + "`"), "the classifier");
+        assertTrue(findingMd.contains("`tool_error_rate:tool:search_docs:up`"), "the pattern");
+        assertTrue(findingMd.contains("128 sample(s)"), "the sample count");
+        assertTrue(findingMd.contains("`cs-checkout`"), "the call site");
+        assertTrue(findingMd.contains("`member`: 426 row(s)"), "member's count");
+        assertTrue(findingMd.contains("`witness`: 5 row(s)"), "witness's count");
+        assertTrue(findingMd.contains("`baseline`: 0 row(s)"), "a role the detector wrote none under is a stated zero");
+        assertFalse(findingMd.contains("0.94"), "no detector number belongs here — get_finding is the one source");
+    }
+
+    @Test
+    void callSiteHasThreeShapes() {
+        FindingRow none = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", null, null, null);
+        assertTrue(findingMd(engine(), none).contains("call site: none"));
+
+        FindingRow unattributed =
+                finding(BuiltInDetector.Kind.TOOL_ERROR, "k", BehaviorSubstrateRepository.UNATTRIBUTED, null, null);
+        assertTrue(findingMd(engine(), unattributed).contains("call site: none"));
+
+        FindingRow plain = finding(BuiltInDetector.Kind.BEHAVIOR_DRIFT, "k", "cs-checkout", null, null);
+        String plainMd = findingMd(engine(), plain);
+        assertTrue(plainMd.contains("- call site: `cs-checkout`\n"), plainMd);
+
+        FindingRow toolBucket = finding(
+                BuiltInDetector.Kind.TOOL_ERROR, "k", "cs-checkout", "{\"bucket\": {\"kind\": \"tool\"}}", null);
+        String toolMd = findingMd(engine(), toolBucket);
+        assertTrue(toolMd.contains("the largest of the call sites this tool bucket spans"), toolMd);
+    }
+
+    @Test
+    void theClaimLineIsDroppedWhenTheCauseCarriesNoMagnitude() {
+        FindingRow omission = finding(BuiltInDetector.Kind.BEHAVIOR_DRIFT, "omitted-step", null, null, null);
+
+        assertFalse(findingMd(engine(), omission).contains("- claim:"));
+    }
+
+    @Test
+    void windowLineIsOptional() {
+        FindingRow noWindow = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", null, null, null);
+        assertFalse(findingMd(engine(), noWindow).contains("- window:"));
+
+        FindingRow withWindow = finding(
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "k",
+                null,
+                "{\"window\": {\"opened_at\": \"2026-08-01T00:00:00Z\", \"closed_at\": \"2026-08-02T00:00:00Z\","
+                        + " \"kind\": \"elapsed\"}}",
+                null);
+        String md = findingMd(engine(), withWindow);
+        assertTrue(md.contains("- window: 2026-08-01T00:00:00Z to 2026-08-02T00:00:00Z (elapsed)\n"), md);
+    }
+
+    // ---- the user message ---------------------------------------------------------------------------
+
+    @Test
+    void theUserMessageStatesTheEffectiveTurnCapAndTheTimeout() {
+        ObserverProperties props = new ObserverProperties();
+        props.getAgentic().setMaxTurns(12);
+        props.getAgentic().setTimeoutMs(600_000);
+        FindingRow row = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", null, null, null);
+
+        String prompt = engine(props).buildPrompt(JOB, row);
+
+        assertTrue(prompt.contains("Rule on finding `fnd-1`."), prompt);
+        assertTrue(prompt.contains("`dossier/finding.md`"), prompt);
+        assertTrue(prompt.contains("`dossier/method.md`"), prompt);
+        // opencode reserves two turns of the configured cap to force a text-only final answer, so the
+        // number stated to the agent is what it actually gets to work with.
+        assertTrue(prompt.contains("You have 10 turns and 10 minutes."), prompt);
+    }
+
+    @Test
+    void theUserMessageOmitsTheMethodCardLineWhenThereIsNone() {
+        FindingRow row = finding("user-authored-thing", "custom:1", null, null, null);
+
+        String prompt = engine().buildPrompt(JOB, row);
+
+        assertFalse(prompt.contains("`dossier/method.md`"));
+        assertTrue(prompt.contains("This detector has no method card; its rule is whatever its author configured."));
     }
 }

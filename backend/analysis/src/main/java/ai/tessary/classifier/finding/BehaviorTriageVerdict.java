@@ -95,22 +95,22 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
                 "verdict": {
                   "type": "string",
                   "enum": ["positive", "negative", "blocked"],
-                  "description": "positive: the claim holds. negative: it does not. blocked: a prerequisite was missing and you could not read the evidence at all — this is not a ruling, it fails the run so it can be retried later."
+                  "description": "positive: the claim holds. negative: it does not. blocked: you could not reach the tools at all; not a ruling, it fails the run so it can be retried."
                 },
                 "summary": {
                   "type": "string",
                   "maxLength": 320,
-                  "description": "ONE sentence a human can act on: what the claim is and why it holds or does not. On `blocked`, name the missing prerequisite instead. Not a report — the evidence is already on the screen beside this."
+                  "description": "One sentence, under 320 characters, plain words, no em dashes: what happened, then why the claim holds or does not. On blocked, the call that failed."
                 },
                 "citations": {
                   "type": "array",
-                  "description": "Everything the ruling rests on: the evidence you opened, the ids you fetched, and EVERY check script you wrote.",
+                  "description": "Everything the ruling rests on: the ids you opened, the get_finding fields you relied on, and every check script you ran.",
                   "items": {
                     "type": "object",
                     "properties": {
-                      "path": {"type": "string", "description": "A dotted pointer into dossier/state.json (window.n_cur), an id you fetched (trace:<id>, span:<trace_id>/<span_id>), or the script you wrote (checks/rate.py)."},
-                      "reason": {"type": "string", "description": "What this established, and for a sample, what you took."},
-                      "stdout": {"type": "string", "description": "For a check script only: exactly what running it printed. Omit for an evidence pointer."}
+                      "path": {"type": "string", "description": "An id you opened (trace:<id>, span:<trace_id>/<span_id>), a get_finding field (toolError.curRate, metric.ratio), or a script you ran (checks/by_model.py)."},
+                      "reason": {"type": "string", "description": "What this established. If you read less than every row, which rows you read."},
+                      "stdout": {"type": "string", "description": "For a script only: exactly what running it printed. Omit for an id or a field."}
                     },
                     "required": ["path", "reason"],
                     "additionalProperties": false
