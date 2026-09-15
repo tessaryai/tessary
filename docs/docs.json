@@ -37,7 +37,12 @@
           "instrument/call-site-tag",
           "instrument/span-requirements",
           "instrument/exporters",
-          "instrument/claude-agent-sdk",
+          {
+            "group": "Frameworks",
+            "pages": [
+              "instrument/frameworks/claude-agent-sdk"
+            ]
+          },
           "instrument/troubleshooting"
         ]
       },
