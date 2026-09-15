@@ -37,8 +37,8 @@
           "instrument/call-site-tag",
           "instrument/span-requirements",
           "instrument/exporters",
-          "instrument/troubleshooting",
-          "instrument/claude-agent-sdk"
+          "instrument/claude-agent-sdk",
+          "instrument/troubleshooting"
         ]
       },
       {

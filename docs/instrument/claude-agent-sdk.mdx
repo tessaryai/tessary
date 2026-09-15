@@ -1,19 +1,28 @@
 ---
-title: "Claude Agent SDK"
-description: "Send Claude Agent SDK traces to Tessary and tag the query() call with a call site, since the SDK ships no OpenTelemetry instrumentation of its own."
+title: "Instrument the Claude Agent SDK"
+description: "Send Claude Agent SDK traces to Tessary and tag each query() call with a call site, since the SDK ships no OpenTelemetry instrumentation of its own."
 ---
 
-[claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) shells out to the bundled Claude Code CLI. That makes every `query()` call the "CLI agent" form of a call site: [The call-site tag](/instrument/call-site-tag) covers what that means and why it carries the same tagging rules as an in-process SDK call. The SDK emits no spans on its own, so this page opens one by hand around `query()` and sets its `gen_ai.*` attributes from the messages the call yields.
+Send traces from [claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) to Tessary and tag each `query()` call with a call site. The SDK emits no OpenTelemetry spans of its own, so you open one by hand around `query()` and fill in its attributes from the messages the call yields.
 
 ## Prerequisites
 
 - A running Tessary instance, with the **Endpoint** and **Bearer Token** from its connect gate. See [Instrument your agent](/instrument/overview#prerequisites).
 - `ANTHROPIC_API_KEY` set in the environment.
-- Python with `claude-agent-sdk`, `opentelemetry-sdk`, and `opentelemetry-exporter-otlp-proto-http` installed.
+- Python 3.10 or later, with `claude-agent-sdk`, `opentelemetry-sdk`, and `opentelemetry-exporter-otlp-proto-http` installed.
 
 ## Add the exporter
 
-Add Tessary as an OTLP destination before opening any spans. [Configure an exporter](/instrument/exporters) covers the environment-variable, in-code, and collector forms; the example below uses the in-code form so it has no other exporter to conflict with:
+Tessary receives spans over OTLP (OpenTelemetry Protocol). Point the exporter at your Tessary instance with environment variables:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://your-tessary-host/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer <token>"
+```
+
+Replace the host with your Tessary origin and `<token>` with the **Bearer Token** value from the connect gate.
+
+Then register an exporter that reads those variables. `OTLPSpanExporter()` with no arguments picks them up:
 
 ```python
 from opentelemetry import trace
@@ -28,44 +37,58 @@ trace.set_tracer_provider(provider)
 tracer = trace.get_tracer("tessary.recipe.claude-agent-sdk")
 ```
 
-`OTLPSpanExporter()` with no arguments reads the endpoint and headers from the standard `OTEL_EXPORTER_OTLP_TRACES_*` environment variables.
+<Note>
+  If your application already configures a `TracerProvider`, skip this block. Add the Tessary exporter to the existing provider as described in [Configure an exporter](/instrument/exporters), and use its tracer. A span opened on a second provider that has no Tessary exporter is never sent.
+</Note>
 
 ## Tag the query() call
 
-`query()` is the call site: open a span around it, set `tessary.call_site.id` as a literal, and fill in the fields [Span requirements](/instrument/span-requirements) marks required from the messages the call yields. The SDK reports the model on the `AssistantMessage` and usage on the final `ResultMessage`, so both are read there rather than guessed up front:
+The SDK runs the Claude Code CLI as a subprocess, so each `query()` call is a CLI agent call site. [The call-site tag](/instrument/call-site-tag) explains why it follows the same tagging rules as an in-process SDK call.
+
+Open a span around `query()`, set `tessary.call_site.id` as a literal, and fill in the fields [Span requirements](/instrument/span-requirements) marks required. The SDK reports the model on each `AssistantMessage` and the usage on the final `ResultMessage`, so read both from the messages instead of setting them up front:
 
 ```python
+import json
+
 import anyio
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, query
-
-CALL_SITE_ID = "support.answer"
 
 
 async def main() -> None:
     prompt = "What is 2 + 2?"
     with tracer.start_as_current_span("claude-agent-sdk.query") as span:
-        span.set_attribute("tessary.call_site.id", CALL_SITE_ID)
+        span.set_attribute("tessary.call_site.id", "support.answer")
         span.set_attribute("gen_ai.operation.name", "invoke_agent")
         span.set_attribute("gen_ai.provider.name", "anthropic")
         span.set_attribute(
             "gen_ai.input.messages",
-            f'[{{"role":"user","parts":[{{"type":"text","content":{prompt!r}}}]}}]',
+            json.dumps([{"role": "user", "parts": [{"type": "text", "content": prompt}]}]),
         )
 
         output_text = ""
         async for message in query(prompt=prompt):
+            print(message)
             if isinstance(message, AssistantMessage):
                 span.set_attribute("gen_ai.request.model", message.model)
                 output_text = "".join(
                     block.text for block in message.content if isinstance(block, TextBlock)
                 )
-            if isinstance(message, ResultMessage):
-                span.set_attribute("gen_ai.usage.input_tokens", message.usage["input_tokens"])
-                span.set_attribute("gen_ai.usage.output_tokens", message.usage["output_tokens"])
+            if isinstance(message, ResultMessage) and message.usage:
+                usage = message.usage
+                span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+                span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+                if "cache_read_input_tokens" in usage:
+                    span.set_attribute("gen_ai.usage.cache_read.input_tokens", usage["cache_read_input_tokens"])
+                if "cache_creation_input_tokens" in usage:
+                    span.set_attribute("gen_ai.usage.cache_creation.input_tokens", usage["cache_creation_input_tokens"])
 
         span.set_attribute(
             "gen_ai.output.messages",
-            f'[{{"role":"assistant","parts":[{{"type":"text","content":{output_text!r}}}],"finish_reason":"stop"}}]',
+            json.dumps([{
+                "role": "assistant",
+                "parts": [{"type": "text", "content": output_text}],
+                "finish_reason": "stop",
+            }]),
         )
 
     provider.force_flush()
@@ -74,13 +97,15 @@ async def main() -> None:
 anyio.run(main)
 ```
 
-<Warning>
-  Set `tessary.call_site.id` as a literal string, never an f-string or a variable. [The call-site tag](/instrument/call-site-tag#four-rules-that-are-not-negotiable) explains why: a computed value cannot be traced back to the code that produced it.
-</Warning>
+The cache token attributes matter here: the Claude Code CLI sends a large system prompt, and without them Tessary prices cached input as full-price input.
+
+<Note>
+  Keep `tessary.call_site.id` a literal string, never an f-string or a variable. [The call-site tag](/instrument/call-site-tag#four-rules-that-are-not-negotiable) explains why: a computed value cannot be traced back to the code that produced it.
+</Note>
 
 ## Verify it works
 
-Running the example above against a Tessary project prints the streamed messages, including the assistant's reply and a `ResultMessage` carrying the real model, usage, and cost:
+Run the example. It prints each message the SDK yields, including the assistant's reply and a final `ResultMessage` with usage and cost. Output is trimmed here, and your model, token counts, and cost will differ:
 
 ```text
 AssistantMessage(content=[TextBlock(text='4')], model='claude-sonnet-5', ...,
@@ -90,7 +115,7 @@ ResultMessage(subtype='success', ..., total_cost_usd=0.06051,
 ```
 
 <Check>
-  The connect gate opened on this span: the project went from "Nothing has arrived yet" straight to a call site being tagged, with 1 trace and 1 call site, no untagged-span step in between. [What done looks like](/instrument/overview#what-done-looks-like) covers the states in between when a span arrives without the tag.
+  The connect gate opens once the tagged span arrives, with 1 trace and the `support.answer` call site. On a project already past the gate, the call site appears in the project instead. If a span arrives without the tag, [What done looks like](/instrument/overview#what-done-looks-like) describes the states you see instead.
 </Check>
 
 ## Related pages
@@ -100,9 +125,9 @@ ResultMessage(subtype='success', ..., total_cost_usd=0.06051,
     What counts as a call site, and the four non-negotiable rules for the id.
   </Card>
   <Card title="Span requirements" icon="table-list" href="/instrument/span-requirements">
-    Every field Tessary reads off a span, beyond what this recipe sets.
+    Every field Tessary reads off a span, beyond what this page sets.
   </Card>
   <Card title="Configure an exporter" icon="share-nodes" href="/instrument/exporters">
-    The environment-variable and collector forms, if the in-code form here does not fit your deployment.
+    The in-code and collector forms, and how to add Tessary to an exporter setup you already run.
   </Card>
 </CardGroup>
