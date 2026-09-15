@@ -655,8 +655,17 @@ public class FindingEvidenceRepository {
     }
 
     private static SpanRef mapSpan(ResultSet rs) throws SQLException {
-        Array modelsArray = rs.getArray("models");
-        List<String> models = modelsArray == null ? List.of() : List.of((String[]) modelsArray.getArray());
+        Array modelsArray = rs.getArray("models"); // NOPMD - CloseResource: freed below; Array has no close()
+        List<String> models;
+        if (modelsArray == null) {
+            models = List.of();
+        } else {
+            try {
+                models = List.of((String[]) modelsArray.getArray());
+            } finally {
+                modelsArray.free();
+            }
+        }
         return new SpanRef(
                 rs.getString("role"),
                 (Integer) rs.getObject("rank"),
