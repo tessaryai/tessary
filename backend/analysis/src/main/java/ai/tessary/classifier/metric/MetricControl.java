@@ -32,10 +32,16 @@ import org.jspecify.annotations.Nullable;
  * work on: a day part of whose traffic was a confirmed regression is not a day whose traffic was
  * normal.
  *
- * <p>A day {@code a} days old contributes {@code 2^(-a/7)} per sample, a seven-day half-life on
- * wall-clock time (not event time, so a backfill landing a month of data in one pass doesn't
- * resolve to a control that is simultaneously fresh and ancient). Retention stops at
- * {@link #RETAIN_DAYS}, three half-lives out.
+ * <p><b>Every day key, age and weight is on EVENT time</b> — the day of the window's own closing
+ * sample, never the clock the sweep happened to run on. A day {@code a} days before the window
+ * being judged contributes {@code 2^(-a/7)} per sample, a seven-day half-life. Retention stops at
+ * {@link #RETAIN_DAYS}, three half-lives out, anchored on the newest day the ring holds (not on
+ * wall-clock now) so that folding in an out-of-order import can never evict a day more recent than
+ * the one just imported. Because the anchor moves only forward, replaying history in event order —
+ * the normal ingest path — reads exactly as a wall-clock ring once did; only a backfill landing
+ * days out of order, or an install importing history it has not yet caught up to, sees the
+ * difference, and there {@link #resolve} judges each window against its own 21 event-days rather
+ * than against whatever the ring happened to hold on the day it was replayed.
  *
  * <p>Weighting applies only to the measure sketch the detector reads. Workload and token blocks
  * are merged exactly over the same retained days: they're context for a human, never an input to
@@ -129,21 +135,20 @@ public final class MetricControl {
      * makes {@link MetricSketch#merge} safe to call across page boundaries. Only the day-to-day weighting
      * is approximate, and it is applied at read time in {@link #resolve} rather than baked in here, so a
      * stored ring never has to be re-derived when the clock moves.
+     *
+     * @param day the window's EVENT day — {@link #dayOf} of its closing sample, never a clock reading.
+     *     Retention is anchored on the newest day the ring holds once this one is folded in, which is
+     *     always {@code max(day, every day already held)}: an import folding in an OLDER day can only add
+     *     to what retention keeps, never push the cutoff forward and evict a day more recent than itself.
      */
     public MetricControl fold(
             Grid grid,
             String day,
             MetricSketch measure,
             @Nullable MetricWorkload workload,
-            @Nullable MetricTokens tokens,
-            Instant now) {
+            @Nullable MetricTokens tokens) {
         Map<String, Day> byDay = new LinkedHashMap<>();
-        String oldest =
-                LocalDate.ofInstant(now, ZoneOffset.UTC).minusDays(RETAIN_DAYS).toString();
         for (Day d : days) {
-            // A day older than retention, and, belt and braces, one dated in the future, which only a
-            // clock skew or a hand-edited row produces and which would otherwise pin a weight at 1 forever.
-            if (d.day().compareTo(oldest) < 0 || d.day().compareTo(dayOf(now)) > 0) continue;
             byDay.put(d.day(), d);
         }
 
@@ -182,7 +187,20 @@ public final class MetricControl {
                         mergedWorkload == null || mergedWorkload.isEmpty() ? null : mergedWorkload.toJson(),
                         mergedTokens == null || mergedTokens.isEmpty() ? null : mergedTokens.toJson()));
 
-        List<Day> out = new ArrayList<>(byDay.values());
+        // The anchor is the newest day now held, INCLUDING the one just folded in — never wall-clock now.
+        // A backfill folding in a day from a month ago leaves the anchor exactly where it was and so
+        // evicts nothing; only a day that is itself the newest can ever move the cutoff forward.
+        String anchor = day;
+        for (String d : byDay.keySet()) {
+            if (d.compareTo(anchor) > 0) anchor = d;
+        }
+        String oldest = LocalDate.parse(anchor).minusDays(RETAIN_DAYS).toString();
+
+        List<Day> out = new ArrayList<>();
+        for (Day d : byDay.values()) {
+            if (d.day().compareTo(oldest) < 0) continue;
+            out.add(d);
+        }
         out.sort((a, b) -> a.day().compareTo(b.day()));
         return new MetricControl(List.copyOf(out));
     }
@@ -190,6 +208,11 @@ public final class MetricControl {
     /**
      * The reference to compare a window against, or null when nothing usable is left after exclusion.
      *
+     * @param eventDay the EVENT day of the window being judged — {@link #dayOf} of its closing sample.
+     *     Every slot's age is measured back from this day, never from wall-clock now, so a replayed
+     *     backfill compares each window against its own 21 event-days rather than against today's. A day
+     *     AFTER {@code eventDay} is skipped (negative age), which is what keeps a replay from comparing a
+     *     window against traffic that, on the event clock, had not happened yet.
      * @param excludedDays days a currently-confirmed regression ran through. Their traffic is a
      *     deviation somebody has already ruled on, so folding it in would let the very thing under
      *     investigation become the bar the next window is judged against, reintroducing the silent
@@ -197,7 +220,7 @@ public final class MetricControl {
      *     applied when the day was folded, because a ruling lands well after the window closed;
      *     keeping the ring exact and the exclusion late is what makes a late verdict retroactive.
      */
-    public @Nullable Resolved resolve(Grid grid, Instant now, Set<String> excludedDays) {
+    public @Nullable Resolved resolve(Grid grid, String eventDay, Set<String> excludedDays) {
         Weighted measure = new Weighted(grid);
         MetricWorkload workload = new MetricWorkload(MetricWorkload.grid(grid.bins()));
         MetricTokens tokens = new MetricTokens(MetricTokens.grid(grid.bins()));
@@ -211,7 +234,7 @@ public final class MetricControl {
             }
             MetricSketch sketch = readSketch(d.sketchJson(), grid);
             if (sketch == null) continue;
-            double weight = weightOf(d.day(), now);
+            double weight = weightOf(d.day(), eventDay);
             if (weight <= 0) continue;
             measure.fold(sketch, weight);
             MetricWorkload dayWorkload = readWorkload(d.workloadJson(), grid);
@@ -252,11 +275,16 @@ public final class MetricControl {
             int daysExcluded,
             @Nullable String oldestDay) {}
 
-    /** {@code 2^(-age/7)}, or 0 for a day outside retention. */
-    private static double weightOf(String day, Instant now) {
+    /**
+     * {@code 2^(-age/7)}, or 0 for a day outside retention or one that falls AFTER {@code eventDay} — the
+     * inclusive bound at {@link #RETAIN_DAYS} keeps a day exactly three half-lives old, and the same-day
+     * case ({@code age == 0}, the window's own closing day already folded in by an earlier close) weighs a
+     * full 1.0, neither special-cased.
+     */
+    private static double weightOf(String day, String eventDay) {
         long age;
         try {
-            age = ChronoUnit.DAYS.between(LocalDate.parse(day), LocalDate.ofInstant(now, ZoneOffset.UTC));
+            age = ChronoUnit.DAYS.between(LocalDate.parse(day), LocalDate.parse(eventDay));
         } catch (RuntimeException e) {
             return 0.0;
         }

@@ -10,9 +10,11 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
@@ -33,6 +35,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -119,6 +122,9 @@ class MetricDriftSweepIntegrationTest {
 
     @Autowired
     ClassifierService classifiers;
+
+    @Autowired
+    FindingService drift;
 
     @Autowired
     SessionRepository sessions;
@@ -210,6 +216,128 @@ class MetricDriftSweepIntegrationTest {
         assertEquals(40, sketch(second.currentSketchJson()).count());
         assertEquals(lastTraceId, second.countedThroughId());
         assertEquals(first.currentOpenedAt(), second.currentOpenedAt(), "the window did not re-open");
+    }
+
+    @Test
+    @DisplayName("a backfill replay compares each window with its prior 21 event-days, not the sweep's own clock")
+    void aBackfillReplayJudgesEachWindowAgainstItsOwnEventDays() {
+        String pid = project("metric-sweep-backfill-replay");
+        ClassifierRow signal = signal(pid);
+
+        // Three windows whose EVENT time is months behind the moment this test actually runs — the
+        // shape a backfill import has. If the sweep threaded its own wall-clock day into MetricControl
+        // instead of each window's own event day, all three would fold into the ONE slot keyed to
+        // today, and the ring assertion below would find one slot instead of three.
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+
+        // Window 1: nothing to compare against yet, so it becomes the bootstrap PIN.
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed());
+
+        // Window 2: breaks from the pin just established. Fires on the PINNED arm — a separate cause
+        // from the one this test is about — and folds an 8s day into the ring alongside the 2s one.
+        seedTurnsAt(pid, earlyJuly, 50, 8_000, null);
+        MetricDriftSweep.MetricSweepOutcome regression = sweep.sweepMetrics(claim(pid, signal), signal);
+        assertEquals(1, regression.windowsClosed());
+        assertEquals(1, regression.fired(), "still the same pin (2s), so an 8s window breaks from it");
+
+        // Window 3: back to the pin's own 2s level, so the PINNED arm falls silent (ratio 1, no
+        // shift) — which is what lets the ROLLING CONTROL arm be the one that fires here. That
+        // control is a blend of the two prior event-days, weighted by how far back each one actually
+        // was (late June at age 14, early July at age 7): if the sweep had threaded the wrong day into
+        // either fold or resolve, this window would either compare against nothing (every day aged out
+        // past real wall-clock retention) or against the two days merged as if same-day, and the
+        // control arm below would not read as it does.
+        seedTurnsAt(pid, judgedJuly, 50, 2_000, null);
+        MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
+        assertEquals(1, outcome.windowsClosed());
+        assertEquals(1, outcome.fired(), "recovered against the pin, but still a shift against the rolling control");
+
+        // The ring itself: three slots keyed by the EVENT day of each closing sample, never by the day
+        // the sweep actually ran on — which is over two months later than any of them.
+        MetricBaselineRow row = baseline(pid, signal);
+        List<String> ringDays = MetricControl.fromJson(row.controlJson()).days().stream()
+                .map(MetricControl.Day::day)
+                .toList();
+        assertEquals(List.of("2026-06-24", "2026-07-01", "2026-07-08"), ringDays);
+
+        // And the control-arm finding names the reference it was actually judged against: both prior
+        // event-days, oldest first — late June AND early July, weighted rather than merged — exactly
+        // what a human reading a backfilled regression needs to see.
+        FindingRow controlFinding = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":previous"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the rolling-control arm"));
+        MetricFindingEvidence.ShiftDetail detail = MetricFindingEvidence.detail(controlFinding.payloadJson());
+        assertNotNull(detail);
+        MetricFindingEvidence.Control control = detail.control();
+        assertNotNull(control, "the control arm reports how its reference was composed");
+        assertEquals(2, control.daysUsed(), "both prior event-days contributed, weighted — not one merged day");
+        assertEquals("2026-06-24", control.oldestDay());
+    }
+
+    @Test
+    @DisplayName("a confirmed regression's own event day is excluded from the control it would otherwise pollute")
+    void aConfirmedRegressionExcludesItsOwnDayFromTheControl() {
+        String pid = project("metric-sweep-confirmed-exclusion");
+        ClassifierRow signal = signal(pid);
+
+        // The exact same three-window shape as the backfill replay above — a bootstrap pin, an 8s
+        // window that breaks from it, and a recovery back to the pin's own 2s level — so the only
+        // variable this test adds is whether a human confirmed the middle window before the third ran.
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed());
+
+        seedTurnsAt(pid, earlyJuly, 50, 8_000, null);
+        assertEquals(
+                1,
+                sweep.sweepMetrics(claim(pid, signal), signal).fired(),
+                "breaks from the pin, same as the unconfirmed backfill replay above");
+
+        // A human confirms it as a real regression. `recordShift` writes onset_at/last_seen_at as the
+        // window's own EVENT time [R11] — checked here by reading them straight back off the row
+        // `confirmedSpansBySubject` hands the sweep, rather than trusting the write in isolation.
+        FindingRow toConfirm = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the pinned arm"));
+        drift.resolve(pid, toConfirm.id(), BehaviorDtos.BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
+
+        MetricBaselineRow confirmedBaseline = baseline(pid, signal);
+        List<FindingRepository.ConfirmedSpan> spans = findings.confirmedSpansBySubject(
+                        pid, Set.of(signal.classifierKey()))
+                .get(confirmedBaseline.id());
+        assertNotNull(spans, "the confirmed finding must be readable back through its own baseline");
+        FindingRepository.ConfirmedSpan span = spans.get(0);
+        assertEquals(
+                "2026-07-01",
+                MetricControl.dayOf(Instant.parse(span.fromAt())),
+                "onset_at reads back as the window's own EVENT day — the day the sweep must exclude");
+        assertEquals(
+                MetricControl.dayOf(Instant.parse(span.fromAt())),
+                MetricControl.dayOf(Instant.parse(span.toAt())),
+                "one window's worth of traffic is one event day, start and end alike");
+
+        // Window 3: left in, early July (8s) would pollute the reference exactly as it does in the
+        // unconfirmed backfill-replay test above, and this 2s recovery would misread as a shift off a
+        // reference the confirmed regression itself had inflated. Excluded correctly, the reference is
+        // late June alone — which this window matches exactly — so nothing should fire.
+        seedTurnsAt(pid, judgedJuly, 50, 2_000, null);
+        assertEquals(
+                0,
+                sweep.sweepMetrics(claim(pid, signal), signal).fired(),
+                "the confirmed day is excluded from the reference, so the recovery reads as a recovery");
+
+        // Across all three windows, the only finding on the books is the one a human already confirmed —
+        // nothing the (correctly excluded) confirmed day should have produced downstream.
+        assertEquals(
+                1, findings.listByProject(pid, null, null, null, false, 100).size());
     }
 
     @Test
@@ -516,12 +644,22 @@ class MetricDriftSweepIntegrationTest {
      * {@code (trace.started_at, trace.id)}, so that ordering is not cosmetic.
      */
     private String seedTurns(String projectId, int fromIndex, int count, long turnMillis, @Nullable Long toolMillis) {
+        return seedTurnsAt(projectId, T0.plusSeconds(fromIndex), count, turnMillis, toolMillis);
+    }
+
+    /**
+     * {@code count} turns of {@code turnMillis} each, optionally containing one tool call of
+     * {@code toolMillis}, started from the absolute instant {@code start} rather than an offset from
+     * {@link #T0} — what a backfill replay needs, since its event times are months behind the sweep's
+     * own wall clock rather than a couple of hours behind it.
+     */
+    private String seedTurnsAt(String projectId, Instant start, int count, long turnMillis, @Nullable Long toolMillis) {
         String sessionId = SubstrateV2Fixtures.sessionId();
-        fx.session(projectId, sessionId, T0.plusSeconds(fromIndex));
+        fx.session(projectId, sessionId, start);
 
         String lastTraceId = "";
         for (int i = 0; i < count; i++) {
-            Instant startedAt = T0.plusSeconds(fromIndex + i);
+            Instant startedAt = start.plusSeconds(i);
             String traceId = SubstrateV2Fixtures.traceId();
             fx.trace(projectId, traceId, sessionId, startedAt);
             String rootId = insertSpan(projectId, traceId, null, "agent", "loop", startedAt, turnMillis);

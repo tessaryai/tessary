@@ -66,6 +66,7 @@ class FindingPayloadFreezeIntegrationTest {
                 null,
                 "cs-1",
                 "{\"ratio\":1.5}",
+                Instant.now().toString(),
                 FAR_PAST,
                 Instant.now().toString());
         String payloadBefore =
@@ -84,6 +85,7 @@ class FindingPayloadFreezeIntegrationTest {
                 null,
                 "cs-1",
                 "{\"ratio\":9.9}",
+                Instant.now().toString(),
                 FAR_PAST,
                 Instant.now().toString());
 

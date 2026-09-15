@@ -251,16 +251,27 @@ window was as noisy as the window it judged, took whatever shape the clock gave 
 became the bar for a busy morning), and forgot a step change immediately, since the next window's
 previous IS the new level.
 
-The control is one slot per UTC day over 21 days, each an exact merge of the windows that closed in
-it, weighted `2^(-age/7)` per sample and reported to the detector at Kish's effective sample size
-`(Σ nᵢdᵢ)²/Σ nᵢdᵢ²`. Days per day rather than a slot per window, because a busy bucket closes one
+The control is one slot per UTC **event** day over 21 days, each an exact merge of the windows that
+closed in it, weighted `2^(-age/7)` per sample and reported to the detector at Kish's effective sample
+size `(Σ nᵢdᵢ)²/Σ nᵢdᵢ²`. Days per day rather than a slot per window, because a busy bucket closes one
 every few minutes and a bounded per-window ring would span hours — back to judging a morning against a
 night.
+
+Every key, age and weight is measured on the **event** clock — the day of a window's own closing
+sample — never on the clock the sweep happens to run the comparison on. A window is judged against its
+own trailing 21 event-days, so a replayed backfill compares each window with the history it actually
+had rather than with whatever the ring holds on the day it is replayed, and a historical regression can
+surface on import. Retention is anchored on the newest day the ring holds, not on wall-clock now, so an
+out-of-order import can never evict a day more recent than the one it is importing. A live install's
+event clock and wall clock stay within seconds of each other, so none of this changes ordinary
+ingestion.
 
 **Days a confirmed regression ran through are excluded**, so a shift under investigation cannot become
 the bar the next window is judged against. Windows ruled *expected* fold in normally. Exclusion is
 decided on every read rather than when the day was folded, because a ruling lands well after the
-window closed — the ring stays an exact record and the late verdict is retroactive.
+window closed — the ring stays an exact record and the late verdict is retroactive. The exclusion span
+itself — `finding.onset_at`/`last_seen_at` for a metric-drift cause — is now also EVENT time, so it
+lines up with the ring's own day keys.
 
 The wire word stays `previous`. It is the last segment of every `cause_key` ever written, so renaming
 it would split one bucket's history into two causes and reopen everything already resolved.
@@ -581,7 +592,7 @@ CREATE TABLE metric_baseline (
     pinned_by_version_id text,
     prev_sketch_json     text,            -- RETIRED: held the previously closed window; see control_json
     current_sketch_json  text,            -- window being filled
-    control_json         text,            -- rolling control: one slot per UTC day, 21 days, §4.3
+    control_json         text,            -- rolling control: one slot per UTC EVENT day, 21 days, §4.3
 
     current_opened_at    text,
     current_count        bigint NOT NULL DEFAULT 0,

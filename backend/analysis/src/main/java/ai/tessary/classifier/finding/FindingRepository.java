@@ -163,10 +163,15 @@ public class FindingRepository {
      * NOW, and a twenty-window-old copy would be a wrong answer rather than a stale one: a human
      * pressing <em>Legitimate — absorb</em> is absorbing the current level.
      *
-     * @param quietBefore the recovery horizon. A bucket that returned to its reference stops earning
-     *     shifted windows, so its finding stops being bumped; a row unrefreshed past this instant had
-     *     therefore recovered, and the window shifting now starts a NEW spell whose onset must move —
-     *     which is what lets {@code CaseLedger.isNewSpell} reopen its case.
+     * @param eventAt the window's own EVENT time — the closing sample's, not the sweep's wall clock
+     *     [R11]. Written into both {@code onset_at} (on first insert) and {@code last_seen_at} (on every
+     *     write), so a confirmed regression is excluded by the event span it actually ran through, and a
+     *     replayed backfill's spells read on the same clock its windows themselves are cut on.
+     * @param quietBefore the recovery horizon, itself measured back from {@code eventAt}. A bucket that
+     *     returned to its reference stops earning shifted windows, so its finding stops being bumped; a
+     *     row unrefreshed past this instant had therefore recovered, and the window shifting now starts a
+     *     NEW spell whose onset must move — which is what lets {@code CaseLedger.isNewSpell} reopen its
+     *     case.
      */
     public Recorded recordShift(
             String id,
@@ -178,6 +183,7 @@ public class FindingRepository {
             @Nullable String sinceVersionId,
             String callSiteId,
             String evidenceJson,
+            String eventAt,
             String quietBefore,
             String now) {
         String payload =
@@ -187,7 +193,7 @@ public class FindingRepository {
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
                                  since_version_id, created_at, updated_at)
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :callSiteId,
-                    'open', :now, :now, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
+                    'open', :eventAt, :eventAt, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status IN ('open', 'blocked') DO UPDATE SET
                 sample_count = finding.sample_count + EXCLUDED.sample_count,
@@ -200,7 +206,8 @@ public class FindingRepository {
                 payload = CASE
                     WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
                     THEN EXCLUDED.payload ELSE finding.payload END,
-                -- The onset moves only across an observed recovery, never within a spell.
+                -- The onset moves only across an observed recovery, never within a spell. Both sides are
+                -- now EVENT time.
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
                     ELSE finding.onset_at END,
@@ -219,6 +226,7 @@ public class FindingRepository {
                 .param("delta", sampleDelta)
                 .param("payload", payload)
                 .param("versionId", sinceVersionId)
+                .param("eventAt", eventAt)
                 .param("quietBefore", quietBefore)
                 .param("now", now)
                 .query((rs, n) -> recorded(rs))

@@ -118,9 +118,17 @@ normalization the pin exists to prevent, arriving through the other reference. W
 
 The exclusion is applied **at read time, not at fold time**. A ruling lands well after the window
 closed, so the ring stores an exact record of what closed when and every pass re-decides what to leave
-out. That is what makes a late verdict retroactive. Weights are on the **wall clock**, so a backfill
-that lands a month of event time in one pass does not resolve to a ring whose every day is
-simultaneously fresh and ancient.
+out. That is what makes a late verdict retroactive.
+
+Every day key, age and weight is on **event time** — the day of the window's own closing sample, never
+the clock the sweep happened to run the comparison on. A window is judged against the 21 event-days
+before it, so a replayed backfill compares each window with its own trailing history rather than with
+whatever the ring happens to hold on the day it is replayed, and a historical regression can surface on
+import. Retention is anchored on the newest day the ring holds, not on wall-clock now, so folding in an
+out-of-order import can never evict a day more recent than the one just imported. A live install's event
+clock and wall clock stay within seconds of each other, so none of this changes ordinary ingestion —
+only a backfill landing days out of order, or an install importing history it has not caught up to, sees
+the difference.
 
 Weighting applies to the measure sketch alone. The workload and token blocks are merged exactly over
 the same retained days — they are context for a human, never an input to the decision, and a median of
@@ -362,7 +370,10 @@ indistinguishable, in a log or an eval report, from one that was never asked.
 **Findings are deduplicated by cause, not by firing.** One `finding` row per `cause_key`,
 with `onset_at` holding the onset of the **current spell**: frozen for as long as the detection
 keeps firing, and moved only when the row goes unrefreshed for longer than its detector's quiet window
-(6h for tool errors, `window_max_hours` for metric drift).
+(6h for tool errors, `window_max_hours` for metric drift). For metric drift, `onset_at` and
+`last_seen_at` hold the closing window's EVENT time — the same clock the control ring itself now runs
+on [R11] — so the quiet-window test is measured back from when the traffic happened rather than from
+when the sweep happened to run.
 
 That gap **is** the recovery observation. Nothing writes "this came back": a recovered detection simply
 stops appearing, so its finding stops being bumped. Freezing the onset within a spell is what stops a

@@ -208,6 +208,7 @@ class MetricDriftCaseGateIntegrationTest {
                         "pv-deploy-9",
                         BUCKET,
                         EVIDENCE,
+                        seenAt.toString(),
                         seenAt.minus(QUIET_WINDOW).toString(),
                         seenAt.toString())
                 .findingId();

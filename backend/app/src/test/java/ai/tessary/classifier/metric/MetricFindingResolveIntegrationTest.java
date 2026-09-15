@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -175,6 +176,31 @@ class MetricFindingResolveIntegrationTest {
     }
 
     @Test
+    @DisplayName("Real deviation: the confirmed span excludes the window's own EVENT day, not the day it was ruled")
+    void notExpectedExcludesTheWindowsOwnEventDayNotTheRulingDay() {
+        // A window that closed days before anyone looked at it — the ordinary lag between traffic
+        // happening and a human pressing a verdict, and exactly the gap [R11] exists to get right: the
+        // exclusion has to key on when the regression RAN, not on today, or a backfilled or slowly
+        // triaged finding would exclude the wrong day (or none of the real ones) from the control.
+        String eventAt = "2026-07-01T12:00:00Z";
+        Fixture f = fixture("metric-resolve-event-bounds", eventAt);
+
+        drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
+
+        List<FindingRepository.ConfirmedSpan> spans = findings.confirmedSpansBySubject(
+                        f.projectId, Set.of(classifierFor(CAUSE_KEY)))
+                .get(f.baselineId);
+        assertNotNull(spans, "the confirmed finding must be readable back through its own baseline");
+        FindingRepository.ConfirmedSpan span = spans.get(0);
+        assertEquals(eventAt, span.fromAt(), "onset_at is the window's own event time, not the moment it was ruled");
+        assertEquals(eventAt, span.toAt(), "last_seen_at matches onset_at on a finding's first write");
+        assertEquals(
+                "2026-07-01",
+                MetricControl.dayOf(Instant.parse(span.fromAt())),
+                "the day MetricDriftSweep#excludedDays must drop from the control ring");
+    }
+
+    @Test
     @DisplayName("absorbing does not write an allowlist row: there is no gram to allow forever")
     void absorbingWritesNoAllowlistRow() {
         Fixture f = fixture("metric-resolve-no-allowlist");
@@ -198,6 +224,15 @@ class MetricFindingResolveIntegrationTest {
     private record Fixture(String projectId, String baselineId, String findingId) {}
 
     private Fixture fixture(String slug) {
+        return fixture(slug, Instant.now().toString());
+    }
+
+    /**
+     * @param eventAt the finding's onset — the window's own EVENT time [R11], passed separately from
+     *     {@code now} (every OTHER column's wall clock) so a test can tell the two apart rather than
+     *     accidentally proving the write correct because both happened to be the same instant.
+     */
+    private Fixture fixture(String slug, String eventAt) {
         String projectId = TenantFixture.bootstrap(tenants, slug).project().id();
         classifiers.seedBuiltIns(projectId);
         String classifierId = signals.findByKey(projectId, BuiltInDetector.Kind.DURATION_DRIFT)
@@ -250,7 +285,8 @@ class MetricFindingResolveIntegrationTest {
                         "pv-deploy-9",
                         "discover-sales-prospects",
                         "{\"measure\":\"turn_duration\",\"ratio\":1.4,\"w1_log\":0.34}",
-                        Instant.parse(now).minus(QUIET_WINDOW).toString(),
+                        eventAt,
+                        Instant.parse(eventAt).minus(QUIET_WINDOW).toString(),
                         now)
                 .findingId();
         return new Fixture(projectId, baselineId, findingId);

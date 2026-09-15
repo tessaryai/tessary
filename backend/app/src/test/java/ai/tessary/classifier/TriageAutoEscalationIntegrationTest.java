@@ -339,6 +339,7 @@ class TriageAutoEscalationIntegrationTest {
                         null,
                         BUCKET,
                         EVIDENCE,
+                        Instant.now().toString(),
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
