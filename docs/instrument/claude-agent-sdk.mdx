@@ -99,9 +99,9 @@ anyio.run(main)
 
 The cache token attributes matter here: the Claude Code CLI sends a large system prompt, and without them Tessary prices cached input as full-price input.
 
-<Note>
+<Warning>
   Keep `tessary.call_site.id` a literal string, never an f-string or a variable. [The call-site tag](/instrument/call-site-tag#four-rules-that-are-not-negotiable) explains why: a computed value cannot be traced back to the code that produced it.
-</Note>
+</Warning>
 
 ## Verify it works
 
