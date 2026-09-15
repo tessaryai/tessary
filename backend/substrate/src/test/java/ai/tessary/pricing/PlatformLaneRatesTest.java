@@ -36,11 +36,13 @@ import org.junit.jupiter.api.Test;
 class PlatformLaneRatesTest {
 
     /**
-     * Every model string the platform lane can stamp on an {@code llm_call} row: the Bedrock
-     * inference-profile ids {@code BedrockModelProfile} sends (the platform-funded lanes), and the BYO
-     * catalog ids a project can pin. Held as literals rather than read from {@code llm-runtime} because
-     * that module sits ABOVE this one — and because the point is to pin what those ids resolve to, which a
-     * shared constant could quietly change on both sides at once.
+     * Every id the platform lane prices a call under: the Bedrock inference-profile ids
+     * {@code BedrockModelProfile} sends (the platform-funded lanes, also what lands on an
+     * {@code llm_call} row's {@code model} column), and the BYO catalog ids a project can pin — for the
+     * route-prefixed providers (xAI, Zhipu, Moonshot, OpenRouter) this is {@code ModelCatalog#pricingId}'s
+     * output, not the bare name {@code llm_call.model} records. Held as literals rather than read from
+     * {@code llm-runtime} because that module sits ABOVE this one — and because the point is to pin what
+     * those ids resolve to, which a shared constant could quietly change on both sides at once.
      */
     private static final Map<String, String[]> EXPECTED = expected();
 
@@ -62,6 +64,16 @@ class PlatformLaneRatesTest {
         m.put("gpt-5.5", new String[] {"5", "30", "0.5", "-"});
         m.put("gpt-5.4-mini", new String[] {"0.75", "4.5", "0.075", "-"});
         m.put("gpt-5.4-nano", new String[] {"0.2", "1.25", "0.02", "-"});
+        // The seven catalog models ModelCatalog#pricingId route-prefixes (decision 19): before that
+        // fix these ids had no scope prefix for ModelResolver to strip, so they resolved nowhere and
+        // every one of these agentic runs recorded no cost at all.
+        m.put("xai/grok-4.6", new String[] {"2", "6", "0.5", "-"});
+        m.put("xai/grok-code-fast-1", new String[] {"1", "2", "0.2", "-"});
+        m.put("zai/glm-5.3", new String[] {"1.4", "4.4", "0.26", "0"});
+        m.put("zai/glm-5.3-flash", new String[] {"0.15", "0.5", "0.03", "0"});
+        m.put("moonshot/kimi-k2.6", new String[] {"0.95", "4", "0.16", "-"});
+        m.put("openrouter/openai/gpt-5.6-terra", new String[] {"2", "12", "0.2", "-"});
+        m.put("openrouter/openai/gpt-5.6-luna", new String[] {"0.2", "1.2", "0.02", "-"});
         return Map.copyOf(m);
     }
 

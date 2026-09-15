@@ -188,7 +188,9 @@ class E2bRcaSandboxTest {
         ProjectModelSettings settings = mock(ProjectModelSettings.class);
         when(settings.resolveAgenticModel("proj", ModelLane.RCA))
                 .thenReturn(Optional.of(new ProjectModelSettings.ResolvedAgenticModel(
-                        ai.tessary.llm.ModelProvider.BEDROCK, "global.anthropic.claude-sonnet-4-6")));
+                        ai.tessary.llm.ModelProvider.BEDROCK,
+                        "global.anthropic.claude-sonnet-4-6",
+                        "global.anthropic.claude-sonnet-4-6")));
 
         StringBuilder posted = new StringBuilder();
         E2bRcaSandbox sandbox =
@@ -231,7 +233,7 @@ class E2bRcaSandboxTest {
         ProjectModelSettings settings = mock(ProjectModelSettings.class);
         when(settings.resolveAgenticModel("proj", ModelLane.RCA))
                 .thenReturn(Optional.of(new ProjectModelSettings.ResolvedAgenticModel(
-                        ai.tessary.llm.ModelProvider.GEMINI, "gemini-2.5-pro")));
+                        ai.tessary.llm.ModelProvider.GEMINI, "gemini-2.5-pro", "gemini-2.5-pro")));
 
         StringBuilder posted = new StringBuilder();
         E2bRcaSandbox sandbox =

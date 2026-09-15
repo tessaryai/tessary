@@ -10,7 +10,6 @@ import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
-import ai.tessary.pricing.PlatformCallPricer;
 import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -22,7 +21,6 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import jakarta.annotation.PostConstruct;
-import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -83,7 +81,6 @@ public class E2bTriageSandbox implements TriageSandbox {
     private final AgenticCredentialResolver credentials;
 
     private final LlmUsageAccountant usage;
-    private final PlatformCallPricer pricer;
     private final Tracer tracer;
     private final ObjectMapper mapper;
     private final HttpClient client =
@@ -94,14 +91,12 @@ public class E2bTriageSandbox implements TriageSandbox {
             ProjectModelSettings modelSettings,
             AgenticCredentialResolver credentials,
             LlmUsageAccountant usage,
-            PlatformCallPricer pricer,
             OpenTelemetry openTelemetry,
             ObjectMapper mapper) {
         this.props = props;
         this.modelSettings = modelSettings;
         this.credentials = credentials;
         this.usage = usage;
-        this.pricer = pricer;
         // The instrumentation scope is this class's own package, matching the convention every other
         // sandbox here follows (E2bRcaSandbox names ai.tessary.rca, E2bAnalysisSandbox
         // ai.tessary.observer). A trace query filtering on a stale scope goes empty rather than
@@ -154,6 +149,8 @@ public class E2bTriageSandbox implements TriageSandbox {
             Optional<ProjectModelSettings.ResolvedAgenticModel> resolved = resolvedModel(req.projectId());
             String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                     .orElseGet(() -> props.getAgentic().getModel());
+            String pricingId = resolved.map(ProjectModelSettings.ResolvedAgenticModel::pricingId)
+                    .orElseGet(() -> props.getAgentic().getModel());
             span.setAttribute("langfuse.trace.name", OPERATION);
             span.setAttribute("tessary.project.id", req.projectId());
             span.setAttribute("langfuse.trace.metadata.project_id", req.projectId());
@@ -190,8 +187,8 @@ public class E2bTriageSandbox implements TriageSandbox {
 
             // Host anchor for the per-turn child spans (in-VM timestamps are offsets from startMs).
             Instant runStart = Instant.now();
-            String respBody =
-                    postLauncher(mapper.writeValueAsString(body), cfg, req.projectId(), req.findingId(), model);
+            String respBody = postLauncher(
+                    mapper.writeValueAsString(body), cfg, req.projectId(), req.findingId(), model, pricingId);
             if (respBody == null) {
                 markError(span, "launcher did not answer");
                 return Optional.empty();
@@ -206,8 +203,7 @@ public class E2bTriageSandbox implements TriageSandbox {
                 return Optional.empty();
             }
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
-            bookUsage(req.projectId(), req.findingId(), model, raw);
-            flagIfOverSpendCap(span, req, model, raw, cfg.getMaxCostUsd());
+            bookUsage(req.projectId(), req.findingId(), model, pricingId, raw);
             String resultText = mapper.readTree(raw).path("result").asText("");
             if (resultText.isBlank()) {
                 markError(span, "agent returned no result");
@@ -259,14 +255,14 @@ public class E2bTriageSandbox implements TriageSandbox {
      *       fact about this request.
      * </ul>
      *
-     * <p>{@code projectId}/{@code findingId}/{@code model} are here only so a failing run's body
-     * can be booked against the ledger before this method returns or throws: server.js's
-     * {@code buildErrorBody} carries a {@code usage} object whenever the agent burned tokens
-     * before the run failed. {@link #bookUsage} already no-ops on a body with nothing usable, so
-     * this is safe to call on every non-2xx response.
+     * <p>{@code projectId}/{@code findingId}/{@code model}/{@code pricingId} are here only so a
+     * failing run's body can be booked against the ledger before this method returns or throws:
+     * server.js's {@code buildErrorBody} carries a {@code usage} object whenever the agent burned
+     * tokens before the run failed. {@link #bookUsage} already no-ops on a body with nothing usable,
+     * so this is safe to call on every non-2xx response.
      */
     private @Nullable String postLauncher(
-            String bodyJson, Agentic cfg, String projectId, String findingId, String model)
+            String bodyJson, Agentic cfg, String projectId, String findingId, String model, String pricingId)
             throws InterruptedException {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/triage"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -313,7 +309,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             // Book what the run spent before it failed, regardless of which bucket the status
             // falls into below: a launcher outage carries no usage (bookUsage no-ops on one), and a
             // run failure (today always a 502, see server.js) is exactly the case this exists for.
-            bookUsage(projectId, findingId, model, resp.body());
+            bookUsage(projectId, findingId, model, pricingId, resp.body());
             if (isLauncherLevel(resp.statusCode())) {
                 // A refusal is not an outage. 401/403/404 will answer identically until somebody
                 // changes the deployment, so it carries the code the worker parks on rather than the
@@ -333,13 +329,14 @@ public class E2bTriageSandbox implements TriageSandbox {
      * Book the run's tokens and cost against the triage lane, and against the FINDING it ruled on.
      * One run is one ledger entry.
      */
-    private void bookUsage(String projectId, String findingId, String model, String envelopeJson) {
+    private void bookUsage(String projectId, String findingId, String model, String pricingId, String envelopeJson) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
         if (u == null) return;
         usage.recordSandboxRun(
                 projectId,
                 ModelLane.TRIAGE.wire(),
                 model,
+                pricingId,
                 // Never platform-funded; see E2bRcaSandbox's identical note.
                 false,
                 u.inputTokens(),
@@ -352,52 +349,6 @@ public class E2bTriageSandbox implements TriageSandbox {
                 // that decides whether an agent session per distinct cause is the right price for a
                 // filter.
                 new LlmUsageAccountant.Subject(SUBJECT_KIND, findingId));
-    }
-
-    /**
-     * The per-run spend cap on triage. Runs after {@link #bookUsage}, on the run's actual priced
-     * cost, and only ever flags: logs a structured OPS line and marks the span, never rejects the
-     * ruling. See {@code ObserverProperties.Agentic#maxCostUsd}'s javadoc for why: the spend
-     * already happened, so discarding the ruling protects nothing, and this is post-hoc rather
-     * than preventive since there is no live per-turn cost signal to intervene on mid-run.
-     *
-     * <p>Prices independently of {@link #bookUsage} rather than threading the number through it,
-     * since {@link LlmUsageAccountant#recordSandboxRun} computes its own priced total internally
-     * and does not hand it back.
-     */
-    private void flagIfOverSpendCap(
-            Span span, SandboxRequest req, String model, String envelopeJson, @Nullable BigDecimal cap) {
-        if (cap == null) return;
-        AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
-        if (u == null) return;
-        Optional<PlatformCallPricer.PricedCall> priced = pricer.price(
-                model,
-                null,
-                clampToInt(u.inputTokens()),
-                clampToInt(u.outputTokens()),
-                clampToInt(u.cacheReadTokens()),
-                clampToInt(u.cacheWriteTokens()));
-        if (priced.isEmpty()) return; // unpriced model: no honest number to compare against the cap
-        BigDecimal cost = priced.get().total();
-        if (cost.compareTo(cap) <= 0) return;
-        log.warn(
-                Markers.OPS,
-                "triage run over spend cap project={} finding={} model={} cost_usd={} cap_usd={}",
-                req.projectId(),
-                req.findingId(),
-                model,
-                cost,
-                cap);
-        span.setAttribute("tessary.triage.over_spend_cap", true);
-        span.setAttribute("tessary.triage.cost_usd", cost.doubleValue());
-        span.setAttribute("tessary.triage.spend_cap_usd", cap.doubleValue());
-    }
-
-    /** Same clamp {@code LlmUsageAccountant#toInt} applies before a price-book lookup — a launcher-
-     *  reported count past {@code Integer.MAX_VALUE} is not realistic, but the lookup takes an Integer. */
-    private static @Nullable Integer clampToInt(long value) {
-        if (value <= 0) return null;
-        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
     }
 
     /**

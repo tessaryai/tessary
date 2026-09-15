@@ -20,16 +20,6 @@ import { effortLabel } from "../../lib/effort";
 import { Button, cn, Modal, PageBody, PageHeader, Select, Skeleton, useToast } from "../../ui";
 
 /**
- * The price-gated warning threshold for the triage lane only: a project must be told, twice, before
- * it points the lane that runs once per distinct cause (routinely dozens of times a day) at a
- * frontier-priced model. Strict `>`, not `>=`: Haiku 4.5's $1/$5 rate must not warn, since Haiku is
- * priced low enough to be a reasonable triage choice. Luna and Haiku both clear this bar; Sonnet 5
- * and Terra do not.
- */
-const TRIAGE_WARN_INPUT_PER_MILLION = 1;
-const TRIAGE_WARN_OUTPUT_PER_MILLION = 5;
-
-/**
  * Settings, Models: which model each job runs on.
  *
  * Sibling of Providers, and deliberately distinct from it: Providers is "which keys this org has
@@ -79,11 +69,11 @@ const NO_PROVIDER = "__no_provider__";
  * Control widths, shared by the selects and by the placeholder that stands in for a row with no tier
  * or no effort: as one constant each, because the whole point is that they line up down a section.
  * Wide enough for the longest option text ("Custom (OpenAI-compatible)", "GPT-5.6 Luna (OpenAI)",
- * "Priority · faster") with room for a longer name later: a native select truncates silently, so a
- * too-narrow one hides exactly the thing being chosen.
+ * "GPT-5.6 · higher cost", "Priority · faster") with room for a longer name later: a native select
+ * truncates silently, so a too-narrow one hides exactly the thing being chosen.
  */
 const PROVIDER_W = "sm:w-[196px]";
-const MODEL_W = "sm:w-[224px]";
+const MODEL_W = "sm:w-[272px]";
 const TIER_W = "sm:w-[168px]";
 // Narrower than the others: the longest option is "Extra high", and reasoning effort is the least
 // consequential of the three choices, so it should not be the widest thing on the row.
@@ -300,8 +290,9 @@ function Footnote({ models }: { models: ModelOption[] }) {
     <p className="mt-8 max-w-prose text-label text-subtle">
       A job left on <em>Automatic</em> takes the first provider in the order above that this
       organization holds a key for, and that provider's default model; picking one pins it until you
-      set the job back to Automatic. Triage offers only models at or under $1 per million input tokens
-      and $5 per million output, because it runs unattended once per cause.{" "}
+      set the job back to Automatic. Triage offers the same models RCA does. A model priced above its
+      own provider's default is marked <em>higher cost</em> and asks you to confirm, because triage runs
+      unattended once per finding.{" "}
       {flex.length > 0 && (
         <>Flex costs about half of Standard for work that can wait; it is offered by {flex.join(", ")}. </>
       )}
@@ -326,11 +317,10 @@ function Footnote({ models }: { models: ModelOption[] }) {
  * what Automatic picks.
  *
  * <p>Two decisions are the server's and only rendered here: which models a lane may use (a small
- * model can drive a sandbox agent and still not be something we run over a whole repository, and the
- * triage lane refuses anything above $1/$5 per million tokens outright), and which one wins when
- * nobody has chosen. The tier list is the selected model's own `supported_tiers`, which is what makes
- * an impossible pair (Flex on a Standard-only model) unpickable rather than a failure that surfaces
- * hours later on the next run.
+ * model can drive a sandbox agent and still not be something we run over a whole repository), and
+ * which one wins when nobody has chosen. The tier list is the selected model's own `supported_tiers`,
+ * which is what makes an impossible pair (Flex on a Standard-only model) unpickable rather than a
+ * failure that surfaces hours later on the next run.
  *
  * <p>Both the tier and the effort control are omitted rather than shown inert when there is nothing
  * to choose: the group does not take them, or the selected model offers a single tier / no effort
@@ -382,9 +372,8 @@ function LaneRow({
   const modelsForProvider = providers.find((o) => o.provider === effectiveProvider)?.model_keys ?? [];
 
   // A stored choice the org can no longer run: its provider's key was removed, or the model left
-  // this lane's offer list (which triage's price ceiling can do on its own). The lane falls back to
-  // automatic rather than breaking, and says so: silently ignoring a choice someone made is how a
-  // settings page starts lying about itself.
+  // this lane's offer list. The lane falls back to automatic rather than breaking, and says so:
+  // silently ignoring a choice someone made is how a settings page starts lying about itself.
   const strandedName =
     lane.automatic && setting
       ? (models.find((m) => m.model_key === setting.model_key)?.display_name ?? setting.model_key)
@@ -393,11 +382,11 @@ function LaneRow({
   const tiers = group.tiered ? (effectiveModel?.supported_tiers ?? []) : [];
   const efforts = group.effort_tunable ? (effectiveModel?.effort_levels ?? []) : [];
 
-  // Triage only, and only above the threshold (see TRIAGE_WARN_*). The lane's offer list is curated
-  // under that same threshold, so this cannot fire on a fresh checkout: it is the backstop for the
-  // price book moving under a static list, which is why it reads live rates instead of hardcoding
-  // them. `pending` holds the (model, tier, effort) the two-step dialog is confirming; the selects
-  // stay bound to what the lane runs throughout, so a cancel at either step needs no explicit revert.
+  // Triage only, and only above its own provider's default rate — not a fixed threshold, since the
+  // book moves and providers price differently. Neither an unpriced candidate nor an unpriced default
+  // warns, since there is then nothing to compare. `pending` holds the (model, tier, effort) the
+  // two-step dialog is confirming; the selects stay bound to what the lane runs throughout, so a
+  // cancel at either step needs no explicit revert.
   const [pending, setPending] = useState<{
     key: string;
     tier: ServiceTier;
@@ -405,13 +394,26 @@ function LaneRow({
     step: 1 | 2;
   } | null>(null);
 
+  const rateFor = (modelKey: string) => rates.find((r) => r.model_key === modelKey);
+
+  /** The provider option that offers `modelKey` on this lane, so its `default_model_key` can be read. */
+  const providerOfferingModel = (modelKey: string) =>
+    lane.provider_options.find((o) => o.model_keys.includes(modelKey));
+
   const crossesPriceGate = (modelKey: string) => {
     if (lane.id !== "triage") return false;
-    const rate = rates.find((r) => r.model_key === modelKey);
+    const rate = rateFor(modelKey);
     if (!rate) return false;
+    const option = providerOfferingModel(modelKey);
+    const defaultRate = option ? rateFor(option.default_model_key) : undefined;
+    if (!defaultRate) return false;
     return (
-      (rate.input_rate_per_million ?? 0) > TRIAGE_WARN_INPUT_PER_MILLION ||
-      (rate.output_rate_per_million ?? 0) > TRIAGE_WARN_OUTPUT_PER_MILLION
+      (rate.input_rate_per_million != null &&
+        defaultRate.input_rate_per_million != null &&
+        rate.input_rate_per_million > defaultRate.input_rate_per_million) ||
+      (rate.output_rate_per_million != null &&
+        defaultRate.output_rate_per_million != null &&
+        rate.output_rate_per_million > defaultRate.output_rate_per_million)
     );
   };
 
@@ -448,6 +450,13 @@ function LaneRow({
   const pendingModelName = pending
     ? (models.find((m) => m.model_key === pending.key)?.display_name ?? pending.key)
     : "";
+  const pendingRate = pending ? rateFor(pending.key) : undefined;
+  const pendingDefaultOption = pending ? providerOfferingModel(pending.key) : undefined;
+  const pendingDefaultModelName = pendingDefaultOption
+    ? (models.find((m) => m.model_key === pendingDefaultOption.default_model_key)?.display_name ??
+      pendingDefaultOption.default_model_key)
+    : "";
+  const pendingDefaultRate = pendingDefaultOption ? rateFor(pendingDefaultOption.default_model_key) : undefined;
 
   // Two different states, and each needs its own sentence. "No provider configured" is true only
   // when the org holds no key at all; when it holds keys that this lane cannot run, saying the same
@@ -515,6 +524,7 @@ function LaneRow({
             {modelsForProvider.map((k) => (
               <option key={k} value={k}>
                 {models.find((m) => m.model_key === k)?.display_name ?? k}
+                {crossesPriceGate(k) && " · higher cost"}
               </option>
             ))}
           </Select>
@@ -571,7 +581,7 @@ function LaneRow({
       <Modal
         open={pending?.step === 1}
         onClose={() => setPending(null)}
-        title="This model costs significantly more"
+        title="This model costs more per triage run"
         size="sm"
         footer={
           <>
@@ -585,9 +595,11 @@ function LaneRow({
         }
       >
         <p className="text-small text-muted">
-          Triage runs once per finding, routinely many times a day. {pendingModelName} costs more than
-          $1 per million input tokens or $5 per million output tokens, and every run is billed to this
-          project.
+          Triage runs on its own, once for each distinct finding, so what this model costs is multiplied
+          by how many findings this project produces. {pendingModelName} costs{" "}
+          {pendingRate && describeRate(pendingRate)}, more than {pendingDefaultModelName}'s{" "}
+          {pendingDefaultRate && describeRate(pendingDefaultRate)}. Every run is billed to this
+          organization's provider key.
         </p>
       </Modal>
       <Modal
@@ -621,4 +633,22 @@ function LaneRow({
       </Modal>
     </div>
   );
+}
+
+const RATE_FORMAT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
+/** A priced model's rate as a phrase, naming only the sides the price book carries. */
+function describeRate(rate: ModelRateView): string {
+  const { input_rate_per_million: input, output_rate_per_million: output } = rate;
+  return [
+    input != null && `${RATE_FORMAT.format(input)} per million input tokens`,
+    output != null && `${RATE_FORMAT.format(output)} per million output tokens`,
+  ]
+    .filter((p): p is string => typeof p === "string")
+    .join(" and ");
 }

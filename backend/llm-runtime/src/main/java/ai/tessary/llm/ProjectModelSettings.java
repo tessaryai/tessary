@@ -186,9 +186,9 @@ public class ProjectModelSettings {
     }
 
     /**
-     * Whether {@code lane} offers {@code modelKey} at all: the lane's own list, not its group's. The
-     * two differ on purpose: TRIAGE carries only the models under its price ceiling, so a group-level
-     * check would let a raw PUT put a frontier model on the lane the ceiling exists to protect.
+     * Whether {@code lane} offers {@code modelKey} at all, read off the lane's own list. Every lane
+     * names exactly the static models its group permits ({@link ModelCatalog} checks that at class
+     * load), so a model the settings page can show on a lane is a model a PUT can save there.
      *
      * <p>{@link ModelProvider#CUSTOM} is matched by provider rather than by model name: the catalog
      * holds one representative entry for an arbitrary OpenAI-compatible endpoint, and the real model
@@ -245,17 +245,28 @@ public class ProjectModelSettings {
                 ModelProvider provider = d.endpoint() == BedrockModelProfile.Endpoint.MANTLE
                         ? ModelProvider.BEDROCK_MANTLE
                         : ModelProvider.BEDROCK;
-                return new ResolvedAgenticModel(provider, d.inferenceProfileId());
+                // Bedrock's inferenceProfileId is already the id it is priced AND reported under (see
+                // that field's javadoc), so both ResolvedAgenticModel fields carry the same string.
+                return new ResolvedAgenticModel(provider, d.inferenceProfileId(), d.inferenceProfileId());
             }
             CatalogKey key = parseCatalogKey(selection.modelKey()).orElseThrow();
-            return new ResolvedAgenticModel(key.provider(), key.modelName());
+            return new ResolvedAgenticModel(
+                    key.provider(), key.modelName(), ModelCatalog.pricingId(key.provider(), key.modelName()));
         });
     }
 
-    /** See {@link #resolveAgenticModel}. */
+    /**
+     * See {@link #resolveAgenticModel}. {@code modelId} is what the sandbox agent runs and what
+     * {@code llm_call.model} records — the name a person actually chose. {@code pricingId} is a
+     * rate-lookup id only, handed to {@link ai.tessary.pricing.PlatformCallPricer} and nowhere else:
+     * on the four catalog providers whose book keys carry a prefix this catalog's names do not (see
+     * {@link ModelCatalog#pricingId}), pricing {@code modelId} directly would read the run as
+     * unpriced.
+     */
     public record ResolvedAgenticModel(
             ModelProvider provider,
-            @JsonProperty("model_id") String modelId) {}
+            @JsonProperty("model_id") String modelId,
+            @JsonProperty("pricing_id") String pricingId) {}
 
     /**
      * Parsed form of a non-Bedrock {@code "<PROVIDER>:<model_name>"} {@code model_key}, see the
@@ -455,9 +466,6 @@ public class ProjectModelSettings {
         if (lane != null && lane.agentic() && !BedrockModelProfile.isAgentic(modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
-        // The lane's own list, not its group's: this is what enforces TRIAGE's price ceiling against a
-        // raw PUT. Claude Sonnet 5 is agentic, offered for AGENT_VM, and valid at Standard, so nothing
-        // above this line stops it landing on the lane that runs unattended once per cause.
         if (lane != null && !isOfferedOn(lane, modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }
@@ -487,8 +495,6 @@ public class ProjectModelSettings {
         if (!entry.agentic()) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
-        // Same lane-scoped gate as the Bedrock half above: TRIAGE's ceiling leaves each provider's
-        // flagship agentic and permitted by the group, but not offered on this lane.
         if (!isOfferedOn(lane, modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }

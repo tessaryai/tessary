@@ -127,19 +127,6 @@ public class ObserverProperties {
         // see that change's PR description for what was and was not empirically confirmed.
         private int maxTurns = 40;
 
-        // The per-run spend cap on TRIAGE — ModelLane.TRIAGE's javadoc used to say
-        // "deliberately uncapped at launch"; this cap is what makes that honest. POST-HOC, not
-        // preventive: E2bTriageSandbox checks the run's ACTUAL
-        // priced cost against this AFTER the run completes and its usage is already booked (there is
-        // no live per-turn cost signal to intervene on mid-run — see the maxTurns comment above on the seam this
-        // shares). A run over the cap is FLAGGED (a structured OPS log line + a span attribute an
-        // operator can alert on), not rejected: the money is already spent either way, and discarding
-        // an otherwise-valid ruling after paying for it protects nothing — it only throws away the
-        // ruling on top of the spend. $3.00 is a starting product default (roughly the
-        // unoptimized single-run cost measured before this cap existed), not a value anyone has tuned against real
-        // TRIAGE traffic yet; adjust it once real numbers exist.
-        private java.math.BigDecimal maxCostUsd = new java.math.BigDecimal("3.00");
-
         public String getSandbox() {
             return sandbox;
         }
@@ -194,14 +181,6 @@ public class ObserverProperties {
 
         public void setMaxTurns(int v) {
             this.maxTurns = v;
-        }
-
-        public java.math.BigDecimal getMaxCostUsd() {
-            return maxCostUsd;
-        }
-
-        public void setMaxCostUsd(java.math.BigDecimal v) {
-            this.maxCostUsd = v;
         }
     }
 }

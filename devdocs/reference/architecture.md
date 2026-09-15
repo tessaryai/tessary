@@ -213,7 +213,7 @@ each one is competent to answer.
 | Layer | Where | Instrument | The question | Ends in |
 |---|---|---|---|---|
 | **1 — Detection** | `classifier/` | No model. A cursor sweep over `span`, per-classifier detectors, arming windows | *Did something move?* | A `finding` (one row per cause), plus `finding_evidence` refs enumerating the population it measured |
-| **2 — Triage** | `classifier/finding/` (`BehaviorTriageEngine`, `E2bTriageSandbox`) | A cheap model in a microVM. No repo. The substrate on demand over MCP. A workspace to write check scripts in | *Does the CLAIM hold — true, sampled enough, carried by its evidence?* | `finding.triage_*`: `positive` opens a case, `negative` / `unclear` close the finding |
+| **2 — Triage** | `classifier/finding/` (`BehaviorTriageEngine`, `E2bTriageSandbox`) | An agent in a microVM, same model choices as RCA. No repo. The substrate on demand over MCP. A workspace to write check scripts in | *Does the CLAIM hold — true, sampled enough, carried by its evidence?* | `finding.triage_*`: `positive` opens a case, `negative` / `unclear` close the finding |
 | **3 — RCA** | `rca/` | A strong model in a microVM. The repository when one is connected | *What change caused it?* | An `rca_report` on the case, which may conclude that no change is locatable |
 
 **Layer 2 never judges impact.** A cost or duration *drop* passes its gate like any other sound claim,

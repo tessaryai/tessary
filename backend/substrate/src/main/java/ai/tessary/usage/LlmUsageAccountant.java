@@ -105,11 +105,18 @@ public class LlmUsageAccountant {
      * therefore priced here from the raw token counts against the same {@code price_book} every
      * in-process call is priced from, and the row is stamped with the book that did it. Still null
      * when no book in force carries the model: an absent cost is honest, a wrong one is not.
+     *
+     * @param model the name to store on the ledger row — what a person actually chose, e.g.
+     *     {@code grok-4.6}
+     * @param pricingId the id to price the run under, e.g. {@code xai/grok-4.6}; equal to
+     *     {@code model} for every model whose book key needs no route prefix. See {@code
+     *     ModelCatalog#pricingId} and {@code ResolvedAgenticModel} for why the two differ.
      */
     public void recordSandboxRun(
             @Nullable String projectId,
             String lane,
             @Nullable String model,
+            @Nullable String pricingId,
             boolean platformFunded,
             long inputTokens,
             long outputTokens,
@@ -122,7 +129,7 @@ public class LlmUsageAccountant {
         Integer cacheRead = toInt(cacheReadTokens);
         Integer cacheWrite = toInt(cacheWriteTokens);
         PlatformCallPricer.PricedCall priced =
-                pricer.price(model, null, in, out, cacheRead, cacheWrite).orElse(null);
+                pricer.price(pricingId, null, in, out, cacheRead, cacheWrite).orElse(null);
         record(
                 projectId,
                 lane,

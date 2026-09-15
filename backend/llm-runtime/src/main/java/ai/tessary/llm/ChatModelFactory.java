@@ -285,18 +285,6 @@ public class ChatModelFactory {
             ModelLane lane) {}
 
     /**
-     * The id this call is priced and reported under: the catalog's {@code modelName} unchanged, except
-     * on {@link ModelProvider#BEDROCK_MANTLE} where the wire id ({@code entry.modelName()}, always bare)
-     * is not what LiteLLM prices it under. Mirrors {@link BedrockModelProfile.ModelDescriptor
-     * #inferenceProfileId}'s split for the platform-lane path, for the same reason.
-     */
-    private static String pricingId(ModelProvider provider, String modelName) {
-        return provider == ModelProvider.BEDROCK_MANTLE
-                ? BedrockModelProfile.MANTLE_ROUTE_PREFIX + modelName
-                : modelName;
-    }
-
-    /**
      * Resolve the model to judge with for an explicit {@code (provider, modelName, effort)}
      * selection (chosen in the run modal). The provider's {@link ProviderCredential} supplies
      * the key; the {@link ModelCatalog} entry supplies per-model build settings.
@@ -337,7 +325,7 @@ public class ChatModelFactory {
         // MISSING_CREDENTIALS throw above, which makes cred non-null on every path that reaches here.
         return new Resolved(
                 m,
-                pricingId(provider, modelName),
+                ModelCatalog.pricingId(provider, modelName),
                 paced(provider),
                 bedrock ? cacheParamsFor(modelName, ServiceTier.STANDARD) : null,
                 ServiceTier.STANDARD,
