@@ -26,9 +26,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>This used to be an opt-in that pressed <em>Run analysis</em> a handful of times a day, because a
  * ruling was advice a person then had to act on and 8 a day was what the shared budget allowed. Triage
- * decides now — {@code positive} opens a case a person reads, {@code negative} and {@code unclear} close
- * the finding — so a finding nobody triaged is a finding nobody will ever see. Every eligible finding is
- * therefore scheduled, with no per-tick or per-project ration on top.
+ * decides now — {@code positive} opens a case a person reads, {@code negative} closes the finding — so
+ * a finding nobody triaged is a finding nobody will ever see. Every eligible finding is therefore
+ * scheduled, with no per-tick or per-project ration on top.
  *
  * <h2>Off unless an org opts in</h2>
  *
@@ -54,7 +54,7 @@ import org.springframework.stereotype.Component;
  *
  * <h2>Re-open on recurrence</h2>
  *
- * <p>Closing on {@code unclear} is only safe because a wrong close is recoverable, and this is the
+ * <p>Closing on {@code negative} is only safe because a wrong close is recoverable, and this is the
  * recovery: a closed finding whose cause fires {@code triageReopenRecurrences} more times within
  * {@code triageReopenWindowHours} has its ruling cleared and goes back through triage. A finding that
  * has already had two looks and closed again does not get a third — it opens a case, because at that

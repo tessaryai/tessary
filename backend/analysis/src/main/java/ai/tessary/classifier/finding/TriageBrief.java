@@ -2,10 +2,9 @@
 package ai.tessary.classifier.finding;
 
 import java.util.Map;
-import org.jspecify.annotations.Nullable;
 
 /**
- * Everything a {@link TriageSource} has to say about one job, in the exact three arguments
+ * Everything a {@link TriageSource} has to say about one job, in the exact two arguments
  * {@code BehaviorTriageEngine.rule} takes.
  *
  * <p><b>Why the brief and not the ruling.</b> A source could have run the engine itself and returned a
@@ -16,12 +15,5 @@ import org.jspecify.annotations.Nullable;
  *
  * @param dossier the files written under {@code dossier/} in the sandbox, by name
  * @param prompt the ruling task, composed for this claim
- * @param claimJson the detector's own numbers, held verbatim so the arithmetic abort check compares the
- *     agent's recomputation against the same string the agent read. Null when the claim has no
- *     machine-readable form — the prose file still carries the numbers, so the run proceeds unchecked
- *     rather than failing.
  */
-public record TriageBrief(
-        Map<String, String> dossier,
-        String prompt,
-        @Nullable String claimJson) {}
+public record TriageBrief(Map<String, String> dossier, String prompt) {}

@@ -31,13 +31,13 @@ import org.springframework.stereotype.Component;
  * <p>Recording the ruling is the only effect on detector state: the worker still does not re-pin a
  * baseline, write the allowlist or touch gram state, because absorbing a shift moves the reference a
  * whole population is compared against. What it DOES decide is whether a person ever sees this finding
- * — {@code positive} opens a case, {@code negative} and {@code unclear} close it — and that is the
- * autonomy the lane was rebuilt for.
+ * — {@code positive} opens a case, {@code negative} closes it — and that is the autonomy the lane was
+ * rebuilt for.
  *
- * <p><b>A run that did not happen writes nothing.</b> The engine throws rather than degrading to a
+ * <p><b>A run that did not happen writes nothing.</b> The engine throws rather than fabricating a
  * verdict, and this worker turns that into a retryable failure: the lease is expired, the next tick
  * re-claims while attempts remain, and {@code failExhausted} dead-letters it. That is what makes
- * "unclear closes the finding" safe — an infra blip cannot silently close a real regression.
+ * "closing on negative" safe — an infra blip cannot silently close a real regression.
  *
  * <p>Runs on a slower cadence than the sweep: the queue is bounded by distinct causes rather than by
  * traffic, and nothing downstream is waiting on the answer.
@@ -198,7 +198,7 @@ public class BehaviorTriageWorker {
                 return;
             }
             BehaviorTriageVerdict verdict =
-                    engine.rule(job.projectId(), job.findingId(), brief.dossier(), brief.prompt(), brief.claimJson());
+                    engine.rule(job.projectId(), job.findingId(), brief.dossier(), brief.prompt());
             owner.recordVerdict(
                     job.projectId(),
                     job.findingId(),

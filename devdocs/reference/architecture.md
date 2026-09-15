@@ -213,15 +213,15 @@ each one is competent to answer.
 | Layer | Where | Instrument | The question | Ends in |
 |---|---|---|---|---|
 | **1 — Detection** | `classifier/` | No model. A cursor sweep over `span`, per-classifier detectors, arming windows | *Did something move?* | A `finding` (one row per cause), plus `finding_evidence` refs enumerating the population it measured |
-| **2 — Triage** | `classifier/finding/` (`BehaviorTriageEngine`, `E2bTriageSandbox`) | An agent in a microVM, same model choices as RCA. No repo. The substrate on demand over MCP. A workspace to write check scripts in | *Does the CLAIM hold — true, sampled enough, carried by its evidence?* | `finding.triage_*`: `positive` opens a case, `negative` / `unclear` close the finding |
+| **2 — Triage** | `classifier/finding/` (`BehaviorTriageEngine`, `E2bTriageSandbox`) | An agent in a microVM, same model choices as RCA. No repo. The substrate on demand over MCP. A workspace to write check scripts in | *Does the CLAIM hold — true, sampled enough, carried by its evidence?* | `finding.triage_*`: `positive` opens a case, `negative` closes the finding |
 | **3 — RCA** | `rca/` | A strong model in a microVM. The repository when one is connected | *What change caused it?* | An `rca_report` on the case, which may conclude that no change is locatable |
 
 **Layer 2 never judges impact.** A cost or duration *drop* passes its gate like any other sound claim,
 because "improvement" is a judgment about intent and triage has no evidence for intent. Layer 2 is also
 **terminal**: there is no queue behind it and no "needs review" state, which is what makes closing on
-`unclear` safe — a real cause keeps firing and comes back for a second look under the recurrence rule.
-A run that did not happen writes no ruling at all (NULL + a retryable job), so an infrastructure blip
-can never masquerade as a decision.
+`negative` safe — a real cause keeps firing and comes back for a second look under the recurrence rule.
+A run that did not settle the question, never reached the evidence, or did not happen at all writes no
+ruling (NULL + a retryable job), so an infrastructure blip can never masquerade as a decision.
 
 **The firewall is between 2 and 3.** RCA receives the **finding id and nothing else** — never the
 triage ruling, summary, citations, or the fact that a triage pass happened. This is enforced

@@ -138,12 +138,11 @@ public class ClassifierProperties {
     /**
      * How many times a CLOSED finding's cause must fire again before it goes back through triage.
      *
-     * <p>Recurrence is the recovery, and this is its threshold. Triage closes on {@code negative} and on
-     * {@code unclear}, so a wrongly-closed finding is not a lost one: its cause keeps firing, the
-     * counter climbs, and at this many firings within {@link #triageReopenWindowHours} the ruling is
-     * cleared and a second look is scheduled. A finding that has already had its two looks and closed
-     * again opens a case directly instead: the agent has said its piece twice, and the third time a
-     * person reads it.
+     * <p>Recurrence is the recovery, and this is its threshold. Triage closes on {@code negative}, so a
+     * wrongly-closed finding is not a lost one: its cause keeps firing, the counter climbs, and at this
+     * many firings within {@link #triageReopenWindowHours} the ruling is cleared and a second look is
+     * scheduled. A finding that has already had its two looks and closed again opens a case directly
+     * instead: the agent has said its piece twice, and the third time a person reads it.
      */
     private long triageReopenRecurrences = 3;
 

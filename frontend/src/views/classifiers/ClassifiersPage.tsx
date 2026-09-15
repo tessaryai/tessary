@@ -11,9 +11,9 @@
  *
  * What replaced them: every finding that opens gets exactly one triage run, and that run ends in
  * exactly one of two acts. `positive` opens a case, which is where a person picks the work up. `negative`
- * and `unclear` both CLOSE the finding — the second is a bet that the cause has stopped, and the bet is
- * called by recurrence rather than by somebody reading a list. So this page is a record of what has
- * been decided, not a pile of what has not.
+ * CLOSES the finding — a bet that the cause has stopped, and the bet is called by recurrence rather
+ * than by somebody reading a list. So this page is a record of what has been decided, not a pile of
+ * what has not.
  *
  * <h2>The two sections</h2>
  * Open findings (pending, in flight, or sound and now a case) and closed history. The split is

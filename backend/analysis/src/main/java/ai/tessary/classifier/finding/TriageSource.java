@@ -73,10 +73,9 @@ public interface TriageSource {
             boolean confirmedOnly);
 
     /**
-     * Open findings this source is holding below the Layer-2 bar — un-triaged, or ruled
-     * legitimate/unclear. Summed across sources into one count beside the list, so "nothing here" can
-     * never be confused with "nothing got through". Zero is a legitimate answer for a store with no
-     * such state.
+     * Open findings this source is holding below the Layer-2 bar — un-triaged, or ruled negative.
+     * Summed across sources into one count beside the list, so "nothing here" can never be confused
+     * with "nothing got through". Zero is a legitimate answer for a store with no such state.
      */
     long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly);
 

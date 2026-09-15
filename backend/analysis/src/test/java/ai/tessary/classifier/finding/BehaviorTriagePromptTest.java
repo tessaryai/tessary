@@ -139,7 +139,8 @@ class BehaviorTriagePromptTest {
 
         assertTrue(prompt.contains("the claim holds"), "positive has to say what it means");
         assertTrue(prompt.contains("the claim does not hold"), "and so does negative");
-        assertTrue(prompt.contains("does not settle it"), "and unclear");
+        assertFalse(
+                prompt.contains("unclear"), "unclear is gone from the vocabulary — only positive and negative rule");
         for (String enumerated : List.of("spread evenly", "too thin", "rare before", "signature")) {
             assertFalse(
                     prompt.contains(enumerated),

@@ -3553,12 +3553,6 @@
           "reason" : {
             "type" : "string"
           },
-          "recomputed" : {
-            "items" : {
-              "$ref" : "#/components/schemas/Recomputed"
-            },
-            "type" : "array"
-          },
           "stdout" : {
             "type" : [
               "string",
@@ -3569,7 +3563,6 @@
         "required" : [
           "path",
           "reason",
-          "recomputed",
           "stdout"
         ],
         "type" : "object"
@@ -7340,22 +7333,6 @@
           "window_from",
           "window_split",
           "window_to"
-        ],
-        "type" : "object"
-      },
-      "Recomputed" : {
-        "properties" : {
-          "pointer" : {
-            "type" : "string"
-          },
-          "value" : {
-            "format" : "double",
-            "type" : "number"
-          }
-        },
-        "required" : [
-          "pointer",
-          "value"
         ],
         "type" : "object"
       },

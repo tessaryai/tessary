@@ -31,9 +31,9 @@ public enum ClassifierError implements ErrorCode {
     // all — nothing written, or everything aged out — and that is what this now says.
     FINDING_HAS_NO_EVIDENCE(HttpStatus.CONFLICT, "Finding '%s' cites no trace to anchor an analysis on"),
     // Never reaches a controller: the triage worker is the only thrower, and it exists so that a run
-    // which did not happen leaves triage_verdict NULL and lets the job retry. Before this, the engine
-    // degraded to `unclear` at confidence 0 — a ruling recorded for a run nobody made, which permanently
-    // disqualified the finding from ever being looked at again.
+    // which did not happen leaves triage_verdict NULL and lets the job retry, rather than recording a
+    // ruling for a run nobody made — which would permanently disqualify the finding from ever being
+    // looked at again.
     TRIAGE_RUN_INCOMPLETE(HttpStatus.INTERNAL_SERVER_ERROR, "Triage of finding '%s' produced no ruling: %s"),
     // The launcher, not the run. Separated from TRIAGE_RUN_INCOMPLETE because the two want opposite
     // handling: a run that failed should spend an attempt and retry, while a launcher that is refusing

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -10,7 +11,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * The structured result a triage run must emit (enforced via a JSON schema). The agent audits ONE
  * finding's CLAIM — is it true, was it sampled over enough of the population, does the evidence
- * carry it — and rules {@code positive}, {@code negative} or {@code unclear}.
+ * carry it — and rules {@code positive} or {@code negative}.
  *
  * <p><b>It does not judge the change.</b> The old vocabulary ({@code expected} / {@code deviation})
  * asked whether the behaviour was legitimate, which is a question about the product's intent that an
@@ -19,18 +20,14 @@ import org.jspecify.annotations.Nullable;
  * on facts.
  *
  * <p><b>There is no {@code none()}.</b> A run that did not happen — no sandbox, an unparseable answer,
- * a launcher 401 — produces no verdict at all: {@link #parse} returns null, the engine throws, and the
- * job retries into the dead letter like every other job kind. That is what makes "unsure means close"
- * safe: every {@code unclear} on a finding was written by a run that actually read the evidence, so
- * closing on it costs a finding whose cause will re-open it if it is real.
+ * a launcher 401, a ruling with nothing behind it — produces no verdict at all: {@link #parse} returns
+ * null, the engine throws, and the job retries into the dead letter like every other job kind.
  *
- * <p><b>{@code blocked} is how the agent joins that set.</b> The three verdicts are conclusions about
- * the evidence, and an agent that cannot reach the evidence has none to conclude from. Before this
- * existed the only way it could report that was to rule {@code unclear}, which is a finding-closing
- * judgement — and one such run closed a finding, and folded 7,191 calls into a detector's reference,
- * on the strength of a read surface it never reached. So the schema gives the failure its own word:
- * {@link #blockedReason} recognises it, {@link #parse} refuses to build a verdict from it, and the
- * engine turns it into the same retryable failure as a launcher that never answered.
+ * <p><b>{@code blocked} is how the agent joins that set.</b> The two verdicts are conclusions about
+ * the evidence, and an agent that cannot reach the evidence has none to conclude from. So the schema
+ * gives the failure its own word: {@link #blockedReason} recognises it, {@link #parse} refuses to
+ * build a verdict from it, and the engine turns it into the same retryable failure as a launcher that
+ * never answered.
  *
  * @param verdict {@link FindingRow.TriageVerdict}
  * @param summary one sentence a human reading the case can act on. The schema caps it and the prompt
@@ -57,35 +54,22 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
      * wrote under {@code checks/}. Separate columns would have bought a type distinction and cost every
      * reader a branch.
      *
+     * <p>Unknown fields are ignored on read: a blob stored before {@code recomputed} was retired still
+     * carries the key, and a plain {@code ObjectMapper} — every reader of {@code triage_citations} uses
+     * one — fails closed on an unrecognised property by default.
+     *
      * @param stdout what the script printed, for a citation that IS a script — the receipt that makes a
      *     computed claim re-checkable by the person reading the case. Null on an evidence pointer.
-     * @param recomputed detector numbers this check re-derived from the substrate. The platform compares
-     *     each against the finding's own payload and ABORTS the run on a disagreement rather than
-     *     recording the ruling: one of the two is wrong, we cannot tell which from here, and a ruling
-     *     built on a silently wrong script is the worst thing this lane can produce.
      */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Citation(
-            String path, String reason, @Nullable String stdout, List<Recomputed> recomputed) {
-
-        /** Absent is empty, including when Jackson reads back a blob written before this field existed. */
-        public Citation {
-            recomputed = recomputed == null ? List.of() : List.copyOf(recomputed);
-        }
+            String path, String reason, @Nullable String stdout) {
 
         /** An evidence pointer or an id — a citation with nothing computed behind it. */
         public static Citation of(String path, String reason) {
-            return new Citation(path, reason, null, List.of());
+            return new Citation(path, reason, null);
         }
     }
-
-    /**
-     * One number a check script re-derived, named by where it sits in the detector's own payload.
-     *
-     * @param pointer a dotted path into {@code dossier/state.json} ({@code window.n_cur},
-     *     {@code quantiles.p95[1]}) — the platform resolves it against the finding's payload
-     * @param value what the script computed for it
-     */
-    public record Recomputed(String pointer, double value) {}
 
     /** The action this verdict fixes. One mapping, defined once, in {@link FindingRow.TriageAction}. */
     public String action() {
@@ -110,8 +94,8 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
               "properties": {
                 "verdict": {
                   "type": "string",
-                  "enum": ["positive", "negative", "unclear", "blocked"],
-                  "description": "positive: the claim holds. negative: it does not. unclear: you read the evidence and it does not settle the question. blocked: a prerequisite was missing and you could not read the evidence at all — this is not a ruling, it fails the run so it can be retried later."
+                  "enum": ["positive", "negative", "blocked"],
+                  "description": "positive: the claim holds. negative: it does not. blocked: a prerequisite was missing and you could not read the evidence at all — this is not a ruling, it fails the run so it can be retried later."
                 },
                 "summary": {
                   "type": "string",
@@ -126,20 +110,7 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
                     "properties": {
                       "path": {"type": "string", "description": "A dotted pointer into dossier/state.json (window.n_cur), an id you fetched (trace:<id>, span:<trace_id>/<span_id>), or the script you wrote (checks/rate.py)."},
                       "reason": {"type": "string", "description": "What this established, and for a sample, what you took."},
-                      "stdout": {"type": "string", "description": "For a check script only: exactly what running it printed. Omit for an evidence pointer."},
-                      "recomputed": {
-                        "type": "array",
-                        "description": "For a check script only: the detector's own numbers this script re-derived. A value that disagrees with the payload ABORTS the run — do not report one you did not compute.",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "pointer": {"type": "string", "description": "Where the number sits in dossier/state.json, dotted, copied from the path it has in that file rather than from this example: window.n_cur, rate.cur, quantiles.p95[1]."},
-                            "value": {"type": "number", "description": "What your script computed for it."}
-                          },
-                          "required": ["pointer", "value"],
-                          "additionalProperties": false
-                        }
-                      }
+                      "stdout": {"type": "string", "description": "For a check script only: exactly what running it printed. Omit for an evidence pointer."}
                     },
                     "required": ["path", "reason"],
                     "additionalProperties": false
@@ -156,9 +127,10 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
      * Parse the agent's output, tolerant of (a) raw schema JSON and (b) a {@code --output-format json}
      * envelope whose {@code structured_output} or {@code result} holds it.
      *
-     * <p>Returns null when there is no ruling in the text. Null is NOT {@code unclear}: an unparseable
-     * answer means the run failed to produce one, and recording {@code unclear} for it would close a
-     * finding on the strength of a broken run.
+     * <p>Returns null when there is no ruling in the text: an unparseable answer, a verdict outside
+     * {@code positive}/{@code negative}, or a ruling with nothing behind it. Null is not a verdict —
+     * the caller throws {@code TRIAGE_RUN_INCOMPLETE} and the job retries, never recording a ruling for
+     * a run that did not actually establish anything.
      */
     public static @Nullable BehaviorTriageVerdict parse(ObjectMapper mapper, String text) {
         JsonNode node = ruling(mapper, text);
@@ -166,25 +138,19 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
         try {
             String verdict = node.path("verdict").asText("");
             if (!FindingRow.TriageVerdict.POSITIVE.equals(verdict)
-                    && !FindingRow.TriageVerdict.NEGATIVE.equals(verdict)
-                    && !FindingRow.TriageVerdict.UNCLEAR.equals(verdict)) {
+                    && !FindingRow.TriageVerdict.NEGATIVE.equals(verdict)) {
                 return null;
             }
             List<Citation> citations = new ArrayList<>();
             for (JsonNode c : node.path("citations")) {
                 String path = c.path("path").asText("");
                 if (path.isBlank()) continue;
-                citations.add(new Citation(
-                        path, c.path("reason").asText(""), stdout(c.path("stdout")), recomputed(c.path("recomputed"))));
+                citations.add(new Citation(path, c.path("reason").asText(""), stdout(c.path("stdout"))));
             }
-            String summary = node.path("summary").asText("");
             // A ruling with nothing behind it is exactly the fabrication this analysis exists to avoid,
-            // so it is downgraded rather than trusted. Downgraded to `unclear`, which now CLOSES the
-            // finding — an uncited claim is not evidence a case should be opened on, and recurrence is
-            // what brings a real one back.
-            if (citations.isEmpty() && !FindingRow.TriageVerdict.UNCLEAR.equals(verdict)) {
-                return new BehaviorTriageVerdict(FindingRow.TriageVerdict.UNCLEAR, summary, List.of());
-            }
+            // so it is not trusted: no verdict is recorded, the caller throws, and the job retries.
+            if (citations.isEmpty()) return null;
+            String summary = node.path("summary").asText("");
             return new BehaviorTriageVerdict(verdict, summary, List.copyOf(citations));
         } catch (Exception e) {
             return null;
@@ -238,22 +204,6 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
         if (!node.isTextual()) return null;
         String out = node.asText();
         return out.isEmpty() ? null : out.length() <= STDOUT_MAX ? out : out.substring(0, STDOUT_MAX) + "\n…truncated";
-    }
-
-    /**
-     * The re-derived numbers, skipping anything that is not a pointer paired with a number — a
-     * malformed entry cannot contradict the payload, and dropping it silently is right here: the
-     * contradiction check is a safety net over the agent's own arithmetic, not a schema validator.
-     */
-    private static List<Recomputed> recomputed(JsonNode node) {
-        if (!node.isArray()) return List.of();
-        List<Recomputed> out = new ArrayList<>();
-        for (JsonNode r : node) {
-            String pointer = r.path("pointer").asText("");
-            JsonNode value = r.path("value");
-            if (!pointer.isBlank() && value.isNumber()) out.add(new Recomputed(pointer, value.asDouble()));
-        }
-        return List.copyOf(out);
     }
 
     private static @Nullable JsonNode tryReadTree(ObjectMapper mapper, @Nullable String s) {

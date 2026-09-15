@@ -55,15 +55,6 @@ public class BehaviorTriageEngine {
     private static final String UNATTRIBUTED = BehaviorSubstrateRepository.UNATTRIBUTED;
 
     /**
-     * How far a re-derived number may sit from the detector's own before the run is aborted.
-     *
-     * <p>Half a percent, relative: the payload rounds what it stores, so an agent computing a rate
-     * over the same rows lands a hair away from it. Anything past this is not rounding, it is two
-     * different populations, two different windows, or a broken script.
-     */
-    private static final double AGREEMENT_TOLERANCE = 0.005;
-
-    /**
      * The dossier file carrying the detector's own numbers. Named {@code state.json} and not
      * {@code evidence.json}: it is a frozen copy of the detector's running state at the moment it
      * fired, while "evidence" on this surface means the rows behind the claim, which live in
@@ -87,8 +78,8 @@ public class BehaviorTriageEngine {
      * <p>Triage rules on evidence it fetches for itself, so the read surface is a precondition of the
      * task, not a convenience within it. When it is unreachable the run has nothing to rule on, so the
      * check is stated first, before the rules that assume it passed, and {@code blocked} is offered
-     * wherever the verdicts are: a run that could not start fails and is retried rather than closing
-     * the finding on a verdict of {@code unclear}.
+     * wherever the verdicts are: a run that could not start fails and is retried rather than being
+     * recorded as a ruling it never actually made.
      */
     private static final String PREFLIGHT = PromptCraft.text(TRIAGE, "preflight.md");
 
@@ -175,26 +166,18 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * One ruling run: mint the run's MCP key, sandbox, parse, check the arithmetic, revoke.
+     * One ruling run: mint the run's MCP key, sandbox, parse, revoke.
      *
      * <p>Throws when the run did not produce a ruling: no sandbox, a launcher error, an answer that
-     * does not parse, a check that contradicts the payload. The worker catches it, the job retries and
-     * eventually dead-letters, and {@code triage_verdict} stays NULL rather than being recorded as
-     * {@code unclear} for a run that never happened, since {@code unclear} closes findings.
-     *
-     * <p>The claim goes to the abort check straight from the source's brief, never re-read out of the
-     * dossier map, so a renamed file cannot disable the check without failing anything.
+     * does not parse or carries no citation. The worker catches it, the job retries and eventually
+     * dead-letters, and {@code triage_verdict} stays NULL rather than being recorded for a run that
+     * never actually established anything.
      *
      * <p>The key is issued to the project org's owner (deterministically, earliest membership first),
      * since triage is scheduled rather than pressed by a person, and is revoked in a {@code finally}:
      * the key must not outlive the sandbox.
      */
-    public BehaviorTriageVerdict rule(
-            String projectId,
-            String findingId,
-            Map<String, String> dossier,
-            String prompt,
-            @Nullable String claimJson) {
+    public BehaviorTriageVerdict rule(String projectId, String findingId, Map<String, String> dossier, String prompt) {
         String mcpBase = props.getTriageMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
             // Without the MCP door the agent cannot open a single row of the population it is auditing,
@@ -253,64 +236,10 @@ public class BehaviorTriageEngine {
                 throw new TessaryException(
                         ClassifierError.TRIAGE_RUN_INCOMPLETE, findingId, "the agent returned no parseable ruling");
             }
-            requireArithmeticAgrees(findingId, claimJson, verdict);
             return verdict;
         } finally {
             revokeQuietly(issued.token().id(), projectId, findingId);
         }
-    }
-
-    /**
-     * Abort when a check script's re-derived number disagrees with the detector's own. One of the two
-     * is wrong and nothing here can say which, so neither answer is recorded: the job retries,
-     * dead-letters, and a person reads both numbers, rather than shipping a confident audit built on
-     * arithmetic the platform already saw fail.
-     *
-     * <p>A pointer that does not resolve is not a contradiction and is ignored: the agent naming a
-     * field the payload does not carry says nothing about the claim.
-     */
-    private void requireArithmeticAgrees(
-            String findingId, @Nullable String evidenceJson, BehaviorTriageVerdict verdict) {
-        JsonNode payload = readTree(evidenceJson);
-        if (payload == null) return;
-        for (BehaviorTriageVerdict.Citation citation : verdict.citations()) {
-            for (BehaviorTriageVerdict.Recomputed r : citation.recomputed()) {
-                JsonNode stated = resolve(payload, r.pointer());
-                if (stated == null || !stated.isNumber()) continue;
-                if (agrees(stated.asDouble(), r.value())) continue;
-                StructuredLog.error(log, Markers.OPS, "triage.check-contradicts-detector")
-                        .field("finding", findingId)
-                        .field("script", citation.path())
-                        .field("pointer", r.pointer())
-                        .field("detector", stated.asDouble())
-                        .field("computed", r.value())
-                        .log();
-                throw new TessaryException(
-                        ClassifierError.TRIAGE_RUN_INCOMPLETE,
-                        findingId,
-                        "check " + citation.path() + " computed " + r.pointer() + " = " + r.value()
-                                + " against the detector's " + stated.asDouble()
-                                + " — one of them is wrong, so no ruling is recorded");
-            }
-        }
-    }
-
-    private static boolean agrees(double stated, double computed) {
-        double scale = Math.max(Math.abs(stated), Math.abs(computed));
-        return Math.abs(stated - computed) <= AGREEMENT_TOLERANCE * scale + 1e-9;
-    }
-
-    /** Resolve a dotted pointer ({@code rate.cur}, {@code quantiles.p95[1]}); null when it leads nowhere. */
-    private static @Nullable JsonNode resolve(JsonNode root, String pointer) {
-        JsonNode node = root;
-        for (String segment : pointer.replace("[", ".").replace("]", "").split("\\.")) {
-            if (segment.isBlank()) continue;
-            node = segment.chars().allMatch(Character::isDigit)
-                    ? node.path(Integer.parseInt(segment))
-                    : node.path(segment);
-            if (node.isMissingNode()) return null;
-        }
-        return node;
     }
 
     private @Nullable JsonNode readTree(@Nullable String json) {
@@ -516,7 +445,7 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * The three verdicts, defined by what each one means. No enumerated failure modes: an example in a
+     * The two verdicts, defined by what each one means. No enumerated failure modes: an example in a
      * verdict definition becomes the thing the agent pattern-matches for instead of reasoning about the
      * actual case. What makes a ruling honest is rule 5, which forces it to compute, and
      * {@code method.md}, which says how the detector works.
@@ -526,8 +455,7 @@ public class BehaviorTriageEngine {
                 + "- `positive` — the claim holds: what the detector asserts really happened, and the "
                 + "evidence you examined carries it.\n"
                 + "- `negative` — the claim does not hold: the evidence, read for yourself, does not "
-                + "carry what the detector asserts.\n"
-                + "- `unclear` — the evidence does not settle it.\n\n"
+                + "carry what the detector asserts.\n\n"
                 + BLOCKED_OPTION;
     }
 

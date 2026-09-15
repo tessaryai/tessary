@@ -266,13 +266,8 @@ class ToolErrorClassifierIntegrationTest {
     /**
      * Which verdicts may move detector state, held directly rather than inferred.
      *
-     * <p>{@code negative} and {@code unclear} share an ACTION — both close the finding — and for one
-     * release the fold was gated on that action, so both folded. They do not assert the same thing. A
-     * negative says the rows do not carry the claim, which is a statement that the traffic was ordinary
-     * and belongs in the reference. An unclear says the run could not tell, and a run that could not
-     * tell has established nothing to fold. Two live rulings made the case: one {@code unclear} came
-     * from an agent that never reached the read surface and one from an agent miscounting the
-     * population, and each moved a baseline by thousands of calls.
+     * <p>{@code negative} is the only verdict that establishes the traffic was ordinary — a claim
+     * folding asserts by adding the window to the reference — so it is the only one that may fold.
      *
      * <p>{@code positive} opens a case. Moving the bar there would be the platform quietly agreeing to
      * a rate a human is about to be asked about, and clearing the arm would drop the evidence out from
@@ -284,10 +279,6 @@ class ToolErrorClassifierIntegrationTest {
         assertTrue(
                 FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.NEGATIVE),
                 "a negative is the one ruling that establishes the window was ordinary");
-        assertFalse(
-                FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.UNCLEAR),
-                "an unclear closes the finding without establishing anything — folding on it treats"
-                        + " 'we could not tell' as 'we checked, it was fine'");
         assertFalse(
                 FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.POSITIVE),
                 "a positive opens a case; the bar must not move under it");

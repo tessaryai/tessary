@@ -168,7 +168,6 @@ export function triageState(finding: BehaviorFinding): TriageState {
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
   if (finding.triageVerdict === "positive") return { label: "Positive", tone: "positive" };
   if (finding.triageVerdict === "negative") return { label: "Closed · negative", tone: "closed" };
-  if (finding.triageVerdict === "unclear") return { label: "Closed · unclear", tone: "closed" };
   return { label: "Closed", tone: "closed" };
 }
 
@@ -201,7 +200,7 @@ export function chainWords(finding: BehaviorFinding): string {
       ? `${finding.traceCount} applicable turns when the rule was fitted`
       : `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
-      ? `triage ruled ${finding.triageVerdict ?? "unclear"}`
+      ? `triage ruled ${finding.triageVerdict ?? "unknown"}`
       : finding.triageStatus === "in_flight"
         ? "triage running"
         : finding.triageStatus === "failed"

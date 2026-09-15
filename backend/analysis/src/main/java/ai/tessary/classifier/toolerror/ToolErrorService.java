@@ -223,10 +223,7 @@ public class ToolErrorService {
      *
      * <p><b>Only on a negative, and this is the whole of the gate.</b> A {@code positive} opens a case:
      * the regression is real, and moving the bar to accommodate it would be the platform quietly
-     * agreeing to a rate a human is about to be asked about. An {@code unclear} closes the finding
-     * without establishing anything at all, it is the verdict for a run that read the evidence and
-     * could not settle the question, and one that reads no evidence has even less standing to move a
-     * reference. Folding on it treated "we do not know" as "we checked, it was fine".
+     * agreeing to a rate a human is about to be asked about.
      *
      * <p>Never throws. A ruling that is already recorded must not be undone by the state write that
      * follows it, so every failure here is a log line and a return.

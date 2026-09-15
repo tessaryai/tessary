@@ -13,7 +13,7 @@ Triage runs an agent in a sandbox against one finding. It is given the finding's
 
 It has no repository. That is deliberate: triage rules on evidence, and reading the code is the next stage's job.
 
-The question it answers is narrow. Does the claim hold, was it measured over enough samples, and is it carried by the evidence it cites? It re-derives the classifier's numbers from the same rows and aborts if the two disagree by more than a rounding-sized margin.
+The question it answers is narrow. Does the claim hold, was it measured over enough samples, and is it carried by the evidence it cites?
 
 **Triage never judges impact.** A cost or duration drop passes its gate exactly like a rise, because "improvement" is a judgment about intent and triage has no evidence about intent.
 
@@ -21,10 +21,9 @@ The question it answers is narrow. Does the claim hold, was it measured over eno
 | --- | --- |
 | `positive` | The claim holds. A case opens. |
 | `negative` | The claim does not hold. The finding closes. |
-| `unclear` | The evidence does not settle it. The finding closes. |
-| No ruling | The run did not happen. Nothing is written and the job retries. |
+| No ruling | The run did not settle the question, never reached the evidence, or did not happen at all. Nothing is written and the job retries. |
 
-Closing on `unclear` is safe because a real cause keeps firing. The finding's cause is still live, the classifier keeps refreshing it, and a recurrence sends it back through triage rather than leaving it in a queue nobody drains.
+Closing on `negative` is safe because a real cause keeps firing. The finding's cause is still live, the classifier keeps refreshing it, and a recurrence sends it back through triage rather than leaving it in a queue nobody drains.
 
 A ruling changes nothing about the classifier itself. It never moves a baseline and never resolves anything. Absorbing a shift moves the reference an entire population is judged against, and that stays a decision a person makes.
 

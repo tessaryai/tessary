@@ -356,7 +356,8 @@ expect "classifier row"                       1 "SELECT count(*) FROM classifier
 expect "eval_case.detector='classifier'"      2 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
 expect "eval_case both finding arms"          2 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
                                                       + (SELECT count(*) FROM eval_case WHERE finding_id IS NULL AND state='resolved')"
-expect "finding rows"                         1 "SELECT count(*) FROM finding"
+expect "finding rows"                         2 "SELECT count(*) FROM finding"
+expect "finding ruled unclear (pre-0010)"     1 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
 expect "annotation all three grains"          3 "SELECT count(DISTINCT subject_kind) FROM annotation"
 expect "failure_mode_instance both grains"    2 "SELECT count(DISTINCT subject_kind) FROM failure_mode_instance"
 expect "metric_rollup metering metrics"       2 "SELECT count(*) FROM metric_rollup WHERE metric IN ('l1_evals','l2_evals')"
@@ -427,6 +428,18 @@ if [ "$(q "SELECT to_regclass('public.telemetry_instance') IS NOT NULL")" = "t" 
   expect "ping_seq survived the rename"         0 "SELECT ping_seq FROM telemetry_instance"
 else
   skip "0008 telemetry instance rename" "telemetry_instance is absent, 0008 has not landed"
+fi
+
+echo
+echo "0010: triage verdict narrows to positive/negative"
+if [ "$(q "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'finding_triage_verdict_check'
+                                  AND pg_get_constraintdef(oid) LIKE '%unclear%')")" = "t" ]; then
+  expect "no finding still reads unclear"       0 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
+  expect "the fixture's unclear finding is now negative" negative "SELECT triage_verdict FROM finding WHERE id='fnd_fix_unclear'"
+  expect "its action is untouched by the rewrite" closed "SELECT triage_action FROM finding WHERE id='fnd_fix_unclear'"
+else
+  skip "0010 triage verdict binary" "finding_triage_verdict_check still allows unclear, 0010 has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

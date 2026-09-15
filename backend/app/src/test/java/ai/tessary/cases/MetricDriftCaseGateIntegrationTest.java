@@ -92,9 +92,9 @@ class MetricDriftCaseGateIntegrationTest {
                 "The retry loop added in 4f2a1c explains it.",
                 null,
                 now());
-        // The verdicts the gate withholds. `negative` and `unclear` both CLOSE the finding, which is a
-        // different thing from opening a case: the row stays readable and its cause keeps being counted,
-        // so a wrong close is recovered by recurrence rather than by a person noticing.
+        // The verdict the gate withholds. `negative` CLOSES the finding, which is a different thing
+        // from opening a case: the row stays readable and its cause keeps being counted, so a wrong
+        // close is recovered by recurrence rather than by a person noticing.
         findings.recordTriage(
                 p.projectId(),
                 absorbed,

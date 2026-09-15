@@ -34,8 +34,8 @@ public final class BehaviorDtos {
     /**
      * The findings page: what the Layer-2 gate let through, and enough context to read that honestly.
      *
-     * @param withheld open findings the gate is holding: un-triaged, or ruled legitimate/unclear.
-     *     Surfaced as a count so "nothing here" can never be confused with "nothing got through".
+     * @param withheld open findings the gate is holding: un-triaged, or ruled negative. Surfaced as a
+     *     count so "nothing here" can never be confused with "nothing got through".
      * @param lane which Layer-2 lane this project's findings are ruled on, as
      *     {@link TriageLane#wire()}. Always the same value: triage reads no repository, so there
      *     is nothing left for it to vary with.
@@ -309,12 +309,12 @@ public final class BehaviorDtos {
      *
      * <p>The triage fields are exposed, and they are a decision rather than a second opinion: the
      * ruling decided whether a person ever sees this finding ({@code positive} opened a case,
-     * {@code negative} and {@code unclear} closed it). It doesn't touch detector state: the status,
-     * the allowlist, and the reference are still only a human's to move.
+     * {@code negative} closed it). It doesn't touch detector state: the status, the allowlist, and
+     * the reference are still only a human's to move.
      *
      * <p>{@code triageCitations} carries what the ruling rests on: evidence pointers, repo paths,
-     * and the agent's own check scripts. An uncited ruling is already downgraded to
-     * {@code unclear}, so the citations are the reason a human should believe a cited one.
+     * and the agent's own check scripts. An uncited ruling is never recorded at all, so the
+     * citations are the reason a human should believe the one that made it here.
      */
     public record BehaviorFindingView(
             String id,

@@ -2692,7 +2692,6 @@ export interface components {
         Citation: {
             path: string;
             reason: string;
-            recomputed: components["schemas"]["Recomputed"][];
             stdout: string | null;
         };
         CitationView: {
@@ -3563,11 +3562,6 @@ export interface components {
             window_from: string;
             window_split: string;
             window_to: string;
-        };
-        Recomputed: {
-            pointer: string;
-            /** Format: double */
-            value: number;
         };
         RedirectView: {
             applicationContext?: components["schemas"]["ApplicationContext"];

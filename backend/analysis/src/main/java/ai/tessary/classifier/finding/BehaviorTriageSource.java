@@ -294,8 +294,7 @@ public class BehaviorTriageSource implements TriageSource {
         // Empty also when the finding was resolved or its epoch closed while the job waited: nothing to
         // rule on, nowhere to write the answer, so the worker marks it done rather than failed.
         return findings.findById(job.projectId(), job.findingId())
-                .map(finding -> new TriageBrief(
-                        engine.dossier(job, finding), engine.buildPrompt(job, finding), finding.payloadJson()));
+                .map(finding -> new TriageBrief(engine.dossier(job, finding), engine.buildPrompt(job, finding)));
     }
 
     @Override
@@ -315,10 +314,8 @@ public class BehaviorTriageSource implements TriageSource {
      * Hand a tool-error window back to the detector once a ruling has established it was normal, so the
      * arm it fired on starts again from a reference that now contains it.
      *
-     * <p>Folds on {@code negative} only, not every close: folding asserts that the traffic in the
-     * window was ordinary and belongs in the rate the detector compares against, and only a negative
-     * ruling asserts that. {@code unclear} closes the finding without establishing anything, on
-     * purpose, since recurrence is the recovery.
+     * <p>Folds on {@code negative} only: folding asserts that the traffic in the window was ordinary
+     * and belongs in the rate the detector compares against, and only a negative ruling asserts that.
      *
      * <p>Only tool error folds, because it is the only classifier here holding an accumulator that a
      * ruling can leave standing. Metric drift closes its own window every pass and behaviour drift

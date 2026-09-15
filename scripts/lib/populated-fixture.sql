@@ -139,6 +139,16 @@ INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, su
 VALUES ('fnd_fix', 'prj_fix', 'fixture_classifier', 'fixture_cause', 'classifier', 'cls_fix', 'cs_fix',
         'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
 
+-- A finding ruled `unclear` under the pre-0010 three-way vocabulary — the one row 0010's UPDATE and
+-- narrowed CHECK both have to survive: the rewrite must catch it, and the narrowed constraint must
+-- not choke validating it once it reads `negative`.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at,
+                     triage_verdict, triage_action, triage_summary, triaged_at)
+VALUES ('fnd_fix_unclear', 'prj_fix', 'fixture_classifier', 'fixture_cause_unclear', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        'unclear', 'closed', 'the evidence did not settle it', '2026-08-02T00:00:00Z');
+
 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, call_site_id,
                        metric, state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at, finding_id)
 VALUES ('ec_fix_finding', 'prj_fix', 1, 'classifier', 'classifier', 'cls_fix', 'Fixture Classifier', 'cs_fix',

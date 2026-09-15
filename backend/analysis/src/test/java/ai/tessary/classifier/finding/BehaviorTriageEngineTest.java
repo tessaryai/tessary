@@ -115,7 +115,7 @@ class BehaviorTriageEngineTest {
                 mock(FindingEvidenceRepository.class));
 
         BehaviorTriageVerdict verdict =
-                engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this", null);
+                engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this");
 
         assertNotNull(verdict);
         assertEquals(FindingRow.TriageVerdict.POSITIVE, verdict.verdict());
@@ -125,8 +125,8 @@ class BehaviorTriageEngineTest {
     @Test
     void emptyRunSurfacesAsTriageRunIncomplete() {
         // The sandbox's own documented contract: an empty Optional means "ran, produced nothing" — the
-        // engine must throw so the job retries, never fabricate an `unclear` ruling for a run that
-        // simply did not happen.
+        // engine must throw so the job retries, never fabricate a ruling for a run that simply did not
+        // happen.
         BehaviorTriageEngine engine = new BehaviorTriageEngine(
                 List.of(fixedSandbox(Optional.empty())),
                 props(),
@@ -138,7 +138,7 @@ class BehaviorTriageEngineTest {
 
         TessaryException e = assertThrows(
                 TessaryException.class,
-                () -> engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this", null));
+                () -> engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this"));
 
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, e.error());
     }

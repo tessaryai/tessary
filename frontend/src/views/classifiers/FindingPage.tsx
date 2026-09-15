@@ -421,15 +421,14 @@ export function FindingPage() {
  * What triage ruled, and everything it ruled on.
  *
  * <p>The verdict line first, because the verdict is what happened to this finding (`positive`
- * handed it to a person, the other two ended it), and a reader who stops after one line should
+ * handed it to a person, `negative` closed it), and a reader who stops after one line should
  * have that fact rather than the prose.
  *
- * <p>Then the citations, which are now two different objects wearing the same shape. An evidence
+ * <p>Then the citations, which are two different objects wearing the same shape. An evidence
  * pointer is a claim about something already on this page ("window.n_cur", a trace id the agent
  * fetched) and reads as one line. A check script is code the agent wrote, ran in its sandbox, and
- * is offering as a receipt, so it is shown as code, with what it printed under it and the
- * detector numbers it re-derived beside that. Flattening a script into a line of prose would hide
- * the one part of a ruling a reader can actually re-run.
+ * is offering as a receipt, so it is shown as code, with what it printed under it. Flattening a
+ * script into a line of prose would hide the one part of a ruling a reader can actually re-run.
  */
 function TriageRuling({ finding }: { finding: Detail["finding"] }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
@@ -477,9 +476,7 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
             What it computed
           </h3>
           <p className="text-subtle mt-0 mx-0 mb-2.5 text-small" style={{ maxWidth: 620 }}>
-            Scripts the agent wrote and ran against the evidence, with what they printed. A number one
-            of these re-derived that disagreed with the detector's own would have aborted the run
-            instead of becoming a ruling, so every figure below already agrees with the payload.
+            Scripts the agent wrote and ran against the evidence, with what they printed.
           </p>
           {scripts.map((c, i) => (
             <CheckScript key={`${c.path}-${i}`} citation={c} />
@@ -494,10 +491,9 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
 const VERDICT_WORDS: Record<string, string> = {
   positive: "Positive: the claim holds, and a case is open on it.",
   negative: "Negative: the measurement is wrong, so there is nothing to explain.",
-  unclear: "Unclear: the evidence could not settle it, so the finding closed.",
 };
 
-/** One check script: the file, what it established, its output, and the numbers it re-derived. */
+/** One check script: the file, what it established, and its output. */
 function CheckScript({ citation }: { citation: TriageCitation }) {
   return (
     <div className="rounded-card border border-border bg-surface py-2.5 px-3 mt-2.5">
@@ -516,15 +512,6 @@ function CheckScript({ citation }: { citation: TriageCitation }) {
         >
           {citation.stdout}
         </pre>
-      )}
-      {citation.recomputed.length > 0 && (
-        <div className="flex flex-wrap gap-3 mt-2">
-          {citation.recomputed.map((r) => (
-            <span key={r.pointer} className="font-mono text-subtle text-label">
-              {r.pointer} = <span className="text-fg">{r.value}</span>
-            </span>
-          ))}
-        </div>
       )}
     </div>
   );

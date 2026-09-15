@@ -50,8 +50,8 @@ import org.springframework.stereotype.Service;
  *
  * <p>A run that happened and produced nothing usable returns {@link Optional#empty()}.
  * {@link BehaviorTriageEngine} turns that into a thrown {@code TRIAGE_RUN_INCOMPLETE}, the job
- * retries and eventually dead-letters, and {@code triage_verdict} stays NULL, which is what makes
- * {@code unclear} safe to close on: a launcher outage cannot manufacture one.
+ * retries and eventually dead-letters, and {@code triage_verdict} stays NULL: a launcher outage
+ * cannot manufacture a ruling.
  *
  * <p>A launcher that could not be reached, rejected the credentials, has no {@code /triage} route,
  * or failed internally is a different fact and throws {@code TRIAGE_LAUNCHER_UNAVAILABLE}: it is
