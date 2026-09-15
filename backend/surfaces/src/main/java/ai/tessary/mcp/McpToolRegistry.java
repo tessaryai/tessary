@@ -826,13 +826,16 @@ public class McpToolRegistry {
      * not a biased sample), so this trimming happens here, at the agent door, and nowhere upstream of it.
      */
     private static BehaviorFindingDetailView agentView(BehaviorFindingDetailView detail) {
+        ToolErrorEvidence.RateDetail toolError = detail.toolError();
+        MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
+        SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
-                detail.toolError() == null ? null : withoutIds(detail.toolError()),
+                toolError == null ? null : withoutIds(toolError),
                 detail.baseline(),
-                detail.malformedOutput() == null ? null : withoutIds(detail.malformedOutput()),
-                detail.secretLeak() == null ? null : withoutIds(detail.secretLeak()),
+                malformedOutput == null ? null : withoutIds(malformedOutput),
+                secretLeak == null ? null : withoutIds(secretLeak),
                 detail.armedWindow());
     }
 
