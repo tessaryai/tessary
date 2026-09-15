@@ -40,7 +40,13 @@ public final class SecretLeakEvidence {
             @Nullable String firstAt,
             @Nullable String lastAt,
             List<SecretLeakKeyView> keys,
-            List<SecretLeakLeakView> leaks) {}
+            List<SecretLeakLeakView> leaks,
+            /** {@code event_count} or {@code distinct_users}: what {@link #threshold} counts. */
+            String basis,
+            long threshold,
+            long windowSeconds,
+            @Nullable String windowStart,
+            @Nullable String windowEnd) {}
 
     /** One masked key's aggregate: how many leaks and traces it accounts for, and whether any instance is unredacted. */
     public record SecretLeakKeyView(
@@ -50,11 +56,17 @@ public final class SecretLeakEvidence {
             @Nullable String lastAt,
             boolean storedRaw) {}
 
-    /** One leaking output: when, which key, whether it is still stored raw, and where to open it. */
+    /**
+     * One leaking output: when, which key, whether it is still stored raw, and where to open it.
+     *
+     * @param traceId null on the agent-facing view {@code get_finding} builds — see {@code
+     *     McpToolRegistry#withoutIds}: an agent gets the timeline and the masked key, never the id to
+     *     follow, which is what {@code get_finding_evidence} is for. Always set on the UI's own view.
+     */
     public record SecretLeakLeakView(
             @Nullable String at,
             String masked,
             String stored,
-            String traceId,
+            @Nullable String traceId,
             @Nullable String spanId) {}
 }

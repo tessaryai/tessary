@@ -13,6 +13,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakKeyView;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakLeakView;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +45,7 @@ public class SecretLeakDetailService {
         }
         String rule = finding.nativeCauseKey();
         Instant onset = onsetOf(finding);
+        JsonNode payload = finding.payload();
 
         SecretLeakSummary summary = detections.secretLeakSummary(
                 BuiltInDetector.Kind.SECRET_LEAK, finding.projectId(), finding.subjectId(), rule, callSiteId, onset);
@@ -70,7 +72,17 @@ public class SecretLeakDetailService {
                                 w.stored() == null ? "unknown" : w.stored(),
                                 w.traceId(),
                                 w.spanId()))
-                        .toList());
+                        .toList(),
+                payload.path("basis").asText("event_count"),
+                payload.path("threshold").asLong(0),
+                payload.path("window_seconds").asLong(0),
+                text(payload.path("window_start")),
+                text(payload.path("window_end")));
+    }
+
+    private static @Nullable String text(JsonNode node) {
+        String s = node.asText("");
+        return s.isEmpty() ? null : s;
     }
 
     /** Every WITNESS ref's (trace, span) pair, the finding's own bounded population. */

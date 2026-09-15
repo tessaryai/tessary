@@ -8,6 +8,8 @@ import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
+import ai.tessary.classifier.worker.ArmedWindowEvidence;
+import ai.tessary.classifier.worker.ArmedWindowEvidence.ArmedWindowDetail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.NotBlank;
@@ -205,12 +207,12 @@ public final class BehaviorDtos {
      * and for a rate shift the signature that took over), so this view renders the numbers
      * themselves rather than a prose summary of them.
      *
-     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput} and {@code
-     * secretLeak} is set, chosen by cause kind, and all four are null for a behaviour-drift cause
-     * (which carries no measured shift) or for any finding whose blob is missing or unreadable. A
-     * caller renders the finding regardless: the headline and the verdict don't depend on the evidence
-     * parsing, and a page that vanished because one column was malformed would be a worse failure than
-     * a page with no chart on it.
+     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code
+     * secretLeak} and {@code armedWindow} is set, chosen by cause kind, and all five are null for a
+     * behaviour-drift cause (which carries no measured shift) or for any finding whose blob is missing
+     * or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
+     * on the evidence parsing, and a page that vanished because one column was malformed would be a
+     * worse failure than a page with no chart on it.
      */
     public record BehaviorFindingDetailView(
             BehaviorFindingView finding,
@@ -235,7 +237,14 @@ public final class BehaviorDtos {
              * leak count, and the per-key and per-leak breakdowns. Also DB-backed rather than payload
              * alone — see {@link ai.tessary.classifier.secretleak.SecretLeakDetailService#detail}.
              */
-            @Nullable SecretLeakDetail secretLeak) {
+            @Nullable SecretLeakDetail secretLeak,
+            /**
+             * Set exactly on an {@code armed_window} finding from a classifier with no richer detail of
+             * its own — frustration, groundedness, and any regex/threshold classifier. Null for Secret
+             * Leak, whose {@link #secretLeak} carries the same bar plus the per-key and per-leak
+             * breakdowns it enumerates from the detection table.
+             */
+            @Nullable ArmedWindowDetail armedWindow) {
 
         /** For a caller with no malformed-output or secret-leak detail to attach. */
         public static BehaviorFindingDetailView of(FindingRow row) {
@@ -253,7 +262,10 @@ public final class BehaviorDtos {
                     FindingRow.Cause.RATE_SHIFT.equals(row.causeKind()) ? ToolErrorEvidence.detail(evidence) : null,
                     null,
                     malformedOutput,
-                    secretLeak);
+                    secretLeak,
+                    secretLeak == null && FindingRow.Cause.ARMED_WINDOW.equals(row.causeKind())
+                            ? ArmedWindowEvidence.detail(evidence)
+                            : null);
         }
     }
 

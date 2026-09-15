@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.classifier.metric;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ai.tessary.classifier.metric.MetricFindingEvidence.Explains;
+import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import org.junit.jupiter.api.Test;
+
+/**
+ * {@link MetricFindingEvidence#detail} on the fields R3 added: {@code bucket.kind}, {@code
+ * window.kind}, {@code since_version_id}, the rolling reference's {@code control} block, and {@code
+ * explains}. Fixed on a hand-written blob rather than {@link MetricFindingEvidence#toJson}'s own
+ * output, because that write path needs a {@link MetricSketch}/{@link MetricWorkload}/{@link
+ * MetricControl.Resolved} graph this test has no stake in building — the reader is what changed.
+ */
+class MetricFindingEvidenceTest {
+
+    private static final String ROLLING_ARM_BLOB = """
+            {"measure":"turn_duration","bucket":{"kind":"call_site","key":"cs-1"},
+             "reference":"previous","direction":"up","ratio":1.42,"w1_log":0.35,"floor":0.19,
+             "n_ref":500,"n_cur":80,
+             "quantiles":{"p50":[2000.0,2840.0],"p95":[4000.0,5680.0]},
+             "workload":{"input_tokens_p50":[1200.0,1250.0]},
+             "since_version_id":"v-42",
+             "control":{"days_used":14,"days_excluded_as_confirmed":2,"oldest_day":"2026-05-01",
+                        "half_life_days":7.0,"retain_days":21},
+             "window":{"opened_at":"2026-06-01T00:00:00Z","closed_at":"2026-06-02T00:00:00Z","kind":"count"},
+             "explains":[{"measure":"tool_duration","bucket":{"kind":"tool","key":"tool:search_docs"},
+                          "reference":"previous","w1_log":0.4,"ratio":1.5,"direction":"up","n_cur":50,
+                          "p50_ms":[1500.0,4500.0],"covered":1.0}]}
+            """;
+
+    @Test
+    void detail_parsesTheControlBlockAndExplains() {
+        ShiftDetail detail = MetricFindingEvidence.detail(ROLLING_ARM_BLOB);
+
+        assertNotNull(detail);
+        assertEquals("call_site", detail.bucketKind());
+        assertEquals("count", detail.windowKind());
+        assertEquals("v-42", detail.sinceVersionId());
+
+        assertNotNull(detail.control(), "the rolling arm reports how its reference was composed");
+        assertEquals(14, detail.control().daysUsed());
+        assertEquals(2, detail.control().daysExcludedAsConfirmed());
+        assertEquals("2026-05-01", detail.control().oldestDay());
+        assertEquals(7.0, detail.control().halfLifeDays());
+        assertEquals(21, detail.control().retainDays());
+
+        assertEquals(1, detail.explains().size(), "the suppressed tool shift rode along");
+        Explains explained = detail.explains().get(0);
+        assertEquals("tool_duration", explained.measure());
+        assertEquals("tool", explained.bucketKind());
+        assertEquals("tool:search_docs", explained.bucketKey());
+        assertEquals("up", explained.direction());
+        assertEquals(50, explained.nCur());
+        assertEquals(1500.0, explained.refMillis());
+        assertEquals(4500.0, explained.curMillis());
+        assertEquals(1.0, explained.covered());
+    }
+
+    @Test
+    void detail_hasNoControlOrExplainsOnThePinnedArm() {
+        String pinnedArmBlob = """
+                {"measure":"turn_duration","bucket":{"kind":"call_site","key":"cs-1"},
+                 "reference":"pinned","direction":"up","ratio":1.1,
+                 "window":{"kind":"count"}}
+                """;
+
+        ShiftDetail detail = MetricFindingEvidence.detail(pinnedArmBlob);
+
+        assertNotNull(detail);
+        assertNull(detail.control(), "the pinned arm's reference is a window, not a ring");
+        assertTrue(detail.explains().isEmpty(), "absence is the accurate statement, not an empty array read as one");
+        assertNull(detail.sinceVersionId());
+    }
+}

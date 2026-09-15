@@ -2424,6 +2424,18 @@ export interface components {
             /** Format: int64 */
             startupDate?: number;
         };
+        ArmedWindowDetail: {
+            basis: string;
+            confidence: string | null;
+            /** Format: int64 */
+            observed: number;
+            /** Format: int64 */
+            threshold: number;
+            windowEnd: string | null;
+            /** Format: int64 */
+            windowSeconds: number;
+            windowStart: string | null;
+        };
         AuditLog: {
             action: string;
             attributes: string | null;
@@ -2454,6 +2466,7 @@ export interface components {
             workflowKey: string | null;
         };
         BehaviorFindingDetailView: {
+            armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
             baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
@@ -2782,6 +2795,17 @@ export interface components {
             enforcement: string;
             kind: string;
         };
+        Control: {
+            /** Format: int32 */
+            daysExcludedAsConfirmed: number;
+            /** Format: int32 */
+            daysUsed: number;
+            /** Format: double */
+            halfLifeDays: number;
+            oldestDay: string | null;
+            /** Format: int32 */
+            retainDays: number;
+        };
         Cost: {
             baseline_usd: number | null;
             /** Format: int64 */
@@ -2928,6 +2952,25 @@ export interface components {
             match_field: string;
             match_pattern: string;
             source: string;
+        };
+        Explains: {
+            bucketKey: string;
+            bucketKind: string;
+            /** Format: double */
+            covered: number;
+            /** Format: double */
+            curMillis: number | null;
+            direction: string;
+            measure: string;
+            /** Format: int64 */
+            nCur: number;
+            /** Format: double */
+            ratio: number;
+            /** Format: double */
+            refMillis: number | null;
+            reference: string;
+            /** Format: double */
+            w1Log: number;
         };
         FacetBucket: {
             /** Format: int64 */
@@ -3466,9 +3509,14 @@ export interface components {
         RateDetail: {
             bucketKey: string;
             /** Format: double */
+            criticality: number;
+            /** Format: double */
             curRate: number;
             /** Format: double */
             deltaPp: number;
+            direction: string;
+            /** Format: double */
+            effectSize: number;
             failingTraces: string[];
             /** Format: int64 */
             failuresCur: number;
@@ -3481,6 +3529,10 @@ export interface components {
             patternsTruncated: boolean;
             /** Format: double */
             refRate: number;
+            /** Format: double */
+            statistic: number;
+            /** Format: double */
+            threshold: number;
             windowClosedAt: string | null;
             windowOpenedAt: string | null;
         };
@@ -3668,6 +3720,7 @@ export interface components {
             rows: components["schemas"]["SearchRow"][];
         };
         SecretLeakDetail: {
+            basis: string;
             confidence: string;
             firstAt: string | null;
             keys: components["schemas"]["SecretLeakKeyView"][];
@@ -3677,7 +3730,13 @@ export interface components {
             leaks: components["schemas"]["SecretLeakLeakView"][];
             rule: string;
             /** Format: int64 */
+            threshold: number;
+            /** Format: int64 */
             traceCount: number;
+            windowEnd: string | null;
+            /** Format: int64 */
+            windowSeconds: number;
+            windowStart: string | null;
         };
         SecretLeakKeyView: {
             lastAt: string | null;
@@ -3693,7 +3752,7 @@ export interface components {
             masked: string;
             spanId: string | null;
             stored: string;
-            traceId: string;
+            traceId: string | null;
         };
         SelectInstallationRequest: {
             /** Format: int64 */
@@ -3908,7 +3967,10 @@ export interface components {
         };
         ShiftDetail: {
             bucketKey: string;
+            bucketKind: string;
+            control: components["schemas"]["Control"] | null;
             direction: string;
+            explains: components["schemas"]["Explains"][];
             /** Format: double */
             floor: number;
             measure: string;
@@ -3920,10 +3982,12 @@ export interface components {
             /** Format: double */
             ratio: number;
             reference: string;
+            sinceVersionId: string | null;
             tokens: components["schemas"]["Pair"][];
             /** Format: double */
             w1Log: number;
             windowClosedAt: string | null;
+            windowKind: string | null;
             windowOpenedAt: string | null;
             workload: components["schemas"]["Pair"][];
         };

@@ -11,6 +11,9 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.malformed.MalformedOutputEvidence;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
@@ -717,12 +720,13 @@ public class McpToolRegistry {
         add(new McpTool(
                 "get_finding",
                 "Fetch one classifier finding by id, scoped to this token's project — the aggregated cause"
-                        + " behind a behaviour-drift, metric-drift, or tool-error-rate-drift detection (many"
-                        + " individual firings rolled into one cause), the same object the Classifiers findings"
-                        + " page renders. Distinct from a single firing (see the classifier_events dataset in"
-                        + " query_search/query_facets) and from an RCA report, which reads inline on the case"
-                        + " that owns it (see get_case). For the rows the detector measured, page"
-                        + " get_finding_evidence.",
+                        + " behind a detection (many individual firings rolled into one cause), with a complete"
+                        + " summary of every number its classifier measured: the shift or rate, its statistic and"
+                        + " threshold, and the reference it was judged against. Carries no sample and no trace or"
+                        + " span id of any kind — for the population the detector measured, page"
+                        + " get_finding_evidence. Distinct from a single firing (see the classifier_events dataset"
+                        + " in query_search/query_facets) and from an RCA report, which reads inline on the case"
+                        + " that owns it (see get_case).",
                 schema(Map.of("id", strField("Finding id, e.g. from a Classifiers findings page URL.")), List.of("id")),
                 (ctx, args) -> getFinding(ctx, requireStr(args, "id"))));
 
@@ -806,28 +810,83 @@ public class McpToolRegistry {
     }
 
     /**
-     * A finding detail with the triage ruling removed. RCA receives a finding id and nothing else: no
-     * ruling, no summary, no rule-outs, not even the fact that a triage pass happened, because "nothing
-     * happened here" is a supported RCA conclusion and the only check on the triage gate. The RCA agent
-     * runs with its own finding id against this same tool, so the firewall has to hold here too, not only
-     * in the dossier and the prompt, and is applied to every caller since the RCA key family is not
+     * A finding detail for an agent's eyes: the triage ruling removed, and every sample and trace/span
+     * id removed from the summary blocks too. RCA receives a finding id and nothing else: no ruling, no
+     * summary, no rule-outs, not even the fact that a triage pass happened, because "nothing happened
+     * here" is a supported RCA conclusion and the only check on the triage gate. The RCA agent runs with
+     * its own finding id against this same tool, so the firewall has to hold here too, not only in the
+     * dossier and the prompt, and is applied to every caller since the RCA key family is not
      * distinguishable at this layer.
+     *
+     * <p>The id stripping is the second, separate firewall this method carries: {@code get_finding} is a
+     * SUMMARY surface, complete on its numbers but carrying no undeclared sample of instances — an agent
+     * handed a handful of ids reads those and calls the claim audited. Evidence, ids included, is what
+     * {@code get_finding_evidence} pages on purpose. The UI's own {@code GET /findings/{id}} renders the
+     * unstripped {@link BehaviorFindingDetailView} directly (a human following a link is a reading aid,
+     * not a biased sample), so this trimming happens here, at the agent door, and nowhere upstream of it.
      */
-    private static BehaviorFindingDetailView withoutTriage(BehaviorFindingDetailView detail) {
+    private static BehaviorFindingDetailView agentView(BehaviorFindingDetailView detail) {
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
-                detail.toolError(),
+                detail.toolError() == null ? null : withoutIds(detail.toolError()),
                 detail.baseline(),
-                detail.malformedOutput(),
-                detail.secretLeak());
+                detail.malformedOutput() == null ? null : withoutIds(detail.malformedOutput()),
+                detail.secretLeak() == null ? null : withoutIds(detail.secretLeak()),
+                detail.armedWindow());
     }
 
-    /** See {@link #withoutTriage}: the same firewall applies here. */
+    private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {
+        return new ToolErrorEvidence.RateDetail(
+                rate.bucketKey(),
+                rate.refRate(),
+                rate.curRate(),
+                rate.deltaPp(),
+                rate.nRef(),
+                rate.nCur(),
+                rate.failuresCur(),
+                rate.patterns(),
+                rate.patternsTruncated(),
+                List.of(),
+                rate.onsetAt(),
+                rate.windowOpenedAt(),
+                rate.windowClosedAt(),
+                rate.direction(),
+                rate.statistic(),
+                rate.threshold(),
+                rate.effectSize(),
+                rate.criticality());
+    }
+
+    private static MalformedOutputEvidence.MalformedDetail withoutIds(MalformedOutputEvidence.MalformedDetail detail) {
+        return new MalformedOutputEvidence.MalformedDetail(
+                withoutIds(detail.rate()), detail.fields(), detail.notJson(), detail.other());
+    }
+
+    private static SecretLeakEvidence.SecretLeakDetail withoutIds(SecretLeakEvidence.SecretLeakDetail detail) {
+        return new SecretLeakEvidence.SecretLeakDetail(
+                detail.rule(),
+                detail.confidence(),
+                detail.leakCount(),
+                detail.traceCount(),
+                detail.firstAt(),
+                detail.lastAt(),
+                detail.keys(),
+                detail.leaks().stream()
+                        .map(l -> new SecretLeakEvidence.SecretLeakLeakView(l.at(), l.masked(), l.stored(), null, null))
+                        .toList(),
+                detail.basis(),
+                detail.threshold(),
+                detail.windowSeconds(),
+                detail.windowStart(),
+                detail.windowEnd());
+    }
+
+    /** See {@link #agentView}. */
     private BehaviorFindingDetailView getFinding(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         try {
-            return withoutTriage(behaviorDrift.finding(projectId, id));
+            return agentView(behaviorDrift.finding(projectId, id));
         } catch (TessaryException e) {
             String message = e.getMessage();
             throw new McpTool.ToolException(message == null ? "finding not found: " + id : message, e);

@@ -2196,6 +2196,53 @@
         },
         "type" : "object"
       },
+      "ArmedWindowDetail" : {
+        "properties" : {
+          "basis" : {
+            "type" : "string"
+          },
+          "confidence" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "observed" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "threshold" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "windowEnd" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "windowSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "windowStart" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "basis",
+          "confidence",
+          "observed",
+          "threshold",
+          "windowEnd",
+          "windowSeconds",
+          "windowStart"
+        ],
+        "type" : "object"
+      },
       "AuditLog" : {
         "properties" : {
           "action" : {
@@ -2332,6 +2379,16 @@
       },
       "BehaviorFindingDetailView" : {
         "properties" : {
+          "armedWindow" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ArmedWindowDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "baseline" : {
             "anyOf" : [
               {
@@ -2387,6 +2444,7 @@
           }
         },
         "required" : [
+          "armedWindow",
           "baseline",
           "finding",
           "malformedOutput",
@@ -3931,6 +3989,40 @@
         ],
         "type" : "object"
       },
+      "Control" : {
+        "properties" : {
+          "daysExcludedAsConfirmed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "daysUsed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "halfLifeDays" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "oldestDay" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "retainDays" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "daysExcludedAsConfirmed",
+          "daysUsed",
+          "halfLifeDays",
+          "oldestDay",
+          "retainDays"
+        ],
+        "type" : "object"
+      },
       "Cost" : {
         "properties" : {
           "baseline_usd" : {
@@ -4548,6 +4640,69 @@
           "match_field",
           "match_pattern",
           "source"
+        ],
+        "type" : "object"
+      },
+      "Explains" : {
+        "properties" : {
+          "bucketKey" : {
+            "type" : "string"
+          },
+          "bucketKind" : {
+            "type" : "string"
+          },
+          "covered" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "curMillis" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "direction" : {
+            "type" : "string"
+          },
+          "measure" : {
+            "type" : "string"
+          },
+          "nCur" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "ratio" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "refMillis" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "reference" : {
+            "type" : "string"
+          },
+          "w1Log" : {
+            "format" : "double",
+            "type" : "number"
+          }
+        },
+        "required" : [
+          "bucketKey",
+          "bucketKind",
+          "covered",
+          "curMillis",
+          "direction",
+          "measure",
+          "nCur",
+          "ratio",
+          "refMillis",
+          "reference",
+          "w1Log"
         ],
         "type" : "object"
       },
@@ -6963,11 +7118,22 @@
           "bucketKey" : {
             "type" : "string"
           },
+          "criticality" : {
+            "format" : "double",
+            "type" : "number"
+          },
           "curRate" : {
             "format" : "double",
             "type" : "number"
           },
           "deltaPp" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "direction" : {
+            "type" : "string"
+          },
+          "effectSize" : {
             "format" : "double",
             "type" : "number"
           },
@@ -7008,6 +7174,14 @@
             "format" : "double",
             "type" : "number"
           },
+          "statistic" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "threshold" : {
+            "format" : "double",
+            "type" : "number"
+          },
           "windowClosedAt" : {
             "type" : [
               "string",
@@ -7023,8 +7197,11 @@
         },
         "required" : [
           "bucketKey",
+          "criticality",
           "curRate",
           "deltaPp",
+          "direction",
+          "effectSize",
           "failingTraces",
           "failuresCur",
           "nCur",
@@ -7033,6 +7210,8 @@
           "patterns",
           "patternsTruncated",
           "refRate",
+          "statistic",
+          "threshold",
           "windowClosedAt",
           "windowOpenedAt"
         ],
@@ -7762,6 +7941,9 @@
       },
       "SecretLeakDetail" : {
         "properties" : {
+          "basis" : {
+            "type" : "string"
+          },
           "confidence" : {
             "type" : "string"
           },
@@ -7796,12 +7978,33 @@
           "rule" : {
             "type" : "string"
           },
+          "threshold" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "traceCount" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "windowEnd" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "windowSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "windowStart" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
+          "basis",
           "confidence",
           "firstAt",
           "keys",
@@ -7809,7 +8012,11 @@
           "leakCount",
           "leaks",
           "rule",
-          "traceCount"
+          "threshold",
+          "traceCount",
+          "windowEnd",
+          "windowSeconds",
+          "windowStart"
         ],
         "type" : "object"
       },
@@ -7866,7 +8073,10 @@
             "type" : "string"
           },
           "traceId" : {
-            "type" : "string"
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -8634,8 +8844,27 @@
           "bucketKey" : {
             "type" : "string"
           },
+          "bucketKind" : {
+            "type" : "string"
+          },
+          "control" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/Control"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "direction" : {
             "type" : "string"
+          },
+          "explains" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Explains"
+            },
+            "type" : "array"
           },
           "floor" : {
             "format" : "double",
@@ -8665,6 +8894,12 @@
           "reference" : {
             "type" : "string"
           },
+          "sinceVersionId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "tokens" : {
             "items" : {
               "$ref" : "#/components/schemas/Pair"
@@ -8676,6 +8911,12 @@
             "type" : "number"
           },
           "windowClosedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "windowKind" : {
             "type" : [
               "string",
               "null"
@@ -8696,7 +8937,10 @@
         },
         "required" : [
           "bucketKey",
+          "bucketKind",
+          "control",
           "direction",
+          "explains",
           "floor",
           "measure",
           "nCur",
@@ -8704,9 +8948,11 @@
           "quantiles",
           "ratio",
           "reference",
+          "sinceVersionId",
           "tokens",
           "w1Log",
           "windowClosedAt",
+          "windowKind",
           "windowOpenedAt",
           "workload"
         ],

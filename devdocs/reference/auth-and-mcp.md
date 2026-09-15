@@ -117,6 +117,18 @@ a bypass. What the surface loses is a ruling a human can see one click away in t
 these fields through `FindingController` (renamed from `BehaviorController`) and is untouched. Background:
 [`architecture.md`](./architecture.md) § *The three analysis layers*.
 
+**`get_finding` carries a second, separate redaction: no sample, no trace or span id of any kind.**
+It is a complete SUMMARY of every number a finding's classifier measured — a tool-error shift's
+statistic and threshold, a metric shift's rolling-reference composition, a secret-leak facet's bar
+— but never the instances behind them: `toolError.failingTraces`, `malformedOutput.rate
+.failingTraces` and `secretLeak.leaks[].traceId`/`spanId` are stripped before the response leaves
+the server, on both the RCA and the triage lane. `McpToolRegistry#agentView` is the redaction (the
+same method that strips the triage ruling above); `McpFindingToolsTest` pins it. The UI's own `GET
+/findings/{id}` renders `BehaviorFindingDetailView` unstripped — a human following a link is a
+reading aid, not an undeclared sample presented as the whole population, which is what handing an
+agent a handful of ids would be. `get_finding_evidence` is where an agent gets ids on purpose, one
+row per unit the detector measured, never a sample.
+
 ## Known limitations
 
 - **`list_findings` truncates silently.** Each `TriageSource` (`BehaviorTriageSource`, and

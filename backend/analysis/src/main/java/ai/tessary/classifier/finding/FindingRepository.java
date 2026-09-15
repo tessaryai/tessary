@@ -193,7 +193,13 @@ public class FindingRepository {
                 sample_count = finding.sample_count + EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                payload = EXCLUDED.payload,
+                -- Frozen once a ruling stands (Recorded#ruled): a human or Layer 2 read and ruled on
+                -- the claim this payload states, and a later close must not re-point it out from under
+                -- them. reopenForTriage nulls triage_action, which is what makes a re-opened finding
+                -- re-pointable again.
+                payload = CASE
+                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
+                    THEN EXCLUDED.payload ELSE finding.payload END,
                 -- The onset moves only across an observed recovery, never within a spell.
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
@@ -298,7 +304,10 @@ public class FindingRepository {
                 sample_count = EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                payload = EXCLUDED.payload,
+                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift.
+                payload = CASE
+                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
+                    THEN EXCLUDED.payload ELSE finding.payload END,
                 -- A row that went unrefreshed past :quietBefore had stopped firing, so this is a new
                 -- spell rather than the same one still running. Text comparison because both sides are
                 -- Instant.toString() — ISO-8601 UTC sorts lexicographically.
@@ -373,7 +382,10 @@ public class FindingRepository {
                 sample_count = EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                payload = EXCLUDED.payload,
+                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift.
+                payload = CASE
+                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
+                    THEN EXCLUDED.payload ELSE finding.payload END,
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
                     ELSE finding.onset_at END,
@@ -452,13 +464,20 @@ public class FindingRepository {
                 sample_count = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
                     THEN EXCLUDED.sample_count ELSE finding.sample_count END,
+                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift. Frozen means frozen:
+                -- once ruled, neither the newer-window replace nor the sticky-confidence merge below
+                -- may touch the payload a human or Layer 2 already read.
                 payload = CASE
-                    WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
-                    THEN EXCLUDED.payload ELSE finding.payload END
-                    -- High confidence is sticky across windows, in either arrival order: one high-band
-                    -- detection is enough to call the whole facet a real credential.
-                    || CASE WHEN finding.payload ->> 'confidence' = 'high' OR EXCLUDED.payload ->> 'confidence' = 'high'
-                            THEN '{"confidence": "high"}'::jsonb ELSE '{}'::jsonb END,
+                    WHEN finding.triage_action IS NOT NULL OR finding.human_verdict_at IS NOT NULL
+                    THEN finding.payload
+                    ELSE (CASE
+                        WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
+                        THEN EXCLUDED.payload ELSE finding.payload END
+                        -- High confidence is sticky across windows, in either arrival order: one high-band
+                        -- detection is enough to call the whole facet a real credential.
+                        || CASE WHEN finding.payload ->> 'confidence' = 'high' OR EXCLUDED.payload ->> 'confidence' = 'high'
+                                THEN '{"confidence": "high"}'::jsonb ELSE '{}'::jsonb END)
+                    END,
                 last_seen_at = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
                     THEN EXCLUDED.last_seen_at ELSE finding.last_seen_at END,

@@ -85,7 +85,12 @@ public final class MalformedOutputEvidence {
                 failingTraces,
                 finding.onsetAt(),
                 null,
-                null);
+                null,
+                body.path("direction").asText("up"),
+                body.path("statistic").asDouble(0),
+                body.path("threshold").asDouble(0),
+                body.path("effect_size").asDouble(0),
+                body.path("criticality").asDouble(0));
     }
 
     /**
