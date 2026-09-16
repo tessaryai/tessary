@@ -2723,6 +2723,7 @@ export interface components {
             detected_at: string;
             evidence_json: string | null;
             id: string;
+            occurred_at: string | null;
             project_version_id: string | null;
             severity: string | null;
             subject_id: string;

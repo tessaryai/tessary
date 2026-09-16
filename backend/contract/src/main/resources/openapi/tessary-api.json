@@ -3709,6 +3709,12 @@
           "id" : {
             "type" : "string"
           },
+          "occurred_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "project_version_id" : {
             "type" : [
               "string",
@@ -3741,6 +3747,7 @@
           "detected_at",
           "evidence_json",
           "id",
+          "occurred_at",
           "project_version_id",
           "severity",
           "subject_id",

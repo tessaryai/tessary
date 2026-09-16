@@ -136,6 +136,50 @@ class ClassifierDailyVolumeIntegrationTest {
     }
 
     @Test
+    void aBackfillChartsOnTheDaysTheSpansRan() {
+        String pid = TenantFixture.bootstrap(tenants, "classifier-daily-backfill")
+                .project()
+                .id();
+        jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
+                .param("pid", pid)
+                .update();
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate backfillDay = today.minusDays(3);
+        Instant sweepNow = today.atTime(12, 0).toInstant(ZoneOffset.UTC);
+        Instant backfillMid = backfillDay.atTime(12, 0).toInstant(ZoneOffset.UTC);
+
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String traceA = seedTrace(pid, sessionId, backfillMid);
+        String classifierId = insertClassifier(pid, "secret_leak", "Secret leak");
+
+        // A backfill sweep: checked today (created_at = sweepNow), over a span that ran three days ago
+        // (subject_started_at = backfillMid). It must chart on the day it ran, not the day it was checked.
+        insertDetection(
+                pid,
+                classifierId,
+                "secret_leak",
+                sessionId,
+                traceA,
+                SubstrateV2Fixtures.spanId(),
+                backfillMid,
+                sweepNow);
+        // A row whose subject_started_at is NULL (its span and trace have both since been deleted): it
+        // falls out of every day bucket rather than being guessed onto the sweep day.
+        insertDetection(
+                pid, classifierId, "secret_leak", sessionId, traceA, SubstrateV2Fixtures.spanId(), null, sweepNow);
+
+        ClassifierService.DailyVolume v = service.dailyVolume(pid, 7);
+        int backfillIdx = v.days().indexOf(backfillDay.toString());
+        int todayIdx = v.days().indexOf(today.toString());
+        assertTrue(backfillIdx >= 0, "the backfill day is inside the 7-day window");
+
+        long[] counts = countsFor(v, classifierId);
+        assertEquals(1, counts[backfillIdx], "the backfilled detection lands on the day its span ran");
+        assertEquals(0, counts[todayIdx], "not on the day the sweep checked it");
+        assertEquals(1, sum(counts), "the null-time row lands in no bucket at all");
+    }
+
+    @Test
     void daysParameterIsClamped() {
         String pid = TenantFixture.bootstrap(tenants, "classifier-daily-clamp")
                 .project()
@@ -179,12 +223,35 @@ class ClassifierDailyVolumeIntegrationTest {
      * <p>Every detection here is span-grain: several spans of one trace is exactly how a trace collects
      * more than one detection of the same classifier, which is what the distinct-trace count exists to
      * collapse.
+     *
+     * <p>{@code subject_started_at} is set to {@code at}: the daily read now buckets on it (migration
+     * {@code 0012}, decision 8b), not on the sweep-time {@code created_at} this same {@code at} also
+     * backdates for determinism.
      */
     private void insertDetection(
             String pid, String classifierId, String key, String sessionId, String traceId, String spanId, Instant at) {
+        insertDetection(pid, classifierId, key, sessionId, traceId, spanId, at, at);
+    }
+
+    /**
+     * As above, with the event clock ({@code subject_started_at}) and the sweep clock ({@code created_at})
+     * independently controllable — for {@code subjectStartedAt == null}, the row a span or trace deletion
+     * has already stripped its event time from.
+     */
+    private void insertDetection(
+            String pid,
+            String classifierId,
+            String key,
+            String sessionId,
+            String traceId,
+            String spanId,
+            @org.jspecify.annotations.Nullable Instant subjectStartedAt,
+            Instant createdAt) {
         jdbc.sql("INSERT INTO secret_leak_detection (id, project_id, classifier_id, classifier_key, "
-                        + "subject_session_id, subject_trace_id, subject_span_id, severity, confidence, created_at) "
-                        + "VALUES (:id, :pid, :sid, :key, :ses, :trace, :span, 'warn', 'high', :at::timestamptz)")
+                        + "subject_session_id, subject_trace_id, subject_span_id, severity, confidence,"
+                        + " subject_started_at, created_at) "
+                        + "VALUES (:id, :pid, :sid, :key, :ses, :trace, :span, 'warn', 'high',"
+                        + " CAST(:subjectAt AS timestamptz), :at::timestamptz)")
                 .param("id", Ids.ulid())
                 .param("pid", pid)
                 .param("sid", classifierId)
@@ -192,7 +259,8 @@ class ClassifierDailyVolumeIntegrationTest {
                 .param("ses", sessionId)
                 .param("trace", traceId)
                 .param("span", spanId)
-                .param("at", at.toString())
+                .param("subjectAt", subjectStartedAt == null ? null : subjectStartedAt.toString())
+                .param("at", createdAt.toString())
                 .update();
     }
 

@@ -403,7 +403,7 @@ function truncate(s: string, max: number): string {
  * confirming. Analysis is offered on the finding, where the cause has already been made, and the
  * grader lane is one of the choices there.
  */
-function DetectionRow({ event }: { event: ClassifierEvent }) {
+export function DetectionRow({ event }: { event: ClassifierEvent }) {
   const summary = evidenceSummary(event.evidence_json);
   // Severity reads as text, never a red pill: Classifiers is amber-only by design.
   const severe = event.severity === "warn" || event.severity === "critical";
@@ -423,7 +423,7 @@ function DetectionRow({ event }: { event: ClassifierEvent }) {
           </span>
         )}
         <span className="shrink-0 text-subtle text-label">
-          {ago(event.detected_at)}
+          {ago(event.occurred_at ?? event.detected_at)}
         </span>
       </div>
       {summary && (

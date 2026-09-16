@@ -39,7 +39,8 @@ public class ClassifierDetectionRepository {
                 + "d.subject_session_id AS session_id, d.subject_trace_id AS trace_id, "
                 + "d.subject_span_id AS span_id, "
                 + "d.project_version_id AS project_version_id, d.evidence AS evidence, "
-                + "d.severity AS severity, d.confidence AS confidence, d.created_at AS created_at "
+                + "d.severity AS severity, d.confidence AS confidence, d.created_at AS created_at, "
+                + "d.subject_started_at AS subject_started_at "
                 + "FROM " + relation + " "
                 + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id ";
         this.modeCountsSql = "SELECT\n"
@@ -47,18 +48,20 @@ public class ClassifierDetectionRepository {
                 + "  COUNT(*) FILTER (WHERE confidence = 'high' OR confidence IS NULL) AS high_count\n"
                 + "FROM " + relation + " WHERE project_id = :pid AND classifier_id = :classifierKey";
         this.dailyCountsSql = "SELECT s.id AS classifier_id,\n"
-                + "       (d.created_at AT TIME ZONE 'UTC')::date AS day,\n"
+                + "       (d.subject_started_at AT TIME ZONE 'UTC')::date AS day,\n"
                 + "       COUNT(DISTINCT d.subject_trace_id) AS traces\n"
                 + "FROM " + relation + "\n"
                 + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id\n"
-                + "WHERE d.project_id = :pid AND d.created_at >= :from\n"
+                + "WHERE d.project_id = :pid AND d.subject_started_at >= :from\n"
                 + "GROUP BY s.id, day\n"
                 + "ORDER BY day ASC";
     }
 
-    /** All detections for a project, newest-first. */
+    /** All detections for a project, newest event-time first. */
     public List<ClassifierDtos.ClassifierEventView> listByProject(String projectId, int limit) {
-        return jdbc.sql(select + "WHERE d.project_id = :pid ORDER BY d.created_at DESC LIMIT :limit")
+        return jdbc.sql(select
+                        + "WHERE d.project_id = :pid ORDER BY d.subject_started_at DESC NULLS LAST, d.created_at DESC"
+                        + " LIMIT :limit")
                 .param("pid", projectId)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
@@ -66,14 +69,14 @@ public class ClassifierDetectionRepository {
     }
 
     /**
-     * Detections for one classifier key, newest-first. When {@code trackingOnly}, restrict to
-     * the high-confidence band (unbanded NULL reads as high).
+     * Detections for one classifier key, newest event-time first. When {@code trackingOnly},
+     * restrict to the high-confidence band (unbanded NULL reads as high).
      */
     public List<ClassifierDtos.ClassifierEventView> listByClassifierKey(
             String projectId, String classifierKey, boolean trackingOnly, int limit) {
         String confidenceFilter = trackingOnly ? " AND (d.confidence = 'high' OR d.confidence IS NULL)" : "";
         return jdbc.sql(select + "WHERE d.project_id = :pid AND d.classifier_id = :classifierKey" + confidenceFilter
-                        + " ORDER BY d.created_at DESC LIMIT :limit")
+                        + " ORDER BY d.subject_started_at DESC NULLS LAST, d.created_at DESC LIMIT :limit")
                 .param("pid", projectId)
                 .param("classifierKey", classifierKey)
                 .param("limit", limit)
@@ -95,9 +98,12 @@ public class ClassifierDetectionRepository {
 
     /**
      * Per-classifier, per-UTC-day distinct-trace detection counts since {@code from}, oldest day
-     * first. Buckets on {@code (created_at AT TIME ZONE 'UTC')::date} rather than
+     * first. Buckets on {@code (subject_started_at AT TIME ZONE 'UTC')::date} — the day the span
+     * ran, not the day the sweep checked it, so a backfill charts on its real days — rather than
      * {@code date_trunc('day', ...)}: date_trunc on a timestamptz follows the session timezone,
-     * which would shift day boundaries.
+     * which would shift day boundaries. A row with no {@code subject_started_at} falls out of the
+     * {@code >= :from} filter rather than being coalesced onto today, which would misreport it and
+     * would stop the {@code ix_*_subject_started} index from being usable.
      */
     public List<DailyClassifierCount> dailyDetectionCounts(String projectId, java.time.Instant from) {
         return jdbc.sql(dailyCountsSql)
@@ -129,6 +135,7 @@ public class ClassifierDetectionRepository {
                 rs.getString("severity"), // the detection's coarse severity
                 rs.getString("evidence"),
                 rs.getString("confidence"),
-                java.util.Objects.requireNonNull(Timestamps.iso(rs, "created_at"), "detection created_at is NOT NULL"));
+                java.util.Objects.requireNonNull(Timestamps.iso(rs, "created_at"), "detection created_at is NOT NULL"),
+                Timestamps.iso(rs, "subject_started_at"));
     }
 }

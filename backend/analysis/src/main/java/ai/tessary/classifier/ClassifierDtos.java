@@ -82,7 +82,8 @@ public final class ClassifierDtos {
             @Nullable String severity,
             @JsonProperty("evidence_json") @Nullable String evidenceJson,
             @Nullable String confidence,
-            @JsonProperty("detected_at") String detectedAt) {}
+            @JsonProperty("detected_at") String detectedAt,
+            @JsonProperty("occurred_at") @Nullable String occurredAt) {}
 
     /** Toggle the enable/disable lifecycle of a classifier definition. */
     public record SetEnabledRequest(@NotNull Boolean enabled) {}

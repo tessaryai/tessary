@@ -609,8 +609,8 @@ public class ClassifierService {
      * days, oldest first, the last bucket being today-so-far; every array is zero-filled and
      * aligned with {@code days()}, and every classifier definition gets an entry, so a silent
      * classifier shows a flat zero strip rather than a missing row. Counts are distinct traces
-     * bucketed by detection time, so a backfill sweep can legitimately push a day's count past
-     * that day's trace total.
+     * bucketed by {@code subject_started_at}, the same clock {@code dailyTraceCounts} totals on,
+     * so a backfilled classifier's bars land on the days its traffic actually ran.
      */
     public DailyVolume dailyVolume(String projectId, int days) {
         int d = Math.clamp(days, 1, 30);
