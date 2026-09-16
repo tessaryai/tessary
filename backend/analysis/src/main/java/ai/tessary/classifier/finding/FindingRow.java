@@ -67,8 +67,9 @@ public record FindingRow(
         @Nullable String triagedAt,
         /** When a human ruled. Their verdict outranks any later machine one. */
         @Nullable String humanVerdictAt,
-        /** Firings since that ruling: the number behind "you blocked this and it kept happening". */
-        long recurrencesSinceVerdict,
+        /** The case this finding opened or joined, or null while it backs none. Set once a ruling is
+         *  positive; the finding stays {@link Status#OPEN} for as long as that case is unresolved. */
+        @Nullable String caseId,
         String createdAt,
         String updatedAt) {
 
@@ -149,16 +150,17 @@ public record FindingRow(
         return FindingPayload.tree(payloadJson);
     }
 
-    /** {@code finding.status} values. */
+    /**
+     * {@code finding.status} values: open or closed, and nothing else. A ruling freezes the row by
+     * construction — see {@code ux_finding_live} — so status alone no longer distinguishes an
+     * untriaged finding from a positively-ruled one still backing a case; {@link #triageVerdict} does
+     * that.
+     */
     public static final class Status {
         private Status() {}
 
         public static final String OPEN = "open";
-        public static final String GRADUATED = "graduated";
-        public static final String ALLOWLISTED = "allowlisted";
-        public static final String BLOCKED = "blocked";
-        public static final String RESOLVED = "resolved";
-        public static final String ABSORBED = "absorbed";
+        public static final String CLOSED = "closed";
     }
 
     /**

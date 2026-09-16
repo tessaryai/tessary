@@ -17,15 +17,17 @@ import org.springframework.stereotype.Repository;
  * JdbcClient repository for {@code finding} — the one table every classifier files into.
  *
  * <p><b>Every upsert here conflicts on the SAME arbiter</b>, {@code ux_finding_live} over
- * {@code (project_id, classifier_key, cause_key)} with the predicate {@code status IN ('open',
- * 'blocked')}. That is the whole point of composing scope into {@link CauseKey}: the three writers used
- * to conflict on three different partial indexes, and Postgres infers the arbiter from the conflict
- * target, so one method could not name them all. The predicate is restated character for character in
- * each statement because a partial index is matched by its expression.
+ * {@code (project_id, classifier_key, cause_key)} with the predicate {@code status = 'open' AND
+ * triage_verdict IS NULL}. That is the whole point of composing scope into {@link CauseKey}: the three
+ * writers used to conflict on three different partial indexes, and Postgres infers the arbiter from the
+ * conflict target, so one method could not name them all. The predicate is restated character for
+ * character in each statement because a partial index is matched by its expression.
  *
- * <p><b>'blocked' stays live, and dropping it re-introduces 0033's bug class.</b> A blocked row that
- * left the index would conflict with nothing, the next firing would INSERT beside it, {@code onset_at}
- * would reset, and the human verdict would be silently discarded.
+ * <p><b>A ruled finding leaves the index by construction.</b> Once a verdict lands — machine or human —
+ * the row no longer satisfies {@code triage_verdict IS NULL}, so no upsert here can ever conflict onto
+ * it again: the next firing of the same cause INSERTs a fresh open row instead of silently mutating a
+ * settled one. That is also why the payload-freeze and recurrence-counter branches every upsert used to
+ * carry are gone — there is no ruled row left for them to guard against.
  *
  * <p>Each {@code record*} returns whether THIS call created the finding: a new finding escalates once,
  * on its exemplar, while the 499 later traces firing on the same cause only bump a counter. That single
@@ -38,7 +40,7 @@ public class FindingRepository {
             + "subject_label, call_site_id, status, onset_at, last_seen_at, title, basis, severity, "
             + "sample_count, payload, evidence_counts, since_version_id, escalated_at, triage_verdict, "
             + "triage_action, triage_summary, triage_citations, triaged_at, human_verdict_at, "
-            + "recurrences_since_verdict, created_at, updated_at";
+            + "case_id, created_at, updated_at";
 
     /**
      * {@link FindingClaim}'s columns: what the detector asserted, and not one column any layer wrote
@@ -48,7 +50,12 @@ public class FindingRepository {
             + "subject_id, subject_label, call_site_id, onset_at, last_seen_at, title, basis, severity, "
             + "sample_count, payload, evidence_counts, created_at";
 
-    private static final String LIVE = "status IN ('open', 'blocked')";
+    /** Every finding, ruled or not, still short of a settled negative. */
+    private static final String LIVE = "status = 'open'";
+
+    /** The arbiter every upsert conflicts on — see the class javadoc. Restated literally in each
+     *  statement, since a partial index is matched by its expression rather than by name. */
+    private static final String OPEN_UNRULED = "status = 'open' AND triage_verdict IS NULL";
 
     private final JdbcClient jdbc;
 
@@ -75,24 +82,7 @@ public class FindingRepository {
             String findingId,
             boolean created,
             long sampleCount,
-            @Nullable String escalatedAt,
-            /** Set once a human has ruled. Layer 2 must not re-litigate a settled cause. */
-            @Nullable String humanVerdictAt,
-            /**
-             * What triage did to this finding, or null while nothing has ruled on it.
-             *
-             * <p>Read by the writers that keep a finding's evidence in step with its payload: a claim may
-             * be re-pointed while no ruling stands, and never once one does. {@code reopenForTriage} nulls
-             * this, so a finding sent back for a second look is re-pointable again, which is the property
-             * that keeps the second look auditable.
-             */
-            @Nullable String triageAction) {
-
-        /** Whether some ruling stands on this finding right now. */
-        public boolean ruled() {
-            return triageAction != null || humanVerdictAt != null;
-        }
-    }
+            @Nullable String escalatedAt) {}
 
     /**
      * Record {@code traceDelta} firings against a behaviour-drift cause, creating the OPEN finding if
@@ -122,19 +112,11 @@ public class FindingRepository {
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
                     'open', :now, :now, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = finding.sample_count + EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
-                updated_at = EXCLUDED.updated_at,
-                -- Recurrences are firings that happened AFTER something ruled on the cause: a human
-                -- pressing BLOCKED, or a triage run closing it. Both are a settled question that the
-                -- traffic then contradicted, which is a much stronger claim than the ordinary
-                -- accumulation an unruled finding does — and for the triage arm it is the counter the
-                -- re-open rule reads.
-                recurrences_since_verdict = finding.recurrences_since_verdict
-                    + CASE WHEN finding.status = 'blocked' OR finding.triage_action = 'closed'
-                           THEN EXCLUDED.sample_count ELSE 0 END
-            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+                updated_at = EXCLUDED.updated_at
+            RETURNING id, sample_count, escalated_at
             """)
                 .param("id", id)
                 .param("pid", projectId)
@@ -195,26 +177,19 @@ public class FindingRepository {
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :callSiteId,
                     'open', :eventAt, :eventAt, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = finding.sample_count + EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                -- Frozen once a ruling stands (Recorded#ruled): a human or Layer 2 read and ruled on
-                -- the claim this payload states, and a later close must not re-point it out from under
-                -- them. reopenForTriage nulls triage_action, which is what makes a re-opened finding
-                -- re-pointable again.
-                payload = CASE
-                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
-                    THEN EXCLUDED.payload ELSE finding.payload END,
+                -- The conflict target only ever matches an unruled row (see the class javadoc), so the
+                -- payload here is always safe to re-point: nothing has read and ruled on this claim yet.
+                payload = EXCLUDED.payload,
                 -- The onset moves only across an observed recovery, never within a spell. Both sides are
                 -- now EVENT time.
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
-                    ELSE finding.onset_at END,
-                recurrences_since_verdict = finding.recurrences_since_verdict
-                    + CASE WHEN finding.status = 'blocked' OR finding.triage_action = 'closed'
-                           THEN EXCLUDED.sample_count ELSE 0 END
-            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+                    ELSE finding.onset_at END
+            RETURNING id, sample_count, escalated_at
             """)
                 .param("id", id)
                 .param("pid", projectId)
@@ -308,28 +283,19 @@ public class FindingRepository {
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
                     'open', :onsetAt, :now, :count, CAST(:payload AS jsonb), :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift.
-                payload = CASE
-                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
-                    THEN EXCLUDED.payload ELSE finding.payload END,
+                -- The conflict target only ever matches an unruled row — see recordShift.
+                payload = EXCLUDED.payload,
                 -- A row that went unrefreshed past :quietBefore had stopped firing, so this is a new
                 -- spell rather than the same one still running. Text comparison because both sides are
                 -- Instant.toString() — ISO-8601 UTC sorts lexicographically.
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
-                    ELSE finding.onset_at END,
-                -- The recurrence counter, on a writer that ASSIGNS its count. Conditioned on the count
-                -- having GROWN rather than on the write happening, because this statement runs on every
-                -- recompute: counting calls would make the re-open rule fire on an unchanged tool at
-                -- whatever rate the sweep happens to run, which is the idempotence this path is built on.
-                recurrences_since_verdict = finding.recurrences_since_verdict
-                    + CASE WHEN finding.triage_action = 'closed'
-                                AND EXCLUDED.sample_count > finding.sample_count THEN 1 ELSE 0 END
-            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+                    ELSE finding.onset_at END
+            RETURNING id, sample_count, escalated_at
             """)
                 .param("id", id)
                 .param("pid", projectId)
@@ -386,25 +352,16 @@ public class FindingRepository {
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
                     'open', :now, :now, :count, CAST(:payload AS jsonb), :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = EXCLUDED.sample_count,
                 last_seen_at = EXCLUDED.last_seen_at,
                 updated_at = EXCLUDED.updated_at,
-                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift.
-                payload = CASE
-                    WHEN finding.triage_action IS NULL AND finding.human_verdict_at IS NULL
-                    THEN EXCLUDED.payload ELSE finding.payload END,
+                -- The conflict target only ever matches an unruled row — see recordShift.
+                payload = EXCLUDED.payload,
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
-                    ELSE finding.onset_at END,
-                -- Assigning writer, so the triage arm asks whether the window GREW — see
-                -- recordRecomputedCause. The blocked arm keeps counting sweeps, unchanged.
-                recurrences_since_verdict = finding.recurrences_since_verdict
-                    + CASE WHEN finding.status = 'blocked' THEN 1
-                           WHEN finding.triage_action = 'closed'
-                                AND EXCLUDED.sample_count > finding.sample_count THEN 1
-                           ELSE 0 END
-            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+                    ELSE finding.onset_at END
+            RETURNING id, sample_count, escalated_at
             """)
                 .param("id", id)
                 .param("pid", projectId)
@@ -463,7 +420,7 @@ public class FindingRepository {
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
                     'open', :onsetAt, :lastSeenAt, :count, CAST(:payload AS jsonb), :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status IN ('open', 'blocked') DO UPDATE SET
+                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 updated_at = EXCLUDED.updated_at,
                 onset_at = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
@@ -472,32 +429,19 @@ public class FindingRepository {
                 sample_count = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
                     THEN EXCLUDED.sample_count ELSE finding.sample_count END,
-                -- Frozen once a ruling stands (Recorded#ruled) — see recordShift. Frozen means frozen:
-                -- once ruled, neither the newer-window replace nor the sticky-confidence merge below
-                -- may touch the payload a human or Layer 2 already read.
-                payload = CASE
-                    WHEN finding.triage_action IS NOT NULL OR finding.human_verdict_at IS NOT NULL
-                    THEN finding.payload
-                    ELSE (CASE
+                -- The conflict target only ever matches an unruled row — see recordShift — so the
+                -- newer-window replace and the sticky-confidence merge below need no freeze guard.
+                payload = (CASE
                         WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) >= CAST(finding.last_seen_at AS timestamptz)
                         THEN EXCLUDED.payload ELSE finding.payload END
                         -- High confidence is sticky across windows, in either arrival order: one high-band
                         -- detection is enough to call the whole facet a real credential.
                         || CASE WHEN finding.payload ->> 'confidence' = 'high' OR EXCLUDED.payload ->> 'confidence' = 'high'
-                                THEN '{"confidence": "high"}'::jsonb ELSE '{}'::jsonb END)
-                    END,
+                                THEN '{"confidence": "high"}'::jsonb ELSE '{}'::jsonb END),
                 last_seen_at = CASE
                     WHEN CAST(EXCLUDED.last_seen_at AS timestamptz) > CAST(finding.last_seen_at AS timestamptz)
-                    THEN EXCLUDED.last_seen_at ELSE finding.last_seen_at END,
-                -- A newer detection after a closing ruling is the cause recurring; an old one arriving
-                -- late is not. The blocked arm keeps counting sweeps, as every other writer's does.
-                recurrences_since_verdict = finding.recurrences_since_verdict
-                    + CASE WHEN finding.status = 'blocked' THEN 1
-                           WHEN finding.triage_action = 'closed'
-                                AND CAST(EXCLUDED.last_seen_at AS timestamptz)
-                                    > CAST(finding.last_seen_at AS timestamptz) THEN 1
-                           ELSE 0 END
-            RETURNING id, sample_count, escalated_at, human_verdict_at, triage_action
+                    THEN EXCLUDED.last_seen_at ELSE finding.last_seen_at END
+            RETURNING id, sample_count, escalated_at
             """)
                 .param("id", id)
                 .param("pid", projectId)
@@ -533,18 +477,18 @@ public class FindingRepository {
     }
 
     /**
-     * Record a triage ruling on the finding, and the action it fixes.
+     * Record Layer 2's ruling on the finding, and the action and status it fixes.
      *
-     * <p><b>The action is derived here rather than passed in</b>, so the mapping
+     * <p><b>The action and status are derived here rather than passed in</b>, so the mapping
      * ({@link FindingRow.TriageAction#of}) has exactly one implementation and no caller can record a
-     * {@code positive} that closed. Both land in the same statement, which
+     * {@code positive} that closed. Verdict, action and status land in the same statement, which
      * {@code finding_triage_paired_check} then enforces — a verdict observed without its action would
      * read as a ruling nothing acted on.
      *
-     * <p><b>The recurrence counter resets.</b> {@code recurrences_since_verdict} is "firings since the
-     * question was settled", so a ruling starts it at zero; what it counts from here is what the re-open
-     * rule reads. It does NOT touch {@code status}: closing is {@code triage_action}, and the row stays
-     * in the live index precisely so its cause can keep firing against it.
+     * <p><b>The {@link #OPEN_UNRULED} guard is the whole of "a ruling freezes the finding".</b> Zero
+     * rows updated means something else ruled first — another triage run, or a person pressing a verb —
+     * and the caller (see {@code BehaviorTriageWorker}) logs that as a lost race rather than an error:
+     * the cost was spent, but the answer it produced is moot.
      */
     public int recordTriage(
             String projectId,
@@ -553,17 +497,15 @@ public class FindingRepository {
             String summary,
             @Nullable String citationsJson,
             String now) {
-        return jdbc.sql("""
-            UPDATE finding
-               SET triage_verdict = :verdict,
-                   triage_action = :action,
-                   triage_summary = :summary,
-                   triage_citations = CAST(:citations AS jsonb),
-                   triaged_at = :now,
-                   recurrences_since_verdict = 0,
-                   updated_at = :now
-             WHERE project_id = :pid AND id = :id
-            """)
+        return jdbc.sql("UPDATE finding"
+                        + "    SET triage_verdict = :verdict,"
+                        + "        triage_action = :action,"
+                        + "        triage_summary = :summary,"
+                        + "        triage_citations = CAST(:citations AS jsonb),"
+                        + "        triaged_at = :now,"
+                        + "        status = CASE WHEN :verdict = 'negative' THEN 'closed' ELSE 'open' END,"
+                        + "        updated_at = :now"
+                        + "  WHERE project_id = :pid AND id = :id AND " + OPEN_UNRULED)
                 .param("verdict", verdict)
                 .param("action", FindingRow.TriageAction.of(verdict))
                 .param("summary", summary)
@@ -575,60 +517,28 @@ public class FindingRepository {
     }
 
     /**
-     * Send a closed finding back through triage, because its cause kept firing.
-     *
-     * <p>Clears the ruling and the escalation stamp together: {@code escalated_at} is the once-per-cause
-     * gate every enqueue path checks, so a re-open that left it set would be a finding nobody could
-     * schedule. The counter goes back to zero because it is about to start counting firings since THIS
-     * decision rather than the last one.
-     *
-     * <p>Conditional on the finding actually being closed, which is what makes it race-safe: two
-     * schedulers reaching the threshold in the same tick produce one re-open and one no-op, and the
-     * loser sees 0 rows.
+     * Record a PERSON's ruling on the finding — the same write {@link #recordTriage} does, plus
+     * {@code human_verdict_at}. Guarded by the same {@link #OPEN_UNRULED} predicate: a verb pressed on
+     * an already-ruled finding updates zero rows, which is what the correction loop turns into a
+     * {@code 409 FINDING_CLOSED} rather than silently overwriting whichever ruling landed first.
      */
-    public int reopenForTriage(String projectId, String findingId, String now) {
-        return jdbc.sql("""
-            UPDATE finding
-               SET triage_verdict = NULL,
-                   triage_action = NULL,
-                   triage_summary = NULL,
-                   triage_citations = NULL,
-                   triaged_at = NULL,
-                   escalated_at = NULL,
-                   recurrences_since_verdict = 0,
-                   updated_at = :now
-             WHERE project_id = :pid AND id = :id AND triage_action = :closed
-            """)
+    public int recordHumanRuling(String projectId, String findingId, String verdict, String summary, String now) {
+        return jdbc.sql("UPDATE finding"
+                        + "    SET triage_verdict = :verdict,"
+                        + "        triage_action = :action,"
+                        + "        triage_summary = :summary,"
+                        + "        triaged_at = :now,"
+                        + "        human_verdict_at = :now,"
+                        + "        status = CASE WHEN :verdict = 'negative' THEN 'closed' ELSE 'open' END,"
+                        + "        updated_at = :now"
+                        + "  WHERE project_id = :pid AND id = :id AND " + OPEN_UNRULED)
+                .param("verdict", verdict)
+                .param("action", FindingRow.TriageAction.of(verdict))
+                .param("summary", summary)
                 .param("now", now)
                 .param("pid", projectId)
                 .param("id", findingId)
-                .param("closed", FindingRow.TriageAction.CLOSED)
                 .update();
-    }
-
-    /**
-     * The closed findings whose cause has fired at least {@code minRecurrences} times since the ruling
-     * and is still firing within the window — what the re-open rule is about to act on, worst-first.
-     *
-     * <p>Liveness is {@code last_seen_at}, not a status: a cause that recovered simply stops being
-     * bumped, so a finding that recurred three times a month ago and nothing since is exactly what the
-     * window is there to leave alone.
-     */
-    public List<FindingRow> listRecurringClosed(String projectId, long minRecurrences, String seenSince, int limit) {
-        return jdbc.sql("SELECT " + COLS + " FROM finding"
-                        + " WHERE project_id = :pid AND " + LIVE
-                        + "   AND triage_action = :closed"
-                        + "   AND human_verdict_at IS NULL"
-                        + "   AND recurrences_since_verdict >= :minRecurrences"
-                        + "   AND last_seen_at >= :since"
-                        + " ORDER BY recurrences_since_verdict DESC, last_seen_at DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("closed", FindingRow.TriageAction.CLOSED)
-                .param("minRecurrences", minRecurrences)
-                .param("since", seenSince)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     /**
@@ -647,26 +557,13 @@ public class FindingRepository {
             @Nullable String classifierKey,
             boolean confirmedOnly,
             int limit) {
-        // `open` means the LIVE set, not literally status='open'. A cause a human blocked that keeps
-        // firing is the most live thing here, and a literal filter made the gate's blocked arm
-        // unsatisfiable (status='open' AND status='blocked') — the recurrence feature was unreachable
-        // in the product while passing at the repository.
-        String statusClause = status == null
-                ? ""
-                : (FindingRow.Status.OPEN.equals(status)
-                        ? " AND (status = :status OR (status = '" + FindingRow.Status.BLOCKED
-                                + "' AND recurrences_since_verdict > 0))"
-                        : " AND status = :status");
+        String statusClause = status == null ? "" : " AND status = :status";
         String scopeClause = callSiteId == null ? "" : " AND call_site_id = :callSiteId";
         String classifierClause = classifierKey == null ? "" : " AND classifier_key = :classifier";
-        // The Layer-2 gate, applied in SQL so the row limit bounds what is SHOWN. A human ruling
-        // outranks the machine's: a cause a human called a deviation, that then recurred, is the most
-        // confirmed thing here — and it carries no triage verdict precisely because the sweep
-        // skips Layer 2 once a human has ruled.
-        String gateClause = confirmedOnly
-                ? " AND (triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'" + " OR (status = '"
-                        + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0))"
-                : "";
+        // The Layer-2 gate, applied in SQL so the row limit bounds what is SHOWN. One clause now
+        // covers every source of a ruling — triage, a person's verb, a high-confidence secret leak
+        // written at arming — because all three write the same triage_verdict column.
+        String gateClause = confirmedOnly ? " AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'" : "";
         var spec = jdbc.sql("SELECT " + COLS + " FROM finding WHERE project_id = :pid" + statusClause + scopeClause
                         + classifierClause + gateClause + " ORDER BY last_seen_at DESC LIMIT :limit")
                 .param("pid", projectId)
@@ -677,15 +574,8 @@ public class FindingRepository {
         return spec.query((rs, n) -> map(rs)).list();
     }
 
-    /**
-     * How many findings are live — the number a case surface offers as "review N findings".
-     *
-     * <p>{@link #LIVE}, not {@code status = 'open'}, and the distinction is the whole point of having
-     * the constant: the findings API's {@code ?status=open} resolves to this same set (see the status
-     * clause in {@link #list}), so a count built from a fresh literal here would send a reader to a list
-     * holding a different number of rows than the button that brought them there promised.
-     */
-    public long countLive(String projectId) {
+    /** How many findings are open — the number a case surface offers as "review N findings". */
+    public long countOpen(String projectId) {
         return jdbc.sql("SELECT count(*) FROM finding WHERE project_id = :pid AND " + LIVE)
                 .param("pid", projectId)
                 .query(Long.class)
@@ -693,93 +583,44 @@ public class FindingRepository {
     }
 
     /**
-     * How many live findings the Layer-2 gate is holding back — everything not yet triaged, plus
-     * everything the repo said was legitimate or could not settle.
+     * The findings of one or more classifiers that have earned a case: open, ruled {@code positive},
+     * and — for a caller that wants one — still firing within a quiet window.
      *
-     * <p>Counted rather than inferred from the list, because the list is capped: "showing 3 of 200" has
-     * to be true even when the withheld set is larger than any page of it.
+     * <p><b>One gate now, not four.</b> A ruling freezes the finding by construction (see the class
+     * javadoc), so "open AND ruled positive" already means a machine or a person confirmed the claim;
+     * there is no separate human arm left to special-case. {@link #seenSince} is optional: the three
+     * detectors with a recovery window pass one, and secret leak — whose findings stay live until a
+     * person closes them — passes null, matching its old {@code listLive}'s no-window, no-cap contract.
+     *
+     * <p><b>The gate is in SQL, deliberately.</b> A case source hands {@code CaseReconciler} the full
+     * live set every pass and the reconciler closes whatever dropped out, so a row filtered in Java
+     * after a {@code LIMIT} would not merely be hidden — it would read as a recovery and close a case
+     * that is still firing.
      */
-    public long countWithheld(String projectId, @Nullable String callSiteId) {
-        String scopeClause = callSiteId == null ? "" : " AND call_site_id = :callSiteId";
-        var spec = jdbc.sql("SELECT count(*) FROM finding WHERE project_id = :pid AND " + LIVE
-                        + " AND (triage_verdict IS NULL OR triage_verdict <> '"
-                        + FindingRow.TriageVerdict.POSITIVE + "')" + scopeClause)
-                .param("pid", projectId);
-        if (callSiteId != null) spec = spec.param("callSiteId", callSiteId);
-        return spec.query(Long.class).single();
-    }
-
-    /**
-     * The survived-analysis predicate, PARAMETERIZED per classifier gate rather than unified.
-     *
-     * <p>Four real variants exist and collapsing them would silently change what a case means for three
-     * of the four detectors. {@link #MACHINE_OR_HUMAN} is metric drift and tool error: Layer 2 ruled it
-     * a deviation, or a human pressed <em>Real deviation</em> (which sets BLOCKED and zeroes the
-     * recurrence counter, so gating the human arm on recurrences would hide a just-confirmed regression
-     * until its bucket shifted again). {@link #MACHINE_ONLY} is conformance, where a human verb RESOLVES
-     * the row instead of marking it, so there is no blocked arm to read. {@link #HUMAN_RECURRENCE} is
-     * behaviour drift's findings-page gate, which requires the cause to have recurred SINCE the ruling.
-     * {@link #NONE} is secret leak's: a high-confidence credential leak is not a claim Layer 2 audits,
-     * it is a fact {@code SecretLeakCaseSource} opens a case for directly.
-     */
-    public enum SurvivalGate {
-        MACHINE_OR_HUMAN("(triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "' OR status = '"
-                + FindingRow.Status.BLOCKED + "')"),
-        MACHINE_ONLY("triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"),
-        HUMAN_RECURRENCE("(status = '" + FindingRow.Status.BLOCKED + "' AND recurrences_since_verdict > 0)");
-
-        private final String sql;
-
-        SurvivalGate(String sql) {
-            this.sql = sql;
-        }
-
-        /**
-         * The gate as SQL, for the two readers that cannot call {@link #listSurvivingAnalysis} — the
-         * confirmed-span exclusion, and the conformance projection, which selects its statistics out of
-         * {@code payload} and so builds its own SELECT list. They still take the predicate from here:
-         * a case source and the query that decides what a case MEANS must not be able to disagree.
-         */
-        public String sql() {
-            return sql;
-        }
-    }
-
-    /**
-     * The findings of one or more classifiers that have earned a case: live, past the gate, and still
-     * firing within the caller's quiet window.
-     *
-     * <p><b>Both halves of the gate are in SQL, deliberately.</b> A case source hands
-     * {@code CaseReconciler} the full live set every pass and the reconciler closes whatever dropped
-     * out, so a row filtered in Java after a {@code LIMIT} would not merely be hidden — it would read as
-     * a recovery and close a case that is still firing.
-     *
-     * <p><b>Liveness is recency, not status.</b> Nothing writes "this came back": a recovered population
-     * simply stops earning firings, so its finding stops being bumped and {@code last_seen_at} stops
-     * advancing.
-     */
-    public List<FindingRow> listSurvivingAnalysis(
-            String projectId, Collection<String> classifierKeys, SurvivalGate gate, String seenSince, int limit) {
+    public List<FindingRow> listConfirmed(
+            String projectId, Collection<String> classifierKeys, @Nullable String seenSince, int limit) {
         if (classifierKeys.isEmpty()) return List.of();
-        return jdbc.sql("SELECT " + COLS + " FROM finding"
+        String sinceClause = seenSince == null ? "" : " AND last_seen_at >= :since";
+        var spec = jdbc.sql("SELECT " + COLS + " FROM finding"
                         + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
-                        + "   AND " + gate.sql()
-                        + "   AND last_seen_at >= :since"
+                        + "   AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'" + sinceClause
                         + " ORDER BY last_seen_at DESC LIMIT :limit")
                 .param("pid", projectId)
                 .param("classifiers", classifierKeys)
-                .param("since", seenSince)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
+                .param("limit", limit);
+        if (seenSince != null) spec = spec.param("since", seenSince);
+        return spec.query((rs, n) -> map(rs)).list();
     }
 
     /**
-     * Every live finding of these classifiers, with no recency window and no cap. For a source whose
-     * findings stay live until a person closes them: a window or a {@code LIMIT} would drop a finding
-     * out of the reconciler's live set, which it reads as a recovery.
+     * Every open finding of these classifiers, no ruling required, no recency window, no cap. For
+     * {@code SecretLeakCaseSource}: a high-confidence leak is a fact to rotate, not a claim Layer 2
+     * audits, and {@code ClassifierArming}'s faceted sweep re-derives the same windows on every pass —
+     * writing a ruling onto the row it keeps refreshing would remove it from {@code ux_finding_live}
+     * and fork a new finding on the very next idempotent re-scan of an unchanged window. The case
+     * source reads {@code highConfidence()} off the payload instead of a verdict.
      */
-    public List<FindingRow> listLive(String projectId, Collection<String> classifierKeys) {
+    public List<FindingRow> listOpen(String projectId, Collection<String> classifierKeys) {
         if (classifierKeys.isEmpty()) return List.of();
         return jdbc.sql("SELECT " + COLS + " FROM finding"
                         + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
@@ -788,6 +629,73 @@ public class FindingRepository {
                 .param("classifiers", classifierKeys)
                 .query((rs, n) -> map(rs))
                 .list();
+    }
+
+    /** Every finding linked to one case, newest first — a case's own findings, per its {@code case_id}. */
+    public List<FindingRow> listByCase(String projectId, String caseId) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding WHERE project_id = :pid AND case_id = :caseId"
+                        + " ORDER BY created_at DESC")
+                .param("pid", projectId)
+                .param("caseId", caseId)
+                .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /**
+     * Link a finding to the case its positive ruling opened or joined. Guarded on
+     * {@code case_id IS NULL}: a finding is linked once, by the first case to claim it, so a case that
+     * lost a race to open on the same key does not steal a finding another case already holds.
+     */
+    public boolean attachToCase(String projectId, String findingId, String caseId, String now) {
+        return jdbc.sql("UPDATE finding SET case_id = :caseId, updated_at = :now"
+                                + " WHERE project_id = :pid AND id = :id AND case_id IS NULL")
+                        .param("caseId", caseId)
+                        .param("now", now)
+                        .param("pid", projectId)
+                        .param("id", findingId)
+                        .update()
+                == 1;
+    }
+
+    /** Close one finding directly — no ruling, no human decision. Returns 0 when it was already closed. */
+    public int close(String projectId, String findingId, String now) {
+        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
+                        + " WHERE project_id = :pid AND id = :id AND " + LIVE)
+                .param("now", now)
+                .param("pid", projectId)
+                .param("id", findingId)
+                .update();
+    }
+
+    /**
+     * Close every open finding linked to a case, in the same transaction as the case's own close — a
+     * case resolved or absorbed closes what it holds, whoever or whatever closed it.
+     */
+    public int closeByCase(String projectId, String caseId, String now) {
+        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
+                        + " WHERE project_id = :pid AND case_id = :caseId AND " + LIVE)
+                .param("now", now)
+                .param("pid", projectId)
+                .param("caseId", caseId)
+                .update();
+    }
+
+    /**
+     * Close every open behaviour-drift finding whose cause is the graduated gram — its alerts must stop
+     * by themselves. Matched on the profile subject plus the classifier's own key inside the payload,
+     * because the scoped {@code cause_key} folds the cause kind in and a graduation is about the gram
+     * whichever kind fired on it. Not a ruling: no verdict, no case, just a settled cause.
+     */
+    public int closeForNativeCause(String projectId, String profileId, String nativeCauseKey) {
+        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
+                        + " WHERE project_id = :pid AND subject_kind = :subjectKind AND subject_id = :profileId"
+                        + "   AND payload ->> 'native_cause_key' = :cause AND " + LIVE)
+                .param("now", java.time.Instant.now().toString())
+                .param("pid", projectId)
+                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
+                .param("profileId", profileId)
+                .param("cause", nativeCauseKey)
+                .update();
     }
 
     /**
@@ -845,12 +753,14 @@ public class FindingRepository {
         record Row(String subjectId, ConfirmedSpan span) {}
         List<Row> rows = jdbc.sql("SELECT subject_id, onset_at, last_seen_at FROM finding"
                         + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
-                        // The same gate listSurvivingAnalysis applies, and deliberately the same one: a
-                        // finding too unconfirmed to open a case is too unconfirmed to disqualify a day's
-                        // traffic from being normal. Layer 1 detects change and cannot tell change from a
-                        // problem, so excluding on an untriaged finding would blind the control to
-                        // every legitimate shift the product ever makes.
-                        + "   AND " + SurvivalGate.MACHINE_OR_HUMAN.sql())
+                        // The same gate listConfirmed applies, and deliberately the same one: a finding
+                        // too unconfirmed to open a case is too unconfirmed to disqualify a day's traffic
+                        // from being normal. Layer 1 detects change and cannot tell change from a
+                        // problem, so excluding on an untriaged finding would blind the control to every
+                        // legitimate shift the product ever makes. No horizon needed: closing a case
+                        // (absorb or resolve) closes its findings, so their days re-enter the control the
+                        // moment the finding leaves this set.
+                        + "   AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'")
                 .param("pid", projectId)
                 .param("classifiers", classifierKeys)
                 .query((rs, n) -> new Row(
@@ -893,76 +803,13 @@ public class FindingRepository {
                 .optional();
     }
 
-    /**
-     * Move a finding out of {@code open} — a HUMAN resolution only. It stamps {@code human_verdict_at},
-     * which permanently suppresses Layer 2 for the cause, so graduation must not route through here.
-     */
-    public int setStatus(String projectId, String id, String status, String now) {
-        return jdbc.sql("UPDATE finding SET status = :status, "
-                        // Timestamp and counter reset TOGETHER. COALESCE-ing the timestamp while zeroing
-                        // the count let a re-ruled finding report "you marked this on <first verdict> — it
-                        // has happened N times since", where N counted only from the SECOND verdict.
-                        + "human_verdict_at = :now, recurrences_since_verdict = 0, updated_at = :now "
-                        + "WHERE project_id = :pid AND id = :id")
-                .param("now", now)
-                .param("status", status)
-                .param("pid", projectId)
-                .param("id", id)
-                .update();
-    }
-
-    /**
-     * Close a finding without recording a human ruling — the conformance resolve and the graduation
-     * path. Deliberately separate from {@link #setStatus}: stamping {@code human_verdict_at} here would
-     * tell Layer 2 a person had settled a cause nobody looked at.
-     */
-    public int resolve(String projectId, String id, String status, String now) {
-        return jdbc.sql("UPDATE finding SET status = :status, updated_at = :now"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("status", status)
-                .param("now", now)
-                .param("pid", projectId)
-                .param("id", id)
-                .update();
-    }
-
-    /**
-     * Close every open behaviour-drift finding whose cause is the graduated gram — its alerts must stop
-     * by themselves. Matched on the profile subject plus the classifier's own key inside the payload,
-     * because the scoped {@code cause_key} folds the cause kind in and a graduation is about the gram
-     * whichever kind fired on it.
-     */
-    public int resolveForNativeCause(String projectId, String profileId, String nativeCauseKey, String status) {
-        return jdbc.sql("UPDATE finding SET status = :status, updated_at = :now"
-                        + " WHERE project_id = :pid AND subject_kind = :subjectKind AND subject_id = :profileId"
-                        + "   AND payload ->> 'native_cause_key' = :cause AND status = 'open'")
-                .param("status", status)
-                .param("now", java.time.Instant.now().toString())
-                .param("pid", projectId)
-                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
-                .param("profileId", profileId)
-                .param("cause", nativeCauseKey)
-                .update();
-    }
-
     private static Recorded recorded(ResultSet rs) throws SQLException {
-        return new Recorded(
-                rs.getString("id"),
-                false,
-                rs.getLong("sample_count"),
-                rs.getString("escalated_at"),
-                rs.getString("human_verdict_at"),
-                rs.getString("triage_action"));
+        return new Recorded(rs.getString("id"), false, rs.getLong("sample_count"), rs.getString("escalated_at"));
     }
 
     private static Recorded created(String id, Recorded outcome) {
         return new Recorded(
-                outcome.findingId(),
-                id.equals(outcome.findingId()),
-                outcome.sampleCount(),
-                outcome.escalatedAt(),
-                outcome.humanVerdictAt(),
-                outcome.triageAction());
+                outcome.findingId(), id.equals(outcome.findingId()), outcome.sampleCount(), outcome.escalatedAt());
     }
 
     /**
@@ -1055,7 +902,7 @@ public class FindingRepository {
                 rs.getString("triage_citations"),
                 rs.getString("triaged_at"),
                 rs.getString("human_verdict_at"),
-                rs.getLong("recurrences_since_verdict"),
+                rs.getString("case_id"),
                 rs.getString("created_at"),
                 rs.getString("updated_at"));
     }

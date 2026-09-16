@@ -8,6 +8,10 @@ public enum ClassifierError implements ErrorCode {
     UNKNOWN_DETECTOR(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown classifier detector: %s"),
     INVALID_MODE(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid classifier mode: %s (expected 'discovery' or 'tracking')"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
+    // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
+    // set), so a verb reaching here found zero rows: something else — another triage run, or a
+    // person's own press a moment earlier — ruled first, and this one is moot rather than wrong.
+    FINDING_CLOSED(HttpStatus.CONFLICT, "Finding '%s' has already been ruled on"),
     INVALID_RESOLUTION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Invalid behaviour-drift resolution: %s (expected 'expected' or 'not_expected')"),
