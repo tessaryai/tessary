@@ -11,6 +11,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -115,7 +116,7 @@ class BehaviorFindingOnsetTest {
 
     /** One recompute pass: the tool is in a spell that began at {@code onset}, observed at {@code at}. */
     private FindingRepository.Recorded record(String projectId, Instant onset, Instant at) {
-        return findings.recordRecomputedCause(
+        return Objects.requireNonNull(findings.recordRecomputedCause(
                 Ids.ulid(),
                 projectId,
                 CAUSE_KEY,
@@ -125,7 +126,7 @@ class BehaviorFindingOnsetTest {
                 EVIDENCE,
                 at.toString(),
                 at.minus(QUIET).toString(),
-                at.toString());
+                at.toString()));
     }
 
     private String firstSeenAt(String projectId, String findingId) {

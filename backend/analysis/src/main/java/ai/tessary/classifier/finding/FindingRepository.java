@@ -26,7 +26,9 @@ import org.springframework.stereotype.Repository;
  * <p><b>A ruled finding leaves the index by construction.</b> Once a verdict lands — machine or human —
  * the row no longer satisfies {@code triage_verdict IS NULL}, so no upsert here can ever conflict onto
  * it again: the next firing of the same cause INSERTs a fresh open row instead of silently mutating a
- * settled one. That is also why the payload-freeze and recurrence-counter branches every upsert used to
+ * settled one. The writes that re-derive the same window on every pass ({@link #recordRecomputedRate}
+ * and {@link #armedUpsert}) only do so for a window NEWER than the cause's latest ruled finding, or a
+ * re-sweep would fork a duplicate of a finding someone already ruled on. That is also why the payload-freeze and recurrence-counter branches every upsert used to
  * carry are gone — there is no ruled row left for them to guard against.
  *
  * <p>Each {@code record*} returns whether THIS call created the finding: a new finding escalates once,
@@ -226,8 +228,9 @@ public class FindingRepository {
      * @param eventAt the spell's own EVENT time — the last hourly bucket the detector folded, not the
      *     sweep's wall clock. Written into {@code last_seen_at} on every write, and into {@code onset_at}
      *     when there is no onset yet, mirroring {@link #recordShift}
+     * @return null when a ruled finding already covers {@code eventAt}; see {@link #recordRecomputedRate}
      */
-    public Recorded recordRecomputedCause(
+    public @Nullable Recorded recordRecomputedCause(
             String id,
             String projectId,
             String causeKey,
@@ -268,8 +271,19 @@ public class FindingRepository {
      *     last_seen_at} on every write, and into {@code onset_at} when there is no onset yet. Malformed
      *     Output has no anchor of its own and passes its sweep's wall clock here unchanged; tool_error
      *     passes the spell's last folded hour
+     *
+     * <p><b>A window no newer than a ruled finding opens nothing.</b> A ruling, positive or negative, takes
+     * its row out of {@code ux_finding_live}, and this write recomputes the same spell on every pass. Without
+     * the guard, the pass after a ruling finds no live row to conflict on and INSERTs a second, unruled
+     * finding for the exact window someone just ruled on. So a fresh INSERT happens only when the cause
+     * still has a live unruled row (the conflict target refreshes it) or no ruled finding of the cause has a
+     * {@code last_seen_at} at or after {@code eventAt}. New traffic in a later hour moves {@code eventAt}
+     * past the ruled row and files a new finding, as it should. The comparisons cast to {@code timestamptz}
+     * for the reason {@link #armedUpsert} gives.
+     *
+     * @return null when the guard suppressed the write, so the caller has no finding to attach evidence to
      */
-    public Recorded recordRecomputedRate(
+    public @Nullable Recorded recordRecomputedRate(
             String id,
             String projectId,
             String classifierKey,
@@ -287,12 +301,19 @@ public class FindingRepository {
             String quietBefore,
             String now) {
         String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey, null));
-        Recorded outcome = jdbc.sql("""
+        return jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
                                  sample_count, payload, created_at, updated_at)
-            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :onsetAt, :eventAt, :count, CAST(:payload AS jsonb), :now, :now)
+            SELECT :id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
+                   'open', :onsetAt, :eventAt, :count, CAST(:payload AS jsonb), :now, :now
+             WHERE EXISTS (SELECT 1 FROM finding
+                            WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
+                              AND status = 'open' AND triage_verdict IS NULL)
+                OR NOT EXISTS (SELECT 1 FROM finding
+                            WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
+                              AND (status = 'closed' OR triage_verdict IS NOT NULL)
+                              AND CAST(last_seen_at AS timestamptz) >= CAST(:eventAt AS timestamptz))
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = EXCLUDED.sample_count,
@@ -323,15 +344,16 @@ public class FindingRepository {
                 .param("quietBefore", quietBefore)
                 .param("now", now)
                 .query((rs, n) -> recorded(rs))
-                .single();
-        return created(id, outcome);
+                .optional()
+                .map(outcome -> created(id, outcome))
+                .orElse(null);
     }
 
     /**
      * Record a per-span classifier's armed window — {@code observedCount} detections inside an
      * event-time window that crossed the classifier's bar — opening the finding if this is the first
      * such window. {@link #armedUpsert} does the writing; see it for the forward-only and
-     * newer-than-closed semantics both armed shapes share.
+     * newer-than-ruled semantics both armed shapes share.
      *
      * @param classifierId the classifier row's id — the subject AND (via {@link CauseKey#perSpanClassifier})
      *     the cause scope, so one classifier holds one live finding
@@ -418,19 +440,20 @@ public class FindingRepository {
      * an older one leaves them alone, and {@code onset_at} starts a new spell only when a NEWER window
      * follows a quiet gap, never because an old window arrived late.
      *
-     * <p><b>A window no newer than an already-closed finding opens nothing.</b> [decision 8b, interactions
-     * with 1] A ruled finding leaves {@code ux_finding_live} by construction (see the class javadoc), so
-     * without this guard a re-sweep of an old window — after the finding a fresher window opened has
-     * already been ruled on and closed — would INSERT a brand new open finding for a window someone
-     * already looked at. The guard only ever suppresses a fresh INSERT: a window that lands while THIS
-     * cause's live row is still open always reaches the conflict target below and refreshes it, whatever
-     * any older, unrelated closed finding says.
+     * <p><b>A window no newer than an already-ruled finding opens nothing.</b> [decision 8b, interactions
+     * with 1, question 11] A ruled finding leaves {@code ux_finding_live} by construction (see the class
+     * javadoc), so without this guard a re-sweep of a window someone already ruled on would INSERT a brand
+     * new open finding for it. Ruled means a verdict of either sign: a negative closes the row, but a
+     * positive keeps it {@code open} with its case, and both must cover the windows they ruled on. The
+     * guard only ever suppresses a fresh INSERT: a window that lands while THIS cause's live row is still
+     * unruled always reaches the conflict target below and refreshes it, whatever any older ruled finding
+     * says.
      *
      * <p>The comparisons cast to {@code timestamptz}. The columns are text, and {@code Instant#toString}
      * drops a zero fraction, so {@code ...:00.5Z} sorts before {@code ...:00Z} as a string while being
      * later as an instant.
      *
-     * @return null when the newer-than-closed guard suppressed the write — nothing was opened or
+     * @return null when the newer-than-ruled guard suppressed the write — nothing was opened or
      *     refreshed, so the caller has no finding to attach evidence to for this window
      */
     private @Nullable Recorded armedUpsert(
@@ -458,7 +481,7 @@ public class FindingRepository {
                               AND status = 'open' AND triage_verdict IS NULL)
                 OR NOT EXISTS (SELECT 1 FROM finding
                             WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
-                              AND status = 'closed'
+                              AND (status = 'closed' OR triage_verdict IS NOT NULL)
                               AND CAST(last_seen_at AS timestamptz) >= CAST(:lastSeenAt AS timestamptz))
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET

@@ -24,6 +24,7 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -88,8 +89,7 @@ class ToolErrorCaseRenderingIntegrationTest {
     void aBehaviourFindingCaseRendersAsItAlwaysDid() {
         Project p = project("conf-case-control");
         seedTrace(p, "trace-tool-1");
-        String findingId = behaviorFindings
-                .recordRecomputedCause(
+        String findingId = Objects.requireNonNull(behaviorFindings.recordRecomputedCause(
                         Ids.ulid(),
                         p.id(),
                         "tool:lookup_account",
@@ -99,7 +99,7 @@ class ToolErrorCaseRenderingIntegrationTest {
                         "{\"failing_traces\":[]}",
                         Instant.now().toString(),
                         Instant.parse("2020-01-01T00:00:00Z").toString(),
-                        Instant.now().toString())
+                        Instant.now().toString()))
                 .findingId();
         findingEvidence.recordExemplarTrace(
                 p.id(), findingId, "trace-tool-1", Instant.now().toString());

@@ -433,6 +433,49 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
+     * A positive ruling keeps the finding open but takes it out of {@code ux_finding_live}, and the
+     * recompute re-derives the same spell every minute. The pass after the ruling used to INSERT a second,
+     * unruled finding with the same onset for the window just ruled on. Only traffic in a later hour may
+     * file a new one.
+     */
+    @Test
+    @DisplayName("a recompute after a positive ruling files nothing until a later hour of traffic arrives")
+    void aRuledSpellIsNotReFiledUntilNewerTraffic() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-ruled-resweep")
+                .project()
+                .id();
+        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        service.refresh(pid);
+        FindingRow ruled = firedFinding(pid);
+        assertEquals(
+                1,
+                findings.recordTriage(
+                        pid,
+                        ruled.id(),
+                        FindingRow.TriageVerdict.POSITIVE,
+                        "The failure rate rose.",
+                        null,
+                        Instant.now().toString()));
+
+        assertEquals(1, service.refresh(pid), "the spell is still running");
+        assertEquals(1, rateShiftFindings(pid), "an unchanged recompute must not re-file the ruled window");
+
+        seedHours(pid, start.plus(QUIET_HOURS + 20L, ChronoUnit.HOURS), 2, 8);
+        service.refresh(pid);
+        assertEquals(2, rateShiftFindings(pid), "a later hour of traffic is a window nobody ruled on");
+        FindingRow fresh = findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
+                .filter(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind()) && !f.id().equals(ruled.id()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no fresh rate_shift finding was written"));
+        assertNull(fresh.triageVerdict(), "the fresh finding is unruled");
+        assertTrue(
+                Instant.parse(fresh.lastSeenAt()).isAfter(Instant.parse(ruled.lastSeenAt())),
+                "and covers only the newer traffic's clock");
+    }
+
+    /**
      * Absorbing says "this rate is the new normal", so the reference it installs has to be measured over
      * the run since onset — the only stretch that describes the new normal. A burst alarms in a couple of
      * dozen calls, so at the moment of the press there is usually nowhere near {@code minBaselineCalls} of
@@ -530,6 +573,13 @@ class ToolErrorClassifierIntegrationTest {
                 .filter(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no rate_shift finding was written"));
+    }
+
+    private long rateShiftFindings(String projectId) {
+        return jdbc.sql("SELECT count(*) FROM finding WHERE project_id = :pid AND classifier_key = 'tool_error'")
+                .param("pid", projectId)
+                .query(Long.class)
+                .single();
     }
 
     /** The up arm, read from the row rather than from the payload's frozen copy of it. */

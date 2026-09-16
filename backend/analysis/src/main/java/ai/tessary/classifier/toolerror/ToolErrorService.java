@@ -346,6 +346,7 @@ public class ToolErrorService {
                 eventAt,
                 quietBefore,
                 now);
+        if (recorded == null) return; // a ruled finding already covers this spell up to eventAt
         recordPopulation(projectId, recorded.findingId(), spell, toolNames, until, now);
     }
 
