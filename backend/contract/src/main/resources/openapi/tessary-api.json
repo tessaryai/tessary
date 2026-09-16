@@ -2462,6 +2462,12 @@
               "null"
             ]
           },
+          "caseId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "causeKey" : {
             "type" : "string"
           },
@@ -2550,6 +2556,7 @@
         },
         "required" : [
           "callSiteId",
+          "caseId",
           "causeKey",
           "causeKind",
           "conformanceKind",
@@ -2977,7 +2984,7 @@
             },
             "type" : "array"
           },
-          "finding_id" : {
+          "latest_finding_id" : {
             "type" : [
               "string",
               "null"
@@ -3059,7 +3066,7 @@
           "detector_available",
           "events",
           "exemplars",
-          "finding_id",
+          "latest_finding_id",
           "malformed_output",
           "metric",
           "rca",
@@ -3260,17 +3267,27 @@
           "detector" : {
             "type" : "string"
           },
-          "finding_id" : {
-            "type" : [
-              "string",
-              "null"
-            ]
+          "finding_count" : {
+            "format" : "int64",
+            "type" : "integer"
           },
           "id" : {
             "type" : "string"
           },
           "last_seen_at" : {
             "type" : "string"
+          },
+          "latest_finding_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "locked_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           },
           "metric" : {
             "type" : "string"
@@ -3354,9 +3371,11 @@
           "current_value",
           "delta",
           "detector",
-          "finding_id",
+          "finding_count",
           "id",
           "last_seen_at",
+          "latest_finding_id",
+          "locked_at",
           "metric",
           "muted_at",
           "muted_by",

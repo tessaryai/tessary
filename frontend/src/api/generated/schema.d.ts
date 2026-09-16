@@ -2476,6 +2476,7 @@ export interface components {
         };
         BehaviorFindingView: {
             callSiteId: string | null;
+            caseId: string | null;
             causeKey: string;
             causeKind: string;
             conformanceKind: string | null;
@@ -2577,7 +2578,7 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
-            finding_id: string | null;
+            latest_finding_id: string | null;
             malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             rca: components["schemas"]["RcaReportView"] | null;
@@ -2629,9 +2630,12 @@ export interface components {
             /** Format: double */
             delta: number | null;
             detector: string;
-            finding_id: string | null;
+            /** Format: int64 */
+            finding_count: number;
             id: string;
             last_seen_at: string;
+            latest_finding_id: string | null;
+            locked_at: string | null;
             metric: string;
             muted_at: string | null;
             muted_by: string | null;

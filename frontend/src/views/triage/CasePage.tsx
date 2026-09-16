@@ -277,11 +277,11 @@ export function CasePage() {
           )}
           {/* The way out, for the reader who wants the ruling's prose and its check scripts.
               Deliberately quiet: it is an escape hatch, not a step in the story. */}
-          {detail.finding_id && (
+          {detail.latest_finding_id && (
             <>
               <Dot />
               <Link
-                to={`${basePath}/classifiers/findings/${encodeURIComponent(detail.finding_id)}`}
+                to={`${basePath}/classifiers/findings/${encodeURIComponent(detail.latest_finding_id)}`}
                 className="text-link hover:text-link-hover transition-colors">
                 Finding
               </Link>
@@ -319,10 +319,10 @@ export function CasePage() {
       <Magnitude detail={detail} basis={c.basis} basePath={basePath} />
 
       {/* ---------------------------------------------------- how outputs broke */}
-      {detail.malformed_output && detail.finding_id && (
+      {detail.malformed_output && detail.latest_finding_id && (
         <Block label="How outputs broke" note="each schema field with its failures, beside one failing output">
           <HowOutputsBroke
-            findingId={detail.finding_id}
+            findingId={detail.latest_finding_id}
             detail={detail.malformed_output}
             linkToTrace={(traceId, spanId) =>
               `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
@@ -772,7 +772,7 @@ function Lead({
 function Failures({ detail, basePath }: { detail: CaseDetail; basePath: string }) {
   const { api } = useTenant();
   const rate = detail.tool_error;
-  const findingId = detail.finding_id;
+  const findingId = detail.latest_finding_id;
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [rows, setRows] = useState<EvidenceSpan[]>([]);
 
@@ -947,8 +947,8 @@ function RcaErrorNote({ error }: { error: unknown }) {
   if (error instanceof ApiError && error.code === "RCA.SUBJECT_NOT_FOUND") {
     return (
       <p className="text-warning mt-3 mx-0 mb-0 text-small">
-        The finding behind this case is no longer there, so there is nothing for the analysis to read. If the
-        case is still open, it will close itself on the next check.
+        The finding behind this case is no longer there, so there is nothing for the analysis to read.
+        Resolve the case by hand if it is done.
       </p>
     );
   }
