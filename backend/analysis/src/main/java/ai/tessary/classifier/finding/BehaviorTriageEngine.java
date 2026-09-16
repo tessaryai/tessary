@@ -331,8 +331,7 @@ public class BehaviorTriageEngine {
                     .append(finding.evidenceCount(role))
                     .append(" row(s)\n");
         }
-        sb.append("\nThese are the counts written when the finding opened. `get_finding_evidence` returns "
-                + "them again beside what still survives.\n");
+        sb.append("\nThese are the counts written when the finding opened.\n");
         return sb.toString();
     }
 
