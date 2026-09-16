@@ -313,6 +313,43 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
   assert.equal(promptBodies[0].agent, 'tessary-triage', 'the custom agent is selected on every session.prompt call');
 });
 
+test('5: triage opens external_directory to opencode\'s own tmp and tool-output globs, nothing else', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+  });
+
+  await runAgent({
+    model: 'anthropic/claude-sonnet-5',
+    prompt: 'rule on this finding',
+    systemPrompt: 'You are the triage agent.',
+    timeoutMs: 1000,
+  });
+
+  const extDir = serverConfigs[0].permission.external_directory;
+  const keys = Object.keys(extDir);
+  assert.equal(keys.length, 3, 'the base deny plus exactly the two allows, nothing more');
+  assert.equal(extDir['*'], 'deny');
+  const os = require('node:os');
+  const path = require('node:path');
+  assert.equal(extDir[path.join(os.tmpdir(), 'opencode', '*')], 'allow');
+  const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  assert.equal(extDir[path.join(dataHome, 'opencode', 'tool-output', '*')], 'allow');
+});
+
+test('5: RCA (no systemPrompt) keeps external_directory as a blanket deny, unchanged', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+  });
+
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', timeoutMs: 1000 });
+
+  assert.deepEqual(serverConfigs[0].permission.external_directory, { '*': 'deny' });
+});
+
 test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');

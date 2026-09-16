@@ -126,7 +126,7 @@ class BehaviorTriagePromptTest {
 
         assertTrue(prompt.contains("get_finding_evidence"), "the rows are load-bearing");
         assertTrue(prompt.contains("get_finding"), "and so is the claim's own numbers");
-        assertTrue(prompt.contains("checks/"), "the one directory the agent may write to");
+        assertTrue(prompt.contains("checks/"), "where the agent's own scripts go");
         assertTrue(prompt.contains("dossier/finding.md"), "the dossier files must be named");
         assertTrue(prompt.contains("dossier/method.md"), "and both of them");
     }

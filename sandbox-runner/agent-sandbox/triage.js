@@ -30,10 +30,13 @@
  * MCP (get_finding_evidence → get_trace / get_span) and cites the ids it actually fetched, so the
  * sample it ruled on is one it chose and stated rather than one this file chose for it silently.
  *
- * WORKSPACE-ONLY WRITES. `checks/` under WORK is the one writable place: the agent is required to
- * compute anything mechanical rather than eyeball it, which means authoring and running its own
- * scripts (bash is allowed, python3 and node are in the image). The permission map is the same
- * shape codegen.js already uses for its single writable file — deny everything, allow one path.
+ * EDIT IS A STATED, BLANKET ALLOW. opencode matches an `edit` rule's path glob against its own
+ * project root, which is `/` when the start directory (WORK) is not a git repo — so a rule scoped
+ * to `checks/**` never actually matched anything and every edit was silently denied, with agents
+ * falling back to bash heredocs to write at all. `checks/`, beside every saved tool result, is
+ * still where the agent's own scripts go — computing anything mechanical rather than eyeballing it
+ * (bash is allowed, python3 and node are in the image) — but nothing polices that any more; it is
+ * a convention the prompt states, not a permission rule that only looked like it enforced one.
  *
  * mcp.token is a live platform key, wired through the agent config and never argv (it must not
  * show in `ps`); scrubToken covers the tsy_* shape, so it cannot reach a log or this script's
@@ -43,7 +46,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runAgent, describeError, sumUsage, WORK } = require('./agent-stream');
 
-/** Where the agent may write, relative to its start directory (WORK). */
+/** Where the agent's own scripts go, relative to its start directory (WORK) — see the header. */
 const CHECKS_DIR = 'checks';
 
 // Materialize the dossier under root, refusing anything that would escape it — the paths come from
@@ -74,8 +77,8 @@ async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
   writeDossier(path.join(WORK, 'dossier'), input.files);
-  // Created here rather than left to the agent: an `edit` allow-rule on a directory that does not
-  // exist is a first tool call that fails for a reason the agent cannot see from its prompt.
+  // Created here rather than left to the agent: a first `write` into a directory that does not
+  // exist yet is a stumble the agent has no reason to expect from its prompt.
   fs.mkdirSync(path.join(WORK, CHECKS_DIR), { recursive: true });
 
   // 'error': the run's VALUE is the schema-constrained ruling JSON — a half-finished run must
@@ -88,7 +91,9 @@ async function main() {
       prompt: input.prompt,
       jsonSchema: parseSchema(input.json_schema),
       mcp: input.mcp,
-      permission: { edit: { '*': 'deny', [`${CHECKS_DIR}/**`]: 'allow' } },
+      // Stated explicitly rather than left to agent-stream.js's own default (also deny-all): see
+      // the header for why a rule scoped to one path never worked in the first place.
+      permission: { edit: { '*': 'allow' } },
       rejectOn: 'error',
       timeoutMs: input.timeout_ms,
       maxTurns: input.max_turns,

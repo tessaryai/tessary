@@ -30,6 +30,7 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
 const { Agent, fetch: undiciFetch } = require('undici');
 const { startMcpRelay } = require('./mcp-relay');
@@ -37,6 +38,19 @@ const { startMcpRelay } = require('./mcp-relay');
 // The custom opencode agent triage runs under (see runAgent's spec.systemPrompt branch). Chosen
 // with `body.agent` on every session.prompt call for that run, never on the RCA path.
 const TRIAGE_AGENT = 'tessary-triage';
+
+// opencode's own scratch directories, where its bash tool already tells the model it may write
+// without asking — the agent-facing prompt promises this, so denying it at the permission layer
+// (the blanket `external_directory: {'*': 'deny'}` below) would just contradict what the agent was
+// told. Triage only (see runAgent's `external_directory` branch below): RCA's own config never
+// runs a bash-heavy enough workflow to have grown a dependency on either path.
+const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
+const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
+  process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+  'opencode',
+  'tool-output',
+  '*',
+);
 
 // How long the sandbox may run when the caller does not say. The launcher always passes the
 // run's real deadline; this only covers a direct/local invocation.
@@ -685,9 +699,11 @@ function toEnvelope(turns, structured, text) {
  *     mcp-relay.js) and defines a custom opencode agent (`TRIAGE_AGENT`) whose `prompt` REPLACES
  *     the provider's default system prompt, `steps` carries the same maxTurns-2 budget as
  *     `build.maxSteps` above, and whose `permission` denies `task`/`skill` (sub-agents and skills
- *     are not this lane's to run) while allowing `todowrite`. Selected on every `session.prompt`
- *     call via `body.agent`. Omitting it (RCA) leaves every part of this function byte-for-byte
- *     the same as before this field existed.
+ *     are not this lane's to run) while allowing `todowrite`. It also opens `external_directory` to
+ *     opencode's own tmp and tool-output globs (see OPENCODE_TMP_GLOB above), which the base config
+ *     otherwise denies outright. Selected on every `session.prompt` call via `body.agent`. Omitting
+ *     it (RCA) leaves every part of this function byte-for-byte the same as before this field
+ *     existed.
  * @returns {Promise<{startMs: number, turns: object[], resultRaw: string}>}
  */
 async function runAgent(spec) {
@@ -702,7 +718,10 @@ async function runAgent(spec) {
   // answer it and would burn the run's wall-clock waiting. bash is on for all five lanes (git, the
   // baked validator, the codegen harness, triage's own check scripts); webfetch is off for all five —
   // nothing here has a reason to reach the network, and it would be the cheapest exfiltration channel
-  // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD.
+  // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD,
+  // with two named exceptions for triage (see OPENCODE_TMP_GLOB above) — opencode matches multiple
+  // rules on the SAME map by taking the last one that matches a given path, so listing the allows
+  // after the `'*': 'deny'` is what makes them win rather than be shadowed by it.
   //
   // webfetch/websearch take a BARE action, not a `{'*': ...}` map — those two are not
   // pattern-scoped the way bash/edit/external_directory are. Sending the map form makes the
@@ -715,7 +734,9 @@ async function runAgent(spec) {
       websearch: 'deny',
       edit: { '*': 'deny' },
       ...(spec.permission || {}),
-      external_directory: { '*': 'deny' },
+      external_directory: spec.systemPrompt
+        ? { '*': 'deny', [OPENCODE_TMP_GLOB]: 'allow', [OPENCODE_TOOL_OUTPUT_GLOB]: 'allow' }
+        : { '*': 'deny' },
     },
     lsp: {},
   };
