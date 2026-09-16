@@ -235,6 +235,12 @@ public class ClassifierArming {
      * and {@link FindingRepository#recordArmedFacet} keeps a window that arrives out of order from moving
      * the finding backwards. Evidence is {@link FindingEvidenceRow.Role#WITNESS}, capped at
      * {@link #MAX_WITNESSES}: instances to open, not an enumeration of the population.
+     *
+     * <p><b>No ruling is written here, high confidence included.</b> This method re-derives the same
+     * windows on every sweep and relies on {@code recordArmedFacet}'s conflict target to refresh the
+     * one row a still-firing spell owns; a ruling would remove that row from {@code ux_finding_live}
+     * (decision 1) and fork a fresh finding on the very next idempotent re-scan of the same window.
+     * {@code SecretLeakCaseSource} reads {@code highConfidence()} off the payload directly instead.
      */
     private List<String> evaluateFaceted(
             ClassifierRow signal,

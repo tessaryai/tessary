@@ -1242,29 +1242,20 @@ public class MetricDriftSweep implements ClassifierSweep {
                 // reopen window would never reopen its case.
                 eventAt.minus(Duration.ofHours(config.windowMaxHours())).toString(),
                 at.toString());
-        // Both windows are re-pointed at the window that just fired, for as long as nothing has ruled
-        // on this finding: `recordShift` replaces the stated quantiles on every close, so leaving the
-        // evidence on an old window would let a persisting shift claim one window's numbers while
-        // enumerating another's — which Layer 2 (auditing the claim by reading the evidence) would
-        // read as the detector contradicting itself. Whichever half moves, both must.
-        //
-        // `ruled()` is the whole of the freeze, and it is enough because `reopenForTriage` NULLs
-        // `triage_action`: a finding sent back for a second look becomes re-pointable again, so the
-        // second look audits the window it is actually about.
-        if (!recorded.ruled()) {
-            evidenceRefs.replace(
-                    projectId,
-                    recorded.findingId(),
-                    FindingEvidenceRow.Role.MEMBER,
-                    pending.memberRefs(),
-                    at.toString());
-            evidenceRefs.replace(
-                    projectId,
-                    recorded.findingId(),
-                    FindingEvidenceRow.Role.BASELINE,
-                    pending.baselineRefs(),
-                    at.toString());
-        }
+        // Both windows are re-pointed at the window that just fired: `recordShift` replaces the stated
+        // quantiles on every close, so leaving the evidence on an old window would let a persisting
+        // shift claim one window's numbers while enumerating another's — which Layer 2 (auditing the
+        // claim by reading the evidence) would read as the detector contradicting itself. Whichever
+        // half moves, both must. No freeze guard needed here: `recordShift`'s conflict target already
+        // excludes a ruled row (see `FindingRepository`), so this call is always on an unruled finding.
+        evidenceRefs.replace(
+                projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, pending.memberRefs(), at.toString());
+        evidenceRefs.replace(
+                projectId,
+                recorded.findingId(),
+                FindingEvidenceRow.Role.BASELINE,
+                pending.baselineRefs(),
+                at.toString());
         StructuredLog.info(log, Markers.OPS, "metric.finding.recorded")
                 .field("project", projectId)
                 .field("baseline", pending.row().id())
