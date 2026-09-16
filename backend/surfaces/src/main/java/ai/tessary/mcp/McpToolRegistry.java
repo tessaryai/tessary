@@ -556,7 +556,7 @@ public class McpToolRegistry {
                 "list_spans",
                 "Find spans in this token's project — the step grain: one LLM call, tool call or sub-agent."
                         + " Newest-first, keyset-paged. Filter by trace_id, call_site_id, kind, name, status,"
-                        + " model_id, session_id and a half-open created_at range; match text with"
+                        + " model_id, session_id and a half-open started_at range; match text with"
                         + " q. One mode, 'keyword' (the only supported value): matches the span name and the"
                         + " stored previews case-insensitively and pages with cursor. Rows are COMPACT: typed columns"
                         + " plus input_preview/output_preview and payload_available, which says whether the full"
@@ -1506,8 +1506,8 @@ public class McpToolRegistry {
      * empty {@code input_preview} means the call genuinely had no input.
      *
      * <p>{@code created_at} rides beside {@code started_at} because they're different clocks: started_at is
-     * the producer's own timing, created_at is when we received it and the column this page's {@code range}
-     * and keyset actually run on.
+     * the producer's own timing, and it is the column this page's {@code range} and keyset actually run on;
+     * created_at is when we received it, shown on every row but never filtered.
      */
     private static Map<String, Object> spanListRow(
             SpanRow s, boolean payloadAvailable, boolean includePayload, @Nullable SpanPayloadRow payload) {
@@ -1884,14 +1884,16 @@ public class McpToolRegistry {
     }
 
     /**
-     * A half-open time window {@code [from, to)} on the dataset's time column (ISO-8601 strings). Named as
-     * "the dataset's time column" rather than {@code created_at} because {@code metric_rollups} buckets on
-     * {@code bucket_start} instead.
+     * A half-open time window {@code [from, to)} on the dataset's own event clock (ISO-8601 strings), not
+     * necessarily {@code created_at}: {@code spans} and {@code tool_calls} range on {@code started_at},
+     * {@code metric_rollups} on {@code bucket_start} (both ingest-adjacent), and {@code classifier_events}
+     * on {@code created_at}. {@code describe_dataset}'s {@code time_column} names it per dataset.
      */
     private static Map<String, Object> rangeField() {
         return rangeField(
-                "Optional half-open time window [from, to) on the dataset's time column — created_at,"
-                        + " or bucket_start for metric_rollups (ISO-8601).",
+                "Optional half-open time window [from, to) on the dataset's own event clock — started_at for"
+                        + " spans and tool_calls, created_at for classifier_events, or bucket_start (ingest time)"
+                        + " for metric_rollups (ISO-8601). See describe_dataset's time_column.",
                 "Optional inclusive lower bound (ISO-8601).",
                 "Optional exclusive upper bound (ISO-8601).");
     }

@@ -116,8 +116,8 @@ public final class ClassifierMethodCard {
 
             A tool bucket spans every call site that calls the tool, and each row carries its own
             `callSiteId`. On the `:previous` arm the reference period's traffic is not in the evidence but
-            is still in the store: `list_spans` and `list_traces` with a `range` before the window reach
-            it, within retention.
+            is still in the store: `list_spans` and `list_traces` with a `range` on the reference period's
+            own dates reach it, within retention.
 
             **Absent roles**
             - No `baseline` on a `:previous` finding is correct: a weighted ring of daily histograms has no

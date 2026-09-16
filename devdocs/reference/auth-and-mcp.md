@@ -141,9 +141,6 @@ row per unit the detector measured, never a sample.
 - **The resolved-case page sorts, not seeks.** `list_cases` orders open/muted cases off
   `ix_eval_case_live_rank`, but there is no index on `(project_id, resolved_at DESC)` for resolved
   cases — a `state=resolved` page sorts at query time instead of seeking through an index.
-- **`list_spans` and `query_search(dataset=spans)` page on a column with no matching index.** Their
-  keyset predicates run on `span.created_at`, but the only time index on `span` is
-  `ix_span_project_started (project_id, started_at DESC)` — there is no `created_at` index.
 - **`get_trace` reports one span count, not two.** Its response carries the rollup's own
   `span_count` as the true total (even when `spans_truncated` is set); there is no separate
   `span_count_total` field.

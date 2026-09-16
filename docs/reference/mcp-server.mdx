@@ -150,7 +150,7 @@ Call `describe_dataset` before the other four. Facetable and filterable fields d
 Four things constrain these tools:
 
 - **Both `range` bounds are required on `query_timeseries`.** An unbounded timeseries is a full scan.
-- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `created_at`, or `bucket_start` on `metric_rollups`.
+- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `started_at` for `spans` and `tool_calls`, `created_at` for `classifier_events`, or `bucket_start` on `metric_rollups`. `describe_dataset`'s `time_column` names it per dataset.
 - **`metric_rollups` rows are already aggregated,** so the answer is the sum of the rollup's `value` rather than a row count. Always filter `granularity` there, or the hour and day grains are summed together.
 - **`query_search` does not accept the `spans` dataset.** `list_spans` searches the same rows with a richer filter set and returns full payloads on a scoped page, so spans are excluded from `query_search` by decision rather than by capability. `metric_rollups` is not searchable at all: a rollup row has no text.
 
@@ -215,7 +215,6 @@ These are current behaviors, stated so you do not read around them.
 - **`list_findings` truncates without saying so.** Each triage source caps its own page at 200 rows and has no `limit` or `cursor` argument, and the service concatenates every source's page. Nothing in the response marks the list as partial, so a project with more confirmed findings than the effective cap gets that many back with no signal.
 - **`get_trace` reports one span count.** The response carries the rollup's `span_count` as the true total even when `spans_truncated` is set. There is no separate total field. For a trace past the 200-span cap, page the rest with `list_spans` and a `trace_id`.
 - **A resolved case page sorts rather than seeks.** Open and muted pages read an index; `state=resolved` sorts at query time.
-- **`list_spans` pages on a column with no matching index.** Its keyset predicate runs on `span.created_at`, and the only time index on the span table is on `started_at`.
 
 ## Related pages
 

@@ -382,6 +382,43 @@ class McpQueryToolsTest {
         assertEquals("bucket_start", rollups.get("time_column").asText(), "rollups bucket on bucket_start");
     }
 
+    /**
+     * The regression decision 8 fixes: {@code spans} and {@code tool_calls} range, page and bucket on
+     * {@code started_at} (the producer's own timing) now, not {@code created_at} (ingest time) — a
+     * late-arriving backfill no longer lands in the wrong bucket. {@code classifier_events} is unmoved
+     * for now (its own event-time cutover is a later decision).
+     */
+    @Test
+    void describeDatasetReportsStartedAtAsTheEventClockForSpansAndToolCalls() throws Exception {
+        JsonNode datasets = structured(callTool("describe_dataset", "{}")).get("datasets");
+        Map<String, String> timeColumnByDataset = new java.util.HashMap<>();
+        for (JsonNode d : datasets) {
+            timeColumnByDataset.put(
+                    d.get("dataset").asText(), d.get("time_column").asText());
+        }
+        assertEquals("started_at", timeColumnByDataset.get("spans"));
+        assertEquals("started_at", timeColumnByDataset.get("tool_calls"));
+        assertEquals("created_at", timeColumnByDataset.get("classifier_events"));
+        assertEquals("bucket_start", timeColumnByDataset.get("metric_rollups"));
+    }
+
+    /**
+     * The shared {@code range} description used to say every dataset but {@code metric_rollups} filters on
+     * {@code created_at} — now false for {@code spans}/{@code tool_calls}. It must name their own clock
+     * instead of reciting the old blanket default.
+     */
+    @Test
+    void rangeDescriptionNamesStartedAtForSpansAndToolCalls() throws Exception {
+        for (String toolName : List.of("query_count", "query_timeseries", "query_facets", "query_search")) {
+            String description = inputSchemaOf(toolName)
+                    .get("properties")
+                    .get("range")
+                    .get("description")
+                    .asText();
+            assertTrue(description.contains("started_at"), toolName + ": " + description);
+        }
+    }
+
     private static List<String> stringsOf(JsonNode array) {
         List<String> out = new java.util.ArrayList<>();
         for (JsonNode v : Objects.requireNonNull(array)) out.add(v.asText());
@@ -451,16 +488,19 @@ class McpQueryToolsTest {
     @Test
     void querySearch_shapesRowsAndCursor() throws Exception {
         var page = new QueryRepository.SearchPage(
-                List.of(new QueryRepository.SearchRow("obs-1", "2026-06-10T00:00:00Z", Map.of("name", "chat"))),
-                "2026-06-10T00:00:00Z|obs-1");
+                List.of(new QueryRepository.SearchRow(
+                        "obs-1", "2026-06-10T00:00:00Z", "2026-06-10T00:00:00Z", Map.of("name", "chat"))),
+                "e1|2026-06-10T00:00:00Z|obs-1");
         when(queryService.search(eq(PROJECT_ID), any(SearchRequest.class))).thenReturn(page);
         JsonNode structured =
                 structured(callTool("query_search", "{\"dataset\":\"tool_calls\",\"q\":\"hello\",\"limit\":1}"));
         JsonNode rows = structured.get("rows");
         assertEquals(1, rows.size());
         assertEquals("obs-1", rows.get(0).get("id").asText());
-        // snake_case wire parity (SearchView.next_cursor).
-        assertEquals("2026-06-10T00:00:00Z|obs-1", structured.get("next_cursor").asText());
+        // snake_case wire parity (SearchView.next_cursor); the versioned e1| cursor is opaque and passes
+        // through the MCP wrapper untouched.
+        assertEquals(
+                "e1|2026-06-10T00:00:00Z|obs-1", structured.get("next_cursor").asText());
     }
 
     // ---- error mapping: TessaryException -> clean tool error, never -32603 -----------------------

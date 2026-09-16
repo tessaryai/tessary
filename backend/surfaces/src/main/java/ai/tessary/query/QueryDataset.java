@@ -15,8 +15,10 @@ import java.util.Set;
  * strings; the service resolves them <b>here</b> to fixed table/column identifiers that are the only
  * thing ever interpolated into SQL. A value outside the allow-list is a {@code 400}, never a query.
  *
- * <p>Every dataset is project-scoped on {@code project_id} and time-ordered on a {@code created_at}
- * TEXT column (ISO-8601), matching the substrate convention.
+ * <p>Every dataset is project-scoped on {@code project_id} and filtered, paged and bucketed on its own
+ * {@link #timeColumn()} — the event clock, not necessarily {@code created_at} (ingest time). {@code spans}
+ * and {@code tool_calls} range on {@code started_at}, the producer's own timing; {@code created_at} still
+ * rides on every row (never filtered) so a caller can tell when a late-arriving row was received.
  * The {@code field -> column} maps are intentionally small and index-aware (see {@code QueryRepository})
  * so v1 stays index-served.
  *
@@ -58,6 +60,9 @@ public enum QueryDataset {
     SPANS(
             "spans",
             "span",
+            "started_at",
+            null,
+            true,
             "trace_id || ':' || id",
             List.of("trace_id", "id"),
             dims(
@@ -90,8 +95,9 @@ public enum QueryDataset {
                     // straight into get_span without parsing the composite handle.
                     entry("trace_id", "trace_id"),
                     entry("span_id", "id"),
+                    entry("started_at", "started_at"),
                     entry("cost_source", "cost_source")),
-            true), // created_at is timestamptz
+            true), // started_at (the time column) and created_at are both timestamptz
 
     /**
      * First-class tool calls: facet/filter/search by tool {@code name}, filter by the producer keys of
@@ -102,6 +108,9 @@ public enum QueryDataset {
     TOOL_CALLS(
             "tool_calls",
             "tool_call",
+            "started_at",
+            null,
+            true,
             "id",
             List.of("id"),
             dims(entry("name", "name")),
@@ -112,8 +121,9 @@ public enum QueryDataset {
                     entry("error_type", "error_type"),
                     entry("latency_ms", "latency_ms"),
                     entry("trace_id", "trace_id"),
-                    entry("span_id", "span_id")),
-            true), // created_at is timestamptz
+                    entry("span_id", "span_id"),
+                    entry("started_at", "started_at")),
+            true), // started_at (the time column) and created_at are both timestamptz
 
     /**
      * Classifier detections: facet by {@code classifier_id}/{@code severity}/{@code confidence}/
@@ -136,6 +146,9 @@ public enum QueryDataset {
     CLASSIFIER_EVENTS(
             "classifier_events",
             "classifier_events_union", // marker only; see class javadoc + QueryRepository#relation
+            "created_at", // detection event time is a later decision; stays on ingest time for now
+            null,
+            true,
             "id",
             List.of("id"),
             dims(
@@ -199,32 +212,7 @@ public enum QueryDataset {
     private final Map<String, String> displayColumns;
     private final boolean timeIsTimestamptz;
 
-    /** The COUNT(*)-over-{@code created_at} datasets: the common case (every dataset but USAGE_ROLLUPS). */
-    QueryDataset(
-            String wireName,
-            String table,
-            String idExpr,
-            List<String> keyColumns,
-            Map<String, String> facetColumns,
-            Map<String, String> filterColumns,
-            Set<String> searchColumns,
-            Map<String, String> displayColumns,
-            boolean timeIsTimestamptz) {
-        this(
-                wireName,
-                table,
-                "created_at",
-                null,
-                true,
-                idExpr,
-                keyColumns,
-                facetColumns,
-                filterColumns,
-                searchColumns,
-                displayColumns,
-                timeIsTimestamptz);
-    }
-
+    /** Every dataset states its own {@code timeColumn} and {@code measureColumn}; there is no default. */
     QueryDataset(
             String wireName,
             String table,
@@ -287,9 +275,12 @@ public enum QueryDataset {
     }
 
     /**
-     * The dataset's time column: a trusted, fixed identifier the query SQL ranges + buckets on. Defaults to
-     * {@code created_at} (the substrate convention); {@code metric_rollups} overrides it to {@code bucket_start}
-     * (the rollup grain column). Never user input.
+     * The dataset's time column: a trusted, fixed identifier the query SQL ranges, keysets and buckets on.
+     * Its own event clock, stated per dataset rather than defaulted — {@code started_at} for {@code spans}
+     * and {@code tool_calls} (the producer's own timing), {@code created_at} for {@code classifier_events}
+     * (ingest time, for now), {@code bucket_start} for {@code metric_rollups} (the rollup grain column,
+     * also ingest time). {@code created_at} still rides on every row for display; it is filtered only where
+     * it is also the time column. Never user input.
      */
     public String timeColumn() {
         return timeColumn;

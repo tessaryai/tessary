@@ -131,6 +131,22 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
+     * {@code list_spans} pages on {@code span.started_at} now (decision 8), not {@code created_at}: the
+     * description must say so, since an agent plans its {@code range} off this text.
+     */
+    @Test
+    void listSpans_descriptionNamesStartedAtAsTheRangeClock() {
+        JsonNode tool = null;
+        for (JsonNode t : listedTools()) {
+            if ("list_spans".equals(t.get("name").asText())) tool = t;
+        }
+        assertNotNull(tool, "list_spans is registered");
+        String description = Objects.requireNonNull(tool).get("description").asText();
+        assertTrue(description.contains("started_at range"), description);
+        assertFalse(description.contains("created_at range"), description);
+    }
+
+    /**
      * The §7.5 contract, carried onto the new surface: sessions carry no rollup, so there is nothing to order
      * them by but recency. A {@code sort} argument here would mean summing every session in the project
      * before this page could be chosen — the read shape the v2 substrate exists to make impossible — so its
@@ -690,11 +706,15 @@ class McpSubstrateReadToolsTest {
             rows.add(new QueryRepository.SearchRow(
                     k.handle(),
                     "2026-08-17T10:00:00Z",
+                    "2026-08-17T10:00:00Z",
                     Map.of("trace_id", k.traceId(), "span_id", k.spanId(), "kind", "llm")));
         }
         if (keys.length == 0) {
             rows.add(new QueryRepository.SearchRow(
-                    "t-1:s-1", "2026-08-17T10:00:00Z", Map.of("trace_id", "t-1", "span_id", "s-1")));
+                    "t-1:s-1",
+                    "2026-08-17T10:00:00Z",
+                    "2026-08-17T10:00:00Z",
+                    Map.of("trace_id", "t-1", "span_id", "s-1")));
         }
         return new QueryRepository.SearchPage(List.copyOf(rows), nextCursor);
     }

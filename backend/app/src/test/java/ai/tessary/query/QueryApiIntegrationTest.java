@@ -104,8 +104,9 @@ class QueryApiIntegrationTest {
                 .payload("q", "result")
                 .previews("q", "result")
                 .writeRef();
-        // The query API windows on created_at (arrival), which the repository will not let a payload set,
-        // so the fixture writes it, exactly as the metering fixtures do.
+        // spans/tool_calls window on started_at (event time) now, which spanSeed().at(...) already sets;
+        // this backdate keeps created_at (ingest time, shown on every row but never filtered) equally
+        // deterministic, since the repository will not let a payload set it and it defaults to now().
         backdate(pid, llm, t0);
         backdate(pid, tool, t2);
 
@@ -277,6 +278,52 @@ class QueryApiIntegrationTest {
         assertEquals(QueryError.INVALID_RANGE, e.error());
     }
 
+    /**
+     * The decision 8 regression: {@code spans} ranges, pages and buckets on {@code started_at} now, not
+     * {@code created_at}. Both spans here share one {@code created_at} (as if they arrived in the same
+     * ingest burst) but keep the 2h-apart {@code started_at} the other timeseries test uses — if bucketing
+     * still ran on {@code created_at}, this would collapse into a single bucket.
+     */
+    @Test
+    void timeseriesBucketsOnStartedAtEvenWhenCreatedAtIsIdentical() {
+        String pid = TenantFixture.bootstrap(tenants, "query-ts-started-at")
+                .project()
+                .id();
+        Instant t0 = Instant.parse("2026-06-10T00:00:00Z");
+        Instant t2 = t0.plus(2, ChronoUnit.HOURS);
+        Instant arrived = Instant.parse("2026-06-15T00:00:00Z");
+        var fx = fixtures();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.session(pid, sessionId, t0);
+
+        var first = fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .kind("llm")
+                .name("chat")
+                .at(t0)
+                .writeRef();
+        var second = fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .kind("tool")
+                .name("search")
+                .at(t2)
+                .writeRef();
+        backdate(pid, first, arrived);
+        backdate(pid, second, arrived);
+
+        var buckets = controller
+                .timeseries(
+                        token(pid),
+                        new TimeseriesRequest(
+                                "spans", "hour", new TimeRange("2026-06-09T00:00:00Z", "2026-06-11T00:00:00Z"), null))
+                .data()
+                .buckets();
+        assertEquals(2, buckets.size(), "buckets follow started_at, not the shared created_at: " + buckets);
+    }
+
     // ---- facets ------------------------------------------------------------------------------
 
     @Test
@@ -435,6 +482,36 @@ class QueryApiIntegrationTest {
                 .data();
         assertEquals(1, legacyCursor.rows().size());
         assertEquals(page1.rows().get(0).id(), legacyCursor.rows().get(0).id());
+    }
+
+    /**
+     * A cursor with no {@code "e1|"} version prefix degrades to page one even when its shape is otherwise
+     * exactly right (correct arity, a real handle) — not just when it is malformed. Before decision 8, this
+     * exact string was a valid cursor: {@code created_at} and {@code started_at} coincide in this fixture,
+     * so an old, unversioned {@code "<createdAt>|<handle>"} token would silently resume the page. Requiring
+     * the version prefix is what stops that: it is never trusted as a position, only as a bookmark that has
+     * gone stale.
+     */
+    @Test
+    void unprefixedCursorFallsBackToPageOneEvenWithTheRightShape() {
+        String pid = seedProject("query-search-unprefixed-cursor");
+        var ctx = token(pid);
+
+        var page1 = controller
+                .search(ctx, new SearchRequest("spans", null, null, null, null, 1, null))
+                .data();
+        assertNotNull(page1.nextCursor());
+        assertTrue(page1.nextCursor().startsWith("e1|"), page1.nextCursor());
+
+        String unprefixed = page1.nextCursor().substring("e1|".length());
+        var resumed = controller
+                .search(ctx, new SearchRequest("spans", null, null, null, null, 1, unprefixed))
+                .data();
+        assertEquals(1, resumed.rows().size());
+        assertEquals(
+                page1.rows().get(0).id(),
+                resumed.rows().get(0).id(),
+                "an unprefixed cursor restarts at page one rather than resuming the keyset");
     }
 
     @Test

@@ -20,8 +20,10 @@ public final class QueryDtos {
     private QueryDtos() {}
 
     /**
-     * A half-open time window {@code [from, to)} on the dataset's {@code created_at} (ISO-8601 strings).
-     * Either bound may be null (open-ended); {@code timeseries()} requires both.
+     * A half-open time window {@code [from, to)} on the dataset's own event clock ({@link
+     * QueryDataset#timeColumn()}, ISO-8601 strings) — {@code started_at} for {@code spans} and {@code
+     * tool_calls}, {@code created_at} for the others. Either bound may be null (open-ended); {@code
+     * timeseries()} requires both.
      */
     public record TimeRange(@Nullable String from, @Nullable String to) {}
 
