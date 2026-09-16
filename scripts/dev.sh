@@ -95,8 +95,13 @@ if [ "$LOCAL_AGENT" = "1" ]; then
     # up -d backend`) interpolates the key from .env alone, so when .env declares one, use it as
     # the default here too, or the host launcher and any recreated backend silently disagree
     # (backend gets 401s). 'devkey' remains the last resort when neither the shell nor .env sets it.
-    if [ -z "${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}" ]; then
-        TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(sed -n 's/^TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1)"
+    #
+    # The file test is load-bearing under `set -euo pipefail`: with no .env (a git worktree, a
+    # fresh clone) sed exits non-zero, pipefail hands that to the command substitution, and the
+    # assignment takes the whole script down. The 2>/dev/null hid the reason, so dev:local failed
+    # with no output at all.
+    if [ -z "${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}" ] && [ -f "$REPO_ROOT/.env" ]; then
+        TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(sed -n 's/^TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY=//p' "$REPO_ROOT/.env" | tail -1)"
     fi
     export TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-devkey}"
     # RCA rides the same host launcher (compose defaults its URL/key onto the observer's).
