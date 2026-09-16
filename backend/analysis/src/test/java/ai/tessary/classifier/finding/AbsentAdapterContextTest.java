@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.debug.ClassifierDebugContributor;
@@ -87,6 +88,11 @@ class AbsentAdapterContextTest {
         @Bean
         BehaviorTriageEngine triageEngine() {
             return mock(BehaviorTriageEngine.class);
+        }
+
+        @Bean
+        CaseOpener caseOpener() {
+            return mock(CaseOpener.class);
         }
 
         @Bean
