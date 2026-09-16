@@ -28,6 +28,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,16 @@ import org.springframework.stereotype.Service;
  * or failed internally is a different fact and throws {@code TRIAGE_LAUNCHER_UNAVAILABLE}: it is
  * not about this finding and will be just as true for the next one, so the worker refunds the
  * attempt and stops draining instead of spending every queued job's attempts against a shut door.
+ *
+ * <p>Not every 502 is the launcher's fault, though — the launcher answers a run it started but
+ * could not finish (an agent timeout, a rejection, unparseable output, a bad request body) with a
+ * 502 of its own, carrying a {@code kind} that says which. {@link #classifyFailure} reads that kind:
+ * {@code timeout}, {@code script_exit}, {@code bad_output} and {@code bad_request} are THIS run's
+ * problem and throw {@code TRIAGE_RUN_INCOMPLETE} instead, so a finding that always times out
+ * dead-letters on its own after a few attempts rather than tripping the breaker and pausing every
+ * other finding's triage. {@code orchestration} (the launcher's own infrastructure failed to even
+ * start the run) and a missing or unrecognized kind (a proxy's own 502 page, not the launcher's)
+ * stay launcher-level.
  */
 @Service
 public class E2bTriageSandbox implements TriageSandbox {
@@ -127,8 +138,9 @@ public class E2bTriageSandbox implements TriageSandbox {
     }
 
     /**
-     * Run one triage. Empty means the run happened and produced nothing usable; a launcher-level
-     * failure throws {@code TRIAGE_LAUNCHER_UNAVAILABLE}.
+     * Run one triage. Empty means the run happened and produced nothing usable; a run failure throws
+     * {@code TRIAGE_RUN_INCOMPLETE} with the launcher's own diagnosis, and a launcher-level failure
+     * throws {@code TRIAGE_LAUNCHER_UNAVAILABLE} or {@code TRIAGE_LAUNCHER_MISCONFIGURED}.
      */
     @Override
     public Optional<SandboxRun> run(SandboxRequest req) {
@@ -255,7 +267,11 @@ public class E2bTriageSandbox implements TriageSandbox {
      *       too. This is the case that spent ~125 attempts against a shut door.
      *   <li><b>404 → launcher.</b> No {@code /triage} route: the sidecar is older than the backend, and
      *       no amount of retrying ships a new image.
-     *   <li><b>5xx → launcher.</b> Its fault, not this request's.
+     *   <li><b>5xx → split by {@link #classifyFailure}.</b> A 502 carrying a {@code kind} of
+     *       {@code timeout}, {@code script_exit}, {@code bad_output} or {@code bad_request} is a run
+     *       failure — the launcher started this run and it did not finish cleanly. Everything else
+     *       (an {@code orchestration} kind, a missing/unrecognized kind, or any non-502 5xx) is the
+     *       launcher's own fault.
      *   <li><b>Other 4xx → run.</b> The launcher understood us and refused this payload, which is a
      *       fact about this request.
      * </ul>
@@ -264,7 +280,8 @@ public class E2bTriageSandbox implements TriageSandbox {
      * failing run's body can be booked against the ledger before this method returns or throws:
      * server.js's {@code buildErrorBody} carries a {@code usage} object whenever the agent burned
      * tokens before the run failed. {@link #bookUsage} already no-ops on a body with nothing usable,
-     * so this is safe to call on every non-2xx response.
+     * so this is safe to call on every non-2xx response — booked before the branch below decides who
+     * is at fault, since a run failure spends tokens exactly as a completed run does.
      */
     private @Nullable String postLauncher(
             String bodyJson, Agentic cfg, String projectId, String findingId, String model, String pricingId)
@@ -280,7 +297,7 @@ public class E2bTriageSandbox implements TriageSandbox {
                 .build();
         HttpResponse<String> resp;
         try {
-            resp = client.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            resp = send(httpReq);
         } catch (java.io.IOException e) {
             boolean timedOut = e instanceof java.net.http.HttpTimeoutException;
             log.error(
@@ -311,24 +328,98 @@ public class E2bTriageSandbox implements TriageSandbox {
                     resp.statusCode() == 404
                             ? " (no /triage route — is the launcher older than the backend?)"
                             : diag.isBlank() ? "" : " " + diag);
-            // Book what the run spent before it failed, regardless of which bucket the status
-            // falls into below: a launcher outage carries no usage (bookUsage no-ops on one), and a
-            // run failure (today always a 502, see server.js) is exactly the case this exists for.
+            // Book what the run spent before it failed, regardless of which bucket the status falls
+            // into below: a launcher outage carries no usage (bookUsage no-ops on one), and a run
+            // failure is exactly the case this exists for.
             bookUsage(projectId, findingId, model, pricingId, resp.body());
-            if (isLauncherLevel(resp.statusCode())) {
+            FailureClass failure = classifyFailure(resp.statusCode(), resp.body());
+            if (failure == FailureClass.MISCONFIGURED) {
                 // A refusal is not an outage. 401/403/404 will answer identically until somebody
                 // changes the deployment, so it carries the code the worker parks on rather than the
                 // one it retries on a breaker cycle.
                 throw new TessaryException(
-                        isLauncherRefusal(resp.statusCode())
-                                ? ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED
-                                : ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE,
+                        ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED,
                         launcherDiagnosis(resp.statusCode(), cfg.getLauncherUrl(), diag));
             }
-            return resp.body();
+            if (failure == FailureClass.LAUNCHER_UNAVAILABLE) {
+                throw new TessaryException(
+                        ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE,
+                        launcherDiagnosis(resp.statusCode(), cfg.getLauncherUrl(), diag));
+            }
+            // FailureClass.RUN: this request's own fault, not the launcher's. Thrown here rather than
+            // returned for the caller to fold into an empty run, so the dead-lettered job's last_error
+            // carries the launcher's own classified diagnosis (kind=... detail=...) instead of the
+            // generic "the sandbox did not run" BehaviorTriageEngine falls back to when nothing about
+            // the failure was ever reported.
+            throw new TessaryException(
+                    ClassifierError.TRIAGE_RUN_INCOMPLETE,
+                    findingId,
+                    diag.isBlank() ? ("status " + resp.statusCode()) : diag);
         }
         return resp.body();
     }
+
+    /**
+     * The one socket round-trip {@link #postLauncher} makes, split out so
+     * {@code E2bTriageSandboxTest} can stub the launcher's answer without a live one — everything
+     * around this call (the request body, the status/kind classification, booking usage) stays real.
+     */
+    HttpResponse<String> send(HttpRequest req) throws java.io.IOException, InterruptedException {
+        return client.send(req, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** The three ways a non-2xx {@code /triage} response resolves; see {@link #classifyFailure}. */
+    enum FailureClass {
+        /** This request's own fault: a run failure, spends the finding's attempt and retries. */
+        RUN,
+        /** The launcher is up and refusing every request identically until a person fixes it. */
+        MISCONFIGURED,
+        /** The launcher could not do its job this time; the breaker should stop the drain. */
+        LAUNCHER_UNAVAILABLE
+    }
+
+    /** The launcher's own {@code kind} values (server.js's {@code buildErrorBody}) that mean the AGENT
+     *  run failed rather than the launcher itself — see the class javadoc's "A failed run fails open"
+     *  section for what each one is. */
+    private static final Set<String> RUN_FAILURE_KINDS = Set.of("timeout", "script_exit", "bad_output", "bad_request");
+
+    /**
+     * Who is at fault for one non-2xx {@code /triage} response — pure, so the table in
+     * {@code E2bTriageSandboxTest} can drive every status/kind combination without a live launcher.
+     *
+     * <p>401/403/404 are always {@link FailureClass#MISCONFIGURED}: the launcher answered and refused,
+     * on terms that will not change until a person edits the deployment. A 502 is split by its {@code
+     * kind}: {@link #RUN_FAILURE_KINDS} means the launcher started this run and it did not finish
+     * cleanly, so it is {@link FailureClass#RUN}; {@code orchestration}, a missing/unrecognized kind (a
+     * proxy's own 502 page, not the launcher's), or any other 5xx status all mean the launcher itself is
+     * the problem. Every remaining 4xx is a run failure, unchanged from before this split existed: the
+     * launcher understood the request and refused this payload, which is a fact about this request, not
+     * about the launcher.
+     */
+    static FailureClass classifyFailure(int status, String body) {
+        if (status == 401 || status == 403 || status == 404) {
+            return FailureClass.MISCONFIGURED;
+        }
+        if (status / 100 == 5) {
+            return status == 502 && RUN_FAILURE_KINDS.contains(kindOf(body))
+                    ? FailureClass.RUN
+                    : FailureClass.LAUNCHER_UNAVAILABLE;
+        }
+        return FailureClass.RUN;
+    }
+
+    /** The launcher error body's {@code kind} field; blank when absent or the body does not parse. */
+    private static String kindOf(String body) {
+        try {
+            return KIND_MAPPER.readTree(body).path("kind").asText("");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** A bare mapper for {@link #kindOf}, which only ever reads one field off an already-scrubbed
+     *  launcher body — {@link #classifyFailure} must stay callable with no Spring context around it. */
+    private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
     /**
      * Book the run's tokens and cost against the triage lane, and against the FINDING it ruled on.
@@ -363,20 +454,6 @@ public class E2bTriageSandbox implements TriageSandbox {
      */
     private Optional<ProjectModelSettings.ResolvedAgenticModel> resolvedModel(String projectId) {
         return modelSettings.resolveAgenticModel(projectId, ModelLane.TRIAGE);
-    }
-
-    /** Whether a status says the LAUNCHER is the problem rather than this particular request. */
-    private static boolean isLauncherLevel(int status) {
-        return status == 401 || status == 403 || status == 404 || status / 100 == 5;
-    }
-
-    /**
-     * The launcher-level statuses that mean "misconfigured", not "down": the run was refused by a
-     * launcher that is up and answering, and will be refused again on identical terms until a person
-     * changes the deployment. {@code launcherDiagnosis} already names the remedy for each.
-     */
-    private static boolean isLauncherRefusal(int status) {
-        return status == 401 || status == 403 || status == 404;
     }
 
     /**
