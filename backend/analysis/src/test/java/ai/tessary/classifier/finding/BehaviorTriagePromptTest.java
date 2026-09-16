@@ -253,7 +253,7 @@ class BehaviorTriagePromptTest {
     // ---- the user message ---------------------------------------------------------------------------
 
     @Test
-    void theUserMessageStatesTheEffectiveTurnCapAndTheTimeout() {
+    void theUserMessageStatesTheEffectiveTurnCapAndNotTheTimeout() {
         ObserverProperties props = new ObserverProperties();
         props.getAgentic().setMaxTurns(12);
         props.getAgentic().setTimeoutMs(600_000);
@@ -266,7 +266,10 @@ class BehaviorTriagePromptTest {
         assertTrue(prompt.contains("`dossier/method.md`"), prompt);
         // opencode reserves two turns of the configured cap to force a text-only final answer, so the
         // number stated to the agent is what it actually gets to work with.
-        assertTrue(prompt.contains("You have 10 turns and 10 minutes."), prompt);
+        assertTrue(prompt.contains("You have 10 turns."), prompt);
+        // The wall clock is an operator guard against a hung run, not something the agent can observe
+        // or plan against, so it is never stated.
+        assertFalse(prompt.contains("minutes"), prompt);
     }
 
     @Test

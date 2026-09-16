@@ -352,7 +352,6 @@ public class BehaviorTriageEngine {
         boolean hasMethodCard = methodCard(finding.classifierKey()).isPresent();
         ObserverProperties.Agentic agentic = observerProps.getAgentic();
         int maxTurns = Math.max(0, agentic.getMaxTurns() - TURN_RESERVE);
-        long timeoutMinutes = agentic.getTimeoutMs() / 60_000L;
 
         StringBuilder sb = new StringBuilder();
         sb.append("Rule on finding `").append(finding.id()).append("`.\n\n");
@@ -367,9 +366,7 @@ public class BehaviorTriageEngine {
         }
         sb.append("You have ")
                 .append(maxTurns)
-                .append(" turns and ")
-                .append(timeoutMinutes)
-                .append(" minutes. Every tool call is a turn. Record your ruling before either runs out.\n");
+                .append(" turns. Every tool call is a turn. Record your ruling before they run out.\n");
         return sb.toString();
     }
 

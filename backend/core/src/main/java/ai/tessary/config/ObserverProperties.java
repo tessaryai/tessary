@@ -109,11 +109,15 @@ public class ObserverProperties {
         // When true, the agent edits/adds graders via the evals plugin and the backend opens a
         // draft PR with the changes. Default false = detect-only (alert + proposals, no PR).
         private boolean remediate = false;
-        // The agent runs with NO turn cap (it was getting cut off mid-analysis); the
-        // wall-clock is the only bound. Remediation (per-grader author+validate via the
-        // plugin) legitimately takes many minutes, so this is generous. Keep it below
-        // ObserverProperties.leaseSeconds (else the job is reclaimed mid-run).
-        private long timeoutMs = 1_200_000;
+        // The TRIAGE lane's wall clock: a hard kill for a run that has hung, NOT a budget the agent
+        // plans against. It is deliberately not stated in the prompt — a model cannot observe elapsed
+        // time, so a number it cannot measure only invites it to guess and cut its reading short. The
+        // turn cap below is the budget it is told about, and this is sized to be slack around it: 30
+        // minutes against maxTurns' 50 working turns. A run killed here records no ruling and retries,
+        // which costs a whole second run, so raise this before lowering maxTurns if live runs come
+        // near it. BehaviorTriageWorker.leaseSeconds() sizes the job lease off this value, so the
+        // lease follows it up on its own.
+        private long timeoutMs = 1_800_000;
 
         // The turn budget for the TRIAGE lane only — E2bAnalysisSandbox (drift analysis /
         // remediation, driven by analyze.js) reads this same Agentic block for launcherUrl/timeoutMs
@@ -125,7 +129,10 @@ public class ObserverProperties {
         // forcing text-only response"), rather than a hard kill that discards a partial verdict.
         // NOT independently verified against a live run in the change that introduced this field —
         // see that change's PR description for what was and was not empirically confirmed.
-        private int maxTurns = 40;
+        //
+        // This is the RAW cap; two of it go to opencode's text-only landing, so the number the prompt
+        // states, and the number the agent actually works with, is 50.
+        private int maxTurns = 52;
 
         public String getSandbox() {
             return sandbox;

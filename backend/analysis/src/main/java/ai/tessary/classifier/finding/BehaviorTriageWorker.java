@@ -158,7 +158,7 @@ public class BehaviorTriageWorker {
      * The lease must outlast the agentic run, not the DB-bound sweep.
      *
      * <p>{@code ClassifierProperties.leaseSeconds} is 300 — sized for the signal sweep. The agent gets
-     * {@code ObserverProperties.Agentic.timeoutMs} (20 minutes). Leasing for the shorter of the two
+     * {@code ObserverProperties.Agentic.timeoutMs} (30 minutes). Leasing for the shorter of the two
      * meant {@code LeasedJobSql} re-claimed any run over 5 minutes and spawned a SECOND microVM for
      * the same finding while the first was still in flight, up to {@code maxAttempts} — multiplying
      * exactly the slowest, most expensive analyses and defeating the recurrence gate's whole purpose.
