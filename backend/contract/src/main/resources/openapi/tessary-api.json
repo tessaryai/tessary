@@ -2501,10 +2501,6 @@
           "lastSeenAt" : {
             "type" : "string"
           },
-          "recurrencesSinceVerdict" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
           "status" : {
             "type" : "string"
           },
@@ -2563,7 +2559,6 @@
           "humanVerdictAt",
           "id",
           "lastSeenAt",
-          "recurrencesSinceVerdict",
           "status",
           "title",
           "traceCount",
@@ -2587,16 +2582,11 @@
           },
           "lane" : {
             "type" : "string"
-          },
-          "withheld" : {
-            "format" : "int64",
-            "type" : "integer"
           }
         },
         "required" : [
           "findings",
-          "lane",
-          "withheld"
+          "lane"
         ],
         "type" : "object"
       },

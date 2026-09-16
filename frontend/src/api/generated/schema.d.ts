@@ -2485,8 +2485,6 @@ export interface components {
             humanVerdictAt: string | null;
             id: string;
             lastSeenAt: string;
-            /** Format: int64 */
-            recurrencesSinceVerdict: number;
             status: string;
             title: string;
             /** Format: int64 */
@@ -2502,8 +2500,6 @@ export interface components {
         BehaviorFindingsView: {
             findings: components["schemas"]["BehaviorFindingView"][];
             lane: string;
-            /** Format: int64 */
-            withheld: number;
         };
         BehaviorProfileDebugView: {
             /** Format: int32 */

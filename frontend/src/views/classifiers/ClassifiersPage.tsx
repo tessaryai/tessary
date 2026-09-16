@@ -10,15 +10,16 @@
  * tomorrow than it was today. That is the queue this whole redesign exists to remove.
  *
  * What replaced them: every finding that opens gets exactly one triage run, and that run ends in
- * exactly one of two acts. `positive` opens a case, which is where a person picks the work up. `negative`
- * CLOSES the finding — a bet that the cause has stopped, and the bet is called by recurrence rather
- * than by somebody reading a list. So this page is a record of what has been decided, not a pile of
- * what has not.
+ * exactly one of two acts. `positive` opens or joins a case and the finding stays open; `negative`
+ * CLOSES the finding outright. A ruling freezes the row — the same cause firing again files a FRESH
+ * finding rather than reopening this one, so there is no re-open to wait on. So this page is a record
+ * of what has been decided, not a pile of what has not.
  *
  * <h2>The two sections</h2>
- * Open findings (pending, in flight, or sound and now a case) and closed history. The split is
- * `triage_action`, never `status`: closing is a triage act, and the row deliberately stays in the live
- * index so its cause can keep firing against it and drive the re-open.
+ * Open findings (pending, in flight, or sound and now a case) and closed history. `status` and
+ * `triage_action` agree by construction now — a ruling sets both in the same write — so the split
+ * reads `isClosedByTriage` for the reason it always did: it is closing that decides the section, not
+ * the bare fact of the status word.
  *
  * <h2>The title is the classifier's own sentence</h2>
  * There is deliberately no "reading" column restating the shift. Each detector writes its finding's

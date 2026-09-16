@@ -332,16 +332,12 @@ export type BehaviorCauseKind =
   | "sop_conformance";
 
 /** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */
-export type BehaviorFindingStatus = "open" | "graduated" | "allowlisted" | "blocked" | "resolved";
+export type BehaviorFindingStatus = "open" | "closed";
 
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
 
-/**
- * The findings page. `withheld` is what the Layer-2 gate is holding back: un-triaged findings
- * plus those a ruling called legitimate or could not settle, so an empty list can be told apart
- * from a filtered one. `lane` is which Layer-2 lane this project's findings get ruled on.
- */
+/** The findings page. `lane` is which Layer-2 lane this project's findings get ruled on. */
 export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings" | "lane"> & {
   findings: BehaviorFinding[];
   lane: TriageLane;

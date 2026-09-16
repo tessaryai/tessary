@@ -185,14 +185,13 @@ export function isBaselineFinding(finding: BehaviorFinding): boolean {
 }
 
 /**
- * The chain on one line: how much traffic, what triage made of it, and what has happened since.
+ * The chain on one line: how much traffic, and what triage made of it.
  *
  * <p>A baseline finding's traffic is not firings. Its count is the population its violations were
  * counted over, once, at fit time, so "seen 257×" would report a fitted fact as a recurring event.
  *
- * <p>The recurrence count is what a closed finding is read by: triage closing a claim it could not
- * settle is a bet that the cause has stopped, and the counter is the bet being called. At the
- * threshold the finding re-opens and goes back through triage once.
+ * <p>No recurrence count any more: a ruling freezes the finding, so a cause that fires again after
+ * one opens a fresh finding rather than reopening this one — there is nothing left to count here.
  */
 export function chainWords(finding: BehaviorFinding): string {
   return [
@@ -206,7 +205,6 @@ export function chainWords(finding: BehaviorFinding): string {
         : finding.triageStatus === "failed"
           ? "triage failed"
           : "not triaged yet",
-    finding.recurrencesSinceVerdict > 0 ? `${finding.recurrencesSinceVerdict} since that ruling` : null,
   ]
     .filter(Boolean)
     .join(" · ");
