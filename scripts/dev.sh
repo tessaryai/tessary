@@ -65,50 +65,25 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-# Local agent backend (task dev:local → TESSARY_LOCAL_AGENT=1): run the launcher on the HOST
-# (against a locally installed `opencode`) instead of E2B, and auto-point the backend container
-# at it. Default off: when unset/0 everything below is skipped and plain `task dev` is unchanged.
-LOCAL_AGENT="${TESSARY_LOCAL_AGENT:-0}"
-if [ "$LOCAL_AGENT" = "1" ]; then
-    # (a) Preflight: the host launcher starts `opencode` and shells out to `git`.
-    if ! command -v opencode >/dev/null 2>&1; then
-        echo "error: dev:local needs the 'opencode' CLI on PATH." >&2
-        echo "       install it with 'npm i -g opencode-ai'; it runs on the same Bedrock creds as prod." >&2
-        exit 1
-    fi
-    if ! command -v git >/dev/null 2>&1; then
-        echo "error: dev:local needs 'git' on PATH (the analyzer scripts clone the repo). brew install git" >&2
-        exit 1
-    fi
-    # (b) Host deps: the analyzer scripts (codegen) need native re2/acorn from this node_modules.
-    # Probe the actual requires rather than the directory: a node_modules installed before these
-    # deps were declared in package.json exists but still can't run codegen.
-    if ! ( cd "$REPO_ROOT/sandbox-runner/agent-sandbox" \
-            && node -e "require('acorn'); require('acorn-walk'); require('re2'); import('@opencode-ai/sdk')" 2>/dev/null ); then
-        echo "installing host analyzer deps (sandbox-runner/agent-sandbox)..."
-        ( cd "$REPO_ROOT/sandbox-runner/agent-sandbox" && pnpm install )
-    fi
-    # (c) Auto-wire: export BEFORE `$COMPOSE up` so the backend container's compose-interpolated
-    # environment picks these up (they outrank .env). The launcher window below uses the same key.
-    export TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080
-    # Key agreement: a container recreated OUTSIDE this wrapper (task rb, plain `docker compose
-    # up -d backend`) interpolates the key from .env alone, so when .env declares one, use it as
-    # the default here too, or the host launcher and any recreated backend silently disagree
-    # (backend gets 401s). 'devkey' remains the last resort when neither the shell nor .env sets it.
-    #
-    # The file test is load-bearing under `set -euo pipefail`: with no .env (a git worktree, a
-    # fresh clone) sed exits non-zero, pipefail hands that to the command substitution, and the
-    # assignment takes the whole script down. The 2>/dev/null hid the reason, so dev:local failed
-    # with no output at all.
-    if [ -z "${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-}" ] && [ -f "$REPO_ROOT/.env" ]; then
-        TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(sed -n 's/^TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY=//p' "$REPO_ROOT/.env" | tail -1)"
-    fi
-    export TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-devkey}"
-    # RCA rides the same host launcher (compose defaults its URL/key onto the observer's).
-    # The analyzer runs on the HOST here, so the dev API origin is reachable for live MCP.
-    export TESSARY_RCA_AGENTIC_MCP_BASE_URL="${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}"
-    echo "dev:local — host launcher mode (local opencode, no E2B); backend → $TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL"
+# Run from inside the session this script is about to replace, the `kill-session` below kills the
+# shell running it: the stack comes up and the new session never does, with no message. Refuse
+# before anything starts instead.
+if [ -n "${TMUX:-}" ] && [ "$(tmux display-message -p '#S' 2>/dev/null)" = "$SESSION" ]; then
+    echo "error: you are inside the $SESSION tmux session, which task dev replaces." >&2
+    echo "       Detach first with C-b d, then run task dev again." >&2
+    exit 1
 fi
+
+# The decisions this stack needs (where agents run, whether the encoder service runs, whether
+# sign-in is enforced), asked once as multiple choice and remembered in .local/dev-choices.env.
+# Resolved and exported BEFORE `$COMPOSE up`, which is when compose interpolates them. Presets
+# (task dev:local, task dev:slim) answer their question up front and skip it.
+# shellcheck source=lib/dev-choices.sh
+. "$REPO_ROOT/scripts/lib/dev-choices.sh"
+dev_choices_resolve
+dev_choices_summary
+dev_local_agent_preflight
+dev_choices_export_sandbox_env
 
 # Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling / dev:local:profiling, or set it
 # yourself in front of any dev task). The agent jar is fetched HERE rather than in the Taskfile so
@@ -171,6 +146,8 @@ mkdir -p "$(dirname "$CHEATSHEET")"
 cat > "$CHEATSHEET" <<EOF
 Stack is up at http://localhost:${HOST_PORT:-8000}
 
+$(dev_choices_summary_text)
+
 Tmux windows — switch with any of:
   • Click the window name in the bottom status bar (mouse mode is on)
   • 0 / 1 / 2 / 3       jump to window (no prefix)
@@ -200,17 +177,16 @@ Stop:
 Detach: C-b d   Re-attach: tmux attach -t $SESSION
 EOF
 
-# In local-agent mode there's a 5th window running the HOST launcher; note it on the sheet.
-if [ "$LOCAL_AGENT" = "1" ]; then
+# With agents=local there's a 5th window running the HOST launcher; note it on the sheet.
+if [ "$TESSARY_DEV_SANDBOX" = "local" ]; then
 cat >> "$CHEATSHEET" <<EOF
 
-── dev:local (host agent launcher) ──
+── agents=local (host agent launcher) ──
   4 launcher   runs sandbox-runner/launcher/server.js on the HOST in local mode,
-               driving your local \`opencode\` (no E2B). Look for
-               "listening on :8080 (backend=local)".
-  Backend is auto-pointed at http://host.docker.internal:8080 (key
-  '$TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY'), so /analyze, /rca, /synthesize and
-  /codegen run your local opencode. Jump to it with no-prefix '4'.
+               driving your local \`opencode\` against this checkout's agent
+               scripts (no image, no E2B). Look for "listening on :8080 (backend=local)".
+  Backend is pointed at http://host.docker.internal:8080, so triage and RCA run
+  here. Jump to it with no-prefix '4'.
 EOF
 fi
 
@@ -241,13 +217,14 @@ tmux send-keys  -t "$SESSION:frontend" "$COMPOSE logs -f --no-log-prefix fronten
 tmux new-window -t "$SESSION" -n "caddy"
 tmux send-keys  -t "$SESSION:caddy" "$COMPOSE logs -f --no-log-prefix caddy" C-m
 
-# Window 4: host launcher (local mode only). Runs sandbox-runner/launcher/server.js on the
-# HOST so the agentic paths (/analyze, /rca, /synthesize, /codegen) drive your local `opencode`
-# instead of E2B. The backend reaches it via host.docker.internal:8080 (wired above).
-if [ "$LOCAL_AGENT" = "1" ]; then
+# Window 4: host launcher (agents=local only). Runs sandbox-runner/launcher/server.js on the
+# HOST so triage and RCA drive your local `opencode` instead of a container or E2B. The backend
+# reaches it via host.docker.internal:8080 (wired above). A launcher left running by a detached
+# `task dev:up` would hold :8080, so that one is stopped first.
+if [ "$TESSARY_DEV_SANDBOX" = "local" ]; then
+    dev_stop_host_launcher
     tmux new-window -t "$SESSION" -n "launcher"
-    tmux send-keys  -t "$SESSION:launcher" \
-        "cd '$REPO_ROOT/sandbox-runner/launcher' && SANDBOX_BACKEND=local SANDBOX_API_KEY='$TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY' PORT=8080 node server.js" C-m
+    tmux send-keys  -t "$SESSION:launcher" "$(dev_host_launcher_cmd)" C-m
 fi
 
 # Session-local no-prefix bindings live in the project's .tmux.conf (repo root):

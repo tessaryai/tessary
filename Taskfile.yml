@@ -69,12 +69,20 @@ tasks:
 
   # ---- dev: run everything (docker + tmux) ----
   dev:
-    desc: Launch the dev stack inside tmux (logs in tabbed windows + a shell). Use `dev:local` to also run a HOST launcher on your local `opencode` (no E2B).
+    desc: 'Launch the dev stack inside tmux (logs in tabbed windows + a shell). Runs like a self-hosted install: on first run it asks where triage and RCA agents run, whether to run the encoder classifier service, and whether to enforce sign-in, then remembers the answers in .local/dev-choices.env.'
     cmds:
       - bash scripts/dev.sh
 
+  # The questions `task dev` asks once, asked again, and nothing started. The stack picks the new
+  # answers up on its next `task dev` or `task dev:up`.
+  dev:configure:
+    desc: 'Answer the dev stack''s questions again (agents: local/docker/e2b/off, encoder classifiers, sign-in) and save them. Restart the stack to apply.'
+    interactive: true
+    cmds:
+      - bash scripts/lib/dev-choices.sh configure
+
   dev:local:
-    desc: Dev stack + a HOST launcher running your local `opencode` (no E2B) for the agentic paths (/analyze, /rca, /triage, /synthesize, /codegen). Needs `opencode` + git on PATH.
+    desc: '`task dev` with agents=local already answered: a HOST launcher running your local `opencode` against this checkout''s agent scripts (no image, no E2B) for triage and RCA. Needs `opencode` + git on PATH. The other questions are still asked.'
     env:
       TESSARY_LOCAL_AGENT: "1"
     cmds:
@@ -108,7 +116,7 @@ tasks:
     # Renamed from dev:2gb — the number was never the point, and it stopped being true when
     # classify's mem_limit went to 8 GB. Alias kept so the old name and old shell history work.
     aliases: [dev:2gb]
-    desc: 'Like `dev` minus the classify + compile services: no gated encoder-weight download, no 8 GB container. Runs postgres, backend, frontend, caddy, alloy — only encoder classifier heads and SOP-conformance fits stay dormant.'
+    desc: '`task dev` with the encoder classifier service already answered "no": no classify or compile, no gated encoder-weight download, no 8 GB container. Only encoder classifier heads and SOP-conformance fits stay dormant.'
     env:
       TESSARY_SKIP_CLASSIFY: "1"
     cmds:
@@ -683,7 +691,7 @@ tasks:
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: Start the dev stack detached, no tmux (build on demand). `TESSARY_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
+    desc: 'Start the dev stack detached, no tmux (build on demand). Same questions as `task dev` on a terminal; saved answers or the non-interactive defaults otherwise. With agents=local the host launcher runs in the background.'
     cmds:
       - bash scripts/dev-up.sh
 
@@ -695,9 +703,10 @@ tasks:
       - bash scripts/dev-up.sh
 
   dev:stop:
-    desc: Stop the dev stack and kill its tmux session.
+    desc: Stop the dev stack, its tmux session, and a host agent launcher started by `task dev:up`.
     cmds:
       - tmux kill-session -t {{.SESSION}} 2>/dev/null || true
+      - bash scripts/lib/dev-choices.sh stop-launcher
       # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
       # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
       #
