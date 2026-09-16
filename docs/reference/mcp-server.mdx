@@ -58,8 +58,8 @@ Three tools strip the triage ruling before their response leaves the server. [Ro
 
 | Tool | Fields removed |
 | --- | --- |
-| `get_finding` | `triageVerdict`, `triageAction`, `triageSummary`, `triageCitations`, `triagedAt` |
-| `list_findings` | The same five fields on every row |
+| `get_finding` | `triageVerdict`, `triageAction`, `triageSummary`, `triageCitations`, `triagedAt`, `humanVerdictAt` |
+| `list_findings` | The same six fields on every row |
 | `get_case` | `ruling` |
 
 Two fields deliberately survive: `triageStatus`, which says only whether a ruling exists and which the findings list needs to render, and a case's inline `rca`, which is the analysis lane's own prior work rather than the gate the redaction exists to protect. The redaction applies to every MCP caller, not only to keys minted for analysis. The full ruling is one click away in the UI, which reads these fields over REST and is untouched.
@@ -102,7 +102,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
-| `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob, plus a withheld count |
+| `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob |
 | `get_finding` | `id` | none | One finding with its parsed evidence |
 | `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
 
