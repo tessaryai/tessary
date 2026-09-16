@@ -346,7 +346,9 @@ function RailFindingRow({
         >
           {triaged ? "Triaged" : inFlight ? "Triaging…" : "Run triage"}
         </VerbButton>
-        <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />
+        {/* A ruling freezes the finding by construction (decision 1): once triaged, every verb on
+            it 409s, so the verbs stop being offered rather than staying up as a dead override. */}
+        {!triaged && <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />}
         {summary && (
           <button
             type="button"

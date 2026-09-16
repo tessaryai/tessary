@@ -103,12 +103,14 @@ export function VerbButton({
 }
 
 /**
- * The human verdicts on one finding: the override, available on every finding including one
- * triage already closed. Both are `outline` for the reason VerbButton's own note gives.
+ * The human verdicts on one finding. Both are `outline` for the reason VerbButton's own note
+ * gives.
  *
- * <p>They stay reachable after a closure because triage closing a finding is a machine ruling on a
- * claim, not a decision about what matters, and a person who disagrees needs somewhere to say so.
- * A human verdict outranks the machine's wherever the two are read together.
+ * <p>A ruling freezes the finding by construction (decision 1): the first one to land, triage's or
+ * a person's, leaves it outside `ux_finding_live` and every verb on it after that 409s. So a
+ * caller renders this only while the finding is still unruled (`!triaged`) — there is no override
+ * of a standing ruling any more, machine or human; a cause that disagrees with the traffic again
+ * simply opens a fresh finding, which is triaged like any other.
  *
  * <p>Conformance gets one verb. The two-verb split exists to correct a fitted reference (absorbing
  * a gram or re-pinning a baseline teaches the detector that what it saw is normal), and an SOP
@@ -166,8 +168,18 @@ export function triageState(finding: BehaviorFinding): TriageState {
   // Without this branch, a run that gave up is indistinguishable from one in flight and sits on
   // "Triaging" forever, the row looking busy while nothing is happening to it.
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
-  if (finding.triageVerdict === "positive") return { label: "Positive", tone: "positive" };
-  if (finding.triageVerdict === "negative") return { label: "Closed · negative", tone: "closed" };
+  // `humanVerdictAt` set means a PERSON's ruling won the race to land first, not triage's — say so
+  // in the verb they actually pressed rather than in triage's own words, which would claim a run
+  // that never happened.
+  const byPerson = finding.humanVerdictAt != null;
+  if (finding.triageVerdict === "positive") {
+    return byPerson ? { label: "Real deviation", tone: "positive" } : { label: "Positive", tone: "positive" };
+  }
+  if (finding.triageVerdict === "negative") {
+    return byPerson
+      ? { label: "Legitimate, absorb", tone: "closed" }
+      : { label: "Closed · negative", tone: "closed" };
+  }
   return { label: "Closed", tone: "closed" };
 }
 
@@ -199,7 +211,7 @@ export function chainWords(finding: BehaviorFinding): string {
       ? `${finding.traceCount} applicable turns when the rule was fitted`
       : `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
-      ? `triage ruled ${finding.triageVerdict ?? "unknown"}`
+      ? `${finding.humanVerdictAt != null ? "a person" : "triage"} ruled ${finding.triageVerdict ?? "unknown"}`
       : finding.triageStatus === "in_flight"
         ? "triage running"
         : finding.triageStatus === "failed"

@@ -148,7 +148,21 @@ export function FindingPage() {
                 {inFlight ? "Triaging…" : "Run triage"}
               </VerbButton>
             )}
-            <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+            {/* A ruling freezes the finding by construction (decision 1): once triaged is true a
+                verdict is stood, and every verb on it — triage's own or a person's — 409s. So the
+                verbs stop being offered the moment there is one, rather than staying up as an
+                "override" that would just fail. */}
+            {!triaged && (
+              <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+            )}
+            {finding.caseId && (
+              <Link
+                to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+                className="text-link hover:text-link-hover text-small"
+              >
+                Opened case →
+              </Link>
+            )}
           </div>
         </>
       )}
@@ -158,7 +172,8 @@ export function FindingPage() {
 
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
-          the ruling, and checking comes after reading what was ruled on. */}
+          the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
+          finding is frozen (decision 1), so there is nothing left to override. */}
       {story && triaged && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
@@ -167,14 +182,14 @@ export function FindingPage() {
               {finding.triageSummary}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-2 mt-1">
-            <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
-            {finding.triageAction === "closed" && (
-              <span className="text-subtle ml-1 text-small">
-                Triage closed this finding. These override the ruling.
-              </span>
-            )}
-          </div>
+          {finding.caseId && (
+            <Link
+              to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+              className="text-link hover:text-link-hover text-small"
+            >
+              Opened case →
+            </Link>
+          )}
         </div>
       )}
 
@@ -261,7 +276,7 @@ export function FindingPage() {
         </p>
       )}
 
-      {triaged && !story && <TriageRuling finding={finding} />}
+      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
       <section className="mt-7">
         <h2 className="font-mono text-label uppercase text-muted mb-1.5">
@@ -430,7 +445,7 @@ export function FindingPage() {
  * is offering as a receipt, so it is shown as code, with what it printed under it. Flattening a
  * script into a line of prose would hide the one part of a ruling a reader can actually re-run.
  */
-function TriageRuling({ finding }: { finding: Detail["finding"] }) {
+function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; basePath: string }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
   const pointers = finding.triageCitations.filter((c) => c.stdout === null);
   return (
@@ -442,6 +457,14 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
         <span className="text-fg text-body">
           {VERDICT_WORDS[finding.triageVerdict ?? ""] ?? finding.triageVerdict}
         </span>
+        {finding.caseId && (
+          <Link
+            to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+            className="text-link hover:text-link-hover text-small"
+          >
+            Opened case →
+          </Link>
+        )}
         {finding.triagedAt && (
           <span className="text-subtle text-small">
             {new Date(finding.triagedAt).toLocaleString()}
