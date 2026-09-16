@@ -34,7 +34,6 @@ Dev images: JVM-mode backend with Spring Boot devtools, Vite dev server with HMR
 ```bash
 task dev                                                   # → tmux session, asks its questions on first run
 task dev:configure                                         # answer them again; the next `task dev` applies it
-task dev:local                                             # agents already answered: local
 task dev:slim                                              # encoder classifiers already answered: no (was `dev:2gb`, still aliased)
 
 task dev:up                                                # no tmux: same containers and questions, detached, logs via `task dev:logs`
@@ -47,15 +46,15 @@ The dev stack runs like the one `docker compose -f oci://docker.io/tessaryai/tes
 
 | Question | Options | Recommended | Without a terminal |
 |---|---|---|---|
-| Where should triage and RCA agents run? | `local` (host launcher on your `opencode`, running this checkout's agent scripts, no image build), `docker` (a sandbox container per run from the published agent image, as self-host does), `e2b` (microVMs; needs `E2B_API_KEY`, a published template and a public MCP URL), `off` | `local` | `off` |
+| Where should triage and RCA agents run? | `docker` (a sandbox container per run, built from this checkout's `sandbox-runner/agent-sandbox/` — always up to date with your changes), `e2b` (microVMs, from the published `tessary/tessary-agent-sandbox` template; needs `E2B_API_KEY` and a public MCP URL), `off` | `docker` | `off` |
 | Run the encoder classifier service? | No, Yes (8 GB container, gated weight download) | No | Yes |
 | Enforce sign-in? | Yes, No | Yes | Yes |
 
-An answer is taken from the first of these that has one: the environment (including a preset like `task dev:local`), `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it. Presets are never saved, so running `task dev:local` once does not turn later plain `task dev` runs into local-launcher ones.
+An answer is taken from the first of these that has one: the environment (including a preset like `task dev:slim`), `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it. Presets are never saved, so running `task dev:slim` once does not turn later plain `task dev` runs into slim ones.
 
-The non-interactive defaults for agents and the classifier service are what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected.
+The non-interactive defaults for agents and the classifier service are what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
 
-With `agents=local`, `task dev` runs the launcher in tmux window 4; `task dev:up` starts it in the background (`.local/launcher.pid`, log in `.local/launcher.log`), and `task dev:stop` stops it.
+With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag — a boot-time failure there stops the whole run rather than surfacing as an opaque 502 on the first `/rca` or `/triage`. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
 
 Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and the launcher key default to the same placeholders `docker-compose.yml` ships. Set real ones in `.env` for anything beyond local development.
 

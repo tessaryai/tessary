@@ -10,12 +10,12 @@
 # self-host behaviour as its recommended answer, unless a dev checkout has a better one.
 #
 # Three decisions:
-#   TESSARY_DEV_SANDBOX     local | docker | e2b | off   where triage and RCA agents run
-#   TESSARY_SKIP_CLASSIFY   1 | 0                        whether the encoder classifier service runs
-#   TESSARY_AUTH_DISABLED   false | true                 whether sign-in is enforced
+#   TESSARY_DEV_SANDBOX     docker | e2b | off   where triage and RCA agents run
+#   TESSARY_SKIP_CLASSIFY   1 | 0                whether the encoder classifier service runs
+#   TESSARY_AUTH_DISABLED   false | true         whether sign-in is enforced
 #
 # Each resolves in this order, and the first that answers wins:
-#   1. the environment: an explicit export, or a task preset (dev:local, dev:slim)
+#   1. the environment: an explicit export, or a task preset (dev:slim)
 #   2. .env at the repo root. Read here, not left to compose, because whatever this exports
 #      outranks .env at interpolation: without this step a .env saying TESSARY_AUTH_DISABLED=true
 #      would be silently overridden by the default below.
@@ -26,8 +26,8 @@
 #      sign-in it is now enforced, like a self-hosted install; the one non-interactive caller that
 #      boots this stack already asked for exactly that explicitly.
 #
-# Only prompted answers are saved. A preset is not: `task dev:local` once must not quietly turn
-# every later plain `task dev` into a local-launcher stack.
+# Only prompted answers are saved. A preset is not: `task dev:slim` once must not quietly turn
+# every later plain `task dev` into a slim stack.
 #
 # Bash 3.2 on purpose (macOS /bin/bash): no associative arrays, no case-modifying expansions.
 
@@ -44,8 +44,11 @@ DEV_CHOICES_FILE="$REPO_ROOT/.local/dev-choices.env"
 # scan's generic rule flags it in a shell file even though the compose files carry it allowlisted.
 DEV_LAUNCHER_KEY_PLACEHOLDER="$(printf '%s' 'CHANGE-ME-insecure-default-launch' | base64)"
 
-DEV_HOST_LAUNCHER_PID="$REPO_ROOT/.local/launcher.pid"
-DEV_HOST_LAUNCHER_LOG="$REPO_ROOT/.local/launcher.log"
+# The tag `task dev` builds sandbox-runner/agent-sandbox/ under and points AGENT_IMAGE at — see
+# dev_docker_agent_image_ensure. Distinct from the published tessaryai/tessary:agent-sandbox-*
+# tags (docker-compose.dev.yml's own AGENT_IMAGE default) so a dev build can never be mistaken
+# for, or silently reuse a stale copy of, a released image.
+DEV_AGENT_IMAGE_TAG="tessary-agent-sandbox-dev:latest"
 
 dev_is_interactive() {
     [ -t 0 ] && [ -t 2 ] && [ -z "${CI:-}" ] && [ "${TESSARY_DEV_NONINTERACTIVE:-0}" != "1" ]
@@ -146,16 +149,10 @@ dev_resolve() {
 }
 
 dev_choices_resolve() {
-    # dev:local predates the question; keep its old spelling meaning what it always meant.
-    if [ -z "${TESSARY_DEV_SANDBOX:-}" ] && [ "${TESSARY_LOCAL_AGENT:-0}" = "1" ]; then
-        export TESSARY_DEV_SANDBOX=local
-    fi
-
     dev_resolve TESSARY_DEV_SANDBOX off 1 \
         "Where should triage and RCA agents run?" \
-        "local|local   On this machine, running this checkout's agent scripts on your opencode. No image build, so agent changes are live." \
-        "docker|docker  In a sandbox container per run, from the published agent image. How a self-hosted install runs." \
-        "e2b|e2b     In E2B microVMs. Needs E2B_API_KEY, a published template and a publicly reachable MCP URL." \
+        "docker|docker  In a sandbox container per run, built from this checkout's sandbox-runner/agent-sandbox/. How a self-hosted install runs, but always up to date with your changes." \
+        "e2b|e2b     In E2B microVMs, from the published tessary/tessary-agent-sandbox template. Needs E2B_API_KEY and a publicly reachable MCP URL." \
         "off|off     Nowhere. No launcher is wired, so triage and RCA will not run."
 
     dev_resolve TESSARY_SKIP_CLASSIFY 0 1 \
@@ -169,9 +166,9 @@ dev_choices_resolve() {
         "true|No    Every request is anonymous. The UI's sign-in flow cannot complete in this mode."
 
     case "$TESSARY_DEV_SANDBOX" in
-        local | docker | e2b | off) ;;
+        docker | e2b | off) ;;
         *)
-            echo "error: TESSARY_DEV_SANDBOX='$TESSARY_DEV_SANDBOX' is not one of local, docker, e2b, off." >&2
+            echo "error: TESSARY_DEV_SANDBOX='$TESSARY_DEV_SANDBOX' is not one of docker, e2b, off." >&2
             echo "       Fix it in .local/dev-choices.env or the environment, or run: task dev:configure" >&2
             exit 1
             ;;
@@ -206,6 +203,38 @@ dev_launcher_key() {
     printf '%s\n' "${key:-$DEV_LAUNCHER_KEY_PLACEHOLDER}"
 }
 
+# Boot guard for agents=docker: build AGENT_IMAGE from this checkout's sandbox-runner/agent-sandbox/
+# BEFORE `compose up` ever runs, and fail the whole `task dev`/`task dev:up` invocation if the
+# build fails — the alternative is server.js's own lazy ensureAgentImage() discovering the problem
+# on the first /rca or /triage request, an hour into a dev session, as an opaque 502. A caller that
+# already named AGENT_IMAGE (an explicit export, or .env) is left alone: naming one is an explicit
+# opt-out of the checkout build, e.g. to pin a published tag instead.
+#
+# Rebuilt on every run rather than once: Docker's own layer cache makes a no-op rebuild a
+# sub-second check, and the alternative (build once, then silently drift from the checkout as
+# rca.js/triage.js/agent-stream.js change underneath it) is exactly the staleness this exists to
+# prevent — see AGENT_IMAGE's own doc comment in server.js.
+dev_docker_agent_image_ensure() {
+    [ "$TESSARY_DEV_SANDBOX" = "docker" ] || return 0
+    if [ -n "${AGENT_IMAGE:-}" ]; then
+        echo "dev stack: AGENT_IMAGE=$AGENT_IMAGE is already set; skipping the checkout build." >&2
+        return 0
+    fi
+    echo "dev stack: building the agent-sandbox image from this checkout (sandbox-runner/agent-sandbox/)…" >&2
+    local revision
+    revision="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if ! docker build -f "$REPO_ROOT/sandbox-runner/agent-sandbox/Dockerfile" \
+        -t "$DEV_AGENT_IMAGE_TAG" \
+        --build-arg IMAGE_VERSION=dev \
+        --build-arg IMAGE_REVISION="$revision" \
+        "$REPO_ROOT" 1>&2; then
+        echo "error: building the agent-sandbox image failed — see the docker build output above." >&2
+        echo "       Fix the build, or set AGENT_IMAGE to a published tag and retry." >&2
+        exit 1
+    fi
+    export AGENT_IMAGE="$DEV_AGENT_IMAGE_TAG"
+}
+
 # Export what the chosen sandbox needs, before `compose up` interpolates the files. Anything the
 # caller already set wins.
 dev_choices_export_sandbox_env() {
@@ -214,96 +243,25 @@ dev_choices_export_sandbox_env() {
     TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY="$(dev_launcher_key)"
     export TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY
 
-    case "$TESSARY_DEV_SANDBOX" in
-        local)
-            # The launcher runs on the host, so the backend container reaches it through the
-            # Docker host gateway, and the agent (also on the host) reaches the API through Caddy.
-            export TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-http://host.docker.internal:8080}"
-            export TESSARY_RCA_AGENTIC_MCP_BASE_URL="${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}"
-            ;;
-        docker | e2b)
-            case ",${COMPOSE_PROFILES:-}," in
-                *,launcher,*) ;;
-                *) export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}launcher" ;;
-            esac
-            export SANDBOX_BACKEND="$TESSARY_DEV_SANDBOX"
-            export TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-http://sandbox-runner:8080}"
-            if [ "$TESSARY_DEV_SANDBOX" = "docker" ]; then
-                # Same origin docker-compose.yml gives its sandbox containers.
-                export TESSARY_RCA_AGENTIC_MCP_BASE_URL="${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}"
-            else
-                if [ -z "${E2B_API_KEY:-}" ] && ! grep -q '^E2B_API_KEY=.' "$REPO_ROOT/.env" 2>/dev/null; then
-                    echo "warning: agents=e2b but E2B_API_KEY is not set; every triage and RCA run will fail to start." >&2
-                fi
-                if [ -z "${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-}" ]; then
-                    echo "warning: agents=e2b needs TESSARY_RCA_AGENTIC_MCP_BASE_URL set to a public URL; a microVM cannot reach localhost." >&2
-                fi
-            fi
-            ;;
+    case ",${COMPOSE_PROFILES:-}," in
+        *,launcher,*) ;;
+        *) export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}launcher" ;;
     esac
-}
+    export SANDBOX_BACKEND="$TESSARY_DEV_SANDBOX"
+    export TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL="${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-http://sandbox-runner:8080}"
 
-# Preflight for agents=local: the host launcher starts `opencode` and the agent scripts shell out
-# to `git` and need their own node_modules.
-dev_local_agent_preflight() {
-    [ "$TESSARY_DEV_SANDBOX" = "local" ] || return 0
-    if ! command -v opencode >/dev/null 2>&1; then
-        echo "error: agents=local needs the 'opencode' CLI on PATH. Install it with 'npm i -g opencode-ai'," >&2
-        echo "       or choose another option with: task dev:configure" >&2
-        exit 1
-    fi
-    if ! command -v git >/dev/null 2>&1; then
-        echo "error: agents=local needs 'git' on PATH (the agent scripts clone the repo). brew install git" >&2
-        exit 1
-    fi
-    # Probe the actual requires rather than the directory: a node_modules installed before these
-    # deps were declared exists but still cannot run the scripts.
-    if ! (cd "$REPO_ROOT/sandbox-runner/agent-sandbox" \
-        && node -e "require('acorn'); require('acorn-walk'); require('re2'); import('@opencode-ai/sdk')" 2>/dev/null); then
-        echo "installing host agent deps (sandbox-runner/agent-sandbox)..." >&2
-        (cd "$REPO_ROOT/sandbox-runner/agent-sandbox" && pnpm install)
-    fi
-}
-
-# The one command line that runs the host launcher, for the tmux window and for the detached start.
-dev_host_launcher_cmd() {
-    printf "cd '%s/sandbox-runner/launcher' && SANDBOX_BACKEND=local SANDBOX_API_KEY='%s' PORT=8080 node server.js" \
-        "$REPO_ROOT" "$TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY"
-}
-
-dev_stop_host_launcher() {
-    [ -f "$DEV_HOST_LAUNCHER_PID" ] || return 0
-    local pid
-    pid="$(cat "$DEV_HOST_LAUNCHER_PID" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-        echo "stopped the host agent launcher (pid $pid)." >&2
-    fi
-    rm -f "$DEV_HOST_LAUNCHER_PID"
-}
-
-# Detached start for `task dev:up`, which has no tmux window to run it in.
-dev_start_host_launcher() {
-    [ "$TESSARY_DEV_SANDBOX" = "local" ] || return 0
-    dev_stop_host_launcher
-    if curl -s -m 2 -o /dev/null http://localhost:8080/healthz 2>/dev/null; then
-        echo "warning: something is already listening on :8080, so the host launcher was not started." >&2
-        echo "         If that is an earlier launcher from a tmux session, stop it first: task dev:stop" >&2
-        return 0
-    fi
-    mkdir -p "$(dirname "$DEV_HOST_LAUNCHER_PID")"
-    nohup bash -c "$(dev_host_launcher_cmd)" >> "$DEV_HOST_LAUNCHER_LOG" 2>&1 &
-    echo $! > "$DEV_HOST_LAUNCHER_PID"
-    local i=0
-    while [ "$i" -lt 20 ]; do
-        if curl -s -m 1 -o /dev/null http://localhost:8080/healthz 2>/dev/null; then
-            echo "host agent launcher up on :8080 (log: .local/launcher.log)." >&2
-            return 0
+    if [ "$TESSARY_DEV_SANDBOX" = "docker" ]; then
+        dev_docker_agent_image_ensure
+        # Same origin docker-compose.yml gives its sandbox containers.
+        export TESSARY_RCA_AGENTIC_MCP_BASE_URL="${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}"
+    else
+        if [ -z "${E2B_API_KEY:-}" ] && ! grep -q '^E2B_API_KEY=.' "$REPO_ROOT/.env" 2>/dev/null; then
+            echo "warning: agents=e2b but E2B_API_KEY is not set; every triage and RCA run will fail to start." >&2
         fi
-        i=$((i + 1))
-        sleep 0.5
-    done
-    echo "warning: the host agent launcher did not answer on :8080 within 10s; see .local/launcher.log" >&2
+        if [ -z "${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-}" ]; then
+            echo "warning: agents=e2b needs TESSARY_RCA_AGENTIC_MCP_BASE_URL set to a public URL; a microVM cannot reach localhost." >&2
+        fi
+    fi
 }
 
 # `bash scripts/lib/dev-choices.sh <command>` for the Taskfile, which cannot source a file.
@@ -315,17 +273,14 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
                 echo "error: task dev:configure asks questions, so it needs a terminal." >&2
                 exit 1
             fi
-            unset TESSARY_DEV_SANDBOX TESSARY_SKIP_CLASSIFY TESSARY_AUTH_DISABLED TESSARY_LOCAL_AGENT
+            unset TESSARY_DEV_SANDBOX TESSARY_SKIP_CLASSIFY TESSARY_AUTH_DISABLED
             TESSARY_DEV_RECONFIGURE=1
             dev_choices_resolve
             dev_choices_summary
             echo "Saved to .local/dev-choices.env. Restart the stack to apply: task dev" >&2
             ;;
-        stop-launcher)
-            dev_stop_host_launcher
-            ;;
         *)
-            echo "usage: bash scripts/lib/dev-choices.sh configure|stop-launcher" >&2
+            echo "usage: bash scripts/lib/dev-choices.sh configure" >&2
             exit 2
             ;;
     esac

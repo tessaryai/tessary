@@ -76,17 +76,10 @@ tasks:
   # The questions `task dev` asks once, asked again, and nothing started. The stack picks the new
   # answers up on its next `task dev` or `task dev:up`.
   dev:configure:
-    desc: 'Answer the dev stack''s questions again (agents: local/docker/e2b/off, encoder classifiers, sign-in) and save them. Restart the stack to apply.'
+    desc: 'Answer the dev stack''s questions again (agents: docker/e2b/off, encoder classifiers, sign-in) and save them. Restart the stack to apply.'
     interactive: true
     cmds:
       - bash scripts/lib/dev-choices.sh configure
-
-  dev:local:
-    desc: '`task dev` with agents=local already answered: a HOST launcher running your local `opencode` against this checkout''s agent scripts (no image, no E2B) for triage and RCA. Needs `opencode` + git on PATH. The other questions are still asked.'
-    env:
-      TESSARY_LOCAL_AGENT: "1"
-    cmds:
-      - bash scripts/dev.sh
 
   # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads TESSARY_PROFILING and
   # self-heals the agent jar, so `TESSARY_PROFILING=1 task dev:slim` (or any other dev mode) works
@@ -94,14 +87,6 @@ tasks:
   dev:profiling:
     desc: Dev stack + continuous CPU profiling. Flame graphs at http://localhost:4040 (local Pyroscope, no cloud account needed).
     env:
-      TESSARY_PROFILING: "1"
-    cmds:
-      - bash scripts/dev.sh
-
-  dev:local:profiling:
-    desc: Like `dev:local` (HOST launcher on your local `opencode`, no E2B) plus continuous CPU profiling at http://localhost:4040.
-    env:
-      TESSARY_LOCAL_AGENT: "1"
       TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
@@ -691,7 +676,7 @@ tasks:
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: 'Start the dev stack detached, no tmux (build on demand). Same questions as `task dev` on a terminal; saved answers or the non-interactive defaults otherwise. With agents=local the host launcher runs in the background.'
+    desc: 'Start the dev stack detached, no tmux (build on demand). Same questions as `task dev` on a terminal; saved answers or the non-interactive defaults otherwise.'
     cmds:
       - bash scripts/dev-up.sh
 
@@ -703,10 +688,9 @@ tasks:
       - bash scripts/dev-up.sh
 
   dev:stop:
-    desc: Stop the dev stack, its tmux session, and a host agent launcher started by `task dev:up`.
+    desc: Stop the dev stack and kill its tmux session.
     cmds:
       - tmux kill-session -t {{.SESSION}} 2>/dev/null || true
-      - bash scripts/lib/dev-choices.sh stop-launcher
       # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
       # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
       #

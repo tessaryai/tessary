@@ -76,19 +76,18 @@ fi
 
 # The decisions this stack needs (where agents run, whether the encoder service runs, whether
 # sign-in is enforced), asked once as multiple choice and remembered in .local/dev-choices.env.
-# Resolved and exported BEFORE `$COMPOSE up`, which is when compose interpolates them. Presets
-# (task dev:local, task dev:slim) answer their question up front and skip it.
+# Resolved and exported BEFORE `$COMPOSE up`, which is when compose interpolates them. The
+# `task dev:slim` preset answers its question up front and skips it.
 # shellcheck source=lib/dev-choices.sh
 . "$REPO_ROOT/scripts/lib/dev-choices.sh"
 dev_choices_resolve
 dev_choices_summary
-dev_local_agent_preflight
 dev_choices_export_sandbox_env
 
-# Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling / dev:local:profiling, or set it
-# yourself in front of any dev task). The agent jar is fetched HERE rather than in the Taskfile so
-# profiling composes with every mode (dev, dev:local, dev:slim) instead of only the one task that
-# happened to carry the download step. Idempotent: re-running is a no-op once the jar exists.
+# Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling, or set it yourself in front of
+# any dev task). The agent jar is fetched HERE rather than in the Taskfile so profiling composes
+# with every mode (dev, dev:slim) instead of only the one task that happened to carry the download
+# step. Idempotent: re-running is a no-op once the jar exists.
 #
 # Version must match the agent pinned in backend/Dockerfile and the io.pyroscope:agent dependency
 # in backend/shared/pom.xml. The labels API is shared static state between the javaagent and the
@@ -177,19 +176,6 @@ Stop:
 Detach: C-b d   Re-attach: tmux attach -t $SESSION
 EOF
 
-# With agents=local there's a 5th window running the HOST launcher; note it on the sheet.
-if [ "$TESSARY_DEV_SANDBOX" = "local" ]; then
-cat >> "$CHEATSHEET" <<EOF
-
-── agents=local (host agent launcher) ──
-  4 launcher   runs sandbox-runner/launcher/server.js on the HOST in local mode,
-               driving your local \`opencode\` against this checkout's agent
-               scripts (no image, no E2B). Look for "listening on :8080 (backend=local)".
-  Backend is pointed at http://host.docker.internal:8080, so triage and RCA run
-  here. Jump to it with no-prefix '4'.
-EOF
-fi
-
 # Wipe any prior session so windows are fresh.
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
@@ -216,16 +202,6 @@ tmux send-keys  -t "$SESSION:frontend" "$COMPOSE logs -f --no-log-prefix fronten
 # Window 3: caddy logs.
 tmux new-window -t "$SESSION" -n "caddy"
 tmux send-keys  -t "$SESSION:caddy" "$COMPOSE logs -f --no-log-prefix caddy" C-m
-
-# Window 4: host launcher (agents=local only). Runs sandbox-runner/launcher/server.js on the
-# HOST so triage and RCA drive your local `opencode` instead of a container or E2B. The backend
-# reaches it via host.docker.internal:8080 (wired above). A launcher left running by a detached
-# `task dev:up` would hold :8080, so that one is stopped first.
-if [ "$TESSARY_DEV_SANDBOX" = "local" ]; then
-    dev_stop_host_launcher
-    tmux new-window -t "$SESSION" -n "launcher"
-    tmux send-keys  -t "$SESSION:launcher" "$(dev_host_launcher_cmd)" C-m
-fi
 
 # Session-local no-prefix bindings live in the project's .tmux.conf (repo root):
 # bare 0-3 / Tab window jumps, the r-chord restart, C-e stop, and mouse-drag

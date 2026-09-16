@@ -144,7 +144,7 @@ services:
       # no opt-in this is dead config the exporter never reads. Bring up Alloy AND flip the
       # enabled flag to actually ship: `COMPOSE_PROFILES=observability
       # MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED=true
-      # task dev` (task dev:profiling / dev:local:profiling does all of this for you already —
+      # task dev` (task dev:profiling does all of this for you already —
       # scripts/dev.sh's TESSARY_PROFILING branch sets both the Compose profile and these flags).
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: tessary-backend
@@ -168,10 +168,10 @@ services:
       # `docker compose up`, which this then passes through.
       MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED:-false}
       MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED:-false}
-      # Host-launcher wiring for `task dev:local` (TESSARY_LOCAL_AGENT=1): scripts/dev.sh
-      # exports these into the shell env, which compose interpolation reads here (outranking
-      # .env). The two launcher settings below are inert when empty, so the backend keeps its
-      # .env/default config on plain `task dev`.
+      # Agent-launcher wiring for the dev stack's chooser (scripts/lib/dev-choices.sh, `task
+      # dev:configure` to change): agents=docker/e2b export these into the shell env before
+      # `docker compose up`, which compose interpolation reads here (outranking .env). Both
+      # settings are inert when empty, so agents=off keeps the backend on its .env/default config.
       #
       # The analyzer type is NOT, which is why it defaults to a value rather than to empty: Spring
       # binds "" over the Java default ("anchor") and ObserverProcessor's fail-fast rejects it, so
@@ -180,16 +180,18 @@ services:
       # Same placeholder docker-compose.yml ships on both sides of the pair, so a launcher and a
       # backend that nobody configured still agree instead of 401ing each other.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # RCA — defaults onto the observer's launcher/key so `task dev:local` (host launcher +
-      # local opencode) powers both lanes with one setup. Without a launcher URL every
-      # "Run RCA" press fails: the sandboxed agent is RCA's only analysis path.
+      # RCA — defaults onto the observer's launcher/key so one chosen agent sandbox powers both
+      # lanes with one setup. Without a launcher URL every "Run RCA" press fails: the sandboxed
+      # agent is RCA's only analysis path.
       TESSARY_RCA_AGENTIC_LAUNCHER_URL: ${TESSARY_RCA_AGENTIC_LAUNCHER_URL:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
       TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}}
       # The evidence door, for BOTH agent lanes, and neither has another one: their dossiers carry
       # the detector's claim and every row behind it is fetched over MCP, so a blank value here is a
       # broken deployment rather than a degraded mode (the engines refuse to run). Defaulted to the
-      # dev API origin — Caddy on :8000 — which is what a HOST launcher (`task dev:local`) reaches.
-      # E2B dev is the exception: the microVM cannot see your localhost, so point this at a tunnel.
+      # dev API origin — Caddy on :8000. agents=docker overrides this to http://backend:8080 (see
+      # dev-choices.sh) since a sibling container reaches the backend by service name, not
+      # localhost. agents=e2b is the exception either way: the microVM cannot see your localhost or
+      # the service network, so point this at a public tunnel.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}}
       # Encoder classification — the classify service below. Same service that runs on
@@ -357,22 +359,22 @@ services:
     networks:
       - tessary
 
-  # Agentic launcher (drives E2B microVMs that run OpenCode) — powers the synth
-  # CODE_GROUNDED tiers (/ground) and the observer agentic lane (/analyze). Built
+  # Agentic launcher (drives the docker/E2B sandbox backends that run OpenCode) — powers the
+  # synth CODE_GROUNDED tiers (/ground) and the observer agentic lane (/analyze). Built
   # locally so it bundles the current server.js (incl. the /ground route).
   # Reachable on the internal network at http://sandbox-runner:8080 — point the
   # backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL there (in .env). Optional: omit or
   # stop it and the backend's code-grounding degrades cleanly to trace/draft.
   #
-  # Prereq: publish the E2B template first (cd sandbox-runner/agent-sandbox &&
+  # E2B prereq only: publish the template first (cd sandbox-runner/agent-sandbox &&
   # pnpm exec tsx build.ts) under the SAME E2B team as E2B_API_KEY. Agent auth inside the
-  # microVM: set AWS_* in .env (every agentic model is served from our own Bedrock).
+  # sandbox: set AWS_* in .env (every agentic model is served from our own Bedrock).
   # ${...} values interpolate from the repo-root ./.env.
   #
-  # OFF by default locally (unlike prod, where it always runs): it is useless without an
-  # E2B key + a published template, and it builds an image most local work never touches.
-  # Start it with `COMPOSE_PROFILES=launcher task dev`. `task dev:local` does not need it
-  # at all — that path runs a locally installed `opencode` on the host instead of a microVM.
+  # OFF by default locally (unlike prod, where it always runs): the `launcher` profile is only
+  # turned on when the dev-choices.sh chooser resolves agents to docker or e2b (`task dev`, `task
+  # dev:configure` to change) — agents=off runs the whole product minus triage/RCA. A bare
+  # `COMPOSE_PROFILES=launcher task dev` also works for a one-off override.
   sandbox-runner:
     profiles:
       - launcher
@@ -386,20 +388,21 @@ services:
       - "8080"
     environment:
       PORT: "8080"
-      # Empty passthrough, same as docker-compose.yml: server.js's own default, `docker`,
-      # wins when this is unset — so the dev stack and the
-      # self-host stack agree, and a fresh `.env` never manufactures an E2B_API_KEY dependency.
-      # This used to default to `e2b` (this service's doc comment above and its Prereq note
-      # are about exercising the E2B template path); to dev against E2B, set SANDBOX_BACKEND=e2b
-      # in .env. The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir
-      # mounts + group_add below) mirrors docker-compose.yml's sandbox-runner service so the
-      # default actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
-      # SANDBOX_WORK_VOLUME. `task dev:local`'s separate host-process
-      # path is untouched either way.
+      # dev-choices.sh exports this (agents=docker or agents=e2b) before `docker compose up`,
+      # outranking .env — so a plain `task dev` needs no manual step. Empty passthrough otherwise:
+      # server.js's own default, `docker`, wins when this is unset, matching the self-host stack.
+      # The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir mounts +
+      # group_add below) mirrors docker-compose.yml's sandbox-runner service so the default
+      # actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
+      # SANDBOX_WORK_VOLUME.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
-      # Same tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner
-      # service — the tag matches the E2B template alias tessary-agent-sandbox.
-      # Unset floats to `-latest`; the version lives in the git tag, never in a literal here.
+      # dev-choices.sh's agents=docker branch builds AGENT_IMAGE from this checkout's
+      # sandbox-runner/agent-sandbox/ and exports the resulting tag here (see
+      # dev_docker_agent_image_ensure) — the default below is only ever reached by a bare
+      # `COMPOSE_PROFILES=launcher docker compose` invocation that bypassed the chooser. Same
+      # tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner service
+      # — the tag matches the E2B template alias tessary-agent-sandbox. Unset floats to `-latest`;
+      # the version lives in the git tag, never in a literal here.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: ${SANDBOX_DOCKER_CONCURRENCY:-1}
       # Same volume as the `sandbox-work` mount below — see docker-compose.yml's sandbox-runner
@@ -420,11 +423,13 @@ services:
       # server.js's file-header doc. MANTLE_PROJECT_ID stays: an attribution scope, not a secret.
       MANTLE_PROJECT_ID: ${TESSARY_MANTLE_PROJECT_ID:-}
     # docker.sock GID + the two mounts: the docker sandbox default's wiring, mirrored from
-    # docker-compose.yml's sandbox-runner service (see the comments there — same trade-offs, same
-    # `getent group docker` hint for DOCKER_SOCK_GID). Unconditional so switching backends stays
-    # one env var, not a compose edit.
+    # docker-compose.yml's sandbox-runner service — same default of 0 (Docker Desktop mounts the
+    # socket root:root, which is most people's first `task dev`; 999 sent every Mac/Windows dev to
+    # EACCES /var/run/docker.sock at boot — see the comment on docker-compose.yml's own group_add
+    # for the full reasoning and the `getent group docker` hint for DOCKER_SOCK_GID on native
+    # Linux). Unconditional so switching backends stays one env var, not a compose edit.
     group_add:
-      - "${DOCKER_SOCK_GID:-999}"
+      - "${DOCKER_SOCK_GID:-0}"
     depends_on:
       sandbox-runner-work-init:
         condition: service_completed_successfully
@@ -462,7 +467,7 @@ services:
       # rebuild); the token never lands in the image (BuildKit secret mount, not a build ARG).
       # Putting it in .env is NOT enough on its own: Compose only auto-loads .env for ${...}
       # substitution in this file's text, not as a real process env var — and the `environment:`
-      # secret source below needs a genuine exported shell variable. `task dev:local` does not
+      # secret source below needs a genuine exported shell variable. `task dev` does not
       # export it for you.
       # PNPM_VERSION single source — see the frontend service.
       args:
@@ -658,6 +663,6 @@ secrets:
   # same shell running `docker compose build`/`up --build` — Compose's `environment:` secret
   # source reads the invoking process's actual env, NOT .env-file interpolation, so having it
   # only in .env silently resolves to an empty secret (confirmed: this is exactly what broke a
-  # `task dev:local` run on 2026-07-15 — "Unauthorized access" pulling the private repo).
+  # `task dev` run on 2026-07-15 — "Unauthorized access" pulling the private repo).
   hf_token:
     environment: HF_TOKEN
