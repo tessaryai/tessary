@@ -58,3 +58,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0010-triage-verdict-binary.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0011-finding-open-closed.sql
+      relativeToChangelogFile: false
