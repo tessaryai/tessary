@@ -13,9 +13,9 @@ import org.jspecify.annotations.Nullable;
  * <p>{@code finding_evidence} has one role vocabulary and the roles do not mean the same thing across
  * classifiers. An empty {@code baseline} is CORRECT for {@code tool_error} (a CUSUM compares against a
  * fitted rate, and no window of rows exists), CORRECT for metric drift's rolling arm (a weighted ring
- * of per-day histograms, likewise no rows), and a DEFECT for metric drift's pinned arm (which stores
- * the window it pinned). An agent handed a role and a count, with no statement of method, reads the
- * same zero three ways and is wrong on two of them.
+ * of per-day histograms, likewise no rows), and a DEFECT for the pinned arm when the detector set the
+ * pin (an absorb stores no rows). An agent handed a role and a count, with no statement of method,
+ * reads the same zero three ways and is wrong on two of them.
  *
  * <p>So the cards state, per classifier: what it measures, what it compared against, where the claim's
  * numbers sit in {@code get_finding}, what each role it writes means HERE, what an absent role
@@ -92,8 +92,9 @@ public final class ClassifierMethodCard {
             **Compares against** one of two references. The `pattern` line in `finding.md` ends with which, and
             `metric.reference` in `get_finding` says it too:
 
-            - `:pinned`: a window a person pinned as normal. Its rows were stored and are here as
-              `baseline`.
+            - `:pinned`: a fixed reference, set automatically to the first window with enough rows, or
+              moved later by a person with Legitimate, absorb. Its rows are here as `baseline` unless a
+              person moved it.
             - `:previous`: a rolling control: one slot per UTC day over 21 days, each an exact merge of
               every window that closed in it, weighted by a seven-day half-life, with days a confirmed
               regression ran through excluded. The name is legacy; it has not meant "the previous window"
@@ -121,8 +122,9 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `baseline` on a `:previous` finding is correct: a weighted ring of daily histograms has no
               rows behind it, and `metric.control` describes what it was. A `:pinned` finding with no
-              `baseline` is a defective write: those rows were stored and should be here, so the reference side
-              cannot be read from the evidence at all.
+              `baseline` means a person moved the reference with Legitimate, absorb: that reference is a
+              day's merged histogram with no rows behind it, so read its shape from `metric` and reach its
+              period with `list_traces` or `list_spans`.
             - No `witness`: every sample in the window is a member of the shifted population, and nothing
               marks one as the failure.
             - No `exemplar`: nothing here is a designated way in, and every member is equally one.

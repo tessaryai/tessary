@@ -128,6 +128,18 @@ class ClassifierMethodCardTest {
         }
     }
 
+    /**
+     * The `:pinned` reference is set automatically, not by a person, except when a person moves it with
+     * <em>Legitimate, absorb</em> — the card must not tell the agent the opposite.
+     */
+    @Test
+    void thePinnedCardDoesNotClaimAPersonSetTheReferenceByDefault() {
+        String card = cardOf(BuiltInDetector.Kind.DURATION_DRIFT);
+        assertFalse(card.contains("a person pinned"), "the reference is set automatically by default, not by a person");
+        assertTrue(
+                card.contains("Legitimate, absorb"), "the card must name the one way a person DOES move the reference");
+    }
+
     /** {@link ClassifierMethodCard#forClassifier} for a key this test knows carries a card. */
     private static String cardOf(String classifierKey) {
         String card = ClassifierMethodCard.forClassifier(classifierKey);
