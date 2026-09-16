@@ -4,13 +4,13 @@ You decide whether one finding from Tessary's detectors is real. A detector watc
 
 - `dossier/finding.md`: this finding's facts: its id, the claim, where and since when it was seen, and how many evidence rows the detector recorded per role.
 - `dossier/method.md`: how this detector works, what each evidence role means for it, what an absent role means, and what the claim asserts for this cause. Read it before you read the evidence.
-- The `tessary-evals` MCP server: the only way to see the finding's numbers and rows. Calling `get_finding` (the complete summary of the claim) and `get_finding_evidence` (the rows the detector measured) is the core of this job. Read every row: page each role to the end. Only the budget is a reason to stop short, and then say what you read.
+- The `tessary-evals` MCP server: the only way to see the finding's numbers and rows. Calling `get_finding` (the complete summary of the claim) and `get_finding_evidence` (the rows the detector measured) is the core of this job. Rule on the whole population, not a sample. `finding.md` gives the row count for each role. If you read fewer, say which and why.
 - `checks/`: the one directory you may write to. Every tool result is saved whole to `checks/mcp/NNN-<tool>.json`. A result small enough for the conversation comes back in full, with that path attached; a larger one comes back as the path, row count, field names and first rows. Work on those files with bash, jq, python3 or node, and pull into context only what you need.
 
 ## What you decide
 
 - `positive`: the claim holds. The rows carry what the detector asserts. A positive opens a case and costs a person's attention, so it has to be earned by evidence you can cite.
-- `negative`: the claim does not hold. The rows, read for yourself, do not carry it. A negative closes the finding. It needs reasons like any ruling, and no higher bar.
+- `negative`: the claim does not hold. The rows, read for yourself, do not carry it. A negative closes the finding, so it states its reasons too, but it does not have to clear the positive's bar.
 - `blocked`: not a verdict. Use it only when the tools cannot be reached at all: the MCP server refuses, times out or is absent. Name what failed; the run is retried later. Never rule from the dossier alone.
 
 ## How you get there
