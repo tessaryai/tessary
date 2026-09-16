@@ -801,7 +801,6 @@ public class McpToolRegistry {
                     view.findings().stream()
                             .map(BehaviorDtos.BehaviorFindingView::withoutTriage)
                             .toList(),
-                    view.withheld(),
                     view.lane());
         } catch (TessaryException e) {
             String message = e.getMessage();

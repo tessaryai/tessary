@@ -122,17 +122,22 @@ public class OnboardingRepository {
      * pressing <i>Real deviation</i> opens a perfectly real case and does not count here — the milestone
      * is about whether the product got there unaided, and a case a person had to open is a case the
      * product did not produce. {@code finding.triaged_at} is non-null exactly when a triage run completed
-     * (a run that did not happen leaves it NULL rather than recording an empty ruling), so the join is
-     * the definition rather than a proxy for it.
+     * (a run that did not happen leaves it NULL rather than recording an empty ruling), so the EXISTS is
+     * the definition rather than a proxy for it — over every finding the case holds, through
+     * {@code finding.case_id} (the reverse of the case's old forward pointer, migration {@code 0011}).
      */
     public CaseProgress caseProgress(String projectId) {
         return jdbc.sql("""
-                        SELECT COUNT(*)                                        AS cases,
-                               COUNT(*) FILTER (WHERE f.triaged_at IS NOT NULL) AS triaged,
-                               MIN(c.opened_at) FILTER (WHERE f.triaged_at IS NOT NULL) AS first_at
-                        FROM eval_case c
-                        LEFT JOIN finding f ON f.id = c.finding_id
-                        WHERE c.project_id = :pid
+                        SELECT COUNT(*) AS cases,
+                               COUNT(*) FILTER (WHERE triaged) AS triaged,
+                               MIN(c.opened_at) FILTER (WHERE triaged) AS first_at
+                        FROM (
+                            SELECT c.opened_at,
+                                   EXISTS (SELECT 1 FROM finding f
+                                            WHERE f.case_id = c.id AND f.triaged_at IS NOT NULL) AS triaged
+                            FROM eval_case c
+                            WHERE c.project_id = :pid
+                        ) c
                         """)
                 .param("pid", projectId)
                 .query((rs, n) ->
