@@ -136,24 +136,6 @@ public class ClassifierProperties {
     private long triageConfigRetrySeconds = 1800;
 
     /**
-     * How many times a CLOSED finding's cause must fire again before it goes back through triage.
-     *
-     * <p>Recurrence is the recovery, and this is its threshold. Triage closes on {@code negative}, so a
-     * wrongly-closed finding is not a lost one: its cause keeps firing, the counter climbs, and at this
-     * many firings within {@link #triageReopenWindowHours} the ruling is cleared and a second look is
-     * scheduled. A finding that has already had its two looks and closed again opens a case directly
-     * instead: the agent has said its piece twice, and the third time a person reads it.
-     */
-    private long triageReopenRecurrences = 3;
-
-    /**
-     * The window {@link #triageReopenRecurrences} must fall within, counted back from now against
-     * {@code last_seen_at}. Three firings spread over a quarter is a cause that recovered and returned,
-     * not a ruling that was wrong; a week is close enough together to be the same spell.
-     */
-    private int triageReopenWindowHours = 168; // 7d
-
-    /**
      * Publicly reachable API base the triage sandbox calls back on for MCP reads (e.g.
      * https://app.tessary.ai), the same value {@code tessary.rca.agentic.mcp-base-url} carries for RCA.
      *
@@ -449,22 +431,6 @@ public class ClassifierProperties {
 
     public void setTriageConfigRetrySeconds(long v) {
         this.triageConfigRetrySeconds = v;
-    }
-
-    public long getTriageReopenRecurrences() {
-        return triageReopenRecurrences;
-    }
-
-    public void setTriageReopenRecurrences(long v) {
-        this.triageReopenRecurrences = v;
-    }
-
-    public int getTriageReopenWindowHours() {
-        return triageReopenWindowHours;
-    }
-
-    public void setTriageReopenWindowHours(int v) {
-        this.triageReopenWindowHours = v;
     }
 
     public String getTriageMcpBaseUrl() {
