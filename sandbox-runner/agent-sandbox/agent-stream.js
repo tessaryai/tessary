@@ -764,8 +764,11 @@ async function runAgent(spec) {
     }
   }
 
-  const server = await startServer(config);
+  // Null until startServer() resolves, so the `finally` below can tell a start failure (nothing to
+  // close) from a start success (something to close) — see there for why that distinction matters.
+  let server = null;
   try {
+    server = await startServer(config);
     const client = createOpencodeClient({
       baseUrl: server.url,
       fetch: makeFetch(spec.timeoutMs || DEFAULT_RUN_MS),
@@ -914,7 +917,10 @@ async function runAgent(spec) {
 
     return { startMs, turns: finalTurns, resultRaw: toEnvelope(finalTurns, structured, text) };
   } finally {
-    server.close();
+    // The relay is started BEFORE startServer(), so a start failure never reaches this `try` but
+    // still leaves the relay's listening socket open. Closing it here, not only on success, is
+    // what stops a failed server start from hanging the process until the run's outer deadline.
+    if (server) server.close();
     if (relay) relay.close();
   }
 }

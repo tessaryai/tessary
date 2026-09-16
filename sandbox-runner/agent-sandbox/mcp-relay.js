@@ -205,7 +205,16 @@ function startMcpRelay({ url, token, workDir }) {
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      resolve({ url: `http://127.0.0.1:${port}/mcp`, close: () => server.close() });
+      // A relay closed mid-run can be holding open keep-alive sockets from opencode; without
+      // dropping them first, server.close() waits for them to end on their own, which is exactly
+      // the hang decision 2 removes from the server side of this same run.
+      resolve({
+        url: `http://127.0.0.1:${port}/mcp`,
+        close: () => {
+          server.closeAllConnections();
+          server.close();
+        },
+      });
     });
   });
 }

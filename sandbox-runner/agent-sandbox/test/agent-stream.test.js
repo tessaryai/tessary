@@ -272,6 +272,73 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
   assert.equal(promptBodies[0].agent, undefined, 'no agent field — the session runs under whatever config.agent picks');
 });
 
+/** Whether `relayUrl` is still accepting connections, by trying one. */
+async function relayRefusesConnections(relayUrl) {
+  try {
+    await fetch(relayUrl, { method: 'POST', body: '{}' });
+    return false;
+  } catch (e) {
+    return /fetch failed/.test(String(e && e.message)) && (e.cause && e.cause.code) === 'ECONNREFUSED';
+  }
+}
+
+test('decision 2: a failed server start still closes the relay, so it cannot hang the process', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const serverConfigs = [];
+  // No mock of mcp-relay.js here either (see the systemPrompt test above for why that is cheap and
+  // real): the whole point of this test is that a REAL listening socket gets closed, which a mocked
+  // relay could not demonstrate.
+  mock.module('@opencode-ai/sdk', {
+    namedExports: {
+      createOpencodeServer: async (opts) => {
+        serverConfigs.push(opts && opts.config);
+        throw new Error('spawn opencode ENOENT');
+      },
+      createOpencodeClient: () => {
+        throw new Error('must not be reached: the server never started');
+      },
+    },
+  });
+
+  await assert.rejects(
+    runAgent({
+      model: 'anthropic/claude-sonnet-5',
+      prompt: 'rule on this finding',
+      systemPrompt: 'You are the triage agent.',
+      mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
+      timeoutMs: 1000,
+    }),
+    /opencode server did not start/,
+  );
+
+  const relayUrl = serverConfigs[0].mcp['tessary-evals'].url;
+  assert.match(relayUrl, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/, 'the relay really did start, on a real loopback port');
+  assert.ok(
+    await relayRefusesConnections(relayUrl),
+    'the relay must be closed once runAgent rejects, not left listening — that listening socket is the hang decision 2 fixes',
+  );
+});
+
+test('decision 2: a successful run also closes the relay once it is done', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+  });
+
+  await runAgent({
+    model: 'anthropic/claude-sonnet-5',
+    prompt: 'rule on this finding',
+    systemPrompt: 'You are the triage agent.',
+    mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
+    timeoutMs: 1000,
+  });
+
+  const relayUrl = serverConfigs[0].mcp['tessary-evals'].url;
+  assert.ok(await relayRefusesConnections(relayUrl), 'the relay closes on the success path too, same as it always did');
+});
+
 test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeric-only usage object', () => {
   // Reproduces exactly what triage.js/rca.js's catch block does with a thrown runAgent error, using
   // the same two exported functions they call — see the file header for why this is tested at that
