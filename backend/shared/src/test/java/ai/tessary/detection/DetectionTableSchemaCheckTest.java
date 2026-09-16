@@ -49,21 +49,20 @@ class DetectionTableSchemaCheckTest {
     }
 
     /** A {@link DataSource} whose {@code to_regclass(...)} answer is fixed for every query it runs. */
-    @SuppressWarnings("unchecked")
     private static DataSource fakeDataSource(boolean tableExists) {
-        InvocationHandler resultSetHandler = (proxy, method, args) -> switch (method.getName()) {
-            case "next" -> true;
-            case "getBoolean" -> tableExists;
-            case "close" -> null;
-            default -> throw new UnsupportedOperationException(method.getName());
-        };
-        ResultSet rs = (ResultSet) Proxy.newProxyInstance(
-                DetectionTableSchemaCheckTest.class.getClassLoader(),
-                new Class<?>[] {ResultSet.class},
-                resultSetHandler);
+        return fakeDataSource(tableExists, tableExists);
+    }
 
+    /**
+     * A {@link DataSource} that answers the table-existence query with {@code tableExists} and the
+     * {@code subject_started_at} column probe (recognised by {@code information_schema} appearing in
+     * the SQL text) with {@code columnExists}, so the two checks can be exercised independently.
+     */
+    @SuppressWarnings("unchecked")
+    private static DataSource fakeDataSource(boolean tableExists, boolean columnExists) {
         InvocationHandler statementHandler = (proxy, method, args) -> switch (method.getName()) {
-            case "executeQuery" -> rs;
+            case "executeQuery" ->
+                resultSetAnswering(((String) args[0]).contains("information_schema") ? columnExists : tableExists);
             case "close" -> null;
             default -> throw new UnsupportedOperationException(method.getName());
         };
@@ -88,6 +87,19 @@ class DetectionTableSchemaCheckTest {
         };
         return (DataSource) Proxy.newProxyInstance(
                 DetectionTableSchemaCheckTest.class.getClassLoader(), new Class<?>[] {DataSource.class}, dsHandler);
+    }
+
+    private static ResultSet resultSetAnswering(boolean answer) {
+        InvocationHandler resultSetHandler = (proxy, method, args) -> switch (method.getName()) {
+            case "next" -> true;
+            case "getBoolean" -> answer;
+            case "close" -> null;
+            default -> throw new UnsupportedOperationException(method.getName());
+        };
+        return (ResultSet) Proxy.newProxyInstance(
+                DetectionTableSchemaCheckTest.class.getClassLoader(),
+                new Class<?>[] {ResultSet.class},
+                resultSetHandler);
     }
 
     private static ObjectProvider<DetectionTable> tablesOf(DetectionTable... items) {
@@ -131,5 +143,22 @@ class DetectionTableSchemaCheckTest {
         DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(true)));
 
         assertDoesNotThrow(check::afterSingletonsInstantiated);
+    }
+
+    /**
+     * A table registered before its owning changelog carries migration {@code 0012} — the paid-overlay
+     * paired-PR case the column probe exists for.
+     */
+    @Test
+    void missingSubjectStartedAtColumnFailsBootNamingKindAndTable() {
+        DetectionTableRegistry registry = new DetectionTableRegistry(
+                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+        DetectionTableSchemaCheck check =
+                new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(true, false)));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
+        assertTrue(ex.getMessage().contains("secret_leak"));
+        assertTrue(ex.getMessage().contains("secret_leak_detection"));
+        assertTrue(ex.getMessage().contains("subject_started_at"));
     }
 }

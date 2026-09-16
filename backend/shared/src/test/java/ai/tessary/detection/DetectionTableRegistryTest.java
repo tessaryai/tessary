@@ -73,7 +73,7 @@ class DetectionTableRegistryTest {
     }
 
     @Test
-    void unionSqlHasOneArmPerDistinctTableAndTwelveColumnsPerArm() {
+    void unionSqlHasOneArmPerDistinctTableAndThirteenColumnsPerArm() {
         DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
                 new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
                 new DetectionTable("frustration", "frustration_detection", Grain.TRACE),
@@ -84,11 +84,11 @@ class DetectionTableRegistryTest {
         String[] arms = sql.split(" UNION ALL ");
         assertEquals(3, arms.length, "four kinds, two sharing a table, is three distinct arms");
         for (String arm : arms) {
-            // 12 columns: id, project_id, classifier_id, severity, confidence, subject_kind,
+            // 13 columns: id, project_id, classifier_id, severity, confidence, subject_kind,
             // subject_session_id, subject_trace_id, subject_span_id, evidence, project_version_id,
-            // created_at — count the commas between SELECT and FROM.
+            // created_at, subject_started_at — count the commas between SELECT and FROM.
             String selectList = arm.substring(arm.indexOf("SELECT") + "SELECT".length(), arm.indexOf(" FROM "));
-            assertEquals(11, selectList.chars().filter(c -> c == ',').count(), "12 columns => 11 commas: " + arm);
+            assertEquals(12, selectList.chars().filter(c -> c == ',').count(), "13 columns => 12 commas: " + arm);
         }
         assertTrue(sql.contains("'trace'::text AS subject_kind"));
         assertTrue(sql.contains("'span'::text AS subject_kind"));

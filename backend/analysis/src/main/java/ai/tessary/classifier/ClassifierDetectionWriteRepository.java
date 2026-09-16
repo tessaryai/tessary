@@ -43,11 +43,13 @@ import org.springframework.stereotype.Repository;
 public class ClassifierDetectionWriteRepository {
 
     /**
-     * The window a detection falls in, on the span's own clock: {@code floor(started_at / W) * W} in epoch
-     * seconds. Bound to {@code :window}, and the same expression wherever a facet window is read, so the
-     * query that finds which windows a sweep touched and the one that counts them cannot disagree.
+     * The window a detection falls in, on its own {@code subject_started_at} (migration {@code 0012}):
+     * {@code floor(subject_started_at / W) * W} in epoch seconds. Bound to {@code :window}, and the same
+     * expression wherever a facet or whole-classifier window is read, so the query that finds which
+     * windows a sweep touched and the one that counts them cannot disagree.
      */
-    private static final String EVENT_WINDOW = "(floor(extract(epoch FROM s.started_at) / :window)::bigint * :window)";
+    private static final String EVENT_WINDOW =
+            "(floor(extract(epoch FROM d.subject_started_at) / :window)::bigint * :window)";
 
     /** The HIGH band. NULL reads as high, the convention every detection read here uses. */
     private static final String HIGH_BAND = " AND (confidence = 'high' OR confidence IS NULL)";
@@ -100,11 +102,20 @@ public class ClassifierDetectionWriteRepository {
         // The table name is interpolated because it is not a bind-able position; every value that
         // reaches SQL from outside this class is a parameter, and the name itself comes from a
         // DetectionTable registration, whose constructor rejects anything but a bare identifier.
+        //
+        // subject_started_at is the span's own started_at, falling back to the trace's when there is no
+        // span (a future trace-grain table; :spanId is null there) — the same expression migration 0012's
+        // backfill used, so a row written today reads on the same clock as one backfilled at the cutover.
+        // A span or trace that has since aged out of retention leaves it NULL rather than guessed.
         int written = jdbc.sql("INSERT INTO " + table + " (id, project_id, classifier_id, classifier_key,"
                         + " project_version_id, subject_session_id, subject_trace_id, subject_span_id,"
-                        + " severity, confidence, evidence, created_at)"
+                        + " severity, confidence, evidence, subject_started_at, created_at)"
                         + " VALUES (:id, :pid, :sid, :skey, :versionId, :sessionId, :traceId, :spanId,"
-                        + " :severity, :confidence, CAST(:evidence AS jsonb), now())"
+                        + " :severity, :confidence, CAST(:evidence AS jsonb),"
+                        + " COALESCE((SELECT started_at FROM span"
+                        + "            WHERE project_id = :pid AND trace_id = :traceId AND id = :spanId),"
+                        + "          (SELECT started_at FROM trace WHERE project_id = :pid AND id = :traceId)),"
+                        + " now())"
                         + " ON CONFLICT DO NOTHING")
                 .param("id", id)
                 .param("pid", projectId)
@@ -119,33 +130,6 @@ public class ClassifierDetectionWriteRepository {
                 .param("evidence", evidenceJson)
                 .update();
         return written > 0;
-    }
-
-    /**
-     * How many detections this classifier has recorded in {@code [start, end)} — the count the sweep's
-     * arming gate reads. Scoped by {@code classifier_id} rather than by key so a renamed classifier keeps its
-     * own window, and restricted to the HIGH band (NULL means high) when the classifier is in tracking
-     * mode, which is the same precision filter every other detection read applies.
-     */
-    public long countInWindow(
-            String detectorKind,
-            String projectId,
-            String classifierId,
-            String start,
-            String end,
-            boolean trackingOnly) {
-        String table = tableFor(detectorKind);
-        if (table == null) return 0;
-        return jdbc.sql("SELECT COUNT(*) FROM " + table
-                        + " WHERE project_id = :pid AND classifier_id = :sid"
-                        + " AND created_at >= :start::timestamptz AND created_at < :end::timestamptz"
-                        + (trackingOnly ? HIGH_BAND : ""))
-                .param("pid", projectId)
-                .param("sid", classifierId)
-                .param("start", start)
-                .param("end", end)
-                .query(Long.class)
-                .single();
     }
 
     /**
@@ -176,37 +160,6 @@ public class ClassifierDetectionWriteRepository {
                 .list());
     }
 
-    /**
-     * How many distinct SESSIONS this classifier flagged in {@code [start, end)} — the {@code
-     * distinct_users} basis a translated threshold rule may carry. Session is the user proxy until
-     * entity identity is wired.
-     *
-     * <p>Read straight off the detection row: the span carried its session when the sweep scored it, so
-     * there is no join. Anonymous traffic contributes nothing — {@code subject_session_id} is NULL and
-     * {@code COUNT(DISTINCT)} skips nulls, which is the honest answer, since a turn with no session
-     * identifies no user to count.
-     */
-    public long countDistinctSessionsInWindow(
-            String detectorKind,
-            String projectId,
-            String classifierId,
-            String start,
-            String end,
-            boolean trackingOnly) {
-        String table = tableFor(detectorKind);
-        if (table == null) return 0;
-        return jdbc.sql("SELECT COUNT(DISTINCT subject_session_id) FROM " + table
-                        + " WHERE project_id = :pid AND classifier_id = :sid"
-                        + " AND created_at >= :start::timestamptz AND created_at < :end::timestamptz"
-                        + (trackingOnly ? HIGH_BAND : ""))
-                .param("pid", projectId)
-                .param("sid", classifierId)
-                .param("start", start)
-                .param("end", end)
-                .query(Long.class)
-                .single();
-    }
-
     /** A span, by both halves of its composite key. */
     public record SpanKey(String traceId, String spanId) {}
 
@@ -234,7 +187,8 @@ public class ClassifierDetectionWriteRepository {
      *
      * <p><b>Event time, not write time.</b> A detection's {@code created_at} is when the sweep checked the
      * span, and a backfill checks months of traffic in an afternoon: bucketing on it would report a
-     * quarter's firings as one day's. The span's {@code started_at} is when the thing happened.
+     * quarter's firings as one day's. {@code subject_started_at} (migration {@code 0012}) is when the
+     * thing happened; the span join here is for {@code call_site_id} alone.
      *
      * @param facetKey the evidence member the facet is read from; a detection without one is left out
      * @param highOnly restrict to the HIGH band (NULL reads as high)
@@ -302,7 +256,7 @@ public class ClassifierDetectionWriteRepository {
         return jdbc.sql("SELECT s.call_site_id, d.evidence ->> :facetKey AS facet, " + EVENT_WINDOW
                         + " AS window_start, "
                         + (distinctSessions ? "COUNT(DISTINCT d.subject_session_id)" : "COUNT(*)") + " AS observed,"
-                        + " MAX(s.started_at) AS last_seen_at, BOOL_OR(d.confidence = 'high') AS any_high"
+                        + " MAX(d.subject_started_at) AS last_seen_at, BOOL_OR(d.confidence = 'high') AS any_high"
                         + " FROM " + table + " d" + SPAN_JOIN
                         + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
                         + " AND (COALESCE(s.call_site_id, ''), d.evidence ->> :facetKey, " + EVENT_WINDOW
@@ -317,6 +271,85 @@ public class ClassifierDetectionWriteRepository {
                 .query((rs, n) -> new FacetWindow(
                         rs.getString("call_site_id"),
                         rs.getString("facet"),
+                        rs.getLong("window_start"),
+                        rs.getLong("observed"),
+                        rs.getObject("last_seen_at", OffsetDateTime.class).toInstant(),
+                        rs.getBoolean("any_high")))
+                .list();
+    }
+
+    /** One fired detection resolved to the event-time window it falls in — the whole-classifier
+     *  counterpart of {@link FiredFacet}, with no facet or call site to key on: the classifier-wide
+     *  shape implicates no single call site. */
+    public record FiredWindow(String traceId, String spanId, long windowStartEpochSecond) {}
+
+    /** One event-time window's count across all sweeps — the whole-classifier counterpart of
+     *  {@link FacetWindow}. */
+    public record CountedWindow(long windowStartEpochSecond, long observed, Instant lastSeenAt, boolean anyHigh) {}
+
+    /**
+     * Resolve the spans this classifier just fired on to the event-time window each falls in — {@link
+     * #firedFacets} without a facet to key on.
+     *
+     * @param highOnly restrict to the HIGH band (NULL reads as high)
+     */
+    public List<FiredWindow> firedWindows(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            Collection<SpanKey> spans,
+            long windowSeconds,
+            boolean highOnly) {
+        String table = tableFor(detectorKind);
+        if (table == null || spans.isEmpty()) return List.of();
+        List<Object[]> keys =
+                spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
+        return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, " + EVENT_WINDOW + " AS window_start"
+                        + " FROM " + table + " d"
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND (d.subject_trace_id, d.subject_span_id) IN (:spans)"
+                        + (highOnly ? HIGH_BAND : ""))
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("spans", keys)
+                .param("window", windowSeconds)
+                .query((rs, n) -> new FiredWindow(
+                        rs.getString("subject_trace_id"), rs.getString("subject_span_id"), rs.getLong("window_start")))
+                .list();
+    }
+
+    /**
+     * Count every detection in the windows {@code touched} names, across all sweeps rather than only the
+     * one that touched them, ordered by window start so a caller filing them walks forward in event time —
+     * {@link #countFacetWindows} without a facet or call site to group by.
+     *
+     * @param distinctSessions count sessions rather than detections, the {@code distinct_users} basis
+     */
+    public List<CountedWindow> countWindows(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            long windowSeconds,
+            boolean highOnly,
+            boolean distinctSessions,
+            Collection<FiredWindow> touched) {
+        String table = tableFor(detectorKind);
+        if (table == null || touched.isEmpty()) return List.of();
+        Set<Long> windowStarts = new LinkedHashSet<>();
+        for (FiredWindow w : touched) windowStarts.add(w.windowStartEpochSecond());
+        return jdbc.sql("SELECT " + EVENT_WINDOW + " AS window_start, "
+                        + (distinctSessions ? "COUNT(DISTINCT d.subject_session_id)" : "COUNT(*)") + " AS observed,"
+                        + " MAX(d.subject_started_at) AS last_seen_at, BOOL_OR(d.confidence = 'high') AS any_high"
+                        + " FROM " + table + " d"
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + " AND " + EVENT_WINDOW + " IN (:windows)"
+                        + (highOnly ? HIGH_BAND : "")
+                        + " GROUP BY 1 ORDER BY 1")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("windows", windowStarts)
+                .param("window", windowSeconds)
+                .query((rs, n) -> new CountedWindow(
                         rs.getLong("window_start"),
                         rs.getLong("observed"),
                         rs.getObject("last_seen_at", OffsetDateTime.class).toInstant(),

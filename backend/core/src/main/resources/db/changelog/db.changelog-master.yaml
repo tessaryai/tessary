@@ -61,3 +61,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0011-finding-open-closed.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0012-detection-subject-started-at.sql
+      relativeToChangelogFile: false

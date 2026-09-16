@@ -179,9 +179,14 @@
         <!-- to_regclass('<table>') on a name that comes from DetectionTableRegistry, i.e. registered
              in code, never from a request. The detector cannot see that, and it is right not to
              assume it: assertPlainIdentifier now enforces the property at the call rather than
-             leaving it as a convention, mirroring ProjectPurgeRepository.assertKnown. -->
+             leaving it as a convention, mirroring ProjectPurgeRepository.assertKnown. assertHasColumn
+             (migration 0012's column probe) concatenates the same already-validated table name plus
+             a private static final column constant, never request input. -->
         <Class name="ai.tessary.detection.DetectionTableSchemaCheck" />
-        <Method name="assertExists" />
+        <Or>
+            <Method name="assertExists" />
+            <Method name="assertHasColumn" />
+        </Or>
         <Bug pattern="SQL_INJECTION_JDBC,SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE" />
     </Match>
     <Match>

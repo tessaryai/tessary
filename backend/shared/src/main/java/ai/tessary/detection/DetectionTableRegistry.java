@@ -18,6 +18,9 @@ import org.springframework.stereotype.Component;
  * <p>{@link #unionSql()} builds the same shape a hand-written {@code UNION ALL} view would, at
  * query time, from whatever tables are actually registered on this classpath: a table that isn't
  * present just drops its arm instead of the query referencing a relation that was never created.
+ * Every arm carries {@code subject_started_at} (migration {@code 0012}) alongside {@code created_at}:
+ * the event clock the span or trace it judged actually ran on, beside the run clock of when the
+ * classifier checked it.
  *
  * <p>Two beans registering the same {@code detectorKind} fail the context at boot
  * ({@code toUnmodifiableMap} throws {@code IllegalStateException} on a duplicate key), the same
@@ -62,7 +65,7 @@ public class DetectionTableRegistry {
     }
 
     /**
-     * The stitched union over every registered table, twelve columns per arm. Callers wrap this
+     * The stitched union over every registered table, thirteen columns per arm. Callers wrap this
      * in parentheses with an alias, {@code "(" + unionSql() + ") d"}, the same way a view name
      * would be referenced.
      */
@@ -81,6 +84,7 @@ public class DetectionTableRegistry {
                 + ".classifier_key AS classifier_id, " + table + ".severity, " + table + ".confidence, '"
                 + t.grain().subjectKind() + "'::text AS subject_kind, " + table + ".subject_session_id, "
                 + table + ".subject_trace_id, " + table + ".subject_span_id, " + table + ".evidence, "
-                + table + ".project_version_id, " + table + ".created_at FROM " + table;
+                + table + ".project_version_id, " + table + ".created_at, " + table
+                + ".subject_started_at FROM " + table;
     }
 }
