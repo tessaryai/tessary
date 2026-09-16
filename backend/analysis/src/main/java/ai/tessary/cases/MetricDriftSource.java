@@ -5,7 +5,6 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
@@ -93,8 +92,7 @@ public class MetricDriftSource implements CaseSource {
     public List<CaseDetection> detect(String projectId) {
         String seenSince = Instant.now().minus(quietWindow(projectId)).toString();
         List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, METRIC_CLASSIFIERS, SurvivalGate.MACHINE_OR_HUMAN, seenSince, LIVE_SET_CAP)) {
+        for (FindingRow finding : findings.listConfirmed(projectId, METRIC_CLASSIFIERS, seenSince, LIVE_SET_CAP)) {
             out.add(toDetection(finding));
         }
         return out;
@@ -192,7 +190,7 @@ public class MetricDriftSource implements CaseSource {
      * deciding whether to page someone needs to know which one they're looking at.
      */
     private static String gateSentence(FindingRow finding) {
-        if (FindingRow.Status.BLOCKED.equals(finding.status())) {
+        if (finding.humanVerdictAt() != null) {
             return "A human ruled this a real deviation.";
         }
         return "A triage run audited this claim and found it sound.";

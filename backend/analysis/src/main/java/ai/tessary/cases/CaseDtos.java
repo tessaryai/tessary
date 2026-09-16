@@ -178,8 +178,8 @@ public final class CaseDtos {
 
     /**
      * Who ruled this case's detection real, and on what: a person pressing "Real deviation," or a
-     * triage run finding the claim {@code positive}. Every field reads straight off the finding
-     * named by {@code eval_case.finding_id}, so the case and the finding cannot disagree.
+     * triage run finding the claim {@code positive}. Every field reads straight off the case's newest
+     * finding (via {@code finding.case_id}), so the case and the finding cannot disagree.
      *
      * @param verdict the triage verdict, always {@code positive} for a machine ruling that reached
      *     a case, null when a human ruled

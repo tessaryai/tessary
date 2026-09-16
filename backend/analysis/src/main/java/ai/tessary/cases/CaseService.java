@@ -11,12 +11,11 @@ import ai.tessary.cases.CaseDtos.TriageView;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
@@ -79,7 +78,9 @@ public class CaseService {
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository findingEvidence;
-    private final FindingService drift;
+    /** Absorb's detector-state re-pin — see {@link #absorb}. */
+    private final BehaviorTriageSource behaviorTriage;
+
     private final ClassifierService classifiers;
     /** Cleared when a tool-error case is closed by hand; see {@link #resolve}. */
     private final ToolErrorStateRepository toolErrorStates;
@@ -102,7 +103,7 @@ public class CaseService {
             RcaTriggerService rcaTrigger,
             FindingRepository findings,
             FindingEvidenceRepository findingEvidence,
-            FindingService drift,
+            BehaviorTriageSource behaviorTriage,
             ClassifierService classifiers,
             ToolErrorStateRepository toolErrorStates,
             MalformedOutputRateRepository malformedOutputRates,
@@ -118,7 +119,7 @@ public class CaseService {
         this.rcaTrigger = rcaTrigger;
         this.findings = findings;
         this.findingEvidence = findingEvidence;
-        this.drift = drift;
+        this.behaviorTriage = behaviorTriage;
         this.classifiers = classifiers;
         this.toolErrorStates = toolErrorStates;
         this.malformedOutputRates = malformedOutputRates;
@@ -235,7 +236,7 @@ public class CaseService {
                 substrate.countCallSitesSince(projectId, since),
                 substrate.countTracesSince(projectId, since),
                 includeEmptyStateCounts ? substrate.countTraces(projectId) : null,
-                includeEmptyStateCounts ? findings.countLive(projectId) : null);
+                includeEmptyStateCounts ? findings.countOpen(projectId) : null);
     }
 
     public CaseDetailView detail(String projectId, String id) {
@@ -310,14 +311,11 @@ public class CaseService {
      * No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
      * rather than a button: there is nothing here for "move the bar" to move.
      *
-     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: absorb
-     * delegates to {@code FindingService.resolve(…, "expected")}, which for every other detector reaches
-     * {@code BehaviorTriageSource.resolve()}'s correction loop — and that loop only handles
-     * {@code DISTRIBUTION_SHIFT}/{@code RATE_SHIFT} causes or a finding with a non-null {@code
-     * profileId()}. Both new causes are {@code ARMED_WINDOW}/{@code MALFORMED_RATE} with a null
-     * profile id, so the press would 404 today. Excluded here rather than left to throw: a case page is
-     * not worth a broken button on it. Fixing the correction loop for these two causes is outside this
-     * step's scope.
+     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: neither
+     * cause has fitted detector state a re-pin could move — {@code BehaviorTriageSource#repin} is a
+     * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
+     * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
+     * than left to no-op silently: a case page is not worth a button that does nothing.
      */
     private static boolean absorbable(CaseRow row) {
         return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
@@ -340,7 +338,7 @@ public class CaseService {
      */
     private static @Nullable CaseRulingView ruling(CaseRow row, @Nullable FindingRow finding) {
         if (finding == null) return null;
-        if (FindingRow.Status.BLOCKED.equals(finding.status())) {
+        if (finding.humanVerdictAt() != null) {
             return new CaseRulingView(
                     finding.id(),
                     "Human",
@@ -427,14 +425,11 @@ public class CaseService {
         if (CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())) {
             malformedOutputRates.states().reset(projectId, row.subjectId(), actor, reason, now.toString());
         }
-        // A secret-leak finding stays live until a person closes it, since SecretLeakCaseSource has no
-        // recency window. Left open, it would be listed again next pass and, once the reopen window
-        // lapsed, open a fresh case for a credential already rotated. A later leak of the same facet
-        // files a new finding, so resolving this one does not silence the rule.
-        String findingId = row.findingId();
-        if (CaseRow.Detector.SECRET_LEAK.equals(row.detector()) && findingId != null && !findingId.isBlank()) {
-            findings.setStatus(projectId, findingId, FindingRow.Status.RESOLVED, now.toString());
-        }
+        // Resolving a case closes what it holds — every finding still open on it, whatever detector
+        // opened it. A secret-leak finding stays live until a person closes it (SecretLeakCaseSource
+        // keeps no recency window), so this is the only thing that ever closes one; every other
+        // detector's finding is usually already closed by its own ruling, and this is a no-op for it.
+        findings.closeByCase(projectId, row.id(), now.toString());
         return CaseView.of(require(projectId, id));
     }
 
@@ -450,16 +445,18 @@ public class CaseService {
      * new normal" has no way out of a case that is correct and unwanted, which is how a detector earns
      * the reputation that gets it turned off.
      *
-     * <p><b>The re-pin is the finding's job and is delegated, never reimplemented.</b>
-     * {@code FindingService.resolve(…, "expected")} is the one place that knows what "absorb" means
-     * for each cause kind, and it refuses rather than guesses when the numbers to accept are unreadable.
-     * That refusal propagates: if the reference cannot be moved, the case does not close, because a case
-     * closed as absorbed while the detector kept its old bar would reopen on the next pass and read as
-     * the button being broken.
+     * <p><b>The re-pin is the finding's job and is delegated, never reimplemented</b> — but not through
+     * {@code FindingService.resolve}. By the time a case exists to absorb, its finding already carries
+     * a positive ruling, so the ordinary correction loop would 409 on it: {@link BehaviorTriageSource}
+     * exposes {@code repin(...)} for exactly this, the detector-state half of "Legitimate" with no
+     * ruling write attached. It refuses rather than guesses when the numbers to accept are unreadable,
+     * and that refusal propagates: if the reference cannot be moved, the case does not close, because a
+     * case closed as absorbed while the detector kept its old bar would reopen on the next pass and
+     * read as the button being broken.
      *
-     * <p>Not transactional across the two writes by choice: the finding resolution is its own
-     * transaction and commits first. If the case close then failed, the reference has still moved and the
-     * detection stops firing, so {@link CaseReconciler} closes the case as recovered on the next pass. The
+     * <p>Not transactional across the two writes by choice: the re-pin is its own transaction and
+     * commits first. If the case close then failed, the reference has still moved and the detection
+     * stops firing, so {@link CaseReconciler} closes the case as recovered on the next pass. The
      * inverse order would be the dangerous one: a case closed against a bar that never moved.
      */
     public CaseView absorb(String projectId, String id, @Nullable String actor) {
@@ -472,9 +469,10 @@ public class CaseService {
         if (!detectorAvailable(projectId, row)) {
             throw new TessaryException(CaseError.DETECTOR_UNAVAILABLE, row.detector());
         }
-        drift.resolve(projectId, findingId, BehaviorResolutionRequest.EXPECTED, actor);
-        // Through the ledger, not inline: the close and its trail line must commit together, and a
-        // @Transactional method on THIS class invoked through `this` gets no proxy and no transaction.
+        behaviorTriage.repin(projectId, findingId, actor);
+        // Through the ledger, not inline: the close and its trail line — and the finding close that
+        // rides with it — must commit together, and a @Transactional method on THIS class invoked
+        // through `this` gets no proxy and no transaction.
         ledger.absorb(projectId, row.id(), actor, Instant.now());
         return CaseView.of(require(projectId, id));
     }
@@ -487,8 +485,8 @@ public class CaseService {
      * question), and the report is an immutable artefact that changes nothing about the case.
      *
      * <p>A case with no finding behind it cannot be analysed: RCA is anchored on a claim and its
-     * recorded evidence, and there is nothing here to anchor on. Only rows written before
-     * {@code eval_case.finding_id} became mandatory can be in that state.
+     * recorded evidence, and there is nothing here to anchor on. Only rows written before a case's
+     * first finding link became mandatory can be in that state.
      */
     public RcaReportView runRca(String projectId, String id, @Nullable String actor) {
         CaseRow row = require(projectId, id);

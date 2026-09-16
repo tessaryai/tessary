@@ -3,7 +3,6 @@ package ai.tessary.cases;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -77,8 +76,7 @@ public class ToolErrorCaseSource implements CaseSource {
     public List<CaseDetection> detect(String projectId) {
         String seenSince = Instant.now().minus(QUIET_WINDOW).toString();
         List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, TOOL_ERROR_CLASSIFIERS, SurvivalGate.MACHINE_OR_HUMAN, seenSince, LIVE_SET_CAP)) {
+        for (FindingRow finding : findings.listConfirmed(projectId, TOOL_ERROR_CLASSIFIERS, seenSince, LIVE_SET_CAP)) {
             out.add(toDetection(finding));
         }
         return out;

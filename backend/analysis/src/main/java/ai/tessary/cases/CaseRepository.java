@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.tenant.Ids;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -26,17 +27,29 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CaseRepository {
 
+    /**
+     * {@code eval_case} carries no forward pointer to a finding any more — {@code finding.case_id} is
+     * the reverse of that, set once a finding's positive ruling opens or joins a case (migration
+     * {@code 0011}). {@code finding_id} here is a correlated subquery reading it back: the newest
+     * finding linked to this case, which is what {@code CaseRow#findingId} has always named.
+     */
     private static final String COLS = "id, project_id, seq, detector, subject_kind, subject_id, "
-            + "subject_label, call_site_id, metric, finding_id, state, title, basis, severity, onset_at, "
+            + "subject_label, call_site_id, metric, "
+            + "(SELECT f.id FROM finding f WHERE f.case_id = eval_case.id ORDER BY f.created_at DESC LIMIT 1)"
+            + " AS finding_id, "
+            + "state, title, basis, severity, onset_at, "
             + "current_value, baseline_value, delta, opened_at, last_seen_at, resolved_at, resolution, "
             + "resolution_reason, resolved_by, muted_at, muted_by, updated_at";
 
     private static final String LIVE_ORDER = "ORDER BY severity DESC, opened_at DESC";
 
     private final JdbcClient jdbc;
+    /** Links a case to the finding that opened, refreshed or reopened it — see {@link #link}. */
+    private final FindingRepository findings;
 
-    public CaseRepository(JdbcClient jdbc) {
+    public CaseRepository(JdbcClient jdbc, FindingRepository findings) {
         this.jdbc = jdbc;
+        this.findings = findings;
     }
 
     /** Every case on this install, open or resolved, in any project: the telemetry heartbeat's
@@ -269,14 +282,14 @@ public class CaseRepository {
         Instant onset = onsetAt == null ? now : onsetAt;
         int inserted = jdbc.sql("""
                 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label,
-                    call_site_id, metric, finding_id, state, title, basis, severity, onset_at,
+                    call_site_id, metric, state, title, basis, severity, onset_at,
                     current_value, baseline_value, delta, opened_at, last_seen_at, updated_at)
                 SELECT :id, :pid, COALESCE(MAX(seq), 0) + 1, :detector, :subjectKind, :subjectId, :subjectLabel,
-                    :callSiteId, :metric, :findingId, 'open', :title, :basis, :severity, :onsetAt,
+                    :callSiteId, :metric, 'open', :title, :basis, :severity, :onsetAt,
                     :currentValue, :baselineValue, :delta, :now, :now, :now
                 FROM eval_case WHERE project_id = :pid
                 ON CONFLICT (project_id, detector, subject_kind, subject_id, metric)
-                    WHERE state <> 'resolved'
+                    WHERE state <> 'resolved' AND locked_at IS NULL
                 DO NOTHING
                 """)
                 .param("id", id)
@@ -287,7 +300,6 @@ public class CaseRepository {
                 .param("subjectLabel", detection.subjectLabel())
                 .param("callSiteId", detection.callSiteId())
                 .param("metric", detection.key().metric())
-                .param("findingId", detection.findingId())
                 .param("title", detection.title())
                 .param("basis", detection.basis())
                 .param("severity", detection.severity())
@@ -297,7 +309,9 @@ public class CaseRepository {
                 .param("delta", detection.delta())
                 .param("now", now.toString())
                 .update();
-        return inserted == 0 ? Optional.empty() : findById(projectId, id);
+        if (inserted == 0) return Optional.empty();
+        link(projectId, detection, id, now);
+        return findById(projectId, id);
     }
 
     /**
@@ -309,7 +323,7 @@ public class CaseRepository {
         jdbc.sql("""
                 UPDATE eval_case SET title = :title, basis = :basis, severity = :severity,
                     current_value = :currentValue, baseline_value = :baselineValue, delta = :delta,
-                    subject_label = :subjectLabel, finding_id = :findingId,
+                    subject_label = :subjectLabel,
                     last_seen_at = :now, updated_at = :now
                 WHERE project_id = :pid AND id = :id
                 """)
@@ -322,9 +336,9 @@ public class CaseRepository {
                 .param("baselineValue", detection.baselineValue())
                 .param("delta", detection.delta())
                 .param("subjectLabel", detection.subjectLabel())
-                .param("findingId", detection.findingId())
                 .param("now", now.toString())
                 .update();
+        link(projectId, detection, id, now);
     }
 
     /**
@@ -342,7 +356,7 @@ public class CaseRepository {
                     resolution_reason = NULL, resolved_by = NULL,
                     title = :title, basis = :basis, severity = :severity, onset_at = :onsetAt,
                     current_value = :currentValue, baseline_value = :baselineValue, delta = :delta,
-                    subject_label = :subjectLabel, finding_id = :findingId,
+                    subject_label = :subjectLabel,
                     last_seen_at = :now, updated_at = :now
                 WHERE project_id = :pid AND id = :id
                 """)
@@ -356,9 +370,19 @@ public class CaseRepository {
                 .param("baselineValue", detection.baselineValue())
                 .param("delta", detection.delta())
                 .param("subjectLabel", detection.subjectLabel())
-                .param("findingId", detection.findingId())
                 .param("now", now.toString())
                 .update();
+        link(projectId, detection, id, now);
+    }
+
+    /**
+     * Link the finding behind {@code detection} to this case, so {@link #COLS}'s reverse lookup can
+     * find it. A no-op past the first call for a given finding: {@code attachToCase}'s {@code case_id
+     * IS NULL} guard means the first case to claim a finding keeps it, so a refresh of an
+     * already-linked finding costs one no-op update rather than stealing it from elsewhere.
+     */
+    private void link(String projectId, CaseDetection detection, String caseId, Instant now) {
+        findings.attachToCase(projectId, detection.findingId(), caseId, now.toString());
     }
 
     /**

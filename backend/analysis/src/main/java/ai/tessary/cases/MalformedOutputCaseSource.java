@@ -3,7 +3,6 @@ package ai.tessary.cases;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
@@ -57,8 +56,8 @@ public class MalformedOutputCaseSource implements CaseSource {
     public List<CaseDetection> detect(String projectId) {
         String seenSince = Instant.now().minus(QUIET_WINDOW).toString();
         List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, MALFORMED_OUTPUT_CLASSIFIERS, SurvivalGate.MACHINE_OR_HUMAN, seenSince, LIVE_SET_CAP)) {
+        for (FindingRow finding :
+                findings.listConfirmed(projectId, MALFORMED_OUTPUT_CLASSIFIERS, seenSince, LIVE_SET_CAP)) {
             out.add(toDetection(finding));
         }
         return out;

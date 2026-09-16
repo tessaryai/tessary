@@ -58,7 +58,7 @@ public class SecretLeakCaseSource implements CaseSource {
     @Override
     public List<CaseDetection> detect(String projectId) {
         List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listLive(projectId, SECRET_LEAK_CLASSIFIERS)) {
+        for (FindingRow finding : findings.listOpen(projectId, SECRET_LEAK_CLASSIFIERS)) {
             // A low-confidence facet is still a legitimate finding on the Classifiers page, but nothing a
             // person needs paged on it for. Checked before the detail read, which costs three queries.
             if (!finding.highConfidence()) continue;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.finding.FindingRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -44,10 +45,15 @@ public class CaseLedger {
 
     private final CaseRepository cases;
     private final CaseEventRepository events;
+    /** Closes a case's open findings when it resolves — see {@link #closeFindings}. Linking a case to
+     *  the finding that opened or refreshed it lives in {@code CaseRepository} itself now, so every
+     *  caller of {@code open}/{@code refresh}/{@code reopen} gets it, this class included. */
+    private final FindingRepository findings;
 
-    public CaseLedger(CaseRepository cases, CaseEventRepository events) {
+    public CaseLedger(CaseRepository cases, CaseEventRepository events, FindingRepository findings) {
         this.cases = cases;
         this.events = events;
+        this.findings = findings;
     }
 
     /**
@@ -73,6 +79,7 @@ public class CaseLedger {
         for (CaseRow live : cases.listLiveByDetector(projectId, detector)) {
             if (byKey.containsKey(keyOf(live))) continue;
             cases.resolve(projectId, live.id(), CaseRow.Resolution.RECOVERED, null, null, now);
+            closeFindings(projectId, live.id(), now);
             events.append(
                     projectId,
                     live.id(),
@@ -99,7 +106,14 @@ public class CaseLedger {
     public void absorb(String projectId, String caseId, @Nullable String actor, Instant now) {
         String reason = "Legitimate — absorbed into the detector's reference, so this level is the new baseline.";
         cases.resolve(projectId, caseId, CaseRow.Resolution.ABSORBED, reason, actor, now);
+        closeFindings(projectId, caseId, now);
         events.append(projectId, caseId, CaseEventRow.Kind.ABSORBED, actor, reason, null, now);
+    }
+
+    /** Close every open finding this case holds — the finding half of resolving or absorbing a case,
+     *  in the same transaction as the case's own close. */
+    private void closeFindings(String projectId, String caseId, Instant now) {
+        findings.closeByCase(projectId, caseId, now.toString());
     }
 
     private void openOrRefresh(String projectId, CaseDetection detection, Instant now) {
