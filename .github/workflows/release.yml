@@ -954,6 +954,69 @@ jobs:
           echo "Release v${VERSION} published"
 
   # ---------------------------------------------------------------------------------------------
+  # @tessaryai/mcp'S OWN VERSION, NOT THIS RELEASE'S. packages/mcp/package.json carries its own
+  # semver, bumped independently of the four images above — this job publishes whatever that file
+  # currently says, not `needs.preflight.outputs.version`. Gated on `finalize` for the same reason
+  # github-release is: nothing here should publish off a run that never committed. npm has no
+  # in-place update and only a discouraged, time-boxed unpublish, so this is a second point of no
+  # return, not the additive/reversible kind covered by cleanup below — a failure here is a warning
+  # to fix by hand, not a tag this workflow can safely delete.
+  publish-mcp-package:
+    name: Publish @tessaryai/mcp to npm
+    runs-on: ubuntu-24.04
+    needs: [preflight, finalize]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # NPM_TOKEN is Akhil's step, not this agent's (see TES-1622) — until it exists, warn and
+      # exit clean rather than fail a release that has nothing to do with this package.
+      - name: Check for NPM_TOKEN
+        id: gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::warning::NPM_TOKEN is not set; @tessaryai/mcp was not published."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.gate.outputs.publish == 'true'
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Zero runtime dependencies (see packages/mcp/package.json), so there is nothing to install —
+      # the test run below exercises the checked-out source directly.
+      - name: Run the package's own tests
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: packages/mcp
+        run: npm test
+
+      # IDEMPOTENT ON PURPOSE. This job runs on every release dispatch, not only ones that bumped
+      # packages/mcp — most releases will find the current version already on npm and skip, which
+      # is the correct outcome, not a failure. `npm view` exits non-zero for an unpublished version,
+      # which is the signal to actually publish.
+      - name: Publish if this version isn't on npm yet
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: packages/mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} is already published; nothing to do."
+            exit 0
+          fi
+          npm publish --access public
+          echo "Published ${NAME}@${VERSION}"
+
+  # ---------------------------------------------------------------------------------------------
   # THE ROLLBACK, and it now only exists for the failure case. When the per-arch builds pushed
   # arch-suffixed tags this job ran on every outcome, because even a perfect release left eight
   # public tags to sweep up. They are pushed by digest now and name nothing, so a green run has
