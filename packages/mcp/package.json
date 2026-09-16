@@ -1,0 +1,34 @@
+{
+  "name": "@tessaryai/mcp",
+  "version": "0.1.0",
+  "description": "stdio bridge for Tessary's MCP server — proxies stdio JSON-RPC to a self-hosted instance's streamable-HTTP /mcp endpoint, for MCP clients that only launch stdio servers.",
+  "mcpName": "io.github.tessaryai/tessary",
+  "type": "commonjs",
+  "bin": {
+    "tessary-mcp": "./bin/tessary-mcp.js"
+  },
+  "main": "./bin/tessary-mcp.js",
+  "files": [
+    "bin/"
+  ],
+  "scripts": {
+    "start": "node bin/tessary-mcp.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tessaryai/tessary.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/tessaryai/tessary",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "tessary"
+  ],
+  "packageManager": "pnpm@11.15.1"
+}
