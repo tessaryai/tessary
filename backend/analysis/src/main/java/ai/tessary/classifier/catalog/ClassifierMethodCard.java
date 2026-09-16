@@ -77,8 +77,7 @@ public final class ClassifierMethodCard {
             failing on the agent's own calls.
 
             A `negative` does more than close the finding: it folds this spell into the tool's reference,
-            so the current rate becomes the detector's new normal for this tool. Rule `negative` only when
-            you accept that rate as how this tool behaves.
+            so this rate becomes the detector's new normal for this tool and a spell at it stops firing.
             """;
 
     private static final String METRIC_DRIFT = """
