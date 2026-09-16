@@ -104,14 +104,7 @@ public class FindingService {
         List<BehaviorFindingView> rows = triageSources.stream()
                 .flatMap(source -> source.list(projectId, status, callSiteId, detector, confirmedOnly).stream())
                 .toList();
-        // NOTE: `countWithheld` is a different "withheld" — findings held below the TRIAGE bar, not
-        // by the flag layer — and each source counts it in SQL, so it can over-report by a withheld
-        // classifier's held-back findings. Left as is rather than restructured: it is a count beside a
-        // list, in a state only reachable after a flag flip on a project with history.
-        long withheld = triageSources.stream()
-                .mapToLong(source -> source.countWithheld(projectId, callSiteId, confirmedOnly))
-                .sum();
-        return new BehaviorFindingsView(rows, withheld, TriageLane.EVIDENCE_ONLY.wire());
+        return new BehaviorFindingsView(rows, TriageLane.EVIDENCE_ONLY.wire());
     }
 
     /**

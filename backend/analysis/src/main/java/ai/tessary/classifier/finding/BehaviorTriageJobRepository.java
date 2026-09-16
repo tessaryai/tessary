@@ -18,8 +18,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The leased queue for Layer-2 triage on the unified {@code job} table ({@code kind='triage'},
- * {@code dedupe_key = <project>:<finding>} for a finding's first look and {@code <project>:<finding>:<n>}
- * for the re-looks the recurrence rule schedules, backed by the unique {@code ux_job_triage}).
+ * {@code dedupe_key = <project>:<finding>}, backed by the unique {@code ux_job_triage}).
  *
  * <p>A separate kind from {@code grader_run} because it is a different question. The call site's
  * grader set judges whether the answer was good; this asks whether the detector's claim is true,
@@ -28,9 +27,10 @@ import org.springframework.stereotype.Repository;
  * so routing findings through the grader queue would audit them with the wrong instrument.
  *
  * <p>Finite-job grain like the RCA queue: no cursor. The dedupe key covers every status rather than
- * pending-only, so a finding gets exactly one triage run per look: the ruling is about the cause, and
- * a later sweep bumping the counter does not make the cause new. A second look is a second key, issued
- * only by the recurrence rule, so the count of keys under a finding is the count of looks it has had.
+ * pending-only, so a finding gets exactly one triage run: the ruling is about the cause, and a later
+ * sweep bumping the counter does not make the cause new. A finding's cause firing again after a
+ * ruling opens a FRESH finding — a new id, a new dedupe key — rather than reopening this one, so there
+ * is no "second look" to key here at all.
  */
 @Repository
 public class BehaviorTriageJobRepository {
@@ -94,18 +94,13 @@ public class BehaviorTriageJobRepository {
      * <p>Unlike the RCA queue this does not revive a job on every touch: triage is advisory evidence on
      * a finding, and a finding whose analysis failed should not re-spend a microVM on every subsequent
      * sweep. Re-running is a deliberate human action, and {@link #REVIVE_IF_COOLED} is what makes that
-     * sentence true rather than aspirational. A dead-lettered look past its cooldown floor goes back to
+     * sentence true rather than aspirational. A dead-lettered job past its cooldown floor goes back to
      * {@code pending} with a fresh attempt budget; every other status is left untouched, exactly as
      * before. The automatic lane cannot reach this branch at all: {@code FindingRepository}'s escalation
-     * sweep requires {@code escalated_at IS NULL}, and a finding with a dead-lettered look has it set.
+     * sweep requires {@code escalated_at IS NULL}, and a finding with a dead-lettered job has it set.
      */
     public EnqueueOutcome enqueue(
-            String projectId,
-            String findingId,
-            @Nullable String verdictId,
-            String classifierKey,
-            int look,
-            String now) {
+            String projectId, String findingId, @Nullable String verdictId, String classifierKey, String now) {
         return jdbc.sql("""
                 INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
                 VALUES (:id, :pid, '""" + KIND + """
@@ -120,7 +115,7 @@ public class BehaviorTriageJobRepository {
                 """)
                 .param("id", Ids.ulid())
                 .param("pid", projectId)
-                .param("dedupeKey", dedupeKey(projectId, findingId, look))
+                .param("dedupeKey", dedupeKey(projectId, findingId))
                 .param("findingId", findingId)
                 .param("verdictId", verdictId)
                 .param("classifierKey", classifierKey)
@@ -145,7 +140,6 @@ public class BehaviorTriageJobRepository {
             String findingId,
             String classifierKey,
             BehaviorTriageJobRow.Conformance conformance,
-            int look,
             String now) {
         return jdbc.sql("""
                 INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
@@ -171,7 +165,7 @@ public class BehaviorTriageJobRepository {
                 """)
                 .param("id", Ids.ulid())
                 .param("pid", projectId)
-                .param("dedupeKey", dedupeKey(projectId, findingId, look))
+                .param("dedupeKey", dedupeKey(projectId, findingId))
                 .param("findingId", findingId)
                 .param("deadFloor", deadFloor())
                 .param("classifierKey", classifierKey)
@@ -265,8 +259,6 @@ public class BehaviorTriageJobRepository {
      */
     public Map<String, FailedTriage> failedByFinding(String projectId, List<String> findingIds) {
         if (findingIds.isEmpty()) return Map.of();
-        // Ordered so the LAST row for a finding wins the put below: a finding re-opened by recurrence
-        // has one job per look, and the later look is the one the surface should report.
         List<FailedTriage> rows = jdbc.sql("SELECT payload->>'finding_id' AS finding_id, attempts, last_error FROM job"
                         + " WHERE kind = :kind AND project_id = :pid AND status = :dead"
                         + "   AND payload->>'finding_id' IN (:findingIds)"
@@ -363,50 +355,9 @@ public class BehaviorTriageJobRepository {
                 .update();
     }
 
-    /**
-     * Which look a press belongs to: the one already scheduled, or the next one.
-     *
-     * <p>Two presses on the same finding must land on the same job, the once-per-cause guarantee,
-     * while a press after a recurrence re-open must start a new one. {@code escalatedAt} is
-     * exactly that distinction: it is stamped when a look is scheduled and cleared by
-     * {@code FindingRepository#reopenForTriage}, so a finding carrying one is mid-look and a finding
-     * without one is due its next.
-     *
-     * <p>Two concurrent first presses both read null and both compute look 1, which is the point: they
-     * build the same key and the dedupe index picks one.
-     */
-    public int lookFor(String projectId, String findingId, @Nullable String escalatedAt) {
-        int looks = countLooks(projectId, findingId);
-        return escalatedAt == null ? looks + 1 : Math.max(1, looks);
-    }
-
-    /**
-     * How many looks this finding has had: one row per dedupe key under it, whatever became of the job.
-     *
-     * <p>This is the "two looks" counter the recurrence rule stands on, and it is deliberately read off
-     * the queue rather than kept on the finding: the job row is what a look is, so a counter beside it
-     * could disagree with reality after any partial write. A failed or dead-lettered look still counts:
-     * it spent a schedule, and the recurrence rule is about how many times we have already asked.
-     */
-    public int countLooks(String projectId, String findingId) {
-        String base = dedupeKey(projectId, findingId, 1);
-        return jdbc.sql("SELECT count(*) FROM job WHERE kind = '" + KIND + "' AND project_id = :pid"
-                        + " AND (dedupe_key = :base OR dedupe_key LIKE :prefix)")
-                .param("pid", projectId)
-                .param("base", base)
-                .param("prefix", base + ":%")
-                .query(Integer.class)
-                .single();
-    }
-
-    /**
-     * The key one look claims. The first look keeps the bare {@code <project>:<finding>} the queue has
-     * always used (it is the key every live row carries), and a re-look appends its ordinal, so the
-     * recurrence rule can schedule a second run without the first one's row swallowing it.
-     */
-    private static String dedupeKey(String projectId, String findingId, int look) {
-        String base = projectId + ":" + findingId;
-        return look <= 1 ? base : base + ":" + look;
+    /** The key one finding's triage claims — {@code <project>:<finding>}, the whole of its scope. */
+    private static String dedupeKey(String projectId, String findingId) {
+        return projectId + ":" + findingId;
     }
 
     private static BehaviorTriageJobRow map(ResultSet rs) throws SQLException {

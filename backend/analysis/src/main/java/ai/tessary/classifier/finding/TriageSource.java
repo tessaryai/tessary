@@ -73,13 +73,6 @@ public interface TriageSource {
             boolean confirmedOnly);
 
     /**
-     * Open findings this source is holding below the Layer-2 bar — un-triaged, or ruled negative.
-     * Summed across sources into one count beside the list, so "nothing here" can never be confused
-     * with "nothing got through". Zero is a legitimate answer for a store with no such state.
-     */
-    long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly);
-
-    /**
      * One finding's own page, or empty when the id is not this source's. Note that this is deliberately
      * NOT the mirror of {@link #resolve}: a shared-table row keyed to another source's classifier is
      * disclaimed here (only that source's projection carries the fields its page renders) while it is

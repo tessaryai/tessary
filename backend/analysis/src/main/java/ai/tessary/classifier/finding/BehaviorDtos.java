@@ -34,13 +34,11 @@ public final class BehaviorDtos {
     /**
      * The findings page: what the Layer-2 gate let through, and enough context to read that honestly.
      *
-     * @param withheld open findings the gate is holding: un-triaged, or ruled negative. Surfaced as a
-     *     count so "nothing here" can never be confused with "nothing got through".
      * @param lane which Layer-2 lane this project's findings are ruled on, as
      *     {@link TriageLane#wire()}. Always the same value: triage reads no repository, so there
      *     is nothing left for it to vary with.
      */
-    public record BehaviorFindingsView(List<BehaviorFindingView> findings, long withheld, String lane) {}
+    public record BehaviorFindingsView(List<BehaviorFindingView> findings, String lane) {}
 
     /**
      * One row of {@code finding_evidence} on the wire: a reference into substrate, never a copy.
@@ -367,12 +365,6 @@ public final class BehaviorDtos {
             /** When a human ruled on this cause; null while it is still an unreviewed lead. */
             @Nullable String humanVerdictAt,
             /**
-             * Firings since that ruling. Non-zero on a BLOCKED finding is the strongest thing this
-             * feature can say: the agent is doing something its owner explicitly said it must not do,
-             * and it has happened this many times since they said so.
-             */
-            long recurrencesSinceVerdict,
-            /**
              * Which of the two claims an SOP-conformance row is making: {@code drift} ("this got
              * worse") or {@code baseline} ("this has always been broken"). Null for every finding
              * that is not one.
@@ -483,7 +475,6 @@ public final class BehaviorDtos {
                     row.triagedAt(),
                     triageStatus(row, failed),
                     row.humanVerdictAt(),
-                    row.recurrencesSinceVerdict(),
                     null);
         }
 
@@ -518,8 +509,10 @@ public final class BehaviorDtos {
                     List.of(),
                     null,
                     triageStatus,
-                    humanVerdictAt,
-                    recurrencesSinceVerdict,
+                    // Nulled along with the verdict: under the open/closed model a human ruling is a
+                    // ruling like any other, so leaving this set would tell RCA the direction a person
+                    // decided even though the columns that say what they decided are gone.
+                    null,
                     conformanceKind);
         }
     }
