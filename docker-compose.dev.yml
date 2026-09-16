@@ -255,6 +255,11 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public:ro
       - ./frontend/index.html:/app/index.html:ro
+      # src/index.css imports ../tokens.css, which lives at the frontend root beside index.html
+      # rather than under src/. Without this mount Vite fails to resolve it and the dev server
+      # serves an error overlay instead of the app: the image copies only the lockfiles, so every
+      # root-level file the dev server reads has to be mounted here by name.
+      - ./frontend/tokens.css:/app/tokens.css:ro
       - ./frontend/package.json:/app/package.json:ro
       - ./frontend/pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
       # pnpm 11 keeps settings (this package's overrides) here rather than in package.json, and the
