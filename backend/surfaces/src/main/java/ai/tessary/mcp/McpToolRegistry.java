@@ -357,8 +357,8 @@ public class McpToolRegistry {
 
         add(new McpTool(
                 "get_case",
-                "Fetch one case by id, scoped to this token's project: the case, its activity trail, the"
-                        + " classifier finding it is about (finding_id — pass it to get_finding), the ruling, the"
+                "Fetch one case by id, scoped to this token's project: the case, its activity trail, the newest"
+                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the ruling, the"
                         + " exemplar traces, and the RCA report INLINE in rca when one has finished — its"
                         + " verdict, hypotheses, the checks it ruled out, and the agent's full written"
                         + " investigation. rca is null while a report is still running (rca_report_id names it,"
@@ -758,7 +758,8 @@ public class McpToolRegistry {
                         Map.ofEntries(
                                 Map.entry(
                                         "finding_id",
-                                        strField("Finding id — a list_findings row's id, or a case's finding_id.")),
+                                        strField("Finding id — a list_findings row's id, or a case's"
+                                                + " latest_finding_id.")),
                                 Map.entry(
                                         "role",
                                         enumField(
@@ -1187,7 +1188,7 @@ public class McpToolRegistry {
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
-                    detail.findingId(),
+                    detail.latestFindingId(),
                     null,
                     detail.exemplars(),
                     detail.rcaReportId(),
