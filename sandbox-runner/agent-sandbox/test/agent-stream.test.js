@@ -139,7 +139,7 @@ test('E: a session that already did real work is not silently retried at double 
   // isEmptyCompletion looks only at the LAST turn, so the old code retried this from scratch,
   // re-paying for turn 1's work. The gate must instead let the run fail on this session.
   const { runAgent } = require('../agent-stream');
-  const { createCalls } = mockSdk({
+  const { createCalls, promptBodies } = mockSdk({
     messagesById: () => [
       assistantMessage({ toolCalls: ['read_file'], usage: { input_tokens: 400, output_tokens: 100 } }),
       assistantMessage({ usage: { input_tokens: 50, output_tokens: 0 } }),
@@ -150,6 +150,73 @@ test('E: a session that already did real work is not silently retried at double 
     runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', timeoutMs: 1000 }),
   );
   assert.equal(createCalls.length, 1, 'a session with real prior work must not trigger a second, fresh session');
+  assert.equal(promptBodies.length, 1, 'no systemPrompt: the 4B turn-cap resume never applies, so this fails on the first prompt');
+});
+
+test('4B: triage resumes the same session once, no tools, when the turn cap empties the final reply', async (t) => {
+  t.after(() => mock.reset());
+  // Session 1, first prompt: real (tool-calling) investigation work, then an empty final turn —
+  // the shape opencode's own step cap produces (a forced text-only turn with no budget left), not
+  // a provider giving up. The resume must reuse this session and ask it to answer with no tools.
+  const toolTurn = assistantMessage({
+    toolCalls: ['get_finding_evidence'],
+    usage: { input_tokens: 400, output_tokens: 100 },
+  });
+  const emptyTurn = assistantMessage({ usage: { input_tokens: 50, output_tokens: 0 } });
+  const rulingTurn = assistantMessage({
+    text: JSON.stringify({ verdict: 'positive' }),
+    usage: { input_tokens: 20, output_tokens: 15 },
+  });
+  const { runAgent } = require('../agent-stream');
+  const { createCalls, promptBodies } = mockSdk({
+    messagesById: (id, callCount) => (callCount === 1 ? [toolTurn, emptyTurn] : [toolTurn, emptyTurn, rulingTurn]),
+  });
+
+  const run = await runAgent({
+    model: 'anthropic/claude-sonnet-5',
+    prompt: 'rule on this finding',
+    systemPrompt: 'You are the triage agent.',
+    timeoutMs: 1000,
+  });
+
+  assert.equal(createCalls.length, 1, 'the turn-cap resume reuses the same session, never a fresh one');
+  assert.equal(promptBodies.length, 2, 'two prompts: the investigation, then the no-tools correction');
+  assert.match(
+    promptBodies[1].parts[0].text,
+    /Do NOT call any tool/,
+    'the correction tells the agent its tool budget is gone',
+  );
+  assert.equal(run.turns.length, 3, 'every turn of the one session counts, the tool-calling one included');
+  const { sumUsage } = require('../agent-stream');
+  const usage = sumUsage(run.turns);
+  assert.equal(usage.input_tokens, 400 + 50 + 20, 'usage sums all three turns, not just the resumed reply');
+  assert.equal(usage.output_tokens, 100 + 0 + 15);
+});
+
+test('4B: still empty after the resume, the run rejects after exactly two prompts', async (t) => {
+  t.after(() => mock.reset());
+  const toolTurn = assistantMessage({
+    toolCalls: ['get_finding_evidence'],
+    usage: { input_tokens: 400, output_tokens: 100 },
+  });
+  const emptyTurn = assistantMessage({ usage: { input_tokens: 50, output_tokens: 0 } });
+  const stillEmptyTurn = assistantMessage({ usage: { input_tokens: 10, output_tokens: 0 } });
+  const { runAgent } = require('../agent-stream');
+  const { createCalls, promptBodies } = mockSdk({
+    messagesById: (id, callCount) => (callCount === 1 ? [toolTurn, emptyTurn] : [toolTurn, emptyTurn, stillEmptyTurn]),
+  });
+
+  await assert.rejects(
+    runAgent({
+      model: 'anthropic/claude-sonnet-5',
+      prompt: 'rule on this finding',
+      systemPrompt: 'You are the triage agent.',
+      timeoutMs: 1000,
+    }),
+  );
+
+  assert.equal(createCalls.length, 1, 'still just the one session');
+  assert.equal(promptBodies.length, 2, 'the resume is spent once — a second empty reply fails rather than retrying again');
 });
 
 test('C/F3: a schema-miss same-session retry does not double-count usage', async (t) => {

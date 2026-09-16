@@ -600,7 +600,8 @@ function usageOf(message) {
  * and all, with nothing in it (anomalyco/opencode#31430, closed as a provider bug). An agent
  * reads it as "the task is done", so a run that hit one has silently truncated — which is worse
  * than a crash, because the caller cannot tell. runAgent retries once when the LAST assistant
- * message looks like this.
+ * message looks like this — a fresh session normally, but a same-session, no-tools resume when
+ * it is triage hitting its own turn cap after real work (see the isEmptyCompletion branch below).
  */
 function isEmptyCompletion(turns) {
   const last = turns[turns.length - 1];
@@ -804,7 +805,10 @@ async function runAgent(spec) {
     // An EMPTY completion is the opposite case: the session itself produced nothing, so the
     // retry has to start clean — UNLESS (E) that session already did real work and only its LAST
     // turn came back empty, in which case a fresh session would re-pay for that work rather than
-    // recover it; see the isEmptyCompletion branch below.
+    // recover it. For triage specifically, that shape is also what opencode's own turn cap looks
+    // like — a forced text-only turn with nothing in it — and the fix there is neither a fresh
+    // session nor letting the run fail: it is THIS same resume, telling the agent to stop calling
+    // tools and answer with what it already has. See the isEmptyCompletion branch below.
     let resume = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!resume) {
@@ -843,11 +847,28 @@ async function runAgent(spec) {
         // already ran a multi-turn investigation and only stumbled on its FINAL reply is not: a
         // fresh-session retry would throw away everything it learned and re-run the whole
         // investigation inside whatever wall-clock is left, silently doubling the run's cost for a
-        // failure that a retry is not even likely to fix (the same model, the same task). Let it
-        // fail instead — `unusable` below will reject it, and Step 1's accumulation means the
-        // failure's usage line/envelope still carries every token this session actually spent.
+        // failure that a retry is not even likely to fix (the same model, the same task).
         const substantialWork = turns.length > 1 || turns.some((t) => (t.tool_calls || []).length > 0);
-        if (substantialWork) break;
+        if (substantialWork) {
+          // Triage only, and only once (attempt 0): this shape — real work, then an empty final
+          // turn — is exactly what opencode's own step cap produces (a forced text-only turn with
+          // no tool budget left), not a provider that gave up. A new prompt on the SAME session
+          // reopens the step count with tools enabled again (checked against opencode 1.18.30), so
+          // the correction has to tell the agent not to use them — an instruction, not an enforced
+          // limit. A real run that ignores it still ends on its own deadline, and decision 3 spends
+          // that as a normal run failure rather than this loop retrying further.
+          if (spec.systemPrompt && attempt === 0) {
+            console.error('empty completion at the turn cap after real work: resuming the same session once, no tools');
+            resume = true;
+            correction =
+              'You have no tool budget left. Do NOT call any tool. Using only the evidence you have already ' +
+              'read, reply now with the ruling JSON object and nothing else.';
+            continue;
+          }
+          // Let it fail instead — `unusable` below will reject it, and Step 1's accumulation means
+          // the failure's usage line/envelope still carries every token this session actually spent.
+          break;
+        }
         resume = false;
         continue;
       }
