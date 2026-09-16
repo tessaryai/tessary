@@ -646,7 +646,16 @@ agent**" is project- and time-relative, so it ships as a fitting procedure and t
 > subject_trace_id, subject_span_id)`); `frustration_detection` and `behavior_drift_detection` at
 > trace grain (unique on `(project_id, classifier_id, subject_trace_id)`, because a turn IS a trace and a
 > trajectory drift labels no one span). The subject ids are producer-keyed loose pointers, never FKs;
-> `created_at` is `timestamptz`; a NULL `confidence` means HIGH. The physical view named
+> `created_at` is `timestamptz`; a NULL `confidence` means HIGH. **Migration `0012` adds
+> `subject_started_at` (nullable `timestamptz`)** alongside `created_at`: the latter is when the
+> classifier CHECKED the span (run time — metering, alert digests and retention keep reading it, since
+> event time would let a backfill dodge billing, miss the digest window it ran through, or get deleted
+> the moment it's written); the former is when the span (or, with no span, the trace) it judged
+> actually RAN (event time). The writer fills it from the span or trace it references, and it is NULL
+> only for a row whose span and trace have both since aged out of retention. The Classifiers page, the
+> `classifier_events` query dataset, the daily volume chart, and each per-span classifier's own arming
+> gate all read this clock, so a backfill charts, pages and arms on the days its traffic actually ran
+> rather than the day the sweep happened to check it. The physical view named
 > `classifier_detection_v` this superseded is still present in the baseline changelog, but nothing in
 > the application layer reads it any more — its deletion is a separate, later cleanup job.
 >

@@ -20,6 +20,13 @@ history — migration `0089` translated every enabled threshold rule's parameter
 arming config and disabled the rules; the schema still accepts creating one, but `AlertWorker` never
 evaluates it.
 
+**Digest and brief windows stay on run time, deliberately** — `AlertQueryRepository.projectActivityInWindow`
+ranges on `created_at`, not on the event-time columns decisions 8 and 8b moved everything else onto. A
+backfilled trace or a late detection landing in one of these windows is a fact about *this project's
+activity right now*, which run time answers and event time would not: on event time, a backfill would
+silently miss every digest window it ran through instead of showing up in the one where it actually
+arrived.
+
 **A threshold rule could not have covered the three launch detectors anyway, and this is a property
 of the detectors rather than a gap in alerting.** A threshold rule counts detections, and a detection
 used to be a `verdict` row with `source='automatic'` — that table is gone; each per-span classifier

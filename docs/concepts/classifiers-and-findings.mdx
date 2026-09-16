@@ -69,6 +69,8 @@ The record has four properties worth understanding, because they shape what you 
 
 **Onset is the start of the current spell.** It holds still while the detection keeps firing and moves only after the detection has gone quiet for longer than that classifier's own window. That gap is how Tessary observes a recovery: nothing writes "this came back", a recovered detection stops appearing.
 
+**A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings — and, on the Classifiers page, charts its volume — on the real days that traffic occurred.
+
 **The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. [Cases](/concepts/cases) covers that step.
 
 ## Read next

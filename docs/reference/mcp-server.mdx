@@ -150,7 +150,7 @@ Call `describe_dataset` before the other four. Facetable and filterable fields d
 Four things constrain these tools:
 
 - **Both `range` bounds are required on `query_timeseries`.** An unbounded timeseries is a full scan.
-- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `started_at` for `spans` and `tool_calls`, `created_at` for `classifier_events`, or `bucket_start` on `metric_rollups`. `describe_dataset`'s `time_column` names it per dataset.
+- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `started_at` for `spans` and `tool_calls`, `subject_started_at` for `classifier_events` (the span or trace it judged, not when the classifier checked it), or `bucket_start` on `metric_rollups`. `describe_dataset`'s `time_column` names it per dataset.
 - **`metric_rollups` rows are already aggregated,** so the answer is the sum of the rollup's `value` rather than a row count. Always filter `granularity` there, or the hour and day grains are summed together.
 - **`query_search` does not accept the `spans` dataset.** `list_spans` searches the same rows with a richer filter set and returns full payloads on a scoped page, so spans are excluded from `query_search` by decision rather than by capability. `metric_rollups` is not searchable at all: a rollup row has no text.
 
