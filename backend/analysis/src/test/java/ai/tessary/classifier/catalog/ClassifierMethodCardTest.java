@@ -93,6 +93,41 @@ class ClassifierMethodCardTest {
         }
     }
 
+    /**
+     * A card never sends the reader to another classifier's card. Exactly one card is delivered per run,
+     * as {@code dossier/method.md}, so "for the same reason as tool_error" points at prose the agent does
+     * not have and cannot get. Duration and cost drift are the one legitimate pair: they share a card,
+     * and it names both.
+     */
+    @Test
+    void noCardPointsAtAnotherClassifiersCard() {
+        for (ClassifierModelModule module : BuiltInClassifierCatalog.MODULES) {
+            String card = cardOf(module.key());
+            for (ClassifierModelModule other : BuiltInClassifierCatalog.MODULES) {
+                if (other.key().equals(module.key())) continue;
+                if (card.equals(cardOf(other.key()))) continue; // one card, two keys
+                assertFalse(
+                        card.contains(other.key()),
+                        module.key() + "'s card names '" + other.key() + "', whose card the agent reading this"
+                                + " one never receives");
+            }
+        }
+    }
+
+    /**
+     * Every card says where the claim's numbers are, including the two whose answer is that there is no
+     * block to read. The system prompt requires a ruling to cite the {@code get_finding} fields it rests
+     * on, so a card that never names them asks for a citation it has not made possible.
+     */
+    @Test
+    void everyCardSaysWhereTheClaimsNumbersAre() {
+        for (ClassifierModelModule module : BuiltInClassifierCatalog.MODULES) {
+            assertTrue(
+                    cardOf(module.key()).contains("**The claim\'s numbers**"),
+                    module.key() + "'s card never says where in get_finding its numbers sit");
+        }
+    }
+
     /** {@link ClassifierMethodCard#forClassifier} for a key this test knows carries a card. */
     private static String cardOf(String classifierKey) {
         String card = ClassifierMethodCard.forClassifier(classifierKey);

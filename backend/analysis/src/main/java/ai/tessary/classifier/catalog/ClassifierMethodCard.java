@@ -51,8 +51,9 @@ public final class ClassifierMethodCard {
 
             **The claim's numbers** are in `get_finding` under `toolError`: `refRate` and `curRate`
             (fractions), `nRef`, `nCur`, `failuresCur`, `deltaPp`, `statistic` against `threshold`,
-            `effectSize`, `direction`, `onsetAt`, and `patterns` (each current failure signature with its
-            count). `nCur` counts to the detector's watermark, the last hour bucket it folded, while
+            `effectSize`, `direction`, `onsetAt`, and `patterns` (each failure signature with its reference and
+            current counts) beside `patternsTruncated`, which is set when that list was cut and does not hold
+            every signature. `nCur` counts to the detector's watermark, the last hour bucket it folded, while
             `member` enumerates to the moment the finding was written, so the two can differ by a few
             calls. Two clocks, not a defect.
 
@@ -66,8 +67,8 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `baseline`, and that is correct: a CUSUM has one reference and it is a fitted rate; there
               is no window of rows it was compared against.
-            - No `exemplar`: nothing here is a designated way in. Page the population and choose what to
-              open.
+            - No `exemplar`: nothing here is a designated way in, and every member is equally one.
+            - No `changepoint`: this detector does not write that role.
 
             ### Cause: `rate_shift`
 
@@ -88,7 +89,8 @@ public final class ClassifierMethodCard {
             a run; cost and tokens on a whole-run row are the trace's rollup, and `models` lists every model
             the run called.
 
-            **Compares against** one of two references, and the cause key's last segment says which:
+            **Compares against** one of two references. The `pattern` line in `finding.md` ends with which, and
+            `metric.reference` in `get_finding` says it too:
 
             - `:pinned`: a window a person pinned as normal. Its rows were stored and are here as
               `baseline`.
@@ -119,10 +121,12 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `baseline` on a `:previous` finding is correct: a weighted ring of daily histograms has no
               rows behind it, and `metric.control` describes what it was. A `:pinned` finding with no
-              `baseline` is a defect.
+              `baseline` is a defective write: those rows were stored and should be here, so the reference side
+              cannot be read from the evidence at all.
             - No `witness`: every sample in the window is a member of the shifted population, and nothing
               marks one as the failure.
-            - No `exemplar`, for the same reason as tool_error.
+            - No `exemplar`: nothing here is a designated way in, and every member is equally one.
+            - No `changepoint`: this detector does not write that role.
 
             ### Cause: `distribution_shift`
 
@@ -145,6 +149,12 @@ public final class ClassifierMethodCard {
 
             **Compares against** the profile: counts, not rows.
 
+            **The claim's numbers** are not a block of their own. This cause carries no measured shift, so
+            `get_finding` holds no `metric`, `toolError` or `armedWindow` for it. The claim is the finding's own
+            row: `causeKey` names the step or the sequence and is the claim itself, `traceCount` is how many
+            traces fired it, and `firstSeenAt` and `lastSeenAt` bound it. The profile's own counts are not on
+            this surface; what you can check is the traces.
+
             **Evidence**
             - `exemplar`: the trace the firing was recorded on.
             - `member`: this cause's firings across batches, at trace grain. A cause builds its population
@@ -153,6 +163,7 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `baseline`, by construction. The reference is a fitted model; a model is counts, and there
               is nothing to enumerate on that side. A zero here is the method, not a lost write.
+            - No `witness` or `changepoint`: this detector writes neither role.
 
             ### Cause: `omission`
 
@@ -178,11 +189,19 @@ public final class ClassifierMethodCard {
             ## sop_conformance: an obligation checked against the turns it applied to
 
             **Measures** how often an SOP rule was honoured on the turns where it was in force. Two
-            different claims share this classifier, and `conformance_kind` says which: a `drift` finding
-            says conformance fell, a `baseline` finding says it was never high.
+            different claims share this classifier, and `conformanceKind` in `get_finding` says which: a
+            `drift` finding says conformance fell, a `baseline` finding says it was never high. Both file the
+            cause `conformance_rule`, so the cause named in `finding.md` does not separate them and the kind
+            sections below are keyed on `conformanceKind`.
 
             **Compares against** either the bundle's fitted expectation model plus a stored activation
             count (the windowed drift test), or the very turns the fit ran on (the fit-time audit).
+
+            **The claim's numbers** sit differently for the two kinds. A `baseline` finding has a block of its
+            own in `get_finding` under `baseline`: `ruleKey`, `applicableTurns` (the activations the violations
+            were counted over), `violations`, and `fittedAt`. A `drift` finding has no block: its rates are in
+            the finding's `title`, its denominator is `traceCount`, which for this classifier counts the tested
+            window's activations rather than firings, and `causeKey` names the rule.
 
             **Evidence**, all at trace grain, all refreshed on every pass, because the window rolls and
             the union across sweeps is the traffic the deficit has actually been seen over.
@@ -196,6 +215,7 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `baseline` on a windowed drift finding is correct: its reference is a fitted expectation
               model, and no set of rows survives it.
+            - No `witness`: the violating turns are the `exemplar` rows, and this detector writes no `witness`.
 
             ### Kind: `drift`
 
@@ -212,8 +232,9 @@ public final class ClassifierMethodCard {
     private static final String ARMED_SIGNAL = """
             ## {key}: a per-observation detector armed on a threshold
 
-            **Measures** whether individual observations trip this detector, and fires a finding when
-            enough of them do inside one window.
+            {measures}
+
+            One observation tripping is not the finding: it fires when enough of them do inside one window.
 
             **Compares against** a threshold on the count, not another stretch of traffic.
 
@@ -229,6 +250,7 @@ public final class ClassifierMethodCard {
             - No `baseline`: nothing here is a two-window comparison, so there is no before side to
               enumerate.
             - No `exemplar`: the population is the claim, and every member of it is equally a way in.
+            - No `witness` or `changepoint`: this detector writes neither role.
 
             ### Cause: `armed_window`
 
@@ -245,14 +267,15 @@ public final class ClassifierMethodCard {
             redaction's record of what it replaced first, then scans the stored output, then looks for a
             bare `[REDACTED_*]` marker.
 
-            **Compares against** nothing. One HIGH-confidence match opens the finding, per call site and
-            rule (the cause key's pattern). HIGH means a rule anchored on a provider format such as
-            `AKIA`; JWT, curl auth and Kubernetes secret rules stay LOW and never open one.
+            **Compares against** a threshold on the count, not another stretch of traffic. The threshold is one:
+            a single HIGH-confidence match opens the finding, per call site and rule (the cause key's pattern),
+            because one leaked credential is the whole incident. HIGH means a rule anchored on a provider format
+            such as `AKIA`; JWT, curl auth and Kubernetes secret rules stay LOW and never open one.
 
             **The claim's numbers** are in `get_finding` under `secretLeak`: `rule`, `confidence`,
             `leakCount`, `traceCount`, `firstAt`, `lastAt`, `keys` (each masked key with its leak and
-            trace counts and whether any copy is stored raw), `basis`, `threshold`, `windowSeconds` and
-            the window.
+            trace counts and whether any copy is stored raw), `leaks` (one entry per match, with its time and
+            masked key), `basis`, `threshold`, `windowSeconds` and the window.
 
             **Evidence**
             - `witness`: the spans whose output matched, capped at 50. Each row carries its masked key
@@ -262,7 +285,8 @@ public final class ClassifierMethodCard {
             **Absent roles**
             - No `member` or `baseline`: nothing here is a rate or a comparison, so no population or
               before side exists.
-            - No `exemplar`, for the same reason as tool_error.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
 
             ### Cause: `armed_window`
 
@@ -279,12 +303,12 @@ public final class ClassifierMethodCard {
             a gen_ai message envelope, the final assistant message is what gets validated. Only call sites
             with a declared schema are counted.
 
-            **Compares against** that call site's fitted in-control rate. Same engine as tool_error, folded
-            hour by hour.
+            **Compares against** that call site's fitted in-control rate, a fitted number and not a stretch of
+            traffic. A Bernoulli CUSUM, folded hour by hour.
 
-            **The claim's numbers** are in `get_finding` under `malformedOutput`: `rate` (the same shape
-            as tool_error's `toolError`: `refRate`, `curRate`, `nRef`, `nCur`, `failuresCur`, `statistic`,
-            `threshold`, `effectSize`, `direction`, `onsetAt`), `fields` (the declared schema with a
+            **The claim's numbers** are in `get_finding` under `malformedOutput`: `rate` (`refRate` and
+            `curRate` as fractions, `nRef`, `nCur`, `failuresCur`, `statistic` against `threshold`,
+            `effectSize`, `direction`, `onsetAt`, and no pattern breakdown), `fields` (the declared schema with a
             failure count per field), `notJson` and `other`. The denominator `nCur` is a count, not
             enumerated rows.
 
@@ -294,8 +318,10 @@ public final class ClassifierMethodCard {
 
             **Absent roles**
             - No `member`: the denominator is `rate.nCur`, not rows.
-            - No `baseline`: the reference is a fitted rate, as with tool_error.
-            - No `exemplar`, for the same reason as tool_error.
+            - No `baseline`: the reference is a fitted rate, not a window of rows, so there is nothing to
+              enumerate on that side.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
 
             ### Cause: `malformed_rate`
 
@@ -327,10 +353,40 @@ public final class ClassifierMethodCard {
         if (classifierKey == null || classifierKey.isBlank()) return null;
         String card = BY_KEY.get(classifierKey);
         if (card != null) return card;
-        return ARMED_SIGNAL_KEYS.contains(classifierKey) ? ARMED_SIGNAL.replace("{key}", classifierKey) : null;
+        String measures = ARMED_SIGNAL_MEASURES.get(classifierKey);
+        return measures == null
+                ? null
+                : ARMED_SIGNAL.replace("{key}", classifierKey).replace("{measures}", measures);
     }
 
-    /** The built-in detectors that file through {@code ClassifierArming} rather than their own sweep. */
-    static final java.util.Set<String> ARMED_SIGNAL_KEYS =
-            java.util.Set.of(BuiltInDetector.Kind.FRUSTRATION, BuiltInDetector.Kind.GROUNDEDNESS);
+    /**
+     * What each armed-signal detector actually looks for, substituted into {@link #ARMED_SIGNAL}'s
+     * {@code {measures\}} slot.
+     *
+     * <p>The rest of that card is the arming shape, which the family shares. Without this the one card
+     * that never states a method would tell an agent it is auditing observations that "trip the
+     * detector" and never say what tripping it means, which is the single thing it cannot work out from
+     * the evidence in front of it.
+     */
+    private static final Map<String, String> ARMED_SIGNAL_MEASURES = Map.of(
+            BuiltInDetector.Kind.FRUSTRATION,
+            "**Measures** emotional frustration in one user turn: an encoder head scores that turn for"
+                    + " annoyance and anger, against the last exchange for context. A conversation's opening"
+                    + " turn is never scored, because the agent has not acted yet and whatever the user arrived"
+                    + " with is not something it caused. A high score is re-scored by a second head and demoted"
+                    + " unless the frustration is attributable to the agent. This catches emotional frustration"
+                    + " only: a failing or looping task with no feeling in the turn does not fire it.",
+            BuiltInDetector.Kind.GROUNDEDNESS,
+            "**Measures** whether an answer contradicts its own source: a three-way NLI head scores each"
+                    + " asserted sentence against the source the trace actually produced, the retrieved"
+                    + " documents where there are any and the prompt where the document sits in it. It fires on"
+                    + " contradiction only. A sentence the source simply does not mention is NOT a finding, and"
+                    + " an answer with nothing checkable in it abstains. Claims sourced from a tool call are out"
+                    + " of scope entirely.");
+
+    /**
+     * The built-in detectors that file through {@code ClassifierArming} rather than their own sweep,
+     * taken from {@link #ARMED_SIGNAL_MEASURES} so a key can never be in one and not the other.
+     */
+    static final java.util.Set<String> ARMED_SIGNAL_KEYS = ARMED_SIGNAL_MEASURES.keySet();
 }
