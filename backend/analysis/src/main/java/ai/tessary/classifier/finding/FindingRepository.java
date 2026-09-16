@@ -222,6 +222,10 @@ public class FindingRepository {
      * <p><b>Observations refresh, judgements never do.</b> The update touches the counts, the clock and
      * the payload and the recurrence counter and nothing else — {@code triage_*}, {@code escalated_at},
      * {@code human_verdict_at} and {@code status} all survive.
+     *
+     * @param eventAt the spell's own EVENT time — the last hourly bucket the detector folded, not the
+     *     sweep's wall clock. Written into {@code last_seen_at} on every write, and into {@code onset_at}
+     *     when there is no onset yet, mirroring {@link #recordShift}
      */
     public Recorded recordRecomputedCause(
             String id,
@@ -231,6 +235,7 @@ public class FindingRepository {
             @Nullable String callSiteId,
             @Nullable String onsetAt,
             String evidenceJson,
+            String eventAt,
             String quietBefore,
             String now) {
         return recordRecomputedRate(
@@ -247,6 +252,7 @@ public class FindingRepository {
                 callSiteId,
                 onsetAt,
                 evidenceJson,
+                eventAt,
                 quietBefore,
                 now);
     }
@@ -258,6 +264,10 @@ public class FindingRepository {
      * judgements, under its own classifier, cause kind and subject.
      *
      * @param nativeCauseKey the classifier's own name for the cause, recorded in the payload vocabulary
+     * @param eventAt the window's own EVENT time, mirroring {@link #recordShift}: written into {@code
+     *     last_seen_at} on every write, and into {@code onset_at} when there is no onset yet. Malformed
+     *     Output has no anchor of its own and passes its sweep's wall clock here unchanged; tool_error
+     *     passes the spell's last folded hour
      */
     public Recorded recordRecomputedRate(
             String id,
@@ -273,6 +283,7 @@ public class FindingRepository {
             @Nullable String callSiteId,
             @Nullable String onsetAt,
             String evidenceJson,
+            String eventAt,
             String quietBefore,
             String now) {
         String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey, null));
@@ -281,7 +292,7 @@ public class FindingRepository {
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
                                  sample_count, payload, created_at, updated_at)
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :onsetAt, :now, :count, CAST(:payload AS jsonb), :now, :now)
+                    'open', :onsetAt, :eventAt, :count, CAST(:payload AS jsonb), :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = EXCLUDED.sample_count,
@@ -307,7 +318,8 @@ public class FindingRepository {
                 .param("callSiteId", callSiteId)
                 .param("count", observedCount)
                 .param("payload", payload)
-                .param("onsetAt", onsetAt == null ? now : onsetAt)
+                .param("onsetAt", onsetAt == null ? eventAt : onsetAt)
+                .param("eventAt", eventAt)
                 .param("quietBefore", quietBefore)
                 .param("now", now)
                 .query((rs, n) -> recorded(rs))

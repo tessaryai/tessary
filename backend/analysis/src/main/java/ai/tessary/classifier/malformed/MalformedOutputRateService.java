@@ -190,6 +190,7 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 callSite,
                 decision.onsetAt(),
                 payload(callSite, decision),
+                now,
                 at.minus(QUIET_WINDOW).toString(),
                 now);
 

@@ -213,6 +213,130 @@ class ToolErrorClassifierIntegrationTest {
         assertEquals(FindingRow.TriageVerdict.POSITIVE, resolved.triageVerdict());
     }
 
+    @Test
+    @DisplayName("a wholly historical backfill still fires — the replay anchors to the project's own "
+            + "traffic, not to wall-clock now")
+    void aBackfillOlderThanTheReplayWindowStillFires() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "toolerr-backfill").project().id();
+        // Ninety days old: well outside a `now - 28d` window, but the whole seeded span (sixty hours)
+        // sits comfortably inside 28 days of the LAST call this project ever made.
+        Instant start = Instant.now().minus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+
+        assertEquals(
+                1,
+                service.refresh(pid),
+                "wall-clock now-28d would read nothing but empty months; the project's own newest "
+                        + "tool-call event is the anchor instead");
+        assertTrue(
+                findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
+                        .anyMatch(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind())),
+                "a rate_shift finding was written from data entirely outside the wall-clock window");
+    }
+
+    @Test
+    @DisplayName("a resweep with no new traffic does not advance last_seen_at")
+    void lastSeenDoesNotAdvanceWithoutNewTraffic() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-stale").project().id();
+        Instant start = Instant.now().minus(60, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+
+        assertEquals(1, service.refresh(pid));
+        String firstLastSeen = firedFinding(pid).lastSeenAt();
+
+        assertEquals(1, service.refresh(pid), "still one tool in a spell");
+        String secondLastSeen = firedFinding(pid).lastSeenAt();
+
+        assertEquals(firstLastSeen, secondLastSeen, "no new buckets were folded, so the event clock must not move");
+    }
+
+    @Test
+    @DisplayName("a gap between folded buckets longer than the quiet window does not reset the onset "
+            + "while the underlying spell never actually recovered")
+    void aGapLongerThanTheQuietWindowKeepsTheOnsetWhileTheSpellIsUnbroken() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-gap").project().id();
+        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 10, 8); // breaks
+
+        assertEquals(1, service.refresh(pid));
+        FindingRow first = firedFinding(pid);
+        String onset = first.onsetAt();
+        assertNotNull(onset);
+
+        // Twenty hours with NOTHING for this tool at all — no upload, not a recovery: an hour with zero
+        // calls contributes no bucket to the replay, so the accumulator that is still broken has nothing
+        // to cool it in the gap. Still broken on the other side.
+        seedHours(pid, start.plus(QUIET_HOURS + 30L, ChronoUnit.HOURS), 10, 8);
+
+        assertEquals(1, service.refresh(pid), "still one tool in a spell, not a second one");
+        FindingRow second = firedFinding(pid);
+
+        assertEquals(
+                first.id(),
+                second.id(),
+                "the same finding — a gap the detector never recovered through is not a new spell");
+        assertEquals(
+                onset,
+                second.onsetAt(),
+                "the onset must not drift across a gap in the UPLOAD when the spell itself was never broken");
+        assertTrue(
+                Instant.parse(second.lastSeenAt()).isAfter(Instant.parse(first.lastSeenAt())),
+                "last_seen_at still advances to the newly folded traffic");
+    }
+
+    @Test
+    @DisplayName("last_seen_at, and the evidence bounded by it, stop at the last hour the detector "
+            + "folded, not at the moment the sweep ran")
+    void memberAndWitnessStopAtTheLastFoldedHour() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "toolerr-bounded").project().id();
+        // Ten days old — well inside a pre-fix `now - 28d` window too, so this isolates the event clock
+        // (last_seen_at, and the evidence bound it drives) from the anchor the backfill test above covers.
+        Instant start = Instant.now().minus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        // The detector's own last folded bucket, read back independently rather than hand-computed from
+        // the seeding parameters, so this asserts against what the replay actually saw.
+        String lastFoldedBucket = repo.hourlyTallies(pid, start).stream()
+                .filter(t -> t.toolKey().endsWith(TOOL))
+                .map(HourlyToolTally::bucket)
+                .max(String::compareTo)
+                .orElseThrow(() -> new AssertionError("no buckets tallied for " + TOOL));
+
+        assertEquals(1, service.refresh(pid));
+        FindingRow finding = firedFinding(pid);
+
+        assertEquals(
+                lastFoldedBucket,
+                finding.lastSeenAt(),
+                "last_seen_at is the last hour actually folded, not Instant.now() at write time");
+        assertTrue(
+                Instant.parse(finding.lastSeenAt()).isBefore(Instant.now().minus(1, ChronoUnit.DAYS)),
+                "the event clock, not the moment the sweep wrote the row");
+        assertNotNull(finding.onsetAt());
+
+        Instant onset = Instant.parse(finding.onsetAt());
+        Instant until = Instant.parse(finding.lastSeenAt()).plus(1, ChronoUnit.HOURS);
+        long expectedMembers =
+                repo.callRefsFor(pid, List.of(TOOL), onset, until).size();
+        long expectedWitnesses =
+                repo.failingCallRefsFor(pid, List.of(TOOL), onset, until).size();
+
+        Map<String, Long> byRole = evidence.countsByRole(pid, finding.id());
+        assertEquals(
+                expectedMembers,
+                byRole.getOrDefault(FindingEvidenceRow.Role.MEMBER, 0L),
+                "member is bounded to [onset, last folded hour], not to wall-clock now");
+        assertEquals(
+                expectedWitnesses,
+                byRole.getOrDefault(FindingEvidenceRow.Role.WITNESS, 0L),
+                "witness follows the same bound as member");
+    }
+
     /**
      * A closed ruling hands the window back to the detector: the arm clears, and what it fired over
      * becomes part of normal.

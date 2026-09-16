@@ -97,6 +97,7 @@ class ToolErrorCaseRenderingIntegrationTest {
                         BehaviorSubstrateRepository.UNATTRIBUTED,
                         Instant.now().toString(),
                         "{\"failing_traces\":[]}",
+                        Instant.now().toString(),
                         Instant.parse("2020-01-01T00:00:00Z").toString(),
                         Instant.now().toString())
                 .findingId();

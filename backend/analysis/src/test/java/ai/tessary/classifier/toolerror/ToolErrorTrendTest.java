@@ -286,6 +286,40 @@ class ToolErrorTrendTest {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // The event clock a finding is written from
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * {@code ToolErrorService} writes a finding's {@code last_seen_at} from this rather than from
+     * wall-clock now, so a backfilled replay reports when the traffic actually happened rather than
+     * when the sweep happened to run.
+     */
+    @Test
+    void aSpellReportsTheLastHourItFolded() {
+        List<HourlyToolTally> s = series(20, 200, 0.01);
+        series(s, 20, 30, 200, 0.05);
+
+        Spell spell = spells(s).get(0);
+        assertEquals(
+                s.get(s.size() - 1).bucket(),
+                spell.lastBucket(),
+                "the spell's event clock is the last hour actually folded, not when the replay ran");
+    }
+
+    /** And it advances only across buckets a resumed sweep actually reads, never past them. */
+    @Test
+    void aResumedSweepReportsOnlyAsFarAsItActuallyFolded() {
+        List<HourlyToolTally> s = series(20, 200, 0.01);
+        series(s, 20, 30, 200, 0.05);
+
+        Sweep first = ToolErrorTrend.sweep(s.subList(0, 40), CONFIG, Map.of(), Map.of());
+        assertEquals(s.get(39).bucket(), first.spells().get(0).lastBucket());
+
+        Sweep resumed = ToolErrorTrend.sweep(s, CONFIG, Map.of(), carriedFrom(first));
+        assertEquals(s.get(s.size() - 1).bucket(), resumed.spells().get(0).lastBucket());
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Onset
     // ---------------------------------------------------------------------------------------------
 

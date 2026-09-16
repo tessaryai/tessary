@@ -123,6 +123,7 @@ class BehaviorFindingOnsetTest {
                 BehaviorSubstrateRepository.UNATTRIBUTED,
                 onset.toString(),
                 EVIDENCE,
+                at.toString(),
                 at.minus(QUIET).toString(),
                 at.toString());
     }

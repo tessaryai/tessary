@@ -409,9 +409,14 @@ new baseline, and the finding vanishes — so the case closes itself as recovere
 recovered. This is the "broken window becomes its own baseline" failure that CUSUM fixes *within* a
 replay and that returns at the replay's edge.
 
-The grader detector accepts this at 28 days. **This one does not:** once a spell is open, the replay
-anchors to that spell's own onset rather than to `now − 28d`, so an unresolved regression cannot
-quietly age out. The horizon still bounds the query for every tool that is behaving.
+The grader detector accepts this at 28 days from wall-clock now. **This one anchors to the project's
+own traffic instead**: the replay reads back 28 days from the newest tool-call event the project has,
+not from whenever the sweep happens to run. A backfill whose traffic is all months old still gets a
+window that contains it, where `now − 28d` would read nothing but the empty months since and never
+produce a finding at all. The anchor is per project, not per tool, so as long as anything in the
+project is still generating traffic the window stays close to real time for every tool in it — a
+spell in a tool that has gone quiet does not lose its history just because a busier one keeps the
+anchor moving.
 
 ---
 

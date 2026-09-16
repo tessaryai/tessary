@@ -44,7 +44,8 @@ public final class ClassifierMethodCard {
             the accumulator left zero, not to a single call.
 
             **Compares against** that tool's own pinned in-control rate, a fitted number, not a stretch
-            of traffic. The spell runs from the onset to now.
+            of traffic. The spell runs from the onset to the last hour of the tool's traffic the detector
+            folded.
 
             Each call counts as an independent trial: parallel calls sharing one upstream failure each
             add their own evidence, so check the witness timestamps for simultaneity.
@@ -53,9 +54,8 @@ public final class ClassifierMethodCard {
             (fractions), `nRef`, `nCur`, `failuresCur`, `deltaPp`, `statistic` against `threshold`,
             `effectSize`, `direction`, `onsetAt`, and `patterns` (each failure signature with its reference and
             current counts) beside `patternsTruncated`, which is set when that list was cut and does not hold
-            every signature. `nCur` counts to the detector's watermark, the last hour bucket it folded, while
-            `member` enumerates to the moment the finding was written, so the two can differ by a few
-            calls. Two clocks, not a defect.
+            every signature. `nCur` counts to the detector's watermark, the last hour bucket it folded, and
+            `member` enumerates the same hour, so the two agree.
 
             **Evidence**
             - `member`: every call of the tool since onset, failing and healthy alike, at span grain. The
