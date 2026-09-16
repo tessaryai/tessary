@@ -294,13 +294,19 @@ public class BehaviorTriageEngine {
         return Optional.of("- claim: " + title + "\n");
     }
 
-    /** The window the payload names, when it carries one: half of "do both sides measure the same thing". */
+    /**
+     * The window the payload names, when it carries one: half of "do both sides measure the same thing".
+     *
+     * <p>The payload's {@code kind} is deliberately not printed. It distinguishes a window that closed
+     * once from a spell whose numbers are recomputed from an hourly aggregate on every read, which is a
+     * fact about the detector rather than about this finding, and each method card states it in its own
+     * words already. Bare, the value is jargon at the point it is read.
+     */
     private static Optional<String> windowLine(FindingRow finding) {
         JsonNode window = finding.payload().path("window");
         if (!window.isObject()) return Optional.empty();
         return Optional.of("- window: " + window.path("opened_at").asText("?") + " to "
-                + window.path("closed_at").asText("?")
-                + (window.hasNonNull("kind") ? " (" + window.path("kind").asText() + ")" : "") + '\n');
+                + window.path("closed_at").asText("?") + '\n');
     }
 
     /** Which call site raised this, in the three shapes a finding's call site can take. */

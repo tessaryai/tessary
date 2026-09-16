@@ -247,7 +247,10 @@ class BehaviorTriagePromptTest {
                         + " \"kind\": \"elapsed\"}}",
                 null);
         String md = findingMd(engine(), withWindow);
-        assertTrue(md.contains("- window: 2026-08-01T00:00:00Z to 2026-08-02T00:00:00Z (elapsed)\n"), md);
+        assertTrue(md.contains("- window: 2026-08-01T00:00:00Z to 2026-08-02T00:00:00Z\n"), md);
+        // The payload's kind says what sort of detector wrote the window, not what this finding covers,
+        // and each method card says it in its own words. Bare, it is jargon at the point it is read.
+        assertFalse(md.contains("elapsed"), md);
     }
 
     // ---- the user message ---------------------------------------------------------------------------
