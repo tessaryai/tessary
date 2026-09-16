@@ -117,12 +117,22 @@ services:
       TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-true}
       # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
       # with no .env and mints run-scoped random values for both (see its boot-recipe comment).
-      # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`;
-      # unset everywhere, these bind blank exactly as before.
-      TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-}
+      # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`.
+      #
+      # Unset everywhere, they land on the SAME two placeholders docker-compose.yml ships, rather
+      # than on blank. Blank was a broken stack that looked like a working one: the app came up, and
+      # the first account creation 500d with "TESSARY_AUTH_COOKIE_PASSWORD is not configured", which
+      # the UI renders as COMMON.INTERNAL. A dev stack nobody can sign into is not a dev stack.
+      #
+      # Safe here for the reason they are safe there: each is base64 of an exactly-32-byte string, so
+      # SessionCipher and SecretBox decode rather than failing at first sign-in, and
+      # PlaceholderSecretGuard still refuses to boot any install that has a SITE_DOMAIN while either
+      # is at its default. This stack has no SITE_DOMAIN, so it warns on every boot instead, which is
+      # the right trade for a localhost stack that must work out of the box.
+      TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtc2VhbCE=}
       # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — see docker-compose.yml's
       # identical removal note; the switch it fed had zero production callers.
-      TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-}
+      TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=}
       # Local dev: behavior-drift profiles re-fit after ≤10 min of idleness (prod: 6h) so a
       # finished test burst arms within minutes instead of hours. The worker tick drops to 1 min
       # to match — at the prod 15-min tick a 10-min idle deadline can overshoot by a full tick.
