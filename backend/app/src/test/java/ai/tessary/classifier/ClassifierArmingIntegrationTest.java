@@ -2,6 +2,8 @@
 package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.finding.CauseKey;
@@ -329,7 +331,7 @@ class ClassifierArmingIntegrationTest {
                 0, evidenceCount(awsA.id(), FindingEvidenceRow.Role.MEMBER), "and a witness set claims no enumeration");
 
         List<String> again = arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now());
-        assertEquals(filed, again, "a re-sweep refreshes the same three findings");
+        assertTrue(again.isEmpty(), "all three are high confidence and so already ruled; a re-sweep files nothing");
         assertEquals(3, liveFindings(pid), "and opens none beside them");
         assertEquals(2, evidenceCount(awsA.id(), FindingEvidenceRow.Role.WITNESS), "without re-adding witnesses");
     }
@@ -382,14 +384,15 @@ class ClassifierArmingIntegrationTest {
     @Test
     void anOlderWindowArrivingLateNeverMovesTheFindingBackwards() {
         String pid = TenantFixture.bootstrap(tenants, "arming-order").project().id();
-        String classifierId = armedSecretLeak(pid);
+        // Low band, counted: a high-confidence finding is ruled at once, and a ruled row is not refreshed.
+        String classifierId = armedSecretLeakAnyBand(pid);
         Instant recent = hoursAgo(1);
         Instant older = daysAgo(3);
 
         String findingId = arming.evaluate(
                         secretLeakRow(pid, classifierId),
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", recent)),
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)),
                         Instant.now())
                 .get(0);
         FindingRow before = findings.findById(pid, findingId).orElseThrow();
@@ -397,7 +400,7 @@ class ClassifierArmingIntegrationTest {
         List<String> late = arming.evaluate(
                 secretLeakRow(pid, classifierId),
                 pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", older)),
+                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", older)),
                 Instant.now());
 
         assertEquals(List.of(findingId), late, "an older leak of the same cause refreshes the same finding");
@@ -411,7 +414,8 @@ class ClassifierArmingIntegrationTest {
     @Test
     void aNewerWindowStaysInTheSpellUntilTwoWindowsWentQuiet() {
         String pid = TenantFixture.bootstrap(tenants, "arming-spell").project().id();
-        String classifierId = armedSecretLeak(pid);
+        // Low band, counted, for the same reason as the late-window test above.
+        String classifierId = armedSecretLeakAnyBand(pid);
         Instant twoDaysAgo = daysAgo(2);
         Instant tenDaysAgo = daysAgo(10);
         Instant recent = hoursAgo(1);
@@ -419,13 +423,13 @@ class ClassifierArmingIntegrationTest {
         String continuing = arming.evaluate(
                         secretLeakRow(pid, classifierId),
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", twoDaysAgo)),
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", twoDaysAgo)),
                         Instant.now())
                 .get(0);
         arming.evaluate(
                 secretLeakRow(pid, classifierId),
                 pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", recent)),
+                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)),
                 Instant.now());
         assertEquals(
                 windowStart(twoDaysAgo).toString(),
@@ -435,18 +439,81 @@ class ClassifierArmingIntegrationTest {
         String restarted = arming.evaluate(
                         secretLeakRow(pid, classifierId),
                         pid,
-                        List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "high", tenDaysAgo)),
+                        List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", tenDaysAgo)),
                         Instant.now())
                 .get(0);
         arming.evaluate(
                 secretLeakRow(pid, classifierId),
                 pid,
-                List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "high", recent)),
+                List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", recent)),
                 Instant.now());
         assertEquals(
                 windowStart(recent).toString(),
                 findings.findById(pid, restarted).orElseThrow().onsetAt(),
                 "a leak after days of quiet is a new spell");
+    }
+
+    @Test
+    void aHighConfidenceLeakIsRuledPositiveAtArmingWithACase_aLowOneStaysUnruled() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-rule").project().id();
+        String classifierId = armedSecretLeakAnyBand(pid);
+        Instant at = hoursAgo(1);
+
+        arming.evaluate(
+                secretLeakRow(pid, classifierId),
+                pid,
+                List.of(
+                        leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", at),
+                        leak(pid, classifierId, "cs-b", "redacted-secret", "low", at)),
+                Instant.now());
+
+        FindingRow high = facetFinding(pid, classifierId, "cs-a", "aws-access-key-id");
+        assertEquals(FindingRow.Status.OPEN, high.status(), "a positive ruling keeps the finding open");
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, high.triageVerdict(), "high confidence skips triage");
+        assertEquals(FindingRow.TriageAction.OPENED_CASE, high.triageAction());
+        assertEquals(ClassifierArming.HIGH_CONFIDENCE_LEAK_SUMMARY, high.triageSummary());
+        assertNotNull(high.triagedAt());
+        assertNull(high.humanVerdictAt(), "no person ruled it");
+        assertNotNull(high.caseId(), "and its case opened in the same pass");
+
+        FindingRow low = facetFinding(pid, classifierId, "cs-b", "redacted-secret");
+        assertEquals(FindingRow.Status.OPEN, low.status());
+        assertNull(low.triageVerdict(), "low confidence is left for triage to rule on");
+        assertNull(low.caseId(), "and opens no case on its own");
+    }
+
+    @Test
+    void aRuledLeakWindowReSweptFilesNothing_aNewerWindowFilesAFreshRuledFindingOnTheSameCase() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-ruled-resweep")
+                .project()
+                .id();
+        String classifierId = armedSecretLeak(pid);
+        Instant older = daysAgo(3);
+        List<FindingEvidenceRepository.Ref> first =
+                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", older));
+
+        String firstId = arming.evaluate(secretLeakRow(pid, classifierId), pid, first, Instant.now())
+                .get(0);
+        FindingRow ruled = findings.findById(pid, firstId).orElseThrow();
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict());
+
+        assertTrue(
+                arming.evaluate(secretLeakRow(pid, classifierId), pid, first, Instant.now())
+                        .isEmpty(),
+                "re-sweeping the window the ruling covers files nothing");
+        assertEquals(1, findingsFor(pid), "and forks no duplicate of the ruled finding");
+
+        String secondId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", hoursAgo(1))),
+                        Instant.now())
+                .get(0);
+        assertTrue(!secondId.equals(firstId), "a newer window files a fresh finding beside the ruled one");
+        assertEquals(2, findingsFor(pid));
+        FindingRow fresh = findings.findById(pid, secondId).orElseThrow();
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, fresh.triageVerdict(), "ruled at arming in turn");
+        assertEquals(ruled.caseId(), fresh.caseId(), "and joins the cause's unlocked case");
     }
 
     @Test
@@ -504,6 +571,15 @@ class ClassifierArmingIntegrationTest {
                 "secret_leak",
                 "{\"arming\":{\"basis\":\"event_count\",\"threshold\":1,\"window_seconds\":86400,"
                         + "\"confidence\":\"high\"}}");
+    }
+
+    /** Secret Leak armed to count both bands, so a low-confidence facet files a finding of its own. */
+    private String armedSecretLeakAnyBand(String pid) {
+        return classifier(
+                pid,
+                "secret_leak",
+                "{\"arming\":{\"basis\":\"event_count\",\"threshold\":1,\"window_seconds\":86400,"
+                        + "\"confidence\":\"any\"}}");
     }
 
     private ClassifierRow row(String pid, String classifierId, String key) {
@@ -618,6 +694,13 @@ class ClassifierArmingIntegrationTest {
         return jdbc.sql("SELECT COUNT(*) FROM finding_evidence WHERE finding_id = :id AND role = :role")
                 .param("id", findingId)
                 .param("role", role)
+                .query(Long.class)
+                .single();
+    }
+
+    private long findingsFor(String pid) {
+        return jdbc.sql("SELECT COUNT(*) FROM finding WHERE project_id = :pid")
+                .param("pid", pid)
                 .query(Long.class)
                 .single();
     }

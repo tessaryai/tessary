@@ -99,7 +99,8 @@ public record CaseRow(
         public static final String SOP_CONFORMANCE = "sop_conformance";
 
         /**
-         * A high-confidence secret-leak finding, opened directly with no triage gate: a credential
+         * A secret-leak finding ruled positive, at arming and without triage when it is high
+         * confidence: a credential
          * sitting in a stored output is a fact to rotate, not a claim to audit. See {@link
          * ai.tessary.classifier.secretleak}.
          */

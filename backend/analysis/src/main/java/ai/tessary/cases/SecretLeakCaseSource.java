@@ -15,16 +15,14 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a high-confidence secret leak into a case, with no triage gate. A leaked credential is a fact
- * to rotate, not a claim for Layer 2 to audit, so this is the one case source {@link CaseOpener} calls
- * with no ruling behind the finding at all — see {@code CaseOpener#qualifies}.
+ * Shapes a secret leak ruled positive into a case. A leaked credential is a fact to rotate, not a claim
+ * for Layer 2 to audit, so a high-confidence one skips triage: {@code ClassifierArming} writes the positive
+ * ruling itself and calls {@link CaseOpener} in the same transaction.
  *
- * <p><b>Confidence, not a ruling, is the bar.</b> {@code ClassifierArming} already files a finding for
- * every facet (one rule at one call site) that crosses its window threshold, low-confidence matches
- * included, since the finding is also how the Classifiers page shows discovery-mode hits. A case opens
- * only for the subset recorded {@code high} on the finding itself, the same word the finding page's
- * subtitle shows — {@code ClassifierArming} calls {@code CaseOpener} once a facet's finding crosses into
- * that band.
+ * <p><b>Confidence decides who rules.</b> {@code ClassifierArming} files a finding for every facet (one
+ * rule at one call site) that crosses its window threshold. One recorded {@code high} on the finding, the
+ * same word the finding page's subtitle shows, is ruled positive at arming; a low-confidence one stays
+ * unruled and reaches a case only through triage or a person.
  *
  * <p><b>A leak never recovers on its own.</b> A credential that stopped appearing in output is still
  * exposed until someone rotates it, so nothing here ever closes the case on silence — it stays open
@@ -59,7 +57,7 @@ public class SecretLeakCaseSource implements CaseSource {
     public CaseDetection shape(FindingRow finding) {
         SecretLeakDetail read = detail.detail(finding);
         if (read == null) {
-            // CaseOpener only calls this once the finding is already known high-confidence; an unreadable
+            // CaseOpener only calls this once the finding is already ruled positive; an unreadable
             // detail read here is the finding's own detection table, not this decision, failing.
             throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
         }

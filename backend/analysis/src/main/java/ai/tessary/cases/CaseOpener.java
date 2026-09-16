@@ -23,8 +23,8 @@ import org.springframework.stereotype.Service;
  *
  * <p>Callers: {@code BehaviorTriageSource.recordVerdict} (a machine's positive) and {@code
  * BehaviorTriageSource.resolve} (a person's <em>Real deviation</em>), both with the finding's ruling
- * already committed in the same transaction; {@code ClassifierArming.evaluateFaceted} (a secret-leak
- * facet crossing high confidence, which carries no ruling at all — see {@link #qualifies}).
+ * already committed in the same transaction; {@code ClassifierArming.evaluateFaceted} (a high-confidence
+ * secret-leak facet, which it rules positive itself, without triage, just before calling here).
  */
 @Service
 public class CaseOpener {
@@ -65,14 +65,11 @@ public class CaseOpener {
     /**
      * Whether this finding, as it stands right now, is a fact a case exists for.
      *
-     * <p>Two ways in, both already the finding's own settled state rather than anything this method
-     * re-derives: a ruling (machine or human) that landed {@link FindingRow.TriageVerdict#POSITIVE}, or
-     * — the one detector with no triage gate at all — a facet {@link FindingRow#highConfidence()
-     * ClassifierArming} has counted a high-confidence detection against. Neither needs the caller to say
-     * which; both are read straight off the row.
+     * <p>One way in, read straight off the row: a ruling that landed {@link FindingRow.TriageVerdict#POSITIVE},
+     * whether triage, a person, or {@code ClassifierArming} for a high-confidence leak wrote it.
      */
     private static boolean qualifies(FindingRow finding) {
-        return FindingRow.TriageVerdict.POSITIVE.equals(finding.triageVerdict()) || finding.highConfidence();
+        return FindingRow.TriageVerdict.POSITIVE.equals(finding.triageVerdict());
     }
 
     private @Nullable CaseSource sourceFor(String classifierKey) {

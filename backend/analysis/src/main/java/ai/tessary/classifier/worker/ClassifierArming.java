@@ -90,13 +90,16 @@ public class ClassifierArming {
      */
     static final int MAX_WITNESSES = 50;
 
+    /** The ruling a high-confidence leak is written with at arming, in place of a triage run's summary. */
+    public static final String HIGH_CONFIDENCE_LEAK_SUMMARY =
+            "A high-confidence credential pattern matched in the agent's output, so this leak was ruled real without triage.";
+
     private final ClassifierDetectionWriteRepository detections;
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
     private final ObjectMapper mapper;
-    /** Opens or joins the case for a facet finding that just crossed high confidence — see
-     *  {@link #evaluateFaceted}. Secret leak is the one classifier this fires for today: it carries no
-     *  triage gate, so arming is the only place its case can open. */
+    /** Opens or joins the case for a facet finding this class just ruled positive at high confidence; see
+     *  {@link #evaluateFaceted}. */
     private final CaseOpener caseOpener;
 
     public ClassifierArming(
@@ -216,7 +219,7 @@ public class ClassifierArming {
                     w.lastSeenAt().toString(),
                     windowStart.minusSeconds(win * QUIET_WINDOWS).toString(),
                     at);
-            if (recorded == null) continue; // a closed finding already covers this window or a newer one
+            if (recorded == null) continue; // a ruled finding already covers this window or a newer one
 
             // Same transaction as the finding write, so a finding never exists without the evidence that
             // justified it. Scoped to this window's own spans: a later refresh adds new members, and the
@@ -257,14 +260,14 @@ public class ClassifierArming {
      * the finding backwards. Evidence is {@link FindingEvidenceRow.Role#WITNESS}, capped at
      * {@link #MAX_WITNESSES}: instances to open, not an enumeration of the population.
      *
-     * <p><b>No ruling is written here, high confidence included.</b> This method re-derives the same
-     * windows on every sweep and relies on {@code recordArmedFacet}'s conflict target to refresh the
-     * one row a still-firing spell owns; a ruling would remove that row from {@code ux_finding_live}
-     * (decision 1) and fork a fresh finding on the very next idempotent re-scan of the same window.
-     * {@link CaseOpener} is called after every window instead, and reads {@code highConfidence()} off
-     * the payload directly to decide whether a case is due — a cheap no-op re-application on a window
-     * that was already high (or is still low), and the one door a leak's case ever opens through, since
-     * this classifier carries no triage gate at all.
+     * <p><b>A high-confidence facet is ruled positive here, without triage.</b> A credential in a format
+     * its provider stamps into the key is a leak whoever looks at it, so the finding is written {@code
+     * positive} with {@link #HIGH_CONFIDENCE_LEAK_SUMMARY} and its case opens (or joins) in the same
+     * transaction. A low-confidence facet stays unruled and goes to triage like any other finding. The
+     * ruling takes the row out of {@code ux_finding_live} (decision 1), so the next re-sweep of the same
+     * window finds no live row to refresh; {@link FindingRepository#recordArmedFacet} returns null for it
+     * rather than forking a duplicate, and only a newer window files a fresh finding, which is ruled here
+     * in turn and joins the same unlocked case.
      */
     private List<String> evaluateFaceted(
             ClassifierRow signal,
@@ -325,15 +328,26 @@ public class ClassifierArming {
                             w.anyHigh() ? FindingRow.Confidence.HIGH : FindingRow.Confidence.LOW),
                     windowStart.minusSeconds(win * QUIET_WINDOWS).toString(),
                     at);
-            if (recorded == null) continue; // a closed finding already covers this window or a newer one
+            if (recorded == null) continue; // a ruled finding already covers this window or a newer one
             List<FindingEvidenceRepository.Ref> refs = witnesses.getOrDefault(
                     new FacetScope(w.callSiteId(), w.facet(), w.windowStartEpochSecond()), List.of());
             int stored = evidence.recordUpTo(
                     projectId, recorded.findingId(), FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES, at);
-            // A no-op unless this finding is high confidence right now (CaseOpener reads the row fresh),
-            // so calling it on every window — high or low, new or a re-application — costs nothing on the
-            // common case and is the only place a leak's case can ever open.
-            caseOpener.ensureCaseFor(projectId, recorded.findingId(), null);
+            // Re-read rather than taken from this window: confidence is sticky across the row's windows, so
+            // an older high window can make a low one's refresh high.
+            boolean high = findings.findById(projectId, recorded.findingId())
+                    .map(FindingRow::highConfidence)
+                    .orElse(false);
+            if (high) {
+                findings.recordTriage(
+                        projectId,
+                        recorded.findingId(),
+                        FindingRow.TriageVerdict.POSITIVE,
+                        HIGH_CONFIDENCE_LEAK_SUMMARY,
+                        null,
+                        at);
+                caseOpener.ensureCaseFor(projectId, recorded.findingId(), null);
+            }
             if (recorded.created()) opened++;
             filed.add(recorded.findingId());
 

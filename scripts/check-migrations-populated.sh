@@ -356,7 +356,9 @@ expect "classifier row"                       1 "SELECT count(*) FROM classifier
 expect "eval_case.detector='classifier'"      3 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
 expect "eval_case both finding arms"          3 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
                                                       + (SELECT count(*) FROM eval_case WHERE finding_id IS NULL AND state='resolved')"
-expect "finding rows"                         6 "SELECT count(*) FROM finding"
+expect "finding rows"                         8 "SELECT count(*) FROM finding"
+expect "secret_leak findings open, unruled, one per band (pre-0013)" "high,low" "SELECT string_agg(payload->>'confidence', ',' ORDER BY payload->>'confidence')
+                                                      FROM finding WHERE classifier_key='secret_leak' AND status='open' AND triage_verdict IS NULL"
 expect "finding ruled unclear (pre-0010)"     1 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
 expect "finding legacy statuses (pre-0011)"   3 "SELECT count(*) FROM finding WHERE status IN ('blocked','allowlisted','graduated')"
 expect "finding open+positive backing a live case (pre-0011)" 1 "SELECT count(*) FROM finding
@@ -482,6 +484,21 @@ if [ "$(q "SELECT EXISTS (SELECT 1 FROM information_schema.columns
                                 FROM finding WHERE id='fnd_fix_open_cased'"
 else
   skip "0011 finding open/closed" "finding.case_id is absent, 0011 has not landed"
+fi
+
+echo
+echo "0013: high-confidence secret leaks are ruled positive"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0013-rule-high-confidence-leaks')")" = "t" ]; then
+  expect "high leak -> open/positive/opened_case" "open|positive|opened_case" "SELECT status || '|' || triage_verdict || '|' || triage_action
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "high leak's fixed summary"            t "SELECT triage_summary = 'A high-confidence credential pattern matched in the agent''s output, so this leak was ruled real without triage.'
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "high leak's triaged_at parses as a timestamp" t "SELECT CAST(triaged_at AS timestamptz) IS NOT NULL
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "low leak stays open and unruled"      "open|" "SELECT status || '|' || COALESCE(triage_verdict, '')
+                                FROM finding WHERE id='fnd_fix_leak_low'"
+else
+  skip "0013 rule high-confidence leaks" "0013 is not in databasechangelog, it has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

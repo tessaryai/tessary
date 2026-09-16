@@ -64,3 +64,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0012-detection-subject-started-at.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0013-rule-high-confidence-leaks.sql
+      relativeToChangelogFile: false

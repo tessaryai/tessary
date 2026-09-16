@@ -178,6 +178,21 @@ VALUES ('fnd_fix_open_cased', 'prj_fix', 'fixture_classifier', 'fixture_cause_op
         'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
         'positive', 'opened_case', 'a triage run found the claim sound', '2026-08-02T00:00:00Z');
 
+-- 0013's two secret-leak shapes: an open, unruled finding recorded at high confidence (ruled positive by
+-- the migration) and one at low confidence (left unruled for triage). No cause_kind in the payload, so
+-- 0009's confidence backfill, which only rewrites armed_window rows, leaves both as written here.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, payload)
+VALUES ('fnd_fix_leak_high', 'prj_fix', 'secret_leak', 'fixture_cause_leak_high', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '{"confidence": "high"}');
+
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, payload)
+VALUES ('fnd_fix_leak_low', 'prj_fix', 'secret_leak', 'fixture_cause_leak_low', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '{"confidence": "low"}');
+
 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, call_site_id,
                        metric, state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at, finding_id)
 VALUES ('ec_fix_finding', 'prj_fix', 1, 'classifier', 'classifier', 'cls_fix', 'Fixture Classifier', 'cs_fix',
