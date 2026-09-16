@@ -93,15 +93,16 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * <h2>Every seeded row has to be one the LIVE pipeline would have written</h2>
  *
  * <p>Not a style preference — a correctness constraint, and the one the first cut of this class got
- * wrong. {@code CaseWorker} sweeps this project like any other within minutes of the seed, and
- * {@code CaseLedger#apply} reconciles the case table against what the detectors currently believe:
- * a seeded case whose {@link ai.tessary.cases.CaseKey} does not match the key
- * {@code MetricDriftSource}/{@code ToolErrorCaseSource} cut from the SAME finding is not recognised,
- * so it is resolved as {@code RECOVERED} and a duplicate opens beside it. The key is
- * {@code (detector, subject_kind, subject_id, metric)} and {@code subject_id} is the finding's
- * {@link FindingRow#nativeCauseKey()} — never the {@code metric_baseline} id, which is only the
- * uniqueness scope prefixed onto {@code cause_key}. {@link #seedCase} derives both halves from the
- * finding it is paired with for exactly this reason.
+ * wrong, back when a periodic {@code CaseWorker} reconciled the case table against every detector's
+ * live set and would resolve a case whose key it didn't recognise as {@code RECOVERED}. There is no
+ * such sweep any more (decision 1: a case opens once, from the ruling that qualified it, never from a
+ * later pass), but the key still has to agree with what {@code MetricDriftSource}/{@code
+ * ToolErrorCaseSource} would cut from the SAME finding, because a real firing on the same cause later
+ * joins this seeded case through exactly that key — a mismatch there would open a silent duplicate
+ * instead. The key is {@code (detector, subject_kind, subject_id, metric)} and {@code subject_id} is
+ * the finding's {@link FindingRow#nativeCauseKey()} — never the {@code metric_baseline} id, which is
+ * only the uniqueness scope prefixed onto {@code cause_key}. {@link #seedCase} derives both halves
+ * from the finding it is paired with for exactly this reason.
  */
 @Component
 public class SampleProjectSeedListener {
@@ -414,8 +415,9 @@ public class SampleProjectSeedListener {
     /**
      * The severity the live case source would compute from this finding's evidence, not the finding's
      * own. The two are different scales on purpose — a finding's severity grades the claim, a case's
-     * only orders the triage list — and seeding the finding's value here would make every seeded case
-     * jump in the ranking the first time {@code CaseWorker} refreshed it.
+     * only orders the triage list — and seeding the finding's value here would make a seeded case jump
+     * in the ranking the moment a real finding on the same cause later joins it and a case's severity
+     * (the running peak across its findings, {@code CaseLedger#openOrJoin}) recomputes.
      */
     private static double caseSeverity(SampleShowcase.DriftStat stat, boolean isTool) {
         if (isTool) {

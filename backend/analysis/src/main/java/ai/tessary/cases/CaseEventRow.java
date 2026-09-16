@@ -25,7 +25,14 @@ public record CaseEventRow(
         private Kind() {}
 
         public static final String OPENED = "opened";
+
+        /** History only — no code writes this any more. A closed case is final; the next positive on
+         *  its cause opens a fresh case number rather than reopening this one. Kept so an old case's
+         *  trail, written before that model existed, still reads. */
         public static final String REOPENED = "reopened";
+
+        /** A second (or later) finding on the same cause joined this still-open case. */
+        public static final String RECURRED = "recurred";
 
         /** The detection deepened while the case was already live (a worse value, a wider spell). */
         public static final String ESCALATED = "escalated";
@@ -33,7 +40,8 @@ public record CaseEventRow(
         public static final String RCA_REQUESTED = "rca_requested";
         public static final String RCA_COMPLETED = "rca_completed";
 
-        /** The detection stopped firing — the reconciler's silent close. */
+        /** History only — no code writes this any more. A case now closes only when a person resolves
+         *  or absorbs it; nothing auto-recovers it on silence. Kept so an old case's trail still reads. */
         public static final String RECOVERED = "recovered";
 
         public static final String RESOLVED = "resolved";

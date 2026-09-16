@@ -2,52 +2,38 @@
 package ai.tessary.cases;
 
 import ai.tessary.classifier.finding.FindingRepository;
-import java.time.Duration;
+import ai.tessary.classifier.finding.FindingRow;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The case table's write side: given what a detector is firing right now, make the ledger agree.
- * Separate from {@link CaseReconciler} because this half is transactional and that half is not —
- * detection can be seconds of replay, and a Spring proxy cannot apply {@code @Transactional} to a
- * self-invoked method anyway.
+ * The case table's write side: given one finding whose ruling just qualified it for a case, make the
+ * ledger agree. Called from {@link CaseOpener}, itself called from inside the same transaction as the
+ * ruling write — a case that exists with no "opened" or "recurred" line in its trail is a case a reader
+ * cannot account for, so every state change and its activity-trail entry commit together.
  *
- * <p>Every state change and its activity-trail entry commit together. A case that exists with no
- * "opened" line in its trail is a case a reader cannot account for.
+ * <p><b>Event-driven, not swept.</b> There is no longer a live set to reconcile: a ruling freezes the
+ * finding it landed on (decision 1), so nothing here ever needs to ask "is this detection still firing"
+ * — the finding either joined a case when it was ruled, or it did not, and it stays exactly as ruled
+ * from then on. A case closes only when a person resolves or absorbs it.
  */
 @Service
 public class CaseLedger {
 
-    private static final Logger log = LoggerFactory.getLogger(CaseLedger.class);
-
     /**
-     * A detection re-firing inside this window continues the case it already had, rather than opening
-     * a second one. The point is continuity for the human: a flapping grader that opened, recovered
-     * and broke again on the same afternoon is one story, and its trail should read that way.
-     */
-    private static final Duration REOPEN_WINDOW = Duration.ofDays(7);
-
-    /**
-     * How much worse a live case has to get before the trail records it. Without a floor, every pass
-     * over a slowly-bleeding grader would append a line, and the trail — whose job is to still read
+     * How much worse a live case has to get before the trail records it. Without a floor, every finding
+     * that joins a slowly-bleeding case would append a line, and the trail — whose job is to still read
      * clearly months later — would drown in its own heartbeat.
      */
     private static final double ESCALATION_STEP = 0.1;
 
     private final CaseRepository cases;
     private final CaseEventRepository events;
-    /** Closes a case's open findings when it resolves — see {@link #closeFindings}. Linking a case to
-     *  the finding that opened or refreshed it lives in {@code CaseRepository} itself now, so every
-     *  caller of {@code open}/{@code refresh}/{@code reopen} gets it, this class included. */
+    /** Links the joining finding to the case ({@link FindingRepository#attachToCase}) and closes a
+     *  case's findings when it resolves or is absorbed ({@link #closeFindings}). */
     private final FindingRepository findings;
 
     public CaseLedger(CaseRepository cases, CaseEventRepository events, FindingRepository findings) {
@@ -57,38 +43,49 @@ public class CaseLedger {
     }
 
     /**
-     * Reconcile one detector's live set. {@code firing} is everything the detector currently believes,
-     * not a delta — cases whose detection has dropped out of it are closed as recovered.
+     * Open a case for {@code detection}, or join it onto the live, unlocked case already open for its
+     * key. Either way the case comes back with {@code detection}'s finding linked
+     * ({@code finding.case_id}).
+     *
+     * <ul>
+     *   <li><b>No live case on the key</b>: a new case opens, with an {@code opened} event.
+     *   <li><b>A live, unlocked case exists</b>: the finding is linked to it, a {@code recurred} event is
+     *       appended (skipped on a re-apply that finds the finding already linked — see
+     *       {@link #join}), the headline (title, basis, the value triple) refreshes to this finding's
+     *       own account, severity only ever rises to the new peak, and an {@code escalated} event marks
+     *       a material one. The onset never moves: the case's story is still the same spell.
+     *   <li><b>A live case is locked</b> (1c: RCA has been pressed on it): {@link CaseRepository#findLive}
+     *       does not see it, so this opens a fresh case instead of joining one an agent may already be
+     *       mid-analysis on.
+     * </ul>
      */
     @Transactional
-    public void apply(String projectId, String detector, List<CaseDetection> firing, Instant now) {
-        // One reconcile per project at a time. Case numbers are allocated as MAX(seq)+1, which two
-        // backends sweeping the same project would read identically before either commits — the loser's
-        // insert then collides on ux_eval_case_seq and its detection is dropped. Every other worker in
-        // this codebase avoids that by claiming its work FOR UPDATE SKIP LOCKED; CaseWorker sweeps every
-        // project instead, so the exclusion has to happen here. Released when the transaction ends.
-        cases.lockProject(projectId);
-
-        Map<CaseKey, CaseDetection> byKey = new LinkedHashMap<>();
-        for (CaseDetection d : firing) byKey.put(d.key(), d);
-
-        for (CaseDetection detection : byKey.values()) {
-            openOrRefresh(projectId, detection, now);
+    public CaseRow openOrJoin(String projectId, CaseDetection detection, @Nullable String actor, Instant now) {
+        Optional<CaseRow> live = cases.findLive(projectId, detection.key());
+        if (live.isPresent()) {
+            return join(projectId, live.get(), detection, actor, now);
         }
 
-        for (CaseRow live : cases.listLiveByDetector(projectId, detector)) {
-            if (byKey.containsKey(keyOf(live))) continue;
-            cases.resolve(projectId, live.id(), CaseRow.Resolution.RECOVERED, null, null, now);
-            closeFindings(projectId, live.id(), now);
+        Optional<CaseRow> opened = cases.open(projectId, detection, now);
+        if (opened.isPresent()) {
             events.append(
                     projectId,
-                    live.id(),
-                    CaseEventRow.Kind.RECOVERED,
-                    null,
-                    "Recovered on its own — the detection stopped firing.",
+                    opened.get().id(),
+                    CaseEventRow.Kind.OPENED,
+                    actor,
+                    "Opened — " + detection.basis(),
                     null,
                     now);
+            return opened.get();
         }
+        // Lost the race to a concurrent opener on the same key; the winner's case is the case, so this
+        // is a join rather than a second open.
+        CaseRow winner = cases.findLive(projectId, detection.key())
+                .orElseThrow(() -> new IllegalStateException("case open declined with no live case on key detector="
+                        + detection.key().detector() + " subject="
+                        + detection.key().subjectId() + " metric="
+                        + detection.key().metric()));
+        return join(projectId, winner, detection, actor, now);
     }
 
     /**
@@ -100,7 +97,7 @@ public class CaseLedger {
      * trail entry commit together, and a {@code @Transactional} method invoked through {@code this} gets
      * neither a proxy nor a transaction. The re-pin itself is the finding's, and has already committed by
      * the time this is called — deliberately in that order, since a case closed against a bar that never
-     * moved would reopen on the next pass.
+     * moved would look wrong the moment it reopened.
      */
     @Transactional
     public void absorb(String projectId, String caseId, @Nullable String actor, Instant now) {
@@ -116,103 +113,70 @@ public class CaseLedger {
         findings.closeByCase(projectId, caseId, now.toString());
     }
 
-    private void openOrRefresh(String projectId, CaseDetection detection, Instant now) {
-        Optional<CaseRow> live = cases.findLive(projectId, detection.key());
-        if (live.isPresent()) {
-            refresh(projectId, live.get(), detection, now);
-            return;
+    private CaseRow join(String projectId, CaseRow row, CaseDetection detection, @Nullable String actor, Instant now) {
+        boolean linked = findings.attachToCase(projectId, detection.findingId(), row.id(), now.toString());
+        if (!linked && !alreadyLinkedHere(projectId, detection.findingId(), row.id())) {
+            // The finding is claimed by a different case already. Never true for a ruling this is called
+            // from — a finding that just qualified for a case has case_id NULL by construction — but a
+            // defensive no-op rather than an overwrite if it ever happens: this case is not the finding's
+            // case, so its headline must not be rewritten from a detection that is not really about it.
+            return row;
         }
 
-        Optional<CaseRow> recent = cases.findResolvedSince(projectId, detection.key(), now.minus(REOPEN_WINDOW));
-        if (recent.isPresent()) {
-            CaseRow row = recent.get();
-            // Only a NEW spell reopens. A detection whose onset is the one the human already closed
-            // is the same degradation still running, not a re-fire — reopening it would undo their
-            // decision on the next tick and make "resolve" look broken. Closing a still-firing
-            // detection is a legitimate act ("known, we shipped the fix, the window hasn't caught up");
-            // if it is genuinely still wrong, the next distinct spell opens a fresh case.
-            if (!isNewSpell(detection, row)) return;
-            cases.reopen(projectId, row.id(), detection, now);
+        double severity = Math.max(row.severity(), detection.severity());
+        boolean escalated = detection.severity() - row.severity() >= ESCALATION_STEP;
+        cases.refresh(projectId, row.id(), withSeverity(detection, severity), now);
+
+        // recurred fires only on an actual join, never on a re-apply of a finding already linked here —
+        // ClassifierArming re-evaluates a still-firing facet on every sweep, and a trail line per sweep
+        // would drown the one that mattered.
+        if (linked) {
             events.append(
                     projectId,
                     row.id(),
-                    CaseEventRow.Kind.REOPENED,
-                    null,
+                    CaseEventRow.Kind.RECURRED,
+                    actor,
                     "Fired again — " + detection.basis(),
                     null,
                     now);
-            return;
         }
-
-        Optional<CaseRow> opened = cases.open(projectId, detection, now);
-        if (opened.isPresent()) {
-            events.append(
-                    projectId,
-                    opened.get().id(),
-                    CaseEventRow.Kind.OPENED,
-                    null,
-                    "Opened — " + detection.basis(),
-                    null,
-                    now);
-            return;
-        }
-        // Lost the race to a concurrent pass; the winner's case is the case, so this is an update.
-        Optional<CaseRow> winner = cases.findLive(projectId, detection.key());
-        if (winner.isPresent()) {
-            refresh(projectId, winner.get(), detection, now);
-            return;
-        }
-        // open() declined and yet nothing live exists on the key. With an explicit conflict target that
-        // should be unreachable; if it happens, a detection was dropped and nobody would otherwise know.
-        log.warn(
-                "case open declined with no live case on key detector={} subject={} metric={}",
-                detection.key().detector(),
-                detection.key().subjectId(),
-                detection.key().metric());
-    }
-
-    private void refresh(String projectId, CaseRow row, CaseDetection detection, Instant now) {
-        cases.refresh(projectId, row.id(), detection, now);
-        if (detection.severity() - row.severity() >= ESCALATION_STEP) {
+        if (escalated) {
             events.append(
                     projectId,
                     row.id(),
                     CaseEventRow.Kind.ESCALATED,
-                    null,
+                    actor,
                     "Got worse — " + detection.basis(),
                     null,
                     now);
         }
+        return cases.findById(projectId, row.id()).orElse(row);
     }
 
-    /**
-     * A detection is a new spell when its onset moved past the one the resolved case recorded.
-     *
-     * <p><b>That comparison is a recovery test, not a clock reading.</b> Every detector's onset is frozen
-     * for as long as its detection keeps firing and advances only once the detection has dropped out and
-     * come back — see {@code FindingRepository.recordRecomputedCause}. So "the onset moved" means
-     * "we watched this recover and break again", which is the question actually being asked here, and the
-     * reason a detection that has simply never stopped cannot reopen a case a human closed.
-     *
-     * <p>Both uncertain answers are "no". A detector that could not bracket the spell hands us a null
-     * onset, and a null onset can never have moved — treating it as new would advance it on every pass
-     * and reopen the case within one tick of a human closing it, which is the whole failure this guard
-     * exists to prevent. An unreadable stored onset is the same argument: a case that reopens forever
-     * is worse than one that stays shut, and the next genuinely distinct spell opens a fresh case
-     * either way once the reopen window lapses.
-     */
-    private static boolean isNewSpell(CaseDetection detection, CaseRow resolved) {
-        Instant onset = detection.onsetAt();
-        if (onset == null) return false;
-        try {
-            return onset.isAfter(Instant.parse(resolved.onsetAt()));
-        } catch (DateTimeParseException e) {
-            log.warn("unreadable stored onset on case={} — not reopening", resolved.reference());
-            return false;
-        }
+    private boolean alreadyLinkedHere(String projectId, String findingId, String caseId) {
+        return findings.findById(projectId, findingId)
+                .map(FindingRow::caseId)
+                .map(caseId::equals)
+                .orElse(false);
     }
 
-    private static CaseKey keyOf(CaseRow row) {
-        return new CaseKey(row.detector(), row.subjectKind(), row.subjectId(), row.metric());
+    /** {@code detection} with its severity replaced by the case's running peak — everything else (the
+     *  title, basis and value triple) still comes from the newest finding, unchanged. Always rebuilt
+     *  rather than short-circuited on equality: {@code severity} is the {@code Math.max} of two doubles,
+     *  and comparing floating-point values for equality is the kind of "optimization" that quietly
+     *  breaks on a value that is merely very close. */
+    private static CaseDetection withSeverity(CaseDetection detection, double severity) {
+        return new CaseDetection(
+                detection.key(),
+                detection.subjectLabel(),
+                detection.callSiteId(),
+                detection.findingId(),
+                detection.title(),
+                detection.basis(),
+                severity,
+                detection.onsetAt(),
+                detection.currentValue(),
+                detection.baselineValue(),
+                detection.delta());
     }
 }

@@ -30,14 +30,17 @@ public class CaseRepository {
     /**
      * {@code eval_case} carries no forward pointer to a finding any more — {@code finding.case_id} is
      * the reverse of that, set once a finding's positive ruling opens or joins a case (migration
-     * {@code 0011}). {@code finding_id} here is a correlated subquery reading it back: the newest
-     * finding linked to this case, which is what {@code CaseRow#findingId} has always named.
+     * {@code 0011}). {@code finding_count} and {@code latest_finding_id} are correlated subqueries
+     * reading it back: how many findings this case holds, and the newest of them — what {@code
+     * CaseRow}'s header, ruling and RCA lane all read (1b: cases read over all their findings; the
+     * newest stands in for the case until the multi-finding case page ships).
      */
     private static final String COLS = "id, project_id, seq, detector, subject_kind, subject_id, "
             + "subject_label, call_site_id, metric, "
+            + "(SELECT COUNT(*) FROM finding f WHERE f.case_id = eval_case.id) AS finding_count, "
             + "(SELECT f.id FROM finding f WHERE f.case_id = eval_case.id ORDER BY f.created_at DESC LIMIT 1)"
-            + " AS finding_id, "
-            + "state, title, basis, severity, onset_at, "
+            + " AS latest_finding_id, "
+            + "state, locked_at, title, basis, severity, onset_at, "
             + "current_value, baseline_value, delta, opened_at, last_seen_at, resolved_at, resolution, "
             + "resolution_reason, resolved_by, muted_at, muted_by, updated_at";
 
@@ -204,11 +207,16 @@ public class CaseRepository {
                 .optional();
     }
 
-    /** The live case on a subject key, if one exists. */
+    /**
+     * The live, UNLOCKED case on a subject key, if one exists — what a new finding on this key would
+     * join. A locked case (1c: RCA has been pressed on it) never matches: it stays exactly as it is,
+     * and the cause's next positive opens a fresh case rather than joining one an agent may already be
+     * reading.
+     */
     public Optional<CaseRow> findLive(String projectId, CaseKey key) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND detector = :detector "
                         + "AND subject_kind = :subjectKind AND subject_id = :subjectId AND metric = :metric "
-                        + "AND state <> 'resolved'")
+                        + "AND state <> 'resolved' AND locked_at IS NULL")
                 .param("pid", projectId)
                 .param("detector", key.detector())
                 .param("subjectKind", key.subjectKind())
@@ -216,65 +224,22 @@ public class CaseRepository {
                 .param("metric", key.metric())
                 .query((rs, n) -> map(rs))
                 .optional();
-    }
-
-    /**
-     * The most recently resolved case on a subject key that closed on or after {@code since} — the
-     * reopen candidate. Re-firing inside the window continues the same case (evidence appends to the
-     * trail a human has already read); past it, the spell is a new story and earns a fresh number.
-     */
-    public Optional<CaseRow> findResolvedSince(String projectId, CaseKey key, Instant since) {
-        return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND detector = :detector "
-                        + "AND subject_kind = :subjectKind AND subject_id = :subjectId AND metric = :metric "
-                        + "AND state = 'resolved' AND resolved_at >= :since ORDER BY resolved_at DESC LIMIT 1")
-                .param("pid", projectId)
-                .param("detector", key.detector())
-                .param("subjectKind", key.subjectKind())
-                .param("subjectId", key.subjectId())
-                .param("metric", key.metric())
-                .param("since", since.toString())
-                .query((rs, n) -> map(rs))
-                .optional();
-    }
-
-    /** Live cases for one detector — the reconciler's sweep set for auto-resolve. */
-    public List<CaseRow> listLiveByDetector(String projectId, String detector) {
-        return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND detector = :detector "
-                        + "AND state <> 'resolved' " + LIVE_ORDER)
-                .param("pid", projectId)
-                .param("detector", detector)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     // ---- writes ------------------------------------------------------------------------------
 
     /**
-     * Exclude other reconciler passes on this project for the rest of the transaction.
-     *
-     * <p>{@link #open} allocates the display number as {@code MAX(seq)+1}, and two backends sweeping the
-     * same project read that identically before either commits. An advisory lock rather than a counter
-     * table or {@code SELECT … FOR UPDATE} on {@code project}: it needs no schema, and it contends with
-     * nothing but another reconcile — locking the {@code project} row would block ordinary settings
-     * writes for the length of a sweep.
-     */
-    public void lockProject(String projectId) {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(:pid))")
-                .param("pid", projectId)
-                .query()
-                .singleValue();
-    }
-
-    /**
      * Open a fresh case for {@code detection}, allocating the next per-project display number.
-     * Returns empty when a concurrent reconciler pass already opened one on this key
-     * ({@code ux_eval_case_live}) — the caller then reads the winner and treats the detection as an
-     * update, so two workers can never double-page for one degradation.
+     * Returns empty when a concurrent opener already claimed this key ({@code ux_eval_case_live}) —
+     * the caller then reads the winner and treats the detection as a join, so two rulings landing on
+     * the same cause key at once can never double-page for one degradation.
      *
      * <p>The conflict target is explicit, and must stay that way. A bare {@code ON CONFLICT DO NOTHING}
      * also swallows a {@code ux_eval_case_seq} collision, which is not a benign "someone already has
      * this case" but a dropped detection — indistinguishable from the caller, and silent. Named this
-     * way, a seq collision raises instead, and {@link #lockProject} is what stops it happening.
+     * way, a seq collision raises instead of swallowing the row; each ruling opens or joins at most one
+     * case, so unlike the retired periodic reconciler there is no batch of opens to serialize behind an
+     * advisory lock, and this class no longer needs one.
      */
     public Optional<CaseRow> open(String projectId, CaseDetection detection, Instant now) {
         String id = Ids.ulid();
@@ -342,37 +307,18 @@ public class CaseRepository {
     }
 
     /**
-     * Bring a resolved case back to open on the same number, re-stamping it from the new detection.
-     * The resolution fields are cleared — the case is live again, and a reader must not see a
-     * "resolved by Priya" stamp on something that is currently firing.
+     * Lock a case at the moment a person presses <em>Run RCA</em> on it (1c). A no-op past the first
+     * call: re-pressing coalesces onto the same report and must not re-stamp the lock time.
      */
-    public void reopen(String projectId, String id, CaseDetection detection, Instant now) {
-        // Unreachable with a null onset — CaseLedger.isNewSpell only lets a bracketed detection reopen —
-        // but the record permits one, and stamping `now` is the same rule open() follows.
-        Instant onsetAt = detection.onsetAt();
-        Instant onset = onsetAt == null ? now : onsetAt;
+    public void lock(String projectId, String id, Instant now) {
         jdbc.sql("""
-                UPDATE eval_case SET state = 'open', resolved_at = NULL, resolution = NULL,
-                    resolution_reason = NULL, resolved_by = NULL,
-                    title = :title, basis = :basis, severity = :severity, onset_at = :onsetAt,
-                    current_value = :currentValue, baseline_value = :baselineValue, delta = :delta,
-                    subject_label = :subjectLabel,
-                    last_seen_at = :now, updated_at = :now
-                WHERE project_id = :pid AND id = :id
+                UPDATE eval_case SET locked_at = :now, updated_at = :now
+                WHERE project_id = :pid AND id = :id AND locked_at IS NULL
                 """)
                 .param("pid", projectId)
                 .param("id", id)
-                .param("title", detection.title())
-                .param("basis", detection.basis())
-                .param("severity", detection.severity())
-                .param("onsetAt", onset.toString())
-                .param("currentValue", detection.currentValue())
-                .param("baselineValue", detection.baselineValue())
-                .param("delta", detection.delta())
-                .param("subjectLabel", detection.subjectLabel())
                 .param("now", now.toString())
                 .update();
-        link(projectId, detection, id, now);
     }
 
     /**
@@ -447,8 +393,10 @@ public class CaseRepository {
                 rs.getString("subject_label"),
                 rs.getString("call_site_id"),
                 rs.getString("metric"),
-                rs.getString("finding_id"),
+                rs.getLong("finding_count"),
+                rs.getString("latest_finding_id"),
                 rs.getString("state"),
+                rs.getString("locked_at"),
                 rs.getString("title"),
                 rs.getString("basis"),
                 rs.getDouble("severity"),

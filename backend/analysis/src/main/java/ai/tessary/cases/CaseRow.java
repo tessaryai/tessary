@@ -27,8 +27,17 @@ public record CaseRow(
         String subjectLabel,
         @Nullable String callSiteId,
         String metric,
-        @Nullable String findingId,
+        /** How many findings this case holds — zero for an archived pre-{@code case_id} row. */
+        long findingCount,
+        /** The newest of this case's findings ({@code finding.case_id}, newest {@code created_at}
+         *  first) — the one its header, its ruling and (until 1c's multi-finding follow-up) its RCA
+         *  lane all read. Null only for an archived case from before {@code finding.case_id} existed. */
+        @Nullable String latestFindingId,
         String state,
+        /** When a person pressed <em>Run RCA</em> on this case, or null if nobody has. A locked case
+         *  never gets a new finding joined to it — the cause's next positive opens a fresh case — but
+         *  stays open/muted/resolved exactly as an unlocked one otherwise. */
+        @Nullable String lockedAt,
         String title,
         String basis,
         double severity,
