@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
@@ -29,9 +28,10 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p>Every test here is a variant of the same fact — {@code ux_finding_live}'s arbiter is
  * {@code status = 'open' AND triage_verdict IS NULL}, so once a verdict lands, machine or human, the
- * row can never be conflicted onto again. A positive stays open (it backs a case once one exists to
- * join, which the async case reconciler picks up on its own cadence); a negative closes; and either
- * way the SAME cause firing again opens a fresh row rather than mutating the settled one.
+ * row can never be conflicted onto again. A positive stays open and opens or joins its case in the SAME
+ * transaction as the ruling ({@code CaseOpener}, called from {@code recordVerdict}/{@code resolve} —
+ * there is no later sweep that picks it up); a negative closes; and either way the SAME cause firing
+ * again opens a fresh row rather than mutating the settled one.
  */
 @SpringBootTest
 class FindingRulingIntegrationTest {
@@ -51,7 +51,7 @@ class FindingRulingIntegrationTest {
     private static final String GRAM = "gram-ruling";
 
     @Test
-    @DisplayName("triage positive stays open, and is what a case source reads as confirmed")
+    @DisplayName("triage positive stays open and opens a case in the same transaction as the ruling")
     void triagePositiveStaysOpen() {
         Project p = project("ruling-triage-positive");
         String findingId = firing(p, GRAM);
@@ -62,11 +62,7 @@ class FindingRulingIntegrationTest {
         assertEquals(FindingRow.Status.OPEN, row.status());
         assertEquals(FindingRow.TriageVerdict.POSITIVE, row.triageVerdict());
         assertNull(row.humanVerdictAt(), "a machine ruling never stamps the human column");
-        assertEquals(
-                1,
-                findings.listConfirmed(p.id(), List.of(BuiltInDetector.Kind.BEHAVIOR_DRIFT), null, 10)
-                        .size(),
-                "a positive, open finding is exactly what the case gate reads as confirmed");
+        assertNotNull(row.caseId(), "CaseOpener runs inside recordVerdict's own transaction, not on a later sweep");
     }
 
     @Test

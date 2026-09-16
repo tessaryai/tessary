@@ -255,6 +255,7 @@ class TriageSourceAbsenceTest {
                 classifiers,
                 null, // BehaviorTriageJobRepository: read by list()/escalate() only
                 null, // BehaviorTriageEngine
+                null, // CaseOpener: the positive (not_expected) branch only; every call here is EXPECTED
                 null, // MetricBaselineRepository: the distribution_shift branch only
                 null, // ToolErrorReferenceRepository: the rate_shift branch only
                 null, // ToolErrorStateRepository
@@ -492,6 +493,7 @@ class TriageSourceAbsenceTest {
                     List.of(),
                     null,
                     BehaviorFindingView.TriageStatus.PENDING,
+                    null,
                     null,
                     null);
         }

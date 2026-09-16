@@ -227,6 +227,7 @@ class FindingServiceMergeTest {
                 null,
                 BehaviorFindingView.TriageStatus.PENDING,
                 null,
+                null,
                 null);
     }
 

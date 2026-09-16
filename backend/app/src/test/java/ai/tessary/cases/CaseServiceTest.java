@@ -2,6 +2,7 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,21 +32,16 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
-/** Case lifecycle as a human drives it: resolve, mute, unmute, and how a case is looked up. */
+/** Case lifecycle as a human drives it: resolve, mute, unmute, how a case is looked up, and what
+ *  pressing RCA on one does (1c). */
 @SpringBootTest
-// Own context on purpose: CaseWorker's sweep is parked here, and the lifecycle assertions depend on no other writer
-// touching the case rows.
-@TestPropertySource(properties = "test.context-group=case-service")
+// batch-size=0 parks RcaWorker's own drain (claimBatch's LIMIT 0 returns nothing), the same reason
+// RcaControllerTest does it: this class presses runRca and must read back locked_at / the trail line
+// itself, not race the real worker picking the job up first.
+@TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
 class CaseServiceTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.cases.heartbeat-ms", () -> "3600000");
-    }
 
     @Autowired
     FindingRepository findings;
@@ -55,6 +51,9 @@ class CaseServiceTest {
 
     @Autowired
     CaseRepository cases;
+
+    @Autowired
+    CaseLedger ledger;
 
     @Autowired
     CaseEventRepository events;
@@ -161,7 +160,7 @@ class CaseServiceTest {
                 service.detail(p.id(), open(p, CaseRow.Detector.TOOL_ERROR).id());
 
         assertTrue(drift.rcaAvailable());
-        assertNotNull(drift.findingId());
+        assertNotNull(drift.latestFindingId());
         assertTrue(toolError.rcaAvailable());
     }
 
@@ -219,7 +218,7 @@ class CaseServiceTest {
     void aFinishedRcaReportIsInlinedAndAPendingOneIsOnlyNamed() {
         Project p = project("svc-rca-inline");
         CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-        String findingId = Objects.requireNonNull(row.findingId());
+        String findingId = Objects.requireNonNull(row.latestFindingId());
         String jobId = rcaJobs.createOrGet(
                 p.id(),
                 findingId,
@@ -271,6 +270,83 @@ class CaseServiceTest {
         assertEquals(finished.rcaReportId(), report.id(), "the inlined report is the one the id names");
         assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, report.verdict());
         assertEquals("## Why\nThe provider rotated the default.", report.detailedReport());
+    }
+
+    // ---- 1c: RCA locks a case --------------------------------------------------------------
+
+    @Test
+    void runRcaLocksTheCaseAndWritesRcaRequested() {
+        Project p = project("svc-rca-locks");
+        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+
+        service.runRca(p.id(), row.id(), "priya@example.com");
+
+        CaseRow locked = cases.findById(p.id(), row.id()).orElseThrow();
+        assertNotNull(locked.lockedAt());
+        assertTrue(kinds(p, row).contains(CaseEventRow.Kind.RCA_REQUESTED));
+    }
+
+    /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */
+    @Test
+    void rePressingALockedCaseCoalescesOntoTheSameReportAndDoesNotReLockOrReNarrate() {
+        Project p = project("svc-rca-re-press");
+        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+
+        RcaReportView first = service.runRca(p.id(), row.id(), "priya@example.com");
+        String lockedAt = cases.findById(p.id(), row.id()).orElseThrow().lockedAt();
+        RcaReportView second = service.runRca(p.id(), row.id(), "priya@example.com");
+
+        assertEquals(first.id(), second.id(), "the same finding coalesces onto one report");
+        assertEquals(lockedAt, cases.findById(p.id(), row.id()).orElseThrow().lockedAt(), "the lock does not move");
+        assertEquals(
+                1,
+                kinds(p, row).stream()
+                        .filter(CaseEventRow.Kind.RCA_REQUESTED::equals)
+                        .count(),
+                "only the locking press narrates the request");
+    }
+
+    /** A locked case's key opens a NEW case rather than joining the locked one. */
+    @Test
+    void aPositiveForALockedCasesKeyOpensAFreshCase() {
+        Project p = project("svc-rca-locked-key");
+        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        service.runRca(p.id(), row.id(), "priya@example.com");
+
+        CaseDetection detection = new CaseDetection(
+                new CaseKey(row.detector(), row.subjectKind(), row.subjectId(), row.metric()),
+                "subject label",
+                null,
+                findingBehind(p, row.detector()),
+                "something happened again",
+                "because the detector said so",
+                0.4,
+                Instant.parse("2026-07-05T10:00:00Z"),
+                0.55,
+                0.95,
+                -0.4);
+        CaseRow secondCase = ledger.openOrJoin(p.id(), detection, null, Instant.now());
+
+        assertNotEquals(row.id(), secondCase.id(), "the locked case is never joined");
+        assertEquals(
+                CaseRow.State.OPEN,
+                cases.findById(p.id(), row.id()).orElseThrow().state(),
+                "the locked case itself is untouched");
+    }
+
+    // ---- resolving/absorbing closes every finding the case holds ---------------------------
+
+    @Test
+    void resolvingClosesEveryOpenFindingTheCaseHolds() {
+        Project p = project("svc-resolve-closes-findings");
+        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        String findingId = Objects.requireNonNull(row.latestFindingId());
+
+        service.resolve(p.id(), row.id(), "shipped a fix", "priya@example.com");
+
+        assertEquals(
+                FindingRow.Status.CLOSED,
+                findings.findById(p.id(), findingId).orElseThrow().status());
     }
 
     // ---- helpers -----------------------------------------------------------------------------

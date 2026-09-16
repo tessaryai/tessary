@@ -226,7 +226,7 @@ class McpCaseToolsTest {
 
         verify(cases).detail(PROJECT_ID, "C-118");
         assertEquals("C-118", body.get("case").get("reference").asText());
-        assertEquals("find-9", body.get("finding_id").asText());
+        assertEquals("find-9", body.get("latest_finding_id").asText());
     }
 
     /**
@@ -369,6 +369,8 @@ class McpCaseToolsTest {
                 null,
                 null,
                 null,
+                1L,
+                "fnd-1",
                 null,
                 // cause + rca_verdict: this fixture is a case nothing has analysed, which is what
                 // almost every case in the queue is.
