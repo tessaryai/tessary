@@ -33,8 +33,9 @@ import org.springframework.stereotype.Repository;
  * always describe the same row.
  *
  * <p><b>Time column.</b> Range, keyset and bucket predicates all run on {@link QueryDataset#timeColumn()},
- * each dataset's own event clock — {@code started_at} for {@code span}/{@code tool_call}, {@code created_at}
- * for the others — never a literal {@code "created_at"}. Per {@link QueryDataset#timeIsTimestamptz()} the
+ * each dataset's own event clock — {@code started_at} for {@code span}/{@code tool_call},
+ * {@code subject_started_at} for {@code classifier_events}, {@code bucket_start} for
+ * {@code metric_rollups} — never a literal {@code "created_at"}. Per {@link QueryDataset#timeIsTimestamptz()} the
  * predicates cast the bound time params with {@code ::timestamptz} for the timestamptz datasets (and read
  * the column back as an ISO-8601 instant), while the TEXT datasets compare lexicographically; both stay
  * served by the {@code (project_id, <time column>)} indexes. {@code created_at} (ingest time) still rides

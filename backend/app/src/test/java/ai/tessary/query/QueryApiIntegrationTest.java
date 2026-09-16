@@ -154,6 +154,11 @@ class QueryApiIntegrationTest {
      *
      * <p>Seeded here into the span-grain table so the dataset's subject-pair filters have both halves to
      * work on: a producer span id is half a key and {@code subject_trace_id} is the other half.
+     *
+     * <p>{@code subject_started_at} is set to {@code at} — the same instant the subject span itself was
+     * created at — since {@code classifier_events} now ranges, pages and orders on it (migration
+     * {@code 0012}, decision 8b); leaving it NULL would drop the row out of every ranged read in these
+     * tests.
      */
     private void insertSignalEvent(
             String pid,
@@ -164,8 +169,10 @@ class QueryApiIntegrationTest {
             String severity,
             Instant at) {
         jdbc.sql("INSERT INTO secret_leak_detection (id, project_id, classifier_id, classifier_key, "
-                        + "subject_session_id, subject_trace_id, subject_span_id, severity, confidence, created_at) "
-                        + "VALUES (:id, :pid, :sid, :key, :ctx, :trace, :subj, :sev, 'high', :at::timestamptz)")
+                        + "subject_session_id, subject_trace_id, subject_span_id, severity, confidence,"
+                        + " subject_started_at, created_at) "
+                        + "VALUES (:id, :pid, :sid, :key, :ctx, :trace, :subj, :sev, 'high', :at::timestamptz,"
+                        + " :at::timestamptz)")
                 .param("id", Ids.ulid())
                 .param("pid", pid)
                 .param("sid", classifierId)

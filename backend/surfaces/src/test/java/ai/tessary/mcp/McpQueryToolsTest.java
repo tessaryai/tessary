@@ -383,10 +383,10 @@ class McpQueryToolsTest {
     }
 
     /**
-     * The regression decision 8 fixes: {@code spans} and {@code tool_calls} range, page and bucket on
-     * {@code started_at} (the producer's own timing) now, not {@code created_at} (ingest time) — a
-     * late-arriving backfill no longer lands in the wrong bucket. {@code classifier_events} is unmoved
-     * for now (its own event-time cutover is a later decision).
+     * The regression decisions 8 and 8b fix: {@code spans} and {@code tool_calls} range, page and bucket
+     * on {@code started_at} (the producer's own timing), and {@code classifier_events} on
+     * {@code subject_started_at} (migration {@code 0012}, the span or trace it judged) — a late-arriving
+     * backfill no longer lands in the wrong bucket on any of the three.
      */
     @Test
     void describeDatasetReportsStartedAtAsTheEventClockForSpansAndToolCalls() throws Exception {
@@ -398,7 +398,7 @@ class McpQueryToolsTest {
         }
         assertEquals("started_at", timeColumnByDataset.get("spans"));
         assertEquals("started_at", timeColumnByDataset.get("tool_calls"));
-        assertEquals("created_at", timeColumnByDataset.get("classifier_events"));
+        assertEquals("subject_started_at", timeColumnByDataset.get("classifier_events"));
         assertEquals("bucket_start", timeColumnByDataset.get("metric_rollups"));
     }
 

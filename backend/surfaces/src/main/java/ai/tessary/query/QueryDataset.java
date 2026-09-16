@@ -146,7 +146,7 @@ public enum QueryDataset {
     CLASSIFIER_EVENTS(
             "classifier_events",
             "classifier_events_union", // marker only; see class javadoc + QueryRepository#relation
-            "created_at", // detection event time is a later decision; stays on ingest time for now
+            "subject_started_at", // the span (or trace) it judged actually ran; migration 0012, decision 8b
             null,
             true,
             "id",
@@ -171,8 +171,9 @@ public enum QueryDataset {
                     entry("confidence", "confidence"),
                     entry("subject_kind", "subject_kind"),
                     entry("subject_trace_id", "subject_trace_id"),
-                    entry("subject_span_id", "subject_span_id")),
-            true), // created_at is timestamptz on every detection table
+                    entry("subject_span_id", "subject_span_id"),
+                    entry("subject_started_at", "subject_started_at")),
+            true), // subject_started_at is timestamptz (nullable) on every detection table
 
     /**
      * Pre-aggregated usage rollups: the {@code metric_rollup} table the metering worker writes. This
@@ -277,10 +278,11 @@ public enum QueryDataset {
     /**
      * The dataset's time column: a trusted, fixed identifier the query SQL ranges, keysets and buckets on.
      * Its own event clock, stated per dataset rather than defaulted — {@code started_at} for {@code spans}
-     * and {@code tool_calls} (the producer's own timing), {@code created_at} for {@code classifier_events}
-     * (ingest time, for now), {@code bucket_start} for {@code metric_rollups} (the rollup grain column,
-     * also ingest time). {@code created_at} still rides on every row for display; it is filtered only where
-     * it is also the time column. Never user input.
+     * and {@code tool_calls} (the producer's own timing), {@code subject_started_at} for
+     * {@code classifier_events} (the span or trace it judged, migration {@code 0012}), {@code bucket_start}
+     * for {@code metric_rollups} (the rollup grain column, still ingest time — billing). {@code created_at}
+     * still rides on every row for display; it is filtered only where it is also the time column. Never
+     * user input.
      */
     public String timeColumn() {
         return timeColumn;

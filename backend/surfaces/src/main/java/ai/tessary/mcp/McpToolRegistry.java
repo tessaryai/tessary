@@ -1886,14 +1886,15 @@ public class McpToolRegistry {
     /**
      * A half-open time window {@code [from, to)} on the dataset's own event clock (ISO-8601 strings), not
      * necessarily {@code created_at}: {@code spans} and {@code tool_calls} range on {@code started_at},
-     * {@code metric_rollups} on {@code bucket_start} (both ingest-adjacent), and {@code classifier_events}
-     * on {@code created_at}. {@code describe_dataset}'s {@code time_column} names it per dataset.
+     * {@code classifier_events} on {@code subject_started_at} (the span or trace it judged), and
+     * {@code metric_rollups} on {@code bucket_start} (ingest time — billing). {@code describe_dataset}'s
+     * {@code time_column} names it per dataset.
      */
     private static Map<String, Object> rangeField() {
         return rangeField(
                 "Optional half-open time window [from, to) on the dataset's own event clock — started_at for"
-                        + " spans and tool_calls, created_at for classifier_events, or bucket_start (ingest time)"
-                        + " for metric_rollups (ISO-8601). See describe_dataset's time_column.",
+                        + " spans and tool_calls, subject_started_at for classifier_events, or bucket_start"
+                        + " (ingest time) for metric_rollups (ISO-8601). See describe_dataset's time_column.",
                 "Optional inclusive lower bound (ISO-8601).",
                 "Optional exclusive upper bound (ISO-8601).");
     }
