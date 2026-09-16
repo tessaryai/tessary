@@ -373,15 +373,16 @@ hold.
    finding's `trace_count` as windows close. Doing that here would make the count "how many times the
    pass ran". The upsert sets counts from the freshly recomputed aggregate. Run it a hundred times,
    get the same row.
-2. **Observations refresh; judgements do not.** A finding that has been triaged, or that a human
-   marked *Real deviation*, keeps `triage_verdict`, `triage_action`, `triage_summary`, `triaged_at`,
-   `escalated_at` and `human_verdict_at` when the next pass rewrites its counts and evidence. Only
-   what was computed gets overwritten.
+2. **A ruled row is frozen, not merely careful.** A finding that has been triaged, or that a human
+   ruled on, has left `ux_finding_live` (decision 1, 0011): the upsert's `WHERE status = 'open' AND
+   triage_verdict IS NULL` cannot match it, so a later pass INSERTs a fresh row for the same cause
+   rather than rewriting the ruled one's counts and evidence underneath its verdict.
 3. **Onset is written once and then left alone** while the spell is unbroken. Under recompute it can
    drift by an hour or two as the replay window slides and the baseline shifts with it, and
    `GraderDegradationSource` recorded what that costs (deleted with grader Layer 1, but the lesson
-   stands): an advancing onset reads to `CaseLedger` as a *fresh spell* and reopens a case a human
-   just closed.
+   stands): a case's own `onset_at` is stamped once from the finding at open and never moves, so a
+   drifting onset upstream would only misdate the row, not resurrect a case a person already closed —
+   there is no reopen to trigger any more.
 
 ### 5.2 The accumulator is capped, or a fix takes weeks to register
 
@@ -439,10 +440,10 @@ duplicate case.
 
 | Level | Guarantee | Enforced by |
 |---|---|---|
-| finding | one live row per cause | `ux_behavior_finding_baseline_cause` on `(baseline_id, cause_kind, cause_key, workflow_key) WHERE status IN ('open','blocked')` |
-| case | one live case per subject | `ux_eval_case_live`, via `CaseKey(detector, subjectKind, subjectId, metric)`; `CaseLedger.open` looks for a live case on the key first |
-| reopen | a closed case reopens only if the onset moved **past** the one it recorded | `CaseLedger.isNewSpell` |
-| verdict | one row to write on, and `escalated_at` keeps escalation to once per cause | the finding row itself |
+| finding | one **unruled, open** row per cause | `ux_finding_live` on `(project_id, classifier_key, cause_key) WHERE status = 'open' AND triage_verdict IS NULL` |
+| case | one live case per subject | `ux_eval_case_live`, via `CaseKey(detector, subjectKind, subjectId, metric)`; `CaseLedger.openOrJoin` looks for a live, unlocked case on the key first |
+| join, not reopen | a closed case is final; a later positive on the same key joins the still-open case, or opens a fresh one if the last is resolved | `CaseLedger.openOrJoin` |
+| verdict | a ruling leaves `ux_finding_live` by construction, so no upsert can conflict onto a ruled row — the same cause firing again inserts a fresh open row instead | the unique index itself |
 
 The case key is `("tool_error", "tool", <bucket_key>, "tool_error_rate")`.
 
@@ -550,11 +551,13 @@ and nothing else.
 
 ### 8.2 The case gate
 
-`ToolErrorCaseSource implements CaseSource`, `CaseRow.Detector.TOOL_ERROR`, `detect()` returning the
-**live set** of `rate_shift` findings whose triage ruled deviation or which a human marked
-*Real deviation* — the same gate `MetricDriftSource` applies, so every Triage row still means "this
-survived Layer-2". A bucket whose rate returns to its reference drops out of the live
-set and its case auto-closes.
+`ToolErrorCaseSource implements CaseSource`, `CaseRow.Detector.TOOL_ERROR`, `owns()` claiming every
+`tool_error` finding and `shape()` reading its numbers — the same seam `MetricDriftSource` implements,
+so every case still means "this survived Layer-2". `CaseOpener` calls `shape()` once, the moment a
+`rate_shift` finding's verdict lands `positive` — from triage or from a human marking *Real
+deviation* — never on a sweep: there is no live set to poll any more (decision 1, 0011). A bucket
+whose rate returns to its reference simply stops filing positive findings; nothing auto-closes the
+case, only a person resolving or absorbing it does.
 
 ### 8.3 What escalates, and when
 
@@ -731,7 +734,8 @@ different statistic, a different config record, and segment A is editing that fi
 - **Anything per failing call.** A detection per failing span is exactly what `0030` deleted. §0.
 - **Incrementing a persisted count.** Under recompute that counts how often the job ran, not how often
   the tool failed. Assign, never add. §5.1.
-- **Letting a recomputed onset overwrite a stored one.** It reopens cases a human just closed, within
-  one tick. §5.1.
+- **Letting a recomputed onset overwrite a stored one.** A ruled finding is frozen by the unique index,
+  not by care in the recompute path — but the case's own `onset_at` is stamped once from the finding at
+  open and never moves, so a drifting onset upstream would misdate a case that already exists. §5.1.
 - **Putting direction in the case key.** A recovery then opens a second case about the first. §6.1.
 - **An uncapped accumulator.** The case then outlives the fix by as long as the outage lasted. §5.2.

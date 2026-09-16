@@ -95,8 +95,8 @@ Conventions the tools share, stated here once rather than per row:
 | `list_call_sites` | — | call sites + observed stats | open |
 | `list_failure_modes` | `call_site_id`, `chain_id`, `scope`, `severity`, `layer`, `pack_id`, `compliance_tag` | taxonomy rows | open |
 | `list_cases` | `state` (open\|muted\|resolved), `detector`, `call_site_id` | paged case rows; open is worst-first, resolved is newest-closure-first | open |
-| `get_case` | `id` (stored id or `C-118`) | case + activity trail + `finding_id` + exemplars + the **RCA report inline in `rca`** when one has finished | open |
-| `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) + withheld count | open |
+| `get_case` | `id` (stored id or `C-118`) | case + activity trail + `latest_finding_id` + `finding_count` + exemplars + the **RCA report inline in `rca`** when one has finished | open |
+| `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) | open |
 | `get_finding` | `id` | finding + parsed evidence | open |
 | `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}`, camelCase, no payload text — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` | open |
 | `list_traces` | `model`, `kind`, `call_site_id`, `status`, `range`, `q` | paged trace rollup rows + previews | open |

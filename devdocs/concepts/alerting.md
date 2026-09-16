@@ -33,6 +33,13 @@ same Layer-2 triage gate, and a case is the thing a human is meant to act on. So
 one rule for all detectors, present and future, instead of a per-detector mechanism that would need
 a new entry every time a detector lands.
 
+`case_opened` fires on **the open, not on every finding that lands on it.** A later positive on the
+same cause joins the still-open case (`CaseLedger.openOrJoin`, a `recurred` trail entry) rather than
+opening a new one, and `opened_at` does not move when that happens — so `casesOpenedBetween` never
+sees it and the idempotent `(rule, case_id)` insert would refuse a second delivery even if it did. A
+join is silent by design: it shows in the case's own trail for whoever is already looking at it,
+which is a different thing from paging someone.
+
 ```
 CaseLedger opens a case
         │

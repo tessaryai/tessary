@@ -446,8 +446,8 @@ deviation.** Not on detection. This follows the existing precedent exactly —
 `CaseRow.Detector.BEHAVIOR_DRIFT` is documented as "a behaviour-drift finding *that survived
 triage*" — and it is what makes the no-alert-budget decision (§9) safe: findings stream
 freely onto the Classifiers page, but Triage is the screen people get paged from and only sees the
-triaged subset. So `detect()` returns findings whose `triage_verdict` is `sound`,
-plus any a human marked `not_expected` directly.
+triaged subset. So the finding qualifies once its verdict lands `positive`, whether that came from
+triage or from a human marking `not_expected` directly.
 
 **Amended (launch segment B, 2026-08-08): triage no longer requires a repository, and the
 case says what it ruled with.** The original Layer 2 needed a git integration, a clone token, a
@@ -459,14 +459,19 @@ dossier, the platform's read-only MCP surface for the traffic behind it, and a `
 agent writes its own scripts into. For a distribution shift that is a genuinely sufficient basis rather
 than a degraded one: the workload block (§7) is what separates "the agent changed" from "the traffic
 changed", and it is read off the traces, not off source. What triage rules on is the CLAIM — true,
-sufficiently sampled, properly evidenced — so a duration or cost *drop* is as `sound` as a rise, and
+sufficiently sampled, properly evidenced — so a duration or cost *drop* is as `positive` as a rise, and
 whether the change was welcome is a question for the human who reads the case.
 
-**The contract is "currently firing", not "newly fired".** `detect(projectId)` returns the full
-live set every pass and `CaseReconciler` closes the cases whose detections dropped out. This is a
-real design constraint, and it maps cleanly: a bucket whose current window has returned to its
-pinned reference stops appearing, and its case auto-closes. Implement the live-set semantics
-directly — do not emit a stream of new findings and expect reconciliation to work.
+**Amended (decision 1, 0011): event-driven, not swept.** A case used to open from a periodic
+reconciler asking every source "what is firing right now" and closing whatever a source stopped
+naming — `detect(projectId)` returning the live set, `CaseReconciler` diffing it pass over pass.
+Under the open/closed finding model a ruling freezes the row it landed on (`ux_finding_live` no
+longer matches it), so there is no live set left to sweep. `CaseOpener` calls `CaseSource.shape`
+once, at the moment a finding's ruling qualifies it, and `CaseLedger.openOrJoin` links the finding to
+a case in that same transaction — a fresh case if the key has none open, or the one already open for
+it otherwise. A bucket whose current window has returned to its pinned reference simply never files a
+positive finding again; nothing auto-closes the case, and only a person resolving or absorbing it
+does. `CaseReconciler` and `CaseWorker` are deleted with this decision.
 
 Fields to fill on `CaseDetection`:
 
@@ -539,7 +544,7 @@ quarantine. It needs a branch on `cause_kind`.
 | Verb (UI label) | Action string | Drift causes (today) | `distribution_shift` (new) |
 |---|---|---|---|
 | **Legitimate — absorb** | `expected` | allowlists the gram permanently, skips the graduation wait | **re-pins the reference**: `pinned_sketch ← current`, stamp `pinned_at` / `pinned_by_version_id`, append a baseline-changelog row |
-| **Real deviation** | `not_expected` | pins in quarantine so it never graduates and keeps firing | leaves the reference alone, marks for escalation. The reference must **not** move, or the next window silently normalizes the regression |
+| **Real deviation** | `not_expected` | pins in quarantine so it never graduates and keeps firing | leaves the reference alone, opens or joins a case with this person as the actor. The reference must **not** move, or the next window silently normalizes the regression |
 
 Both labels and both action strings already exist in `ClassifiersPage.tsx`; the branch is entirely
 server-side.
