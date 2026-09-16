@@ -159,14 +159,142 @@ class ClassifierArmingIntegrationTest {
                 arming.evaluate(row(pid, classifierId, "regex"), pid, refs, Instant.now())
                         .isEmpty(),
                 "two sessions is under a bar of three, however many detections they produced");
-        assertTrue(detections.countInWindow(
-                        "regex",
+        String table = detections.tableFor("regex");
+        assertTrue(
+                jdbc.sql("SELECT COUNT(*) FROM " + table + " WHERE project_id = :pid AND classifier_id = :cid")
+                                .param("pid", pid)
+                                .param("cid", classifierId)
+                                .query(Long.class)
+                                .single()
+                        >= 3,
+                "the detections themselves are still there, whatever the arming verdict");
+    }
+
+    @Test
+    void aBackfillOfOldSpansNeverArmsTodaysWindow() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-backfill-under")
+                .project()
+                .id();
+        String classifierId = armedClassifier(pid, "regex", "event_count", 3, (int) DAY);
+
+        // Three matches, but on three different days 30 to 90 days back: each event-time window holds
+        // exactly one, well under a bar of three. Summing them into "the window now falls in" — the old
+        // classifier-wide behaviour — would wrongly arm; walking each window separately must not.
+        List<FindingEvidenceRepository.Ref> refs = List.of(
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), daysAgo(30)),
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), daysAgo(60)),
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), daysAgo(90)));
+
+        assertTrue(
+                arming.evaluate(row(pid, classifierId, "regex"), pid, refs, Instant.now())
+                        .isEmpty(),
+                "one detection per day across three separate days crosses no single window's bar");
+        assertEquals(0, liveFindings(pid));
+    }
+
+    @Test
+    void aBackfilledDayThatCrossesTheBarFilesUnderItsOwnDay() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-backfill-over")
+                .project()
+                .id();
+        String classifierId = armedClassifier(pid, "regex", "event_count", 3, (int) DAY);
+        Instant backfillDay = daysAgo(45);
+
+        // All three on the same backfilled day: one window crosses the bar, and it must file under the
+        // day the spans ran, not under today (when the sweep happened to check them).
+        List<FindingEvidenceRepository.Ref> refs = List.of(
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), backfillDay),
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), backfillDay.plusSeconds(60)),
+                writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), backfillDay.plusSeconds(120)));
+
+        List<String> filed = arming.evaluate(row(pid, classifierId, "regex"), pid, refs, Instant.now());
+
+        assertEquals(1, filed.size(), "the backfilled day crosses the bar");
+        FindingRow finding = findings.findById(pid, filed.get(0)).orElseThrow();
+        assertEquals(windowStart(backfillDay).toString(), finding.onsetAt(), "filed under the day the spans ran");
+        assertEquals(3, finding.sampleCount());
+    }
+
+    @Test
+    void anOlderWholeWindowArrivingLateNeverMovesTheFindingBackwards() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "arming-whole-order").project().id();
+        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
+        Instant recent = hoursAgo(1);
+        Instant older = daysAgo(3);
+
+        String findingId = arming.evaluate(
+                        row(pid, classifierId, "regex"),
                         pid,
-                        classifierId,
-                        Instant.now().minusSeconds(86_400).toString(),
-                        Instant.now().plusSeconds(60).toString(),
-                        false)
-                >= 3);
+                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
+                        Instant.now())
+                .get(0);
+        FindingRow before = findings.findById(pid, findingId).orElseThrow();
+
+        List<String> late = arming.evaluate(
+                row(pid, classifierId, "regex"),
+                pid,
+                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), older)),
+                Instant.now());
+
+        assertEquals(List.of(findingId), late, "an older window of the same cause refreshes the same finding");
+        FindingRow after = findings.findById(pid, findingId).orElseThrow();
+        assertEquals(before.onsetAt(), after.onsetAt(), "the spell does not restart on an old window");
+        assertEquals(before.lastSeenAt(), after.lastSeenAt(), "last seen does not move backwards");
+    }
+
+    @Test
+    void aNewerWholeWindowStaysInTheSameSpellAcrossOneQuietDay() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-whole-spell-same")
+                .project()
+                .id();
+        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
+        Instant twoDaysAgo = daysAgo(2);
+        Instant recent = hoursAgo(1);
+
+        String findingId = arming.evaluate(
+                        row(pid, classifierId, "regex"),
+                        pid,
+                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), twoDaysAgo)),
+                        Instant.now())
+                .get(0);
+        arming.evaluate(
+                row(pid, classifierId, "regex"),
+                pid,
+                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
+                Instant.now());
+
+        assertEquals(
+                windowStart(twoDaysAgo).toString(),
+                findings.findById(pid, findingId).orElseThrow().onsetAt(),
+                "one quiet day between windows is the same spell");
+    }
+
+    @Test
+    void aNewerWholeWindowStartsAFreshSpellAfterTwoWindowsWentQuiet() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-whole-spell-fresh")
+                .project()
+                .id();
+        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
+        Instant tenDaysAgo = daysAgo(10);
+        Instant recent = hoursAgo(1);
+
+        String findingId = arming.evaluate(
+                        row(pid, classifierId, "regex"),
+                        pid,
+                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), tenDaysAgo)),
+                        Instant.now())
+                .get(0);
+        arming.evaluate(
+                row(pid, classifierId, "regex"),
+                pid,
+                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
+                Instant.now());
+
+        assertEquals(
+                windowStart(recent).toString(),
+                findings.findById(pid, findingId).orElseThrow().onsetAt(),
+                "a window after days of quiet is a new spell");
     }
 
     // ---- the faceted shape (Secret Leak) ----------------------------------------------------------
@@ -410,12 +538,33 @@ class ClassifierArmingIntegrationTest {
         return refs;
     }
 
+    /**
+     * A real span (the classifier-wide shape now resolves its event-time window off
+     * {@code subject_started_at}, filled at write time from the span itself), carrying one detection.
+     */
     private FindingEvidenceRepository.Ref writeOne(String pid, String classifierId, String key, String sessionId) {
-        String traceId = SubstrateV2Fixtures.traceId();
-        String spanId = SubstrateV2Fixtures.spanId();
+        return writeOneAt(pid, classifierId, key, sessionId, Instant.now());
+    }
+
+    /** As {@link #writeOne}, with the span's own event time under test control. */
+    private FindingEvidenceRepository.Ref writeOneAt(
+            String pid, String classifierId, String key, String sessionId, Instant at) {
+        SubstrateV2Fixtures.SpanRef span =
+                fx.spanSeed(pid).sessionId(sessionId).at(at).writeRef();
         detections.insert(
-                Ids.ulid(), key, pid, classifierId, key, null, sessionId, traceId, spanId, "warn", "high", null);
-        return FindingEvidenceRepository.Ref.span(traceId, spanId);
+                Ids.ulid(),
+                key,
+                pid,
+                classifierId,
+                key,
+                null,
+                sessionId,
+                span.traceId(),
+                span.spanId(),
+                "warn",
+                "high",
+                null);
+        return FindingEvidenceRepository.Ref.span(span.traceId(), span.spanId());
     }
 
     /**

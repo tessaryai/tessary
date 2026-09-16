@@ -328,25 +328,18 @@ public class FindingRepository {
     }
 
     /**
-     * Record a per-span classifier's armed window — {@code observedCount} detections inside the window
-     * its owner configured — opening the finding if this is the first such window.
-     *
-     * <p><b>The count is ASSIGNED, not accumulated</b>, for the same reason
-     * {@link #recordRecomputedCause} assigns: the number is what the current window holds, recomputed
-     * from the detection table on every sweep, so adding it would measure how often the sweep ran. Run
-     * this twice on an unchanged window and the row is identical both times, which is what makes the
-     * sweep safe to re-run without a transaction spanning it.
-     *
-     * <p><b>The onset freezes within a spell.</b> A classifier that keeps breaching its bar keeps
-     * refreshing one finding; only a window that went quiet past {@code quietBefore} starts a new spell
-     * and moves the onset, which is what lets {@code CaseLedger.isNewSpell} reopen a case a human closed
-     * rather than reopening it on the next tick.
+     * Record a per-span classifier's armed window — {@code observedCount} detections inside an
+     * event-time window that crossed the classifier's bar — opening the finding if this is the first
+     * such window. {@link #armedUpsert} does the writing; see it for the forward-only and
+     * newer-than-closed semantics both armed shapes share.
      *
      * @param classifierId the classifier row's id — the subject AND (via {@link CauseKey#perSpanClassifier})
      *     the cause scope, so one classifier holds one live finding
      * @param label the classifier's display name, for a case title that reads as a sentence
+     * @param onsetAt the window's start
+     * @param lastSeenAt when the latest detection in the window happened
      */
-    public Recorded recordArmedWindow(
+    public @Nullable Recorded recordArmedWindow(
             String id,
             String projectId,
             String classifierKey,
@@ -355,63 +348,35 @@ public class FindingRepository {
             long observedCount,
             @Nullable String callSiteId,
             String payloadJson,
+            String onsetAt,
+            String lastSeenAt,
             String quietBefore,
             String now) {
-        Recorded outcome = jdbc.sql("""
-            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                 subject_label, call_site_id, status, onset_at, last_seen_at,
-                                 sample_count, payload, created_at, updated_at)
-            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :now, :now, :count, CAST(:payload AS jsonb), :now, :now)
-            ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
-                sample_count = EXCLUDED.sample_count,
-                last_seen_at = EXCLUDED.last_seen_at,
-                updated_at = EXCLUDED.updated_at,
-                -- The conflict target only ever matches an unruled row — see recordShift.
-                payload = EXCLUDED.payload,
-                onset_at = CASE
-                    WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
-                    ELSE finding.onset_at END
-            RETURNING id, sample_count, escalated_at
-            """)
-                .param("id", id)
-                .param("pid", projectId)
-                .param("classifier", classifierKey)
-                .param("causeKey", CauseKey.perSpanClassifier(classifierId))
-                .param("subjectKind", FindingRow.SubjectKind.CLASSIFIER)
-                .param("subjectId", classifierId)
-                .param("subjectLabel", label)
-                .param("callSiteId", callSiteId)
-                .param("count", observedCount)
-                .param("payload", payloadJson)
-                .param("quietBefore", quietBefore)
-                .param("now", now)
-                .query((rs, n) -> recorded(rs))
-                .single();
-        return created(id, outcome);
+        return armedUpsert(
+                id,
+                projectId,
+                classifierKey,
+                CauseKey.perSpanClassifier(classifierId),
+                classifierId,
+                label,
+                callSiteId,
+                observedCount,
+                onsetAt,
+                lastSeenAt,
+                payloadJson,
+                quietBefore,
+                now);
     }
 
     /**
      * Open or refresh the finding for one facet of a per-span classifier (one call site, one kind of thing
-     * the detector saw) from an event-time window that crossed the classifier's bar.
-     *
-     * <p><b>Every field moves forward only.</b> Windows are bucketed on when the span happened, and a late
-     * upload can report a window older than the one this finding already holds. So {@code last_seen_at}
-     * keeps the later of the two, {@code sample_count} and {@code payload} belong to the newest window and
-     * an older one leaves them alone, and {@code onset_at} starts a new spell only when a NEWER window
-     * follows a quiet gap, never because an old window arrived late.
-     *
-     * <p>The comparisons cast to {@code timestamptz}. The columns are text, and {@code Instant#toString}
-     * drops a zero fraction, so {@code ...:00.5Z} sorts before {@code ...:00Z} as a string while being
-     * later as an instant.
+     * the detector saw) from an event-time window that crossed the classifier's bar. {@link #armedUpsert}
+     * does the writing.
      *
      * @param onsetAt the window's start
      * @param lastSeenAt when the latest detection in the window happened
-     * @param quietBefore a finding last seen before this has been quiet long enough that a newer window
-     *     is a new spell
      */
-    public Recorded recordArmedFacet(
+    public @Nullable Recorded recordArmedFacet(
             String id,
             String projectId,
             String classifierKey,
@@ -425,12 +390,76 @@ public class FindingRepository {
             String payloadJson,
             String quietBefore,
             String now) {
-        Recorded outcome = jdbc.sql("""
+        return armedUpsert(
+                id,
+                projectId,
+                classifierKey,
+                CauseKey.perSpanClassifierFacet(classifierId, callSiteId, facet),
+                classifierId,
+                label,
+                callSiteId,
+                observedCount,
+                onsetAt,
+                lastSeenAt,
+                payloadJson,
+                quietBefore,
+                now);
+    }
+
+    /**
+     * The write both of a per-span classifier's armed shapes share: the classifier-wide one
+     * ({@link #recordArmedWindow}, one finding per classifier) and the faceted one ({@link
+     * #recordArmedFacet}, one per call site and facet). Both walk their sweep's fired windows
+     * oldest-first and call this once per window that crossed the bar.
+     *
+     * <p><b>Every field moves forward only.</b> Windows are bucketed on when the span happened, and a late
+     * upload can report a window older than the one this finding already holds. So {@code last_seen_at}
+     * keeps the later of the two, {@code sample_count} and {@code payload} belong to the newest window and
+     * an older one leaves them alone, and {@code onset_at} starts a new spell only when a NEWER window
+     * follows a quiet gap, never because an old window arrived late.
+     *
+     * <p><b>A window no newer than an already-closed finding opens nothing.</b> [decision 8b, interactions
+     * with 1] A ruled finding leaves {@code ux_finding_live} by construction (see the class javadoc), so
+     * without this guard a re-sweep of an old window — after the finding a fresher window opened has
+     * already been ruled on and closed — would INSERT a brand new open finding for a window someone
+     * already looked at. The guard only ever suppresses a fresh INSERT: a window that lands while THIS
+     * cause's live row is still open always reaches the conflict target below and refreshes it, whatever
+     * any older, unrelated closed finding says.
+     *
+     * <p>The comparisons cast to {@code timestamptz}. The columns are text, and {@code Instant#toString}
+     * drops a zero fraction, so {@code ...:00.5Z} sorts before {@code ...:00Z} as a string while being
+     * later as an instant.
+     *
+     * @return null when the newer-than-closed guard suppressed the write — nothing was opened or
+     *     refreshed, so the caller has no finding to attach evidence to for this window
+     */
+    private @Nullable Recorded armedUpsert(
+            String id,
+            String projectId,
+            String classifierKey,
+            String causeKey,
+            String classifierId,
+            String label,
+            @Nullable String callSiteId,
+            long observedCount,
+            String onsetAt,
+            String lastSeenAt,
+            String payloadJson,
+            String quietBefore,
+            String now) {
+        return jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
                                  sample_count, payload, created_at, updated_at)
-            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :onsetAt, :lastSeenAt, :count, CAST(:payload AS jsonb), :now, :now)
+            SELECT :id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
+                   'open', :onsetAt, :lastSeenAt, :count, CAST(:payload AS jsonb), :now, :now
+             WHERE EXISTS (SELECT 1 FROM finding
+                            WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
+                              AND status = 'open' AND triage_verdict IS NULL)
+                OR NOT EXISTS (SELECT 1 FROM finding
+                            WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
+                              AND status = 'closed'
+                              AND CAST(last_seen_at AS timestamptz) >= CAST(:lastSeenAt AS timestamptz))
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 updated_at = EXCLUDED.updated_at,
@@ -458,7 +487,7 @@ public class FindingRepository {
                 .param("id", id)
                 .param("pid", projectId)
                 .param("classifier", classifierKey)
-                .param("causeKey", CauseKey.perSpanClassifierFacet(classifierId, callSiteId, facet))
+                .param("causeKey", causeKey)
                 .param("subjectKind", FindingRow.SubjectKind.CLASSIFIER)
                 .param("subjectId", classifierId)
                 .param("subjectLabel", label)
@@ -470,8 +499,9 @@ public class FindingRepository {
                 .param("quietBefore", quietBefore)
                 .param("now", now)
                 .query((rs, n) -> recorded(rs))
-                .single();
-        return created(id, outcome);
+                .optional()
+                .map(outcome -> created(id, outcome))
+                .orElse(null);
     }
 
     /**
