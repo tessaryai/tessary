@@ -374,7 +374,10 @@ public final class BehaviorDtos {
              * not a number of firings, and a reader who took it for one would read a fitted fact as a
              * recurring event.
              */
-            @Nullable String conformanceKind) {
+            @Nullable String conformanceKind,
+            /** The case this finding opened or joined ({@code finding.case_id}), or null while it backs
+             *  none — a negative verdict, or a positive still waiting on {@code CaseOpener}. */
+            @Nullable String caseId) {
 
         /**
          * Where this finding is in the Layer-2 pipeline. A null verdict alone is ambiguous: it is
@@ -475,7 +478,8 @@ public final class BehaviorDtos {
                     row.triagedAt(),
                     triageStatus(row, failed),
                     row.humanVerdictAt(),
-                    null);
+                    null,
+                    row.caseId());
         }
 
         /**
@@ -513,7 +517,10 @@ public final class BehaviorDtos {
                     // ruling like any other, so leaving this set would tell RCA the direction a person
                     // decided even though the columns that say what they decided are gone.
                     null,
-                    conformanceKind);
+                    conformanceKind,
+                    // caseId survives: it says which case this finding backs, carrying no opinion about
+                    // who ruled it or which way — the same reason triageStatus survives just above.
+                    caseId);
         }
     }
 

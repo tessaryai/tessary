@@ -582,55 +582,6 @@ public class FindingRepository {
                 .single();
     }
 
-    /**
-     * The findings of one or more classifiers that have earned a case: open, ruled {@code positive},
-     * and — for a caller that wants one — still firing within a quiet window.
-     *
-     * <p><b>One gate now, not four.</b> A ruling freezes the finding by construction (see the class
-     * javadoc), so "open AND ruled positive" already means a machine or a person confirmed the claim;
-     * there is no separate human arm left to special-case. {@link #seenSince} is optional: the three
-     * detectors with a recovery window pass one, and secret leak — whose findings stay live until a
-     * person closes them — passes null, matching its old {@code listLive}'s no-window, no-cap contract.
-     *
-     * <p><b>The gate is in SQL, deliberately.</b> A case source hands {@code CaseReconciler} the full
-     * live set every pass and the reconciler closes whatever dropped out, so a row filtered in Java
-     * after a {@code LIMIT} would not merely be hidden — it would read as a recovery and close a case
-     * that is still firing.
-     */
-    public List<FindingRow> listConfirmed(
-            String projectId, Collection<String> classifierKeys, @Nullable String seenSince, int limit) {
-        if (classifierKeys.isEmpty()) return List.of();
-        String sinceClause = seenSince == null ? "" : " AND last_seen_at >= :since";
-        var spec = jdbc.sql("SELECT " + COLS + " FROM finding"
-                        + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
-                        + "   AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'" + sinceClause
-                        + " ORDER BY last_seen_at DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("classifiers", classifierKeys)
-                .param("limit", limit);
-        if (seenSince != null) spec = spec.param("since", seenSince);
-        return spec.query((rs, n) -> map(rs)).list();
-    }
-
-    /**
-     * Every open finding of these classifiers, no ruling required, no recency window, no cap. For
-     * {@code SecretLeakCaseSource}: a high-confidence leak is a fact to rotate, not a claim Layer 2
-     * audits, and {@code ClassifierArming}'s faceted sweep re-derives the same windows on every pass —
-     * writing a ruling onto the row it keeps refreshing would remove it from {@code ux_finding_live}
-     * and fork a new finding on the very next idempotent re-scan of an unchanged window. The case
-     * source reads {@code highConfidence()} off the payload instead of a verdict.
-     */
-    public List<FindingRow> listOpen(String projectId, Collection<String> classifierKeys) {
-        if (classifierKeys.isEmpty()) return List.of();
-        return jdbc.sql("SELECT " + COLS + " FROM finding"
-                        + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
-                        + " ORDER BY last_seen_at DESC")
-                .param("pid", projectId)
-                .param("classifiers", classifierKeys)
-                .query((rs, n) -> map(rs))
-                .list();
-    }
-
     /** Every finding linked to one case, newest first — a case's own findings, per its {@code case_id}. */
     public List<FindingRow> listByCase(String projectId, String caseId) {
         return jdbc.sql("SELECT " + COLS + " FROM finding WHERE project_id = :pid AND case_id = :caseId"
@@ -753,8 +704,9 @@ public class FindingRepository {
         record Row(String subjectId, ConfirmedSpan span) {}
         List<Row> rows = jdbc.sql("SELECT subject_id, onset_at, last_seen_at FROM finding"
                         + " WHERE project_id = :pid AND classifier_key IN (:classifiers) AND " + LIVE
-                        // The same gate listConfirmed applies, and deliberately the same one: a finding
-                        // too unconfirmed to open a case is too unconfirmed to disqualify a day's traffic
+                        // The same gate CaseOpener applies before a case ever opens, and deliberately the
+                        // same one: a finding too unconfirmed to open a case is too unconfirmed to disqualify a day's
+                        // traffic
                         // from being normal. Layer 1 detects change and cannot tell change from a
                         // problem, so excluding on an untriaged finding would blind the control to every
                         // legitimate shift the product ever makes. No horizon needed: closing a case

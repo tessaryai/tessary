@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository.FacetWindow;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository.FiredFacet;
@@ -92,16 +93,22 @@ public class ClassifierArming {
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
     private final ObjectMapper mapper;
+    /** Opens or joins the case for a facet finding that just crossed high confidence — see
+     *  {@link #evaluateFaceted}. Secret leak is the one classifier this fires for today: it carries no
+     *  triage gate, so arming is the only place its case can open. */
+    private final CaseOpener caseOpener;
 
     public ClassifierArming(
             ClassifierDetectionWriteRepository detections,
             FindingRepository findings,
             FindingEvidenceRepository evidence,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            CaseOpener caseOpener) {
         this.detections = detections;
         this.findings = findings;
         this.evidence = evidence;
         this.mapper = mapper;
+        this.caseOpener = caseOpener;
     }
 
     /**
@@ -240,7 +247,10 @@ public class ClassifierArming {
      * windows on every sweep and relies on {@code recordArmedFacet}'s conflict target to refresh the
      * one row a still-firing spell owns; a ruling would remove that row from {@code ux_finding_live}
      * (decision 1) and fork a fresh finding on the very next idempotent re-scan of the same window.
-     * {@code SecretLeakCaseSource} reads {@code highConfidence()} off the payload directly instead.
+     * {@link CaseOpener} is called after every window instead, and reads {@code highConfidence()} off
+     * the payload directly to decide whether a case is due — a cheap no-op re-application on a window
+     * that was already high (or is still low), and the one door a leak's case ever opens through, since
+     * this classifier carries no triage gate at all.
      */
     private List<String> evaluateFaceted(
             ClassifierRow signal,
@@ -305,6 +315,10 @@ public class ClassifierArming {
                     new FacetScope(w.callSiteId(), w.facet(), w.windowStartEpochSecond()), List.of());
             int stored = evidence.recordUpTo(
                     projectId, recorded.findingId(), FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES, at);
+            // A no-op unless this finding is high confidence right now (CaseOpener reads the row fresh),
+            // so calling it on every window — high or low, new or a re-application — costs nothing on the
+            // common case and is the only place a leak's case can ever open.
+            caseOpener.ensureCaseFor(projectId, recorded.findingId(), null);
             if (recorded.created()) opened++;
             filed.add(recorded.findingId());
 
