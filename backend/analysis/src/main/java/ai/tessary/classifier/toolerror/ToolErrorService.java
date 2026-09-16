@@ -166,13 +166,13 @@ public class ToolErrorService {
         // still waiting for the run to thicken. Both are the same fact, a human has already accepted this
         // rate, and writing the spell hands them back the finding they accepted.
         //
-        // The pending arm is not belt-and-braces. `resolve` sets the finding ALLOWLISTED, and
-        // `ux_finding_live` covers only ('open','blocked'), so the ON CONFLICT in `recordRecomputedCause`
-        // does not see the allowlisted row: every pass through the deferral window INSERTS A SECOND,
-        // FRESH, OPEN finding for a cause the human has settled. Nothing closes it, and the absorb reads
-        // as having done nothing. That window used to be the width of one Triage page load, because this
-        // was a read path that recomputed; it is now however long the tool takes to reach
-        // `minBaselineCalls`, with `ToolErrorSweep` running the whole time.
+        // The pending arm is not belt-and-braces. A person's absorb closes the finding, and
+        // `ux_finding_live` only covers an unruled `open` row, so the ON CONFLICT in
+        // `recordRecomputedCause` does not see the closed row: every pass through the deferral window
+        // INSERTS A SECOND, FRESH, OPEN finding for a cause the human has settled. Nothing closes it, and
+        // the absorb reads as having done nothing. That window used to be the width of one Triage page
+        // load, because this was a read path that recomputed; it is now however long the tool takes to
+        // reach `minBaselineCalls`, with `ToolErrorSweep` running the whole time.
         List<Spell> spells = sweep.spells().stream()
                 .filter(s -> !absorbed.contains(s.toolKey()) && !awaitingPin.contains(s.toolKey()))
                 .toList();
@@ -196,12 +196,10 @@ public class ToolErrorService {
      * Fold a negatively-ruled finding's window into the tool's reference, and clear the arm it fired on.
      *
      * <p><b>What a negative means.</b> Triage ruled the claim does not hold: the rows do not carry what
-     * the detector asserted, so the traffic it fired on was ordinary. Until now that wrote three columns
-     * on the finding and nothing else, the accumulator kept the value it fired at, above its own
-     * threshold, so the spell went on firing on evidence a ruling had already dismissed. Those firings
-     * land in {@code recurrences_since_verdict}, which the re-open rule reads as "the traffic
-     * contradicted the ruling", so a dismissed finding re-triaged itself and eventually opened a case
-     * off nothing new. The recurrence signal only means something if a negative resets the arm.
+     * the detector asserted, so the traffic it fired on was ordinary. Closing the finding does not by
+     * itself fix that: the accumulator still sits above its own threshold, so the very next sweep opens a
+     * FRESH finding for a cause a human just dismissed, off nothing new. Folding the window into the
+     * reference is what actually resets the arm.
      *
      * <p><b>Why the window folds into the reference rather than replacing it.</b> Absorb REPLACES: a
      * human pressing "legitimate" is saying this run is the normal, and the run is the whole of it. A

@@ -341,12 +341,10 @@ class ToolErrorClassifierIntegrationTest {
      * A closed ruling hands the window back to the detector: the arm clears, and what it fired over
      * becomes part of normal.
      *
-     * <p><b>The state this replaces.</b> Triage wrote three columns on the finding and nothing else, so
-     * the accumulator kept the value it fired at — above its own threshold — and went on firing on
-     * evidence a ruling had already dismissed. Those firings feed {@code recurrences_since_verdict},
-     * which the re-open rule reads as the traffic contradicting the ruling, so a closed finding
-     * re-triaged itself and eventually opened a case off nothing new. On the websearch finding that
-     * prompted this the arm sat at 7.331 against a threshold of 6.0 for thirteen failure-free days.
+     * <p><b>The state this replaces.</b> Closing the finding alone does not touch the accumulator, so it
+     * kept the value it fired at — above its own threshold — and the very next sweep would open a fresh
+     * finding for a cause a human just dismissed, off nothing new. On the websearch finding that prompted
+     * this the arm sat at 7.331 against a threshold of 6.0 for thirteen failure-free days.
      *
      * <p><b>Folded, not replaced.</b> Absorb replaces the reference, because a human pressing
      * "legitimate" is saying this run IS the normal. A close is weaker — nobody said the old normal was
