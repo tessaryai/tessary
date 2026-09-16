@@ -94,7 +94,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_cases` | none | `state` (`open` \| `muted` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open and muted pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
-| `get_case` | `id` | none | The case, its activity trail, `finding_id`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
+| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
 
 `get_case` accepts either the stored id or the human reference a person would quote, such as `C-118`. `rca` is null while a report is still running, in which case `rca_report_id` names it so you can poll, and null when none has been run; `rca_available` says whether one could be.
 
