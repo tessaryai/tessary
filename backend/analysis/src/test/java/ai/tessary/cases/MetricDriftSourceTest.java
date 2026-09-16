@@ -54,8 +54,8 @@ class MetricDriftSourceTest {
     @Test
     void anTriagedShiftOpensACaseAndRecoveryClosesItOnTheNextPass() {
         when(signals.listByProject(PROJECT)).thenReturn(List.of());
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
-                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, FindingRow.Status.OPEN)));
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
+                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, false)));
 
         List<CaseDetection> firing = source.detect(PROJECT);
 
@@ -82,7 +82,7 @@ class MetricDriftSourceTest {
         // The bucket returns to its reference: nothing writes "recovered", the finding simply stops being
         // bumped and drops out of the live query. The reconciler closes the case from that absence, which
         // only works because this source restates the whole live set every pass.
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
                 .thenReturn(List.of());
 
         assertTrue(source.detect(PROJECT).isEmpty(), "a recovered shift must leave the live set");
@@ -101,7 +101,7 @@ class MetricDriftSourceTest {
         // MetricDriftCaseGateIntegrationTest is what proves the predicate itself withholds that lead
         // against real SQL; what this asserts is that the source has no second path around it — no
         // "show it anyway if it has recurred enough", no ungated fallback list.
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
                 .thenReturn(List.of());
 
         assertTrue(source.detect(PROJECT).isEmpty());
@@ -118,8 +118,8 @@ class MetricDriftSourceTest {
     @Test
     void aHumanConfirmedShiftOpensACaseWithNoMachineVerdict() {
         when(signals.listByProject(PROJECT)).thenReturn(List.of());
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
-                .thenReturn(List.of(finding(null, FindingRow.Status.BLOCKED)));
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
+                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, true)));
 
         CaseDetection detection = source.detect(PROJECT).get(0);
 
@@ -136,8 +136,8 @@ class MetricDriftSourceTest {
     @Test
     void theCaseNamesWhoConfirmedIt() {
         when(signals.listByProject(PROJECT)).thenReturn(List.of());
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
-                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, FindingRow.Status.OPEN)));
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
+                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, false)));
 
         String basis = source.detect(PROJECT).get(0).basis();
 
@@ -148,8 +148,8 @@ class MetricDriftSourceTest {
     @Test
     void aHumanRulingSaysSo() {
         when(signals.listByProject(PROJECT)).thenReturn(List.of());
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
-                .thenReturn(List.of(finding(null, FindingRow.Status.BLOCKED)));
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
+                .thenReturn(List.of(finding(FindingRow.TriageVerdict.POSITIVE, true)));
 
         String basis = source.detect(PROJECT).get(0).basis();
 
@@ -164,8 +164,8 @@ class MetricDriftSourceTest {
     @Test
     void anUnreadableEvidenceBlobDegradesRatherThanDroppingTheCase() {
         when(signals.listByProject(PROJECT)).thenReturn(List.of());
-        when(findings.listSurvivingAnalysis(eq(PROJECT), anyCollection(), any(), anyString(), anyInt()))
-                .thenReturn(List.of(row(FindingRow.TriageVerdict.POSITIVE, FindingRow.Status.OPEN, "{not json")));
+        when(findings.listConfirmed(eq(PROJECT), anyCollection(), any(), anyInt()))
+                .thenReturn(List.of(row(FindingRow.TriageVerdict.POSITIVE, false, "{not json")));
 
         CaseDetection detection = source.detect(PROJECT).get(0);
 
@@ -178,8 +178,8 @@ class MetricDriftSourceTest {
 
     // ---- fixtures --------------------------------------------------------------------------------
 
-    private static FindingRow finding(@Nullable String verdict, String status) {
-        return row(verdict, status, EVIDENCE);
+    private static FindingRow finding(@Nullable String verdict, boolean human) {
+        return row(verdict, human, EVIDENCE);
     }
 
     /** PROGRAM.md §7's blob, as {@code MetricFindingEvidence} writes it. */
@@ -192,7 +192,7 @@ class MetricDriftSourceTest {
              "window":{"opened_at":"2026-07-28T00:00:00Z","closed_at":"2026-07-30T00:00:00Z","kind":"count"}}
             """;
 
-    private static FindingRow row(@Nullable String verdict, String status, String evidence) {
+    private static FindingRow row(@Nullable String verdict, boolean human, String evidence) {
         return new FindingRow(
                 "fnd_1",
                 PROJECT,
@@ -202,7 +202,7 @@ class MetricDriftSourceTest {
                 "mbl_1",
                 BUCKET,
                 null,
-                status,
+                FindingRow.Status.OPEN,
                 "2026-07-30T00:00:00Z",
                 Instant.now().toString(),
                 null,
@@ -218,8 +218,8 @@ class MetricDriftSourceTest {
                 verdict == null ? null : "The retry loop added in 4f2a1c explains it.",
                 /* triageCitationsJson */ null,
                 verdict == null ? null : "2026-07-30T06:30:00Z",
-                FindingRow.Status.BLOCKED.equals(status) ? "2026-07-30T12:00:00Z" : null,
-                0,
+                human ? "2026-07-30T12:00:00Z" : null,
+                /* caseId */ null,
                 "2026-07-30T00:00:00Z",
                 Instant.now().toString());
     }

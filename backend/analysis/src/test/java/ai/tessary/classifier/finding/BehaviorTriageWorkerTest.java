@@ -129,11 +129,6 @@ class BehaviorTriageWorkerTest {
         }
 
         @Override
-        public long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly) {
-            return 0;
-        }
-
-        @Override
         public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
             return Optional.empty();
         }

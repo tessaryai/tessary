@@ -103,7 +103,12 @@ class MetricDriftCaseGateIntegrationTest {
                 null,
                 now());
         // A human pressing "Real deviation" outranks the machine, and carries no machine verdict at all.
-        findings.setStatus(p.projectId(), human, FindingRow.Status.BLOCKED, now());
+        findings.recordHumanRuling(
+                p.projectId(),
+                human,
+                FindingRow.TriageVerdict.POSITIVE,
+                "A person ruled this a real deviation.",
+                now());
 
         Set<String> firing = source.detect(p.projectId()).stream()
                 .map(d -> d.key().subjectId())
@@ -127,10 +132,13 @@ class MetricDriftCaseGateIntegrationTest {
                 p.projectId(), id, FindingRow.TriageVerdict.POSITIVE, "Explained by 4f2a1c.", null, now());
         assertEquals(1, source.detect(p.projectId()).size());
 
-        // What "Legitimate — absorb" does to the finding. The reference re-pin is FindingService's
-        // half and is covered by MetricFindingResolveIntegrationTest; what matters here is that the
-        // absorbed cause stops being live, which is how a case closes with nobody touching Triage.
-        findings.setStatus(p.projectId(), id, FindingRow.Status.ALLOWLISTED, now());
+        // What "Legitimate — absorb" does to the finding once a case already holds it: the person's
+        // ruling is already in place, so absorb closes the finding directly (CaseLedger#absorb, via
+        // FindingRepository#closeByCase) rather than writing a second one. The reference re-pin is
+        // BehaviorTriageSource#repin's half and is covered by MetricFindingResolveIntegrationTest;
+        // what matters here is that a closed cause stops being live, which is how a case closes with
+        // nobody touching Triage.
+        findings.close(p.projectId(), id, now());
 
         assertTrue(source.detect(p.projectId()).isEmpty());
     }

@@ -130,7 +130,8 @@ class MetricFindingResolveIntegrationTest {
         assertEquals("pv-deploy-9", row.pinnedByVersionId());
         assertEquals(FILLING_SKETCH, row.currentSketchJson(), "absorbing reads the window; it does not consume it");
 
-        assertEquals(FindingRow.Status.ALLOWLISTED, view.status(), "the absorbed cause stops recurring");
+        assertEquals(FindingRow.Status.CLOSED, view.status(), "the absorbed cause closes");
+        assertEquals(FindingRow.TriageVerdict.NEGATIVE, view.triageVerdict());
 
         // An online baseline cannot be stopped from absorbing drift. What can be done is to make every
         // absorption a durable, readable row — and this is the one absorption a person chose, so it is
@@ -163,10 +164,10 @@ class MetricFindingResolveIntegrationTest {
         assertNull(row.pinnedAt());
         assertNull(row.pinnedByVersionId());
 
-        // BLOCKED is what "marks for escalation" means concretely: it stamps human_verdict_at, so
-        // recurrences_since_verdict starts counting the windows that shifted after a person said this
-        // must not happen — the state PLAN.md §8's CaseSource reads.
-        assertEquals(FindingRow.Status.BLOCKED, view.status());
+        // A positive human ruling is what "marks for escalation" means concretely now: the finding
+        // stays open and human_verdict_at is stamped, which is what lets the cause open or join a case.
+        assertEquals(FindingRow.Status.OPEN, view.status());
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, view.triageVerdict());
         assertNotNull(view.humanVerdictAt(), "the ruling is stamped, which is what a case is opened off");
 
         assertEquals(

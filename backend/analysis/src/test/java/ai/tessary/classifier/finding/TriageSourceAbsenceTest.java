@@ -60,11 +60,10 @@ class TriageSourceAbsenceTest {
     // ---- absent adapters degrade, on every port -----------------------------------------------
 
     @Test
-    @DisplayName("no TriageSource at all: the page is empty and the withheld count is zero, not a failure")
+    @DisplayName("no TriageSource at all: the page is empty, not a failure")
     void absent_triage_sources_render_an_empty_page() {
         var page = service(List.of()).findings(PROJECT, null, null, null, true);
         assertTrue(page.findings().isEmpty());
-        assertEquals(0, page.withheld());
         assertEquals(TriageLane.EVIDENCE_ONLY.wire(), page.lane(), "the lane is a constant, not a source's opinion");
     }
 
@@ -121,7 +120,9 @@ class TriageSourceAbsenceTest {
                 source.resolve(PROJECT, "f1", BehaviorResolutionRequest.EXPECTED, "usr_1");
 
         assertTrue(resolved.isPresent(), "an absent resolver degrades the write, it does not fail the call");
-        verify(findings).setStatus(eq(PROJECT), eq("f1"), eq(FindingRow.Status.ALLOWLISTED), anyString());
+        verify(findings)
+                .recordHumanRuling(
+                        eq(PROJECT), eq("f1"), eq(FindingRow.TriageVerdict.NEGATIVE), anyString(), anyString());
         verify(events).insert(any(BehaviorBaselineEventRow.class));
         ArgumentCaptor<AnnotationRow> annotation = ArgumentCaptor.forClass(AnnotationRow.class);
         verify(annotations).upsert(annotation.capture());
@@ -349,7 +350,7 @@ class TriageSourceAbsenceTest {
                 null,
                 null,
                 null,
-                0,
+                null,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z");
     }
@@ -429,11 +430,6 @@ class TriageSourceAbsenceTest {
         }
 
         @Override
-        public long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly) {
-            return 0;
-        }
-
-        @Override
         public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
             return Optional.empty();
         }
@@ -497,7 +493,6 @@ class TriageSourceAbsenceTest {
                     null,
                     BehaviorFindingView.TriageStatus.PENDING,
                     null,
-                    0,
                     null);
         }
     }

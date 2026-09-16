@@ -202,13 +202,15 @@ class ToolErrorClassifierIntegrationTest {
                         .count(),
                 "a recompute must not deposit a second finding for a cause that already has one");
 
-        // The human arm of the case gate. BLOCKED is what `listLiveByCause` reads as confirmed.
+        // The human arm of the case gate: a positive ruling stays open, which is what the case source
+        // now reads as confirmed.
         var resolved = drift.resolve(pid, finding.id(), "not_expected", null);
         assertEquals(
-                FindingRow.Status.BLOCKED,
+                FindingRow.Status.OPEN,
                 resolved.status(),
                 "Real deviation must mark the finding confirmed — this 404'd before rate_shift had a "
                         + "branch in resolve, so no tool-error case could open by any path");
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, resolved.triageVerdict());
     }
 
     /**

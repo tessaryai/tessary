@@ -97,7 +97,7 @@ class BehaviorTriagePromptTest {
                 null,
                 null,
                 null,
-                0,
+                null,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z");
     }

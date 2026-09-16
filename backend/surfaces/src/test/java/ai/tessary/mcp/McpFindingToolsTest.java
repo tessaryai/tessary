@@ -162,7 +162,7 @@ class McpFindingToolsTest {
                 /* triageCitationsJson */ null,
                 /* triagedAt */ null,
                 /* humanVerdictAt */ null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         // No evidence set on the detail: get_finding returns the CLAIM, and get_finding_evidence pages
@@ -195,7 +195,6 @@ class McpFindingToolsTest {
                         "2026-06-03T00:00:00Z",
                         f.triageStatus(),
                         f.humanVerdictAt(),
-                        f.recurrencesSinceVerdict(),
                         f.conformanceKind()),
                 base.metric(),
                 base.toolError(),
@@ -247,10 +246,25 @@ class McpFindingToolsTest {
                 "the triage summary's text is still somewhere on the wire");
     }
 
+    /**
+     * Under the open/closed model a person's ruling is a ruling like any other — set on the same
+     * columns triage writes — so redacting the verdict and leaving {@code humanVerdictAt} standing
+     * would still tell RCA that a person decided this, only not what they decided.
+     */
+    @Test
+    void getFinding_neverReturnsWhoRuled() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFinding());
+
+        JsonNode finding =
+                structured(callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
+
+        assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
+    }
+
     @Test
     void listFindings_neverReturnsTheTriageRuling() throws Exception {
         when(behaviorDrift.findings(PROJECT_ID, null, null, null, true))
-                .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), 0L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), "repo"));
 
         JsonNode body = structured(callTool("list_findings", "{}"));
 
@@ -322,7 +336,7 @@ class McpFindingToolsTest {
                 null,
                 null,
                 null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         return BehaviorFindingDetailView.of(row);
@@ -375,7 +389,7 @@ class McpFindingToolsTest {
                 null,
                 null,
                 null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         MalformedOutputEvidence.MalformedDetail malformed = new MalformedOutputEvidence.MalformedDetail(
@@ -443,7 +457,7 @@ class McpFindingToolsTest {
                 null,
                 null,
                 null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         SecretLeakEvidence.SecretLeakDetail secretLeak = new SecretLeakEvidence.SecretLeakDetail(
@@ -516,7 +530,7 @@ class McpFindingToolsTest {
                 null,
                 null,
                 null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         return BehaviorFindingDetailView.of(row);
@@ -562,7 +576,7 @@ class McpFindingToolsTest {
     @Test
     void listFindings_defaultsToConfirmedOnly() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 2L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         structured(callTool("list_findings", "{}"));
 
@@ -573,7 +587,7 @@ class McpFindingToolsTest {
     @Test
     void listFindings_passesEveryFilterThroughAndWidensOnlyForExplicitAll() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 0L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         structured(callTool(
                 "list_findings",
@@ -583,18 +597,14 @@ class McpFindingToolsTest {
         verify(behaviorDrift).findings(PROJECT_ID, "open", "cs-1", "behavior_drift", false);
     }
 
-    /**
-     * {@code withheld} is rendered, not dropped. It is the count of findings this org's capabilities held
-     * back, and an agent reading a short list needs to know the list was filtered rather than empty.
-     */
+    /** The lane is rendered on every page: which Layer-2 lane this project's findings are ruled on. */
     @Test
-    void listFindings_rendersWithheldCountAndLane() throws Exception {
+    void listFindings_rendersLane() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 4L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         JsonNode body = structured(callTool("list_findings", "{}"));
 
-        assertEquals(4, body.get("withheld").asInt());
         assertEquals("repo", body.get("lane").asText());
     }
 
