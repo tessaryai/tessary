@@ -69,16 +69,17 @@ tasks:
 
   # ---- dev: run everything (docker + tmux) ----
   dev:
-    desc: Launch the dev stack inside tmux (logs in tabbed windows + a shell). Use `dev:local` to also run a HOST launcher on your local `opencode` (no E2B).
+    desc: 'Launch the dev stack inside tmux (logs in tabbed windows + a shell). Runs like a self-hosted install: on first run it asks where triage and RCA agents run, whether to run the encoder classifier service, and whether to enforce sign-in, then remembers the answers in .local/dev-choices.env.'
     cmds:
       - bash scripts/dev.sh
 
-  dev:local:
-    desc: Dev stack + a HOST launcher running your local `opencode` (no E2B) for the agentic paths (/analyze, /rca, /triage, /synthesize, /codegen). Needs `opencode` + git on PATH.
-    env:
-      TESSARY_LOCAL_AGENT: "1"
+  # The questions `task dev` asks once, asked again, and nothing started. The stack picks the new
+  # answers up on its next `task dev` or `task dev:up`.
+  dev:configure:
+    desc: 'Answer the dev stack''s questions again (agents: docker/e2b/off, encoder classifiers, sign-in) and save them. Restart the stack to apply.'
+    interactive: true
     cmds:
-      - bash scripts/dev.sh
+      - bash scripts/lib/dev-choices.sh configure
 
   # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads TESSARY_PROFILING and
   # self-heals the agent jar, so `TESSARY_PROFILING=1 task dev:slim` (or any other dev mode) works
@@ -86,14 +87,6 @@ tasks:
   dev:profiling:
     desc: Dev stack + continuous CPU profiling. Flame graphs at http://localhost:4040 (local Pyroscope, no cloud account needed).
     env:
-      TESSARY_PROFILING: "1"
-    cmds:
-      - bash scripts/dev.sh
-
-  dev:local:profiling:
-    desc: Like `dev:local` (HOST launcher on your local `opencode`, no E2B) plus continuous CPU profiling at http://localhost:4040.
-    env:
-      TESSARY_LOCAL_AGENT: "1"
       TESSARY_PROFILING: "1"
     cmds:
       - bash scripts/dev.sh
@@ -108,7 +101,7 @@ tasks:
     # Renamed from dev:2gb — the number was never the point, and it stopped being true when
     # classify's mem_limit went to 8 GB. Alias kept so the old name and old shell history work.
     aliases: [dev:2gb]
-    desc: 'Like `dev` minus the classify + compile services: no gated encoder-weight download, no 8 GB container. Runs postgres, backend, frontend, caddy, alloy — only encoder classifier heads and SOP-conformance fits stay dormant.'
+    desc: '`task dev` with the encoder classifier service already answered "no": no classify or compile, no gated encoder-weight download, no 8 GB container. Only encoder classifier heads and SOP-conformance fits stay dormant.'
     env:
       TESSARY_SKIP_CLASSIFY: "1"
     cmds:
@@ -683,7 +676,7 @@ tasks:
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: Start the dev stack detached, no tmux (build on demand). `TESSARY_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
+    desc: 'Start the dev stack detached, no tmux (build on demand). Same questions as `task dev` on a terminal; saved answers or the non-interactive defaults otherwise.'
     cmds:
       - bash scripts/dev-up.sh
 

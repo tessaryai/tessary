@@ -36,7 +36,7 @@ E2B; nothing in this tree can delete it.
 
 ## Layout
 
-- `launcher/` — the HTTP sidecar (`server.js`). Owns the three backends below.
+- `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below.
 - `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, the shared `agent-stream.js`
   OpenCode runner, and TWO INDEPENDENTLY MAINTAINED RECIPES for one runtime — `template.ts` (the E2B
   template, published by `build.ts`) and `Dockerfile` (the published agent image the Docker backend
@@ -51,9 +51,9 @@ narrower.
 
 - **Isolation:** the E2B backend's microVM is a kernel-level boundary. The **Docker** backend gets
   an equivalent process-level one — a fresh, hardened sibling container per request (`--cap-drop=ALL`,
-  `no-new-privileges`, its own bridge network). The `local` backend has **no container or VM
-  isolation at all**: the agent runs as a plain host child process. It is a developer convenience
-  (`task dev:local`), not an isolation option.
+  `no-new-privileges`, its own bridge network). Both are equally isolated; `task dev` builds
+  the Docker image from this checkout, so it is also the default for local development, not
+  only for a self-hosted install.
 - **Credentials and egress:** the agent NEEDS both — a repo clone and a model-provider call — so
   AGENT_POSTURE hands it the provider credentials `agentEnvs()` derives and puts the container on the
   sandbox bridge network. `E2B_API_KEY` stays in the launcher and is never sent to the backend or
@@ -108,63 +108,6 @@ That no-argument form is unchanged and publishes under the `default` tag. `--rel
 `--promote=` and `--rollback=` are the four verbs the workflow drives; every one of them is runnable
 on a laptop with the same key, which is the point of them living in `build.ts` rather than inline in
 a workflow step.
-
-## Local agent backend (`task dev:local`)
-
-Both launcher paths — RCA (`/rca`) and Layer-2 triage (`/triage`) — drive the **`opencode`** CLI. By
-default the launcher runs each in a fresh **E2B microVM** (template
-`tessary/tessary-agent-sandbox`, namespaced because E2B scopes template names to the project that
-built them), which needs `E2B_API_KEY` and Bedrock credentials. For local development you can instead run those scripts on the **host**,
-against a locally installed `opencode`, with no E2B at all:
-
-- **`SANDBOX_BACKEND`** — `docker` (default — see below) | `e2b` (opt-in) | `local`.
-  In `local`, the agentic paths run the `agent-sandbox/*.js` scripts on the host via
-  `node` (no `E2B_API_KEY`, no `e2b` package install, no container isolation at all).
-  The launcher logs the active backend at startup:
-  `listening on :8080 (backend=local)` / `(backend=e2b, template=…)` /
-  `(backend=docker, image=…, concurrency=…)`.
-- **Model** — no local override, and nothing to translate. Both backends get the same
-  model and the same credentials, so a local run cannot silently exercise a different
-  provider than production. The backend still configures a bare Bedrock id; the launcher's
-  `toProviderModel()` qualifies it with the OpenCode provider that serves it
-  (`global.anthropic.claude-sonnet-4-6` → `amazon-bedrock/…`, `openai.gpt-5.6-terra` →
-  `bedrock-mantle-gpt/…`). An id that already names a provider passes through.
-- **Credentials** — `agentEnvs()` forwards **SigV4 only** (`AWS_REGION`,
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, plus `AWS_SESSION_TOKEN` when set) along
-  with the generated OpenCode provider config in `OPENCODE_CONFIG_CONTENT`. A Bedrock
-  bearer token is not a substitute here — on this path the launcher never reads one. For a
-  dev machine with no AWS access key / secret, `AGENT_PROVIDER` selects a dev-only escape
-  hatch instead: `anthropic` (+ `ANTHROPIC_API_KEY`) runs the agent on the first-party
-  Anthropic API, serving the Claude line only, and `bedrock-api-key`
-  (+ `AWS_BEARER_TOKEN_BEDROCK`) runs bedrock-runtime over a bearer token, without the
-  mantle GPT models. Unset (in every compose file) is always SigV4 Bedrock. `AGENT_PROVIDER`
-  is also how a self-hoster's own model keys plug into the Docker backend below — it is
-  not a dev-only escape hatch any more. Setup detail lives in
-  [`devdocs/guides/local-dev.md` § Agent credentials without AWS keys](../devdocs/guides/local-dev.md#agent-credentials-without-aws-keys)
-  and `.env.example`.
-- **`WORK_DIR`** — the filesystem root the analyzer scripts use (`$WORK_DIR/repo`,
-  `$WORK_DIR/candidate.js`, `$WORK_DIR/units`). Defaults to `/home/user` so the E2B
-  template behavior is unchanged; in local mode the launcher sets it per-request to a
-  fresh `os.tmpdir()` temp dir, which it removes after the run.
-
-**Recipe** — from the repo root, with `opencode` installed and `git` on PATH:
-
-```bash
-task dev:local
-```
-
-This runs the normal Docker stack **plus** a 5th tmux window (`launcher`) running the
-host launcher in local mode, and auto-points the backend container at it
-(`TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL=http://host.docker.internal:8080`, key `devkey`
-unless `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` is set). It installs the host analyzer
-deps (`sandbox-runner/agent-sandbox/node_modules`) on first run. Plain `task dev` is unchanged (E2B path, no launcher window).
-
-> **Note (Linux):** the backend container reaches the host launcher via
-> `host.docker.internal`, which resolves out-of-the-box on Docker Desktop (macOS/Windows) —
-> the platform the documented `task dev:local` workflow targets. On a **native Linux** Docker
-> engine that hostname may not resolve; add an `extra_hosts: ["host.docker.internal:host-gateway"]`
-> mapping to the backend service (or point `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` at the host's
-> IP) for it to work there.
 
 ## Docker sandbox driver (`SANDBOX_BACKEND=docker`, the default)
 
@@ -278,6 +221,7 @@ the published `AGENT_IMAGE`, both as a bare host process and as a genuinely cont
    because this host's Docker Desktop socket has no group-write bit at all — see the socket
    permissions note above; `group_add` is the documented mechanism for a real Linux host, whose
    `docker.sock` is normally group-writable.)
-4. **`task dev:local` unaffected:** that path's `runScriptLocally` and the `local` backend
-   selection are untouched by this issue — `SANDBOX_BACKEND=local` still runs the analyzer
-   scripts directly on the host process, no Docker involved.
+4. **(2026-09-16) The `local` backend this point once described — a host-process escape hatch
+   with no container or VM isolation, `task dev:local` — was removed once `task dev` started
+   building AGENT_IMAGE from the checkout: an isolated Docker sandbox is now no slower to get
+   running than the unisolated one was, so there was no remaining reason to keep it.

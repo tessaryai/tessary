@@ -10,7 +10,7 @@
  * between an explicit BEDROCK selection and the AGENT_PROVIDER knob, is deleted outright: there is
  * no more knob for a selection to be hijacked by.
  */
-process.env.SANDBOX_BACKEND = 'local'; // keep require() side-effect free (no docker fail-fast, no listen)
+process.env.SANDBOX_BACKEND = 'e2b'; // keep require() side-effect free (no docker fail-fast, no listen)
 // None of these should be read by the launcher any more — set to loud canaries so a regression
 // that reaches back into process.env for a provider secret fails LOUDLY, not silently.
 process.env.OPENAI_API_KEY = 'LEAKED-env-openai';

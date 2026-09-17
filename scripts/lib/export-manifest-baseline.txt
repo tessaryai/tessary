@@ -1495,6 +1495,7 @@ scripts/dev.sh
 scripts/emit-span.js
 scripts/lib/check-export-denylist.sh
 scripts/lib/cloud-credential-denylist.sh
+scripts/lib/dev-choices.sh
 scripts/lib/dev-compose.sh
 scripts/lib/dev-services.sh
 scripts/lib/dns-sink.js

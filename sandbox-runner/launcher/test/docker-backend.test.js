@@ -322,7 +322,7 @@ test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset', asyn
       files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200, `default backend must be docker with no cloud creds set, got: ${res.body}`);
-    assert.equal(daemon.createBodies.length, 1, 'the unconfigured default must route through /containers/create, not e2b/local');
+    assert.equal(daemon.createBodies.length, 1, 'the unconfigured default must route through /containers/create, not e2b');
   } finally {
     child.kill();
     daemon.server.close();

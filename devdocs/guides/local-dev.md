@@ -23,7 +23,7 @@ task caddy              # :8000 (canonical entry)
 `task node:install` / `frontend:install` self-heal a pre-pnpm checkout (clears npm's flat
 `node_modules` when the `.pnpm/` marker is missing).
 
-Auth is bypassed locally because `TESSARY_AUTH_DISABLED=true` is set for you — in `docker-compose.dev.yml` for the Docker stack, and in the `backend` task itself for the bare-metal one. Unsetting WorkOS is no longer enough on its own: without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated).
+Auth is bypassed for the bare-metal `backend` task, which sets `TESSARY_AUTH_DISABLED=true` itself. The Docker stack is different: it enforces sign-in by default, like a self-hosted install, and asks before it does anything else (see [the questions `task dev` asks](#the-questions-task-dev-asks)). Unsetting WorkOS is no longer enough on its own: without the flag every `/api/**` call answers 401, deliberately, so that an unconfigured deployment refuses rather than opens. With the flag, sign-in is skipped and every request is anonymous (no `TenantContext` populated), which also means the UI's sign-in flow cannot complete: `/auth/me` answers 401 however many times you sign in.
 
 To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `TESSARY_AUTH_COOKIE_PASSWORD`, `WORKOS_REDIRECT_URI`, and `SPRING_PROFILES_ACTIVE=production` before `task backend` — **and also edit the `backend` task's hardcoded `TESSARY_AUTH_DISABLED: "true"` to `"false"`, or unset it.** (Corrected 2026-09-01: this used to say a configured provider always wins over the flag, so unsetting it wasn't needed — that precedence was retired. The flag is authoritative on its own now; a configured WorkOS provider no longer overrides it.)
 
@@ -32,12 +32,31 @@ To exercise the auth flow end-to-end against WorkOS staging, set `WORKOS_API_KEY
 Dev images: JVM-mode backend with Spring Boot devtools, Vite dev server with HMR, Caddy reverse proxy. Source is bind-mounted; node_modules and the Maven repo live in named volumes so rebuilds don't refetch.
 
 ```bash
-task dev                                                   # → tmux session
-task dev:slim                                              # same, minus classify + compile (was `dev:2gb`, still aliased)
+task dev                                                   # → tmux session, asks its questions on first run
+task dev:configure                                         # answer them again; the next `task dev` applies it
+task dev:slim                                              # encoder classifiers already answered: no (was `dev:2gb`, still aliased)
 
-task dev:up                                                # no tmux: same containers, detached, logs via `task dev:logs`
+task dev:up                                                # no tmux: same containers and questions, detached, logs via `task dev:logs`
 task dev:up:slim                                           # = TESSARY_SKIP_CLASSIFY=1 task dev:up
 ```
+
+### The questions `task dev` asks
+
+The dev stack runs like the one `docker compose -f oci://docker.io/tessaryai/tessary:compose` installs, and the few things that genuinely differ between setups are asked as multiple choice on first run, then saved to `.local/dev-choices.env` (gitignored). Every run prints one line saying what it is using and where each answer came from.
+
+| Question | Options | Recommended | Without a terminal |
+|---|---|---|---|
+| Where should triage and RCA agents run? | `docker` (a sandbox container per run, built from this checkout's `sandbox-runner/agent-sandbox/` — always up to date with your changes), `e2b` (microVMs, from the published `tessary/tessary-agent-sandbox` template; needs `E2B_API_KEY` and a public MCP URL), `off` | `docker` | `off` |
+| Run the encoder classifier service? | No, Yes (8 GB container, gated weight download) | No | Yes |
+| Enforce sign-in? | Yes, No | Yes | Yes |
+
+An answer is taken from the first of these that has one: the environment (including a preset like `task dev:slim`), `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it. Presets are never saved, so running `task dev:slim` once does not turn later plain `task dev` runs into slim ones.
+
+The non-interactive defaults for agents and the classifier service are what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
+
+With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag — a boot-time failure there stops the whole run rather than surfacing as an opaque 502 on the first `/rca` or `/triage`. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
+
+Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and the launcher key default to the same placeholders `docker-compose.yml` ships. Set real ones in `.env` for anything beyond local development.
 
 ### Slim mode — what runs
 
