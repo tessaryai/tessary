@@ -251,9 +251,18 @@ public final class BehaviorDtos {
 
         public static BehaviorFindingDetailView of(
                 FindingRow row, @Nullable MalformedDetail malformedOutput, @Nullable SecretLeakDetail secretLeak) {
+            return of(row, malformedOutput, secretLeak, null);
+        }
+
+        /** As above, carrying the finding's dead-lettered triage when it has one; see {@link BehaviorFindingView#of(FindingRow, FailedTriage)}. */
+        public static BehaviorFindingDetailView of(
+                FindingRow row,
+                @Nullable MalformedDetail malformedOutput,
+                @Nullable SecretLeakDetail secretLeak,
+                @Nullable FailedTriage failed) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
-                    BehaviorFindingView.of(row),
+                    BehaviorFindingView.of(row, failed),
                     FindingRow.Cause.DISTRIBUTION_SHIFT.equals(row.causeKind())
                             ? MetricFindingEvidence.detail(evidence)
                             : null,

@@ -253,7 +253,7 @@ class TriageSourceAbsenceTest {
                 evidence,
                 null, // ClassifierRepository: read by the escalation arm only
                 classifiers,
-                null, // BehaviorTriageJobRepository: read by list()/escalate() only
+                null, // BehaviorTriageJobRepository: read by list()/escalate()/detail() of a non-SOP row only
                 null, // BehaviorTriageEngine
                 null, // CaseOpener: the positive (not_expected) branch only; every call here is EXPECTED
                 null, // MetricBaselineRepository: the distribution_shift branch only

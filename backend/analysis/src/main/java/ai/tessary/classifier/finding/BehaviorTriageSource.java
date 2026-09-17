@@ -219,8 +219,12 @@ public class BehaviorTriageSource implements TriageSource {
         // Reachability is re-asserted rather than assumed: a withheld classifier's finding must 404,
         // and this source has now claimed the id, so throwing is the contract.
         FindingRow finding = requireReachableFinding(projectId, findingId);
-        return Optional.of(
-                BehaviorFindingDetailView.of(finding, malformedOutputs.detail(finding), secretLeaks.detail(finding)));
+        // The same read the list makes, for the same reason: without it a dead-lettered triage renders
+        // as running on this page for good, while the queue it was opened from says it failed.
+        BehaviorTriageJobRepository.FailedTriage failed =
+                jobs.failedByFinding(projectId, List.of(findingId)).get(findingId);
+        return Optional.of(BehaviorFindingDetailView.of(
+                finding, malformedOutputs.detail(finding), secretLeaks.detail(finding), failed));
     }
 
     // ---- escalation -----------------------------------------------------------------------------
