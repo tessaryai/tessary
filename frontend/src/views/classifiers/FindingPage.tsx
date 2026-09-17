@@ -19,7 +19,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, EvidenceRef, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import { CONTAINER, ResolveVerbs, VerbButton, chainWords, detectorLabel, triageState } from "./shared";
+import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, triageState } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
@@ -87,7 +87,6 @@ export function FindingPage() {
   const detail: Detail = detailQ.data;
   const finding = detail.finding;
   const triaged = finding.triageStatus === "done";
-  const inFlight = finding.triageStatus === "in_flight";
   const busy = resolveM.isPending || analyzeM.isPending;
   const state = triageState(finding);
 
@@ -103,15 +102,14 @@ export function FindingPage() {
   return (
     <div style={CONTAINER}>
       {shift ? (
-        <ShiftHeader shift={shift} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
+        <ShiftHeader shift={shift} finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
       ) : rate ? (
-        <RateHeader rate={rate} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
+        <RateHeader rate={rate} finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
       ) : secretLeak ? (
         <SecretHeader
           secretLeak={secretLeak}
           finding={finding}
           basePath={basePath}
-          inFlight={inFlight}
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
@@ -120,7 +118,6 @@ export function FindingPage() {
           rate={malformedOutput.rate}
           finding={finding}
           basePath={basePath}
-          inFlight={inFlight}
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
@@ -144,9 +141,7 @@ export function FindingPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-4">
             {!triaged && (
-              <VerbButton kind="filled" disabled={busy || inFlight} onClick={() => analyzeM.mutate()}>
-                {inFlight ? "Triaging…" : "Run triage"}
-              </VerbButton>
+              <RunTriageButton finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
             )}
             {/* A ruling freezes the finding by construction (decision 1): once triaged is true a
                 verdict is stood, and every verb on it — triage's own or a person's — 409s. So the
@@ -169,6 +164,13 @@ export function FindingPage() {
 
       {resolveM.isError && <ErrorNote error={resolveM.error} />}
       {analyzeM.isError && <ErrorNote error={analyzeM.error} />}
+      {/* A dead-lettered run is revived only once its cooldown has passed; before that the press lands
+          on the same dead job, and saying nothing would read as the button not working. */}
+      {analyzeM.data?.jobStatus === "dead" && (
+        <p className="text-muted text-small mt-2 mb-0">
+          Triage gave up on this finding recently. It can run again once its cooldown has passed.
+        </p>
+      )}
 
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
@@ -301,13 +303,11 @@ export function FindingPage() {
   function ShiftHeader({
     shift: sh,
     finding: f,
-    inFlight: running,
     busy: disabled,
     onAnalyze,
   }: {
     shift: NonNullable<Detail["metric"]>;
     finding: Detail["finding"];
-    inFlight: boolean;
     busy: boolean;
     onAnalyze: () => void;
   }) {
@@ -354,9 +354,7 @@ export function FindingPage() {
               {triageState(f).label}
             </span>
           ) : (
-            <VerbButton kind="filled" disabled={disabled || running} onClick={onAnalyze}>
-              {running ? "Triaging…" : "Run triage"}
-            </VerbButton>
+            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
           )
         }
       />
@@ -373,13 +371,11 @@ export function FindingPage() {
   function RateHeader({
     rate: r,
     finding: f,
-    inFlight: running,
     busy: disabled,
     onAnalyze,
   }: {
     rate: NonNullable<Detail["toolError"]>;
     finding: Detail["finding"];
-    inFlight: boolean;
     busy: boolean;
     onAnalyze: () => void;
   }) {
@@ -422,9 +418,7 @@ export function FindingPage() {
               {triageState(f).label}
             </span>
           ) : (
-            <VerbButton kind="filled" disabled={disabled || running} onClick={onAnalyze}>
-              {running ? "Triaging…" : "Run triage"}
-            </VerbButton>
+            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
           )
         }
       />

@@ -103,6 +103,37 @@ export function VerbButton({
 }
 
 /**
+ * The triage verb a finding's own page offers before there is a ruling.
+ *
+ * <p>A run that gave up says so beside the button, in the label and tone the findings list uses, and
+ * the button offers the run again rather than staying on "Triaging…" for a job nothing is running.
+ */
+export function RunTriageButton({
+  finding,
+  busy,
+  onAnalyze,
+}: {
+  finding: BehaviorFinding;
+  busy: boolean;
+  onAnalyze: () => void;
+}) {
+  const inFlight = finding.triageStatus === "in_flight";
+  const failed = finding.triageStatus === "failed";
+  const button = (
+    <VerbButton kind="filled" disabled={busy || inFlight} onClick={onAnalyze}>
+      {inFlight ? "Triaging…" : failed ? "Run triage again" : "Run triage"}
+    </VerbButton>
+  );
+  if (!failed) return button;
+  return (
+    <span className="flex flex-wrap items-center gap-2.5">
+      <span className="text-error text-small">{triageState(finding).label}</span>
+      {button}
+    </span>
+  );
+}
+
+/**
  * The human verdicts on one finding. Both are `outline` for the reason VerbButton's own note
  * gives.
  *
