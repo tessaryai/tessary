@@ -6,12 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.CauseKey;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakKeyView;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakLeakView;
 import ai.tessary.classifier.worker.ClassifierArming;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -26,6 +30,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +65,9 @@ class ClassifierArmingIntegrationTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    CaseService cases;
 
     @Autowired
     JdbcClient jdbc;
@@ -573,6 +582,44 @@ class ClassifierArmingIntegrationTest {
     }
 
     @Test
+    void aSecretLeakCaseListsKeysFromEveryFinding() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "arming-case-keys").project().id();
+        String classifierId = armedSecretLeak(pid);
+        Instant older = windowStart(daysAgo(5)).plusSeconds(3_600);
+        Instant newer = windowStart(daysAgo(2)).plusSeconds(3_600);
+
+        String firstId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…OLD1", older)),
+                        Instant.now())
+                .get(0);
+        String secondId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…NEW2", newer)),
+                        Instant.now())
+                .get(0);
+        String caseId = findings.findById(pid, firstId).orElseThrow().caseId();
+        assertNotNull(caseId);
+        assertEquals(caseId, findings.findById(pid, secondId).orElseThrow().caseId(), "both findings on one case");
+
+        SecretLeakDetail detail = cases.detail(pid, caseId).secretLeak();
+        assertNotNull(detail);
+        assertEquals(
+                Set.of("AKIA…OLD1", "AKIA…NEW2"),
+                detail.keys().stream().map(SecretLeakKeyView::masked).collect(Collectors.toSet()),
+                "every finding's key is a key to rotate");
+        assertEquals(older.toString(), detail.firstAt(), "it started when the oldest finding's leak happened");
+        assertEquals(2, detail.leakCount());
+        assertEquals(
+                Set.of("AKIA…OLD1", "AKIA…NEW2"),
+                detail.leaks().stream().map(SecretLeakLeakView::masked).collect(Collectors.toSet()),
+                "and the witnesses are both findings'");
+    }
+
+    @Test
     void witnessesStopAtTheCap() {
         String pid = TenantFixture.bootstrap(tenants, "arming-cap").project().id();
         String classifierId = armedSecretLeak(pid);
@@ -706,6 +753,18 @@ class ClassifierArmingIntegrationTest {
      */
     private FindingEvidenceRepository.Ref leak(
             String pid, String classifierId, String callSiteId, String pattern, String confidence, Instant startedAt) {
+        return leak(pid, classifierId, callSiteId, pattern, confidence, "AKIA…ZAM2", startedAt);
+    }
+
+    /** As {@link #leak}, leaking the key masked as {@code masked}. */
+    private FindingEvidenceRepository.Ref leak(
+            String pid,
+            String classifierId,
+            String callSiteId,
+            String pattern,
+            String confidence,
+            String masked,
+            Instant startedAt) {
         SubstrateV2Fixtures.SpanRef span =
                 fx.spanSeed(pid).callSiteId(callSiteId).at(startedAt).writeRef();
         detections.insert(
@@ -720,7 +779,8 @@ class ClassifierArmingIntegrationTest {
                 span.spanId(),
                 "critical",
                 confidence,
-                "{\"pattern\":\"" + pattern + "\",\"source\":\"output\",\"masked\":\"AKIA…ZAM2\",\"stored\":\"raw\"}");
+                "{\"pattern\":\"" + pattern + "\",\"source\":\"output\",\"masked\":\"" + masked
+                        + "\",\"stored\":\"raw\"}");
         return FindingEvidenceRepository.Ref.span(span.traceId(), span.spanId());
     }
 

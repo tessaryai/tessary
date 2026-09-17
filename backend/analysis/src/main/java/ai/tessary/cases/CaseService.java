@@ -259,10 +259,26 @@ public class CaseService {
                 shiftDetail(finding),
                 rateDetail(finding),
                 finding == null ? null : malformedOutputDetail.detail(finding),
-                finding == null ? null : secretLeakDetail.detail(finding),
+                finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
+    }
+
+    /**
+     * The findings a secret-leak case's keys-to-rotate and when-it-leaked read across: all of them, newest
+     * first, rather than only the newest one the rest of the page shows. A credential leaked in an earlier
+     * window is still exposed, so a later finding joining the case must not hide it. Any other case gets
+     * its newest finding alone, which the secret-leak reader returns null for.
+     */
+    private List<FindingRow> secretLeakFindings(String projectId, CaseRow row, FindingRow newest) {
+        if (!CaseRow.Detector.SECRET_LEAK.equals(row.detector())) return List.of(newest);
+        List<FindingRow> all = new ArrayList<>();
+        all.add(newest);
+        for (FindingRow f : findings.listByCase(projectId, row.id())) {
+            if (!f.id().equals(newest.id())) all.add(f);
+        }
+        return all;
     }
 
     /**
