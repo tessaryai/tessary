@@ -26,6 +26,9 @@ import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidenceSpanPage;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.malformed.MalformedOutputEvidence;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
@@ -159,7 +162,7 @@ class McpFindingToolsTest {
                 /* triageCitationsJson */ null,
                 /* triagedAt */ null,
                 /* humanVerdictAt */ null,
-                0L,
+                null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
         // No evidence set on the detail: get_finding returns the CLAIM, and get_finding_evidence pages
@@ -192,13 +195,14 @@ class McpFindingToolsTest {
                         "2026-06-03T00:00:00Z",
                         f.triageStatus(),
                         f.humanVerdictAt(),
-                        f.recurrencesSinceVerdict(),
-                        f.conformanceKind()),
+                        f.conformanceKind(),
+                        f.caseId()),
                 base.metric(),
                 base.toolError(),
                 base.baseline(),
                 base.malformedOutput(),
-                base.secretLeak());
+                base.secretLeak(),
+                base.armedWindow());
     }
 
     // ---- registration --------------------------------------------------------------------------
@@ -243,10 +247,25 @@ class McpFindingToolsTest {
                 "the triage summary's text is still somewhere on the wire");
     }
 
+    /**
+     * Under the open/closed model a person's ruling is a ruling like any other — set on the same
+     * columns triage writes — so redacting the verdict and leaving {@code humanVerdictAt} standing
+     * would still tell RCA that a person decided this, only not what they decided.
+     */
+    @Test
+    void getFinding_neverReturnsWhoRuled() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFinding());
+
+        JsonNode finding =
+                structured(callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
+
+        assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
+    }
+
     @Test
     void listFindings_neverReturnsTheTriageRuling() throws Exception {
         when(behaviorDrift.findings(PROJECT_ID, null, null, null, true))
-                .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), 0L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), "repo"));
 
         JsonNode body = structured(callTool("list_findings", "{}"));
 
@@ -284,6 +303,257 @@ class McpFindingToolsTest {
         verify(behaviorDrift, org.mockito.Mockito.never()).finding(any(), any());
     }
 
+    private static BehaviorFindingDetailView toolErrorFinding() {
+        FindingRow row = new FindingRow(
+                "find-2",
+                PROJECT_ID,
+                "tool_error",
+                "tool_error:tool:search_docs:up",
+                FindingRow.SubjectKind.TOOL,
+                "tool:search_docs",
+                "search_docs",
+                "cs-1",
+                FindingRow.Status.OPEN,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z",
+                null,
+                null,
+                null,
+                80L,
+                "{\"cause_kind\":\"" + FindingRow.Cause.RATE_SHIFT + "\",\"measure\":\"tool_error_rate\","
+                        + "\"bucket\":{\"kind\":\"tool\",\"key\":\"tool:search_docs\"},"
+                        + "\"direction\":\"up\",\"statistic\":12.5,\"threshold\":6.0,\"criticality\":40.2,"
+                        + "\"effect_size\":0.31,\"delta_pp\":8.4,\"counts_basis\":\"onset\","
+                        + "\"rate\":{\"ref\":0.02,\"cur\":0.1},\"n_ref\":500,\"n_cur\":80,"
+                        + "\"failures\":{\"cur\":8},"
+                        + "\"failing_traces\":[\"trace-secret-1\",\"trace-secret-2\"],"
+                        + "\"onset_at\":\"2026-06-01T00:00:00Z\",\"window\":{\"kind\":\"recomputed\"}}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z");
+        return BehaviorFindingDetailView.of(row);
+    }
+
+    /**
+     * {@code get_finding}'s summary blocks now carry every number R3 added, and the agent view still
+     * drops the sample this classifier's blob names: {@code failing_traces}.
+     */
+    @Test
+    void getFinding_toolError_carriesSummaryNumbers_andDropsFailingTraces() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-2")).thenReturn(toolErrorFinding());
+
+        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-2\"}"));
+        JsonNode toolError = body.get("toolError");
+
+        assertEquals("up", toolError.get("direction").asText());
+        assertEquals(12.5, toolError.get("statistic").asDouble(), 0.001);
+        assertEquals(6.0, toolError.get("threshold").asDouble(), 0.001);
+        assertEquals(0.31, toolError.get("effectSize").asDouble(), 0.001);
+        assertEquals(40.2, toolError.get("criticality").asDouble(), 0.001);
+        assertEquals(0, toolError.get("failingTraces").size(), "the agent view carries no trace ids");
+        assertFalse(body.toString().contains("trace-secret-1"), "a failing trace id reached the agent");
+    }
+
+    private static BehaviorFindingDetailView malformedOutputFinding() {
+        FindingRow row = new FindingRow(
+                "find-4",
+                PROJECT_ID,
+                BuiltInDetector.Kind.MALFORMED_OUTPUT,
+                "malformed_output_rate:cs-3",
+                FindingRow.SubjectKind.TOOL,
+                "cs-3",
+                "cs-3",
+                "cs-3",
+                FindingRow.Status.OPEN,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z",
+                null,
+                null,
+                null,
+                12L,
+                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\"}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z");
+        MalformedOutputEvidence.MalformedDetail malformed = new MalformedOutputEvidence.MalformedDetail(
+                new ToolErrorEvidence.RateDetail(
+                        "cs-3",
+                        0.01,
+                        0.2,
+                        19.0,
+                        500,
+                        60,
+                        12,
+                        List.of(),
+                        false,
+                        List.of("trace-malformed-1"),
+                        "2026-06-01T00:00:00Z",
+                        null,
+                        null,
+                        "up",
+                        9.0,
+                        5.0,
+                        0.4,
+                        30.0),
+                List.of(),
+                2L,
+                1L);
+        return BehaviorFindingDetailView.of(row, malformed, null);
+    }
+
+    @Test
+    void getFinding_malformedOutput_dropsFailingTraces() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-4")).thenReturn(malformedOutputFinding());
+
+        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-4\"}"));
+        JsonNode rate = body.get("malformedOutput").get("rate");
+
+        assertEquals("up", rate.get("direction").asText());
+        assertEquals(0, rate.get("failingTraces").size(), "the agent view carries no trace ids");
+        assertFalse(body.toString().contains("trace-malformed-1"), "a failing trace id reached the agent");
+    }
+
+    private static BehaviorFindingDetailView secretLeakFinding() {
+        FindingRow row = new FindingRow(
+                "find-3",
+                PROJECT_ID,
+                BuiltInDetector.Kind.SECRET_LEAK,
+                "secret_leak:aws-access-token",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "classifier-1",
+                "aws-access-token",
+                "cs-2",
+                FindingRow.Status.OPEN,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z",
+                null,
+                null,
+                null,
+                3L,
+                "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"native_cause_key\":\"aws-access-token\"}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z");
+        SecretLeakEvidence.SecretLeakDetail secretLeak = new SecretLeakEvidence.SecretLeakDetail(
+                "aws-access-token",
+                FindingRow.Confidence.HIGH,
+                3L,
+                2L,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z",
+                List.of(new SecretLeakEvidence.SecretLeakKeyView("AKIA…WXYZ", 3L, 2L, "2026-06-02T00:00:00Z", false)),
+                List.of(new SecretLeakEvidence.SecretLeakLeakView(
+                        "2026-06-02T00:00:00Z", "AKIA…WXYZ", "masked", "trace-secret-9", "span-1")),
+                "event_count",
+                1L,
+                86_400L,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z");
+        return BehaviorFindingDetailView.of(row, null, secretLeak);
+    }
+
+    /**
+     * The whole R3 checklist for Secret Leak in one test: the summary numbers ({@code basis}, {@code
+     * threshold}, {@code windowSeconds}) that were missing, the masked key that must survive, and the
+     * witness trace/span ids that must not — the case decision 12 calls out by name.
+     */
+    @Test
+    void getFinding_secretLeak_carriesSummaryNumbers_andDropsWitnessIds() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-3")).thenReturn(secretLeakFinding());
+
+        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-3\"}"));
+        JsonNode secretLeak = body.get("secretLeak");
+
+        assertEquals("event_count", secretLeak.get("basis").asText());
+        assertEquals(1, secretLeak.get("threshold").asLong());
+        assertEquals(86_400, secretLeak.get("windowSeconds").asLong());
+        JsonNode leak = secretLeak.get("leaks").get(0);
+        assertTrue(leak.get("traceId").isNull(), "the agent view carries no trace id");
+        assertTrue(leak.get("spanId").isNull(), "the agent view carries no span id");
+        assertEquals("AKIA…WXYZ", leak.get("masked").asText(), "the masked key still reaches the agent");
+        assertFalse(body.toString().contains("trace-secret-9"), "a witness trace id reached the agent");
+        assertTrue(body.get("armedWindow").isNull(), "secret leak's richer block replaces the generic one");
+    }
+
+    private static BehaviorFindingDetailView armedWindowFinding() {
+        FindingRow row = new FindingRow(
+                "find-5",
+                PROJECT_ID,
+                BuiltInDetector.Kind.FRUSTRATION,
+                "per_span_classifier:classifier-2",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "classifier-2",
+                "Frustration",
+                null,
+                FindingRow.Status.OPEN,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z",
+                null,
+                null,
+                null,
+                7L,
+                "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"basis\":\"event_count\","
+                        + "\"observed\":7,\"threshold\":5,\"window_seconds\":86400,"
+                        + "\"window_start\":\"2026-06-01T00:00:00Z\",\"window_end\":\"2026-06-02T00:00:00Z\"}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-02T00:00:00Z");
+        return BehaviorFindingDetailView.of(row);
+    }
+
+    /**
+     * Frustration, groundedness and regex/threshold classifiers had no summary block before R3 — this
+     * is the new one, built off exactly what {@code ClassifierArming} already wrote to the payload.
+     */
+    @Test
+    void getFinding_armedWindow_carriesSummaryForAClassifierWithNoRicherDetailOfItsOwn() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-5")).thenReturn(armedWindowFinding());
+
+        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-5\"}"));
+        JsonNode armedWindow = body.get("armedWindow");
+
+        assertEquals("event_count", armedWindow.get("basis").asText());
+        assertEquals(7, armedWindow.get("observed").asLong());
+        assertEquals(5, armedWindow.get("threshold").asLong());
+        assertEquals(86_400, armedWindow.get("windowSeconds").asLong());
+    }
+
     // ---- list_findings ---------------------------------------------------------------------------
 
     /**
@@ -307,7 +577,7 @@ class McpFindingToolsTest {
     @Test
     void listFindings_defaultsToConfirmedOnly() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 2L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         structured(callTool("list_findings", "{}"));
 
@@ -318,7 +588,7 @@ class McpFindingToolsTest {
     @Test
     void listFindings_passesEveryFilterThroughAndWidensOnlyForExplicitAll() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 0L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         structured(callTool(
                 "list_findings",
@@ -328,18 +598,14 @@ class McpFindingToolsTest {
         verify(behaviorDrift).findings(PROJECT_ID, "open", "cs-1", "behavior_drift", false);
     }
 
-    /**
-     * {@code withheld} is rendered, not dropped. It is the count of findings this org's capabilities held
-     * back, and an agent reading a short list needs to know the list was filtered rather than empty.
-     */
+    /** The lane is rendered on every page: which Layer-2 lane this project's findings are ruled on. */
     @Test
-    void listFindings_rendersWithheldCountAndLane() throws Exception {
+    void listFindings_rendersLane() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), 4L, "repo"));
+                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
         JsonNode body = structured(callTool("list_findings", "{}"));
 
-        assertEquals(4, body.get("withheld").asInt());
         assertEquals("repo", body.get("lane").asText());
     }
 
@@ -381,7 +647,10 @@ class McpFindingToolsTest {
                                 7293L,
                                 4120L,
                                 0.031,
-                                "claude-opus-5",
+                                List.of("claude-opus-5", "claude-haiku-5"),
+                                true,
+                                true,
+                                true,
                                 "otto-von-bismarck",
                                 "what the span was given",
                                 "what it returned",
@@ -403,7 +672,10 @@ class McpFindingToolsTest {
                                 84L,
                                 null,
                                 null,
-                                null,
+                                List.of(),
+                                false,
+                                false,
+                                false,
                                 "otto-von-bismarck",
                                 "tool input",
                                 "tool output",
@@ -447,7 +719,12 @@ class McpFindingToolsTest {
         assertTrue(first.get("spanId").isNull(), "a trace-grain row carries no span id");
         assertEquals(7293, first.get("latencyMs").asLong());
         assertEquals(4120, first.get("totalTokens").asLong());
-        assertEquals("claude-opus-5", first.get("model").asText());
+        List<String> models = new java.util.ArrayList<>();
+        first.get("models").forEach(m -> models.add(m.asText()));
+        assertEquals(List.of("claude-opus-5", "claude-haiku-5"), models);
+        assertTrue(first.get("notRolledUp").asBoolean(), "a whole-run row can flag its trace as not rolled up yet");
+        assertTrue(first.get("partialCost").asBoolean(), "a whole-run row can flag unpriced spans");
+        assertTrue(first.get("staleTotals").asBoolean(), "a whole-run row can flag an unsettled rollup");
         assertEquals("otto-von-bismarck", first.get("callSiteId").asText());
         JsonNode second = body.get("rows").get(1);
         assertEquals("trace-8", second.get("traceId").asText());
@@ -457,6 +734,8 @@ class McpFindingToolsTest {
         assertEquals("Timeout", second.get("errorType").asText());
         // A tool span has neither, and an empty cell is the honest answer rather than a zero.
         assertTrue(second.get("totalTokens").isNull(), "a tool span has no tokens");
+        assertEquals(0, second.get("models").size(), "a tool span carries no model");
+        assertFalse(second.get("notRolledUp").asBoolean(), "the flags are always false on a single-step row");
         assertEquals("cursor-2", body.get("nextCursor").asText());
         assertEquals(120, body.get("counts").get("member").asLong());
     }

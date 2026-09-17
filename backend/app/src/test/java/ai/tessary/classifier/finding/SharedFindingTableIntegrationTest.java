@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,7 +25,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -228,6 +228,57 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
+     * A whole-run evidence row ({@code span_id IS NULL}) reads tokens and cost off the TRACE rollup,
+     * not the root span — a run's spend is the sum of every LLM call inside it, and the root step
+     * (an {@code agent} span) carries neither. It also reports every distinct model the run called,
+     * and mirrors the rollup's own caveats: not yet rolled up, missing priced spans, or still
+     * unsettled. Latency alone stays the root step's, per decision R2, since that is what the
+     * detector actually measured.
+     */
+    @Test
+    @DisplayName("a whole-run row reads tokens and cost from the trace rollup, every model, and the rollup flags")
+    void wholeRunEvidenceRowReadsTraceRollupAndModels() {
+        Project p = project("finding-evidence-whole-run");
+        String findingId = firing(p, "gram-whole-run");
+        String now = Instant.now().toString();
+        String traceId = "trace-whole-run";
+
+        jdbc.sql("""
+                INSERT INTO trace (project_id, id, started_at, event_ts, total_tokens, total_cost,
+                                    unpriced_spans, rolled_up_at, is_settled)
+                VALUES (:pid, :tid, now(), now(), 9000, 1.2345, 2, NULL, false)
+                """).param("pid", p.id()).param("tid", traceId).update();
+        insertRootSpan(p.id(), traceId, "span-root", null, "invoke_agent root", 4_000L);
+        insertLlmSpan(p.id(), traceId, "span-llm-1", "span-root", "claude-opus-5", false);
+        insertLlmSpan(p.id(), traceId, "span-llm-2", "span-root", "claude-haiku-5", false);
+        insertLlmSpan(p.id(), traceId, "span-llm-3", "span-root", "claude-opus-5", false);
+        insertLlmSpan(p.id(), traceId, "span-deleted", "span-root", "gpt-ghost", true);
+
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.trace(traceId)),
+                now);
+
+        var page = behaviorDrift.findingEvidenceSpans(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, 100, null);
+        assertEquals(1, page.rows().size());
+        var row = page.rows().get(0);
+        assertEquals(4_000L, row.latencyMs(), "latency stays the root step, not a trace-wide figure");
+        assertEquals(9000L, row.totalTokens(), "tokens come from the trace rollup, not the root span");
+        assertNotNull(row.totalCost(), "cost comes from the trace rollup, not the root span");
+        assertEquals(
+                1.2345, row.totalCost().doubleValue(), 1e-9, "cost comes from the trace rollup, not the root span");
+        assertEquals(
+                List.of("claude-haiku-5", "claude-opus-5"),
+                row.models(),
+                "every distinct model the run called, the deleted span's excluded: " + row.models());
+        assertTrue(row.notRolledUp(), "rolled_up_at is null");
+        assertTrue(row.partialCost(), "unpriced_spans > 0");
+        assertTrue(row.staleTotals(), "is_settled is false");
+    }
+
+    /**
      * One logical-root span, inserted straight in: the substrate fixtures build whole traces, and this
      * test needs an unnatural one — several logical roots in a single trace — to exercise the join.
      */
@@ -243,6 +294,21 @@ class SharedFindingTableIntegrationTest {
                 .param("parent", parentId)
                 .param("name", name)
                 .param("latency", latencyMs)
+                .update();
+    }
+
+    /** One LLM leaf span under {@code parentId}, carrying a model — what the whole-run models list reads. */
+    private void insertLlmSpan(
+            String projectId, String traceId, String spanId, String parentId, String model, boolean deleted) {
+        jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name,"
+                        + " provided_model_name, started_at, event_ts, is_deleted)"
+                        + " VALUES (:pid, :tid, :sid, :parent, 'llm', 'chat', :model, now(), now(), :deleted)")
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .param("sid", spanId)
+                .param("parent", parentId)
+                .param("model", model)
+                .param("deleted", deleted)
                 .update();
     }
 
@@ -302,52 +368,33 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * {@code ux_finding_live} keeps {@code blocked} inside its predicate. Dropping it would let the
-     * blocked row stop matching the index, so the next firing would conflict with nothing, a second
-     * finding would be INSERTed beside it, and the human's verdict would be silently discarded.
+     * {@code ux_finding_live} now excludes any ruled row, {@code blocked} included: a person's ruling
+     * is written onto the same {@code triage_verdict}/{@code status} columns a machine's is, and a
+     * ruled row leaves the arbiter by construction. Dropping a ruled row out of the index is the
+     * point, not the bug this test used to guard against: the next firing must open a FRESH finding
+     * rather than silently mutate the one a person already read and ruled on.
      */
     @Test
-    @DisplayName("a blocked finding still owns its cause, so a later firing lands on it")
-    void blockedStaysInsideTheLiveArbiter() {
-        Project p = project("finding-blocked-arm");
+    @DisplayName("a human-ruled finding leaves the live arbiter, so a later firing opens a fresh one")
+    void aHumanRuledFindingLeavesTheLiveArbiter() {
+        Project p = project("finding-human-ruled-arm");
         String findingId = firing(p, "gram-blocked");
-        findings.setStatus(
-                p.id(), findingId, FindingRow.Status.BLOCKED, Instant.now().toString());
+        findings.recordHumanRuling(
+                p.id(),
+                findingId,
+                FindingRow.TriageVerdict.POSITIVE,
+                "A person ruled this a real deviation.",
+                Instant.now().toString());
 
         String second = firing(p, "gram-blocked");
 
-        assertEquals(findingId, second, "the firing landed on the blocked row rather than beside it");
-        FindingRow after = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.BLOCKED, after.status(), "the human verdict survives the firing");
-        assertEquals(
-                1,
-                after.recurrencesSinceVerdict(),
-                "only a blocked row counts recurrences — firings AFTER a person said this must not happen");
-    }
-
-    /**
-     * The forward CHECK: {@code finding_id IS NOT NULL OR state = 'resolved'}. A live case names the
-     * finding it is about, because a case that cannot say what it is about is a triage row nobody can
-     * act on. The state arm exists because force-resolving a retired detector's cases sets
-     * {@code state} without backfilling {@code finding_id}, so a resolved case has to stay legal
-     * without one. The second half of this test is that row: findingless, resolved.
-     */
-    @Test
-    @DisplayName("a live case must name a finding; a resolved case may be findingless")
-    void everyLiveCasePointsAtAFinding() {
-        Project p = project("finding-case-check");
-
-        assertThrows(
-                DataIntegrityViolationException.class,
-                () -> insertCase(p, "behavior_drift", null, "open"),
-                "behaviour drift has a finding by construction, so a live case without one is a bug");
-
-        // A case opened by a source that no longer exists, closed by the migration that retired it,
-        // still carrying no finding. Such rows have to remain legal, since no later migration could
-        // re-add this constraint otherwise.
-        insertCase(p, "classifier", null, "resolved");
-
-        insertCase(p, "behavior_drift", firing(p, "gram-case"), "open");
+        assertTrue(!second.equals(findingId), "the ruled row left the arbiter, so the firing opened a new row");
+        FindingRow ruled = findings.findById(p.id(), findingId).orElseThrow();
+        assertEquals(FindingRow.Status.OPEN, ruled.status(), "a positive ruling stays open");
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict(), "the human verdict survives");
+        FindingRow fresh = findings.findById(p.id(), second).orElseThrow();
+        assertEquals(FindingRow.Status.OPEN, fresh.status(), "the new row starts unruled, exactly like a first firing");
+        assertTrue(fresh.triageVerdict() == null, "the new row starts unruled, exactly like a first firing");
     }
 
     /**
@@ -412,28 +459,6 @@ class SharedFindingTableIntegrationTest {
                         "cs-a",
                         Instant.now().toString())
                 .findingId();
-    }
-
-    private void insertCase(Project p, String detector, @Nullable String findingId, String state) {
-        jdbc.sql("""
-            INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label,
-                                   metric, finding_id, state, resolution, resolved_at, title, basis,
-                                   severity, onset_at, opened_at, last_seen_at, updated_at)
-            SELECT :id, :pid, COALESCE(MAX(seq), 0) + 1, :detector, 'behavior_profile', :subject, 'label',
-                   'pass_rate', :fid, :state,
-                   CASE WHEN :state = 'resolved' THEN 'recovered' END,
-                   CASE WHEN :state = 'resolved' THEN :now END,
-                   'title', 'basis', 0.5, :now, :now, :now, :now
-              FROM eval_case WHERE project_id = :pid
-            """)
-                .param("id", Ids.ulid())
-                .param("pid", p.id())
-                .param("detector", detector)
-                .param("subject", "subject-" + detector + "-" + Ids.ulid())
-                .param("fid", findingId)
-                .param("state", state)
-                .param("now", Instant.now().toString())
-                .update();
     }
 
     /**

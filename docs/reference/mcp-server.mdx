@@ -58,8 +58,8 @@ Three tools strip the triage ruling before their response leaves the server. [Ro
 
 | Tool | Fields removed |
 | --- | --- |
-| `get_finding` | `triageVerdict`, `triageAction`, `triageSummary`, `triageCitations`, `triagedAt` |
-| `list_findings` | The same five fields on every row |
+| `get_finding` | `triageVerdict`, `triageAction`, `triageSummary`, `triageCitations`, `triagedAt`, `humanVerdictAt` |
+| `list_findings` | The same six fields on every row |
 | `get_case` | `ruling` |
 
 Two fields deliberately survive: `triageStatus`, which says only whether a ruling exists and which the findings list needs to render, and a case's inline `rca`, which is the analysis lane's own prior work rather than the gate the redaction exists to protect. The redaction applies to every MCP caller, not only to keys minted for analysis. The full ruling is one click away in the UI, which reads these fields over REST and is untouched.
@@ -94,7 +94,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_cases` | none | `state` (`open` \| `muted` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open and muted pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
-| `get_case` | `id` | none | The case, its activity trail, `finding_id`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
+| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
 
 `get_case` accepts either the stored id or the human reference a person would quote, such as `C-118`. `rca` is null while a report is still running, in which case `rca_report_id` names it so you can poll, and null when none has been run; `rca_available` says whether one could be.
 
@@ -102,7 +102,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
-| `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob, plus a withheld count |
+| `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob |
 | `get_finding` | `id` | none | One finding with its parsed evidence |
 | `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
 
@@ -150,7 +150,7 @@ Call `describe_dataset` before the other four. Facetable and filterable fields d
 Four things constrain these tools:
 
 - **Both `range` bounds are required on `query_timeseries`.** An unbounded timeseries is a full scan.
-- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `created_at`, or `bucket_start` on `metric_rollups`.
+- **`range` is half-open, `[from, to)`,** on the dataset's own time column: `started_at` for `spans` and `tool_calls`, `subject_started_at` for `classifier_events` (the span or trace it judged, not when the classifier checked it), or `bucket_start` on `metric_rollups`. `describe_dataset`'s `time_column` names it per dataset.
 - **`metric_rollups` rows are already aggregated,** so the answer is the sum of the rollup's `value` rather than a row count. Always filter `granularity` there, or the hour and day grains are summed together.
 - **`query_search` does not accept the `spans` dataset.** `list_spans` searches the same rows with a richer filter set and returns full payloads on a scoped page, so spans are excluded from `query_search` by decision rather than by capability. `metric_rollups` is not searchable at all: a rollup row has no text.
 
@@ -215,7 +215,6 @@ These are current behaviors, stated so you do not read around them.
 - **`list_findings` truncates without saying so.** Each triage source caps its own page at 200 rows and has no `limit` or `cursor` argument, and the service concatenates every source's page. Nothing in the response marks the list as partial, so a project with more confirmed findings than the effective cap gets that many back with no signal.
 - **`get_trace` reports one span count.** The response carries the rollup's `span_count` as the true total even when `spans_truncated` is set. There is no separate total field. For a trace past the 200-span cap, page the rest with `list_spans` and a `trace_id`.
 - **A resolved case page sorts rather than seeks.** Open and muted pages read an index; `state=resolved` sorts at query time.
-- **`list_spans` pages on a column with no matching index.** Its keyset predicate runs on `span.created_at`, and the only time index on the span table is on `started_at`.
 
 ## Related pages
 

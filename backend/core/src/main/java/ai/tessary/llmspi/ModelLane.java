@@ -49,15 +49,11 @@ public enum ModelLane {
      * <p>Separated from {@link #RCA} because of volume rather than shape. RCA runs when a person asks
      * about one mover; this runs once per distinct cause, and once {@code triage_automatic_enabled}
      * is on for an org it runs unattended over every finding that clears the recurrence bar. Every
-     * run books against {@code (project, triage)} in the LLM ledger, and the lane can be re-pointed
-     * at a cheaper model for one project without moving RCA with it.
-     *
-     * <p>Spend is capped: {@code E2bTriageSandbox} checks each run's actual priced cost against
-     * {@code ObserverProperties.Agentic#maxCostUsd} after the run has completed and its usage is
-     * booked, because no live per-turn cost signal exists in this codebase to intervene on mid-run.
-     * A run over the cap is flagged (a structured log line and a span attribute an operator can
-     * alert on), not rejected: see that field's javadoc for why rejecting an already-paid-for ruling
-     * was considered and not chosen.
+     * run books against {@code (project, triage)} in the LLM ledger, and the lane can be pointed at a
+     * different model for one project without moving RCA with it. It offers exactly the same models
+     * as RCA, in the same order, with the same defaults, so a project that never chose a triage model
+     * runs whatever RCA would; picking a model priced above its provider's default is allowed, and
+     * the settings page warns first.
      */
     TRIAGE(
             "triage",

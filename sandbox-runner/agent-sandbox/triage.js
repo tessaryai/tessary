@@ -5,8 +5,13 @@
  * or on the host in local mode, exactly like rca.js. The launcher injects the agent auth and
  * invokes:  node triage.js <input.json>
  *
- *   input.json : { files, prompt, json_schema, model, mcp: {url, token}|null, timeout_ms }
+ *   input.json : { files, prompt, json_schema, model, mcp: {url, token}|null, timeout_ms,
+ *                  system_prompt|null }
  *   stdout     : { raw: "<result envelope>", turns: [...], startMs }
+ *
+ * system_prompt, when the backend sends one (always, today — Phase 6 fills in its content),
+ * routes this run through agent-stream.js's custom triage agent and its own mcp-relay in front of
+ * `mcp` — see runAgent's JSDoc for `spec.systemPrompt`. null/absent runs exactly as before.
  *
  * NO CLONE, EVER. Triage audits one finding's CLAIM — is it true, was it measured over enough,
  * does the evidence carry it — and none of those questions is answered by source code. This lane
@@ -25,10 +30,13 @@
  * MCP (get_finding_evidence → get_trace / get_span) and cites the ids it actually fetched, so the
  * sample it ruled on is one it chose and stated rather than one this file chose for it silently.
  *
- * WORKSPACE-ONLY WRITES. `checks/` under WORK is the one writable place: the agent is required to
- * compute anything mechanical rather than eyeball it, which means authoring and running its own
- * scripts (bash is allowed, python3 and node are in the image). The permission map is the same
- * shape codegen.js already uses for its single writable file — deny everything, allow one path.
+ * EDIT IS A STATED, BLANKET ALLOW. opencode matches an `edit` rule's path glob against its own
+ * project root, which is `/` when the start directory (WORK) is not a git repo — so a rule scoped
+ * to `checks/**` never actually matched anything and every edit was silently denied, with agents
+ * falling back to bash heredocs to write at all. `checks/`, beside every saved tool result, is
+ * still where the agent's own scripts go — computing anything mechanical rather than eyeballing it
+ * (bash is allowed, python3 and node are in the image) — but nothing polices that any more; it is
+ * a convention the prompt states, not a permission rule that only looked like it enforced one.
  *
  * mcp.token is a live platform key, wired through the agent config and never argv (it must not
  * show in `ps`); scrubToken covers the tsy_* shape, so it cannot reach a log or this script's
@@ -38,7 +46,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runAgent, describeError, sumUsage, WORK } = require('./agent-stream');
 
-/** Where the agent may write, relative to its start directory (WORK). */
+/** Where the agent's own scripts go, relative to its start directory (WORK) — see the header. */
 const CHECKS_DIR = 'checks';
 
 // Materialize the dossier under root, refusing anything that would escape it — the paths come from
@@ -69,8 +77,8 @@ async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
   writeDossier(path.join(WORK, 'dossier'), input.files);
-  // Created here rather than left to the agent: an `edit` allow-rule on a directory that does not
-  // exist is a first tool call that fails for a reason the agent cannot see from its prompt.
+  // Created here rather than left to the agent: a first `write` into a directory that does not
+  // exist yet is a stumble the agent has no reason to expect from its prompt.
   fs.mkdirSync(path.join(WORK, CHECKS_DIR), { recursive: true });
 
   // 'error': the run's VALUE is the schema-constrained ruling JSON — a half-finished run must
@@ -83,10 +91,13 @@ async function main() {
       prompt: input.prompt,
       jsonSchema: parseSchema(input.json_schema),
       mcp: input.mcp,
-      permission: { edit: { '*': 'deny', [`${CHECKS_DIR}/**`]: 'allow' } },
+      // Stated explicitly rather than left to agent-stream.js's own default (also deny-all): see
+      // the header for why a rule scoped to one path never worked in the first place.
+      permission: { edit: { '*': 'allow' } },
       rejectOn: 'error',
       timeoutMs: input.timeout_ms,
       maxTurns: input.max_turns,
+      systemPrompt: input.system_prompt,
     });
   } catch (e) {
     // F1: a failing run still spent tokens (agent-stream.js's `.turns` on the thrown error carries
@@ -100,7 +111,19 @@ async function main() {
   process.stdout.write(JSON.stringify({ raw: run.resultRaw, turns: run.turns, startMs: run.startMs }));
 }
 
-main().catch((e) => {
-  console.error(describeError(e));
-  process.exit(1);
-});
+main()
+  .catch((e) => {
+    console.error(describeError(e));
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // Unref'd, so a clean exit is unaffected — node ignores an unref'd timer once nothing else
+    // holds the loop open. It only fires if something ELSE already is: a socket runAgent's
+    // `finally` failed to close, the exact shape of the hang decision 2 fixes at the source. Five
+    // seconds, not the launcher's own deadline, so a leak is diagnosed in the log within the run
+    // rather than surfacing only as a late timeout with no clue which handle caused it.
+    setTimeout(() => {
+      console.error('still alive 5s after main() finished:', process.getActiveResourcesInfo());
+      process.exit(process.exitCode || 1);
+    }, 5000).unref();
+  });

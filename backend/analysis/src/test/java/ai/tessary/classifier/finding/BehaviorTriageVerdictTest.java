@@ -9,14 +9,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 /**
- * The parse contract for a triage run. Two load-bearing properties, and they are opposites:
- *
- * <ul>
- *   <li>an ANSWER that is ambiguous or unevidenced degrades to {@code unclear}, which closes the
- *       finding — recurrence is what brings a real one back;
- *   <li>a NON-ANSWER parses to null, never to a verdict. Null makes the job retry and eventually
- *       dead-letter; recording {@code unclear} for it would close a finding on a broken run.
- * </ul>
+ * The parse contract for a triage run. One load-bearing property: a verdict is recorded only for a run
+ * that actually produced one. Everything that is NOT a cited {@code positive} or {@code negative} —
+ * gibberish, an unrecognised verdict word, an uncited ruling — parses to null, never to a fabricated
+ * verdict. Null makes the job retry and eventually dead-letter; recording anything for it would close a
+ * finding on the strength of a broken or unsupported run.
  */
 class BehaviorTriageVerdictTest {
 
@@ -50,27 +47,29 @@ class BehaviorTriageVerdictTest {
         assertEquals("the reference window is 40 turns", v.summary());
     }
 
+    /**
+     * The fabrication guard [R6]. An agent that rules without pointing at anything has not done the
+     * audit, so the answer is discarded rather than trusted with a verdict of its own: no ruling is
+     * recorded, and the job retries as {@code TRIAGE_RUN_INCOMPLETE}.
+     */
     @Test
-    void downgradesAnUncitedRulingToUnclear() {
-        // The fabrication guard. An agent that rules without pointing at anything has not done the
-        // audit, and `positive` is the answer that would open a case on nothing.
+    void anUncitedRulingReturnsNull() {
         BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
                 {"verdict": "positive", "summary": "seems real", "citations": []}
                 """);
 
-        assertNotNull(v);
-        assertEquals(FindingRow.TriageVerdict.UNCLEAR, v.verdict());
-        assertEquals(FindingRow.TriageAction.CLOSED, v.action());
+        assertNull(v, "an uncited ruling must not become a verdict — it is a failed run, not a low-confidence one");
     }
 
+    /** `unclear` is gone from the vocabulary [decision 4]: verdicts are positive and negative only. */
     @Test
-    void anUncitedUnclearIsLeftAlone() {
+    void rejectsUnclear() {
         BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
-                {"verdict": "unclear", "summary": "the evidence does not settle it", "citations": []}
+                {"verdict": "unclear", "summary": "the evidence does not settle it",
+                 "citations": [{"path": "window.n_cur", "reason": "too thin to tell"}]}
                 """);
 
-        assertNotNull(v);
-        assertEquals(FindingRow.TriageVerdict.UNCLEAR, v.verdict());
+        assertNull(v, "unclear is not a recognised verdict word any more");
     }
 
     /**
@@ -94,7 +93,8 @@ class BehaviorTriageVerdictTest {
     @Test
     void aRealRulingIsNotBlocked() {
         String answer = """
-                {"verdict": "unclear", "summary": "the evidence does not settle it", "citations": []}
+                {"verdict": "negative", "summary": "the reference window is 40 turns",
+                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns"}]}
                 """;
         assertNull(BehaviorTriageVerdict.blockedReason(mapper, answer));
         assertNull(BehaviorTriageVerdict.blockedReason(mapper, "not json at all"));

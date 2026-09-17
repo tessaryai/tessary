@@ -202,8 +202,12 @@ class TriageAutoEscalationIntegrationTest {
         Project p = project("auto-esc-human");
         automaticOn(p);
         String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
-        findings.setStatus(
-                p.projectId(), id, FindingRow.Status.BLOCKED, Instant.now().toString());
+        findings.recordHumanRuling(
+                p.projectId(),
+                id,
+                FindingRow.TriageVerdict.POSITIVE,
+                "A person ruled this a real deviation.",
+                Instant.now().toString());
 
         escalator.tick();
 
@@ -339,6 +343,7 @@ class TriageAutoEscalationIntegrationTest {
                         null,
                         BUCKET,
                         EVIDENCE,
+                        Instant.now().toString(),
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();

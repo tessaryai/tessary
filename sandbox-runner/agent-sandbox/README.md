@@ -20,9 +20,9 @@ The microVM every agentic lane runs in: it clones the target repo at HEAD and ru
 - `triage.js` — the Layer-2 ruling: materialize the finding's two-file dossier (`finding.md`,
   `evidence.json`) → agent run wired to the platform's MCP surface → emit verdict + citations. The
   one script that never clones: triage audits a claim, and no repository says whether a claim about
-  production traffic is true. It reads the substrate through MCP instead, and `checks/` under the
-  work dir is the one path it may write — the agent computes what is mechanical rather than
-  eyeballing it. (Node builtins only.)
+  production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
+  under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
+  computes what is mechanical rather than eyeballing it. (Node builtins only.)
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's

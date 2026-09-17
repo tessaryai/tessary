@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
@@ -33,6 +34,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -41,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The shared {@code finding} table's {@link TriageSource}: the list, the detail, the correction loop
@@ -94,6 +97,9 @@ public class BehaviorTriageSource implements TriageSource {
 
     private final BehaviorTriageJobRepository jobs;
     private final BehaviorTriageEngine engine;
+    /** Opens or joins the case behind a positive ruling — see {@link #recordVerdict} and {@link
+     *  #resolve}. Called inside the same transaction as the ruling write, not on a later sweep. */
+    private final CaseOpener caseOpener;
 
     /** Read + re-pinned by the metric-drift branch of {@link #resolve} only; drift never touches it. */
     private final MetricBaselineRepository baselines;
@@ -133,6 +139,7 @@ public class BehaviorTriageSource implements TriageSource {
             ClassifierService classifiers,
             BehaviorTriageJobRepository jobs,
             BehaviorTriageEngine engine,
+            CaseOpener caseOpener,
             MetricBaselineRepository baselines,
             ToolErrorReferenceRepository toolErrorReferences,
             ToolErrorStateRepository toolErrorStates,
@@ -150,6 +157,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.classifiers = classifiers;
         this.jobs = jobs;
         this.engine = engine;
+        this.caseOpener = caseOpener;
         this.baselines = baselines;
         this.toolErrorReferences = toolErrorReferences;
         this.toolErrorStates = toolErrorStates;
@@ -196,11 +204,6 @@ public class BehaviorTriageSource implements TriageSource {
                 .toList();
     }
 
-    @Override
-    public long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly) {
-        return confirmedOnly ? findings.countWithheld(projectId, callSiteId) : 0;
-    }
-
     /**
      * The shared projection, for any row in this table that is not SOP-keyed. Routed on
      * {@code classifier_key} rather than on "the shared read came back empty", since conformance rows
@@ -216,8 +219,12 @@ public class BehaviorTriageSource implements TriageSource {
         // Reachability is re-asserted rather than assumed: a withheld classifier's finding must 404,
         // and this source has now claimed the id, so throwing is the contract.
         FindingRow finding = requireReachableFinding(projectId, findingId);
-        return Optional.of(
-                BehaviorFindingDetailView.of(finding, malformedOutputs.detail(finding), secretLeaks.detail(finding)));
+        // The same read the list makes, for the same reason: without it a dead-lettered triage renders
+        // as running on this page for good, while the queue it was opened from says it failed.
+        BehaviorTriageJobRepository.FailedTriage failed =
+                jobs.failedByFinding(projectId, List.of(findingId)).get(findingId);
+        return Optional.of(BehaviorFindingDetailView.of(
+                finding, malformedOutputs.detail(finding), secretLeaks.detail(finding), failed));
     }
 
     // ---- escalation -----------------------------------------------------------------------------
@@ -262,8 +269,6 @@ public class BehaviorTriageSource implements TriageSource {
                 findingId,
                 finding.exemplarVerdictId(),
                 classifierKeyOf(projectId, finding),
-                // Which look this is: the one already scheduled, or the next one after a re-open.
-                jobs.lookFor(projectId, findingId, finding.escalatedAt()),
                 Instant.now().toString());
         boolean alreadyEscalated = finding.escalatedAt() != null;
         if (!alreadyEscalated) {
@@ -291,34 +296,53 @@ public class BehaviorTriageSource implements TriageSource {
     @Override
     public Optional<TriageBrief> brief(BehaviorTriageJobRow job) {
         if (job.isConformance()) return Optional.empty();
-        // Empty also when the finding was resolved or its epoch closed while the job waited: nothing to
-        // rule on, nowhere to write the answer, so the worker marks it done rather than failed.
+        // Empty also when the finding was resolved, closed, or already ruled while the job waited:
+        // nothing to rule on, nowhere to write the answer, so the worker marks it done rather than
+        // failed, before any sandbox spends a run on a question already settled.
         return findings.findById(job.projectId(), job.findingId())
-                .map(finding -> new TriageBrief(
-                        engine.dossier(job, finding), engine.buildPrompt(job, finding), finding.payloadJson()));
+                .filter(finding -> FindingRow.Status.OPEN.equals(finding.status()) && finding.triageVerdict() == null)
+                .map(finding -> new TriageBrief(engine.dossier(job, finding), engine.buildPrompt(job, finding)));
     }
 
+    /**
+     * Transactional: the ruling write and the detector fold that follows it are the product of one
+     * microVM run, and a caller retrying a half-applied write would re-spend the run for nothing.
+     */
     @Override
+    @Transactional
     public void recordVerdict(
             String projectId,
             String findingId,
             BehaviorTriageVerdict verdict,
             @Nullable String citationsJson,
             String now) {
-        findings.recordTriage(projectId, findingId, verdict.verdict(), verdict.summary(), citationsJson, now);
+        int updated =
+                findings.recordTriage(projectId, findingId, verdict.verdict(), verdict.summary(), citationsJson, now);
+        if (updated == 0) {
+            // The finding left ux_finding_live before this run landed — another triage run, or a
+            // person's own verb, ruled first. The cost was spent; the answer it produced is moot, and
+            // there is nowhere left to write it, so this logs rather than throws.
+            StructuredLog.info(log, Markers.OPS, "behavior.triage.superseded")
+                    .field("project", projectId)
+                    .field("finding", findingId)
+                    .log();
+            return;
+        }
         // Ordered after recordTriage and outside its failure: the ruling is the product of a microVM
         // run and must survive a problem writing detector state, which is advisory by comparison.
         findings.findById(projectId, findingId).ifPresent(finding -> foldIfRuledNegative(finding, verdict));
+        // A positive opens or joins the case, in the SAME transaction as the ruling: a ruled finding
+        // leaves ux_finding_live for good, so there is no later sweep that would ever see it again.
+        // A no-op on a negative — ensureCaseFor reads the finding's own verdict and declines.
+        caseOpener.ensureCaseFor(projectId, findingId, null);
     }
 
     /**
      * Hand a tool-error window back to the detector once a ruling has established it was normal, so the
      * arm it fired on starts again from a reference that now contains it.
      *
-     * <p>Folds on {@code negative} only, not every close: folding asserts that the traffic in the
-     * window was ordinary and belongs in the rate the detector compares against, and only a negative
-     * ruling asserts that. {@code unclear} closes the finding without establishing anything, on
-     * purpose, since recurrence is the recovery.
+     * <p>Folds on {@code negative} only: folding asserts that the traffic in the window was ordinary
+     * and belongs in the rate the detector compares against, and only a negative ruling asserts that.
      *
      * <p>Only tool error folds, because it is the only classifier here holding an accumulator that a
      * ruling can leave standing. Metric drift closes its own window every pass and behaviour drift
@@ -347,14 +371,27 @@ public class BehaviorTriageSource implements TriageSource {
 
     // ---- the correction loop --------------------------------------------------------------------
 
+    /** The fixed summary a person's "Legitimate, absorb" ruling writes. */
+    private static final String LEGITIMATE_SUMMARY = "A person ruled this legitimate.";
+
+    /** The fixed summary a person's "Real deviation" ruling writes. */
+    private static final String REAL_DEVIATION_SUMMARY = "A person ruled this a real deviation.";
+
     /**
-     * Resolve a finding: allowlist the cause permanently ({@code expected}) or pin it so it never
-     * graduates and keeps firing ({@code not_expected}).
+     * Resolve a finding: allowlist the cause permanently ({@code expected}) or mark it a real
+     * deviation, opening or joining its case ({@code not_expected}).
      *
-     * <p>Branches on {@code cause_kind}, because the two verbs mean different writes for the three
-     * classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
-     * tool error corrects a rate (see {@link #resolveRateShift}); everything else hangs off a fitted
-     * profile and goes through {@link CauseResolver}.
+     * <p>Branches on {@code cause_kind}, because the two verbs mean different detector-state writes for
+     * the classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
+     * tool error corrects a rate (see {@link #resolveRateShift}); malformed-output and armed-window
+     * causes have no fitted state to move; everything else hangs off a fitted profile and goes through
+     * {@link CauseResolver}. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
+     * which is what actually opens or closes the finding.
+     *
+     * <p><b>A ruling freezes the finding by construction.</b> This is the same {@code status = 'open' AND
+     * triage_verdict IS NULL} predicate the six upserts conflict on, so a verb pressed on a finding
+     * another ruling already reached updates zero rows — guarded up front here rather than left to the
+     * write, so the detector-state half never runs for a press that cannot land.
      *
      * <p>The transaction is the caller's: {@code FindingService.resolve} is the annotated entry point,
      * deliberately, because a half-applied correction would read as resolved on the finding while the
@@ -368,6 +405,9 @@ public class BehaviorTriageSource implements TriageSource {
         if (findings.findById(projectId, findingId).isEmpty()) return Optional.empty();
         boolean expected = BehaviorResolutionRequest.EXPECTED.equals(action);
         FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Status.OPEN.equals(finding.status()) || finding.triageVerdict() != null) {
+            throw new TessaryException(ClassifierError.FINDING_CLOSED, findingId);
+        }
 
         String now = Instant.now().toString();
         if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
@@ -375,6 +415,15 @@ public class BehaviorTriageSource implements TriageSource {
         }
         if (FindingRow.Cause.RATE_SHIFT.equals(finding.causeKind())) {
             return Optional.of(resolveRateShift(projectId, finding, expected, action, userId, now));
+        }
+        // Neither has fitted detector state: malformed-output is a recomputed rate with no reference to
+        // pin (unlike tool error, it corrects nothing on absorb), and an armed-window classifier just
+        // re-arms on new detections. The ruling write alone is the correction.
+        if (FindingRow.Cause.MALFORMED_RATE.equals(finding.causeKind())
+                || FindingRow.Cause.ARMED_WINDOW.equals(finding.causeKind())) {
+            writeHumanRuling(projectId, finding.id(), expected, userId, now);
+            logResolved(projectId, findingId, finding.causeKind(), action);
+            return Optional.of(reread(projectId, findingId));
         }
         // Every cause that reaches here hangs off a fitted profile. This is no longer guaranteed by a
         // schema check: a finding can have neither a profile nor a baseline when its cause is
@@ -384,19 +433,99 @@ public class BehaviorTriageSource implements TriageSource {
         if (finding.profileId() == null) {
             throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
         }
+        String annotationKey = repinProfile(projectId, finding, expected, userId, now);
+        writeHumanRuling(projectId, findingId, expected, userId, now);
+        recordAnnotation(projectId, finding, annotationKey, expected, userId);
+        logResolved(projectId, findingId, finding.causeKind(), action);
+        return Optional.of(reread(projectId, findingId));
+    }
+
+    /**
+     * The detector-state half of "Legitimate, absorb" — re-pin whatever fitted state a cause has,
+     * without writing a ruling. Public for {@code CaseService#absorb}: by the time a person absorbs a
+     * case, the finding behind it already carries a positive ruling, so the ordinary {@link #resolve}
+     * path would 409 on it. {@code CaseLedger#absorb} is what closes the finding; this only moves the
+     * reference it was ruled against.
+     */
+    public void repin(String projectId, String findingId, @Nullable String userId) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        String now = Instant.now().toString();
+        if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
+            repinShift(projectId, finding, userId, now);
+            return;
+        }
+        if (FindingRow.Cause.RATE_SHIFT.equals(finding.causeKind())) {
+            repinRateShift(projectId, finding, userId, now);
+            return;
+        }
+        if (FindingRow.Cause.MALFORMED_RATE.equals(finding.causeKind())
+                || FindingRow.Cause.ARMED_WINDOW.equals(finding.causeKind())) {
+            return; // no fitted state to move
+        }
+        if (finding.profileId() != null) repinProfile(projectId, finding, true, userId, now);
+    }
+
+    /**
+     * The detector-state half of absorbing a CASE (1b): fold every window the case's findings hold into
+     * the detector's reference at once, rather than the newest finding's alone.
+     *
+     * <p>Only a rate_shift (tool-error) case needs this: its windows are independent spells that never
+     * shared an accumulator — a ruled finding leaves {@code ux_finding_live} for good, so a second spell
+     * on the same tool is a fresh row with its own counts since ITS onset — and absorbing just the
+     * newest one would leave the reference blind to every earlier spell the case also held. A
+     * distribution_shift case's findings all read the SAME metric baseline's rolling control, so
+     * re-pinning off any one of them (the newest, via {@link #repin}) already picks up the reference the
+     * whole case sits on; malformed_rate and armed_window causes have no fitted state to move at all.
+     *
+     * @param caseFindings the case's own findings, newest first, as {@code FindingRepository#listByCase}
+     *     returns them; a no-op for an empty list (an archived case with none)
+     */
+    public void repinCase(String projectId, List<FindingRow> caseFindings, @Nullable String userId) {
+        if (caseFindings.isEmpty()) return;
+        FindingRow newest = caseFindings.get(0);
+        if (!FindingRow.Cause.RATE_SHIFT.equals(newest.causeKind())) {
+            repin(projectId, newest.id(), userId);
+            return;
+        }
+        String bucketKey = null;
+        long nCur = 0;
+        long failuresCur = 0;
+        for (FindingRow finding : caseFindings) {
+            ToolErrorEvidence.Read read = ToolErrorEvidence.read(finding.payloadJson());
+            if (read == null || !read.countsAreOnsetRun()) {
+                // Same refusal repin() makes on a single finding: the counts to accept live in the
+                // evidence blob and nowhere else, and folding a case that holds one unreadable spell
+                // beside readable ones would silently under-count what is being accepted as normal.
+                throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
+            }
+            bucketKey = read.bucketKey();
+            nCur += read.nCur();
+            failuresCur += read.failuresCur();
+        }
+        pinToolErrorReference(
+                projectId,
+                // Never null past the loop: caseFindings is non-empty (checked above) and every
+                // iteration either assigns this or throws.
+                Objects.requireNonNull(bucketKey),
+                nCur,
+                failuresCur,
+                userId,
+                Instant.now().toString(),
+                "Absorbed.");
+    }
+
+    private @Nullable String repinProfile(
+            String projectId, FindingRow finding, boolean expected, @Nullable String userId, String now) {
+        String profileId = finding.profileId();
+        if (profileId == null) return null;
         String annotationKey = causeResolvers.stream()
                 .filter(r -> r.owns(finding.causeKind()))
                 .findFirst()
                 .map(r -> r.apply(projectId, finding, expected, userId, now))
                 .orElse(null);
-        // The caller's clock, so the finding's human_verdict_at and the baseline_event announcing the
-        // same judgement carry one timestamp rather than two.
-        findings.setStatus(
-                projectId, findingId, expected ? FindingRow.Status.ALLOWLISTED : FindingRow.Status.BLOCKED, now);
-        recordAnnotation(projectId, finding, annotationKey, expected, userId);
         events.insert(BehaviorBaselineEventRow.forProfile(
                 Ids.ulid(),
-                finding.profileId(),
+                profileId,
                 projectId,
                 expected
                         ? BehaviorBaselineEventRow.Event.GRAM_ALLOWLISTED
@@ -405,8 +534,23 @@ public class BehaviorTriageSource implements TriageSource {
                 finding.nativeCauseKey(),
                 now,
                 null));
-        logResolved(projectId, findingId, finding.causeKind(), action);
-        return Optional.of(reread(projectId, findingId));
+        return annotationKey;
+    }
+
+    /** The finding's own ruling write: negative (absorbed) closes it, positive (real deviation) opens
+     *  or joins its case, with the person who pressed it as the case's actor. The caller's clock, so
+     *  this and the detector-state write it follows share a timestamp. */
+    private void writeHumanRuling(
+            String projectId, String findingId, boolean expected, @Nullable String userId, String now) {
+        findings.recordHumanRuling(
+                projectId,
+                findingId,
+                expected ? FindingRow.TriageVerdict.NEGATIVE : FindingRow.TriageVerdict.POSITIVE,
+                expected ? LEGITIMATE_SUMMARY : REAL_DEVIATION_SUMMARY,
+                now);
+        if (!expected) {
+            caseOpener.ensureCaseFor(projectId, findingId, userId);
+        }
     }
 
     /**
@@ -443,45 +587,66 @@ public class BehaviorTriageSource implements TriageSource {
             String action,
             @Nullable String userId,
             String now) {
-        if (expected) {
-            ToolErrorEvidence.Read read = ToolErrorEvidence.read(finding.payloadJson());
-            if (read == null || !read.countsAreOnsetRun()) {
-                // The counts to accept live in the evidence blob and nowhere else, so absorbing without
-                // a blob this can describe refuses rather than guessing: the finding stays open and
-                // "real deviation" still works. countsAreOnsetRun refuses a subtler case too, where an
-                // older payload carries a tool's whole history under the same keys, which would absorb a
-                // lifetime average as the new normal for a tool that is on fire.
-                throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
-            }
-            ToolErrorConfig config = toolErrorConfig(projectId);
-            String epoch = CarriedState.epochOf(config, ToolErrorTrend.STATE_SCHEMA_VERSION);
-            if (read.nCur() >= config.minBaselineCalls()) {
-                toolErrorReferences.pin(
-                        projectId,
-                        read.bucketKey(),
-                        read.nCur(),
-                        read.failuresCur(),
-                        userId,
-                        // The caller's clock: this reference is dated by the human decision that
-                        // installed it, and the replay resumes from here, so it must be a time no
-                        // already-counted bucket sits after.
-                        now);
-                toolErrorStates.clearPendingPin(projectId, read.bucketKey(), now);
-                // The evidence behind the absorbed spell has been accepted, so it must stop counting
-                // against the reference that replaced it, or the accumulator stays where the outage
-                // left it and the tool alarms again on its next call.
-                toolErrorStates.reset(projectId, read.bucketKey(), userId, "Absorbed: " + action, now);
-            } else {
-                // Too early to measure a new normal from: a burst alarms in about a dozen calls, and a
-                // dozen calls at 83% would become an 83% baseline. The decision is kept and installs
-                // itself once the run is thick enough.
-                toolErrorStates.markPendingPin(projectId, read.bucketKey(), userId, now, epoch);
-            }
-        }
-        findings.setStatus(
-                projectId, finding.id(), expected ? FindingRow.Status.ALLOWLISTED : FindingRow.Status.BLOCKED, now);
+        if (expected) repinRateShift(projectId, finding, userId, now, "Absorbed: " + action);
+        writeHumanRuling(projectId, finding.id(), expected, userId, now);
         logResolved(projectId, finding.id(), finding.causeKind(), action);
         return reread(projectId, finding.id());
+    }
+
+    /** The detector-state half of absorbing a tool-error rate shift — see {@link #resolveRateShift}. */
+    private void repinRateShift(String projectId, FindingRow finding, @Nullable String userId, String now) {
+        repinRateShift(projectId, finding, userId, now, "Absorbed.");
+    }
+
+    private void repinRateShift(
+            String projectId, FindingRow finding, @Nullable String userId, String now, String resetReason) {
+        ToolErrorEvidence.Read read = ToolErrorEvidence.read(finding.payloadJson());
+        if (read == null || !read.countsAreOnsetRun()) {
+            // The counts to accept live in the evidence blob and nowhere else, so absorbing without
+            // a blob this can describe refuses rather than guessing: the finding stays open and
+            // "real deviation" still works. countsAreOnsetRun refuses a subtler case too, where an
+            // older payload carries a tool's whole history under the same keys, which would absorb a
+            // lifetime average as the new normal for a tool that is on fire.
+            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
+        }
+        pinToolErrorReference(projectId, read.bucketKey(), read.nCur(), read.failuresCur(), userId, now, resetReason);
+    }
+
+    /** The pin-or-pend decision itself, shared by a single finding's absorb ({@link #repinRateShift})
+     *  and a whole case's ({@link #repinCase}), which folds several findings' counts before calling
+     *  this once. */
+    private void pinToolErrorReference(
+            String projectId,
+            String bucketKey,
+            long nCur,
+            long failuresCur,
+            @Nullable String userId,
+            String now,
+            String resetReason) {
+        ToolErrorConfig config = toolErrorConfig(projectId);
+        String epoch = CarriedState.epochOf(config, ToolErrorTrend.STATE_SCHEMA_VERSION);
+        if (nCur >= config.minBaselineCalls()) {
+            toolErrorReferences.pin(
+                    projectId,
+                    bucketKey,
+                    nCur,
+                    failuresCur,
+                    userId,
+                    // The caller's clock: this reference is dated by the human decision that
+                    // installed it, and the replay resumes from here, so it must be a time no
+                    // already-counted bucket sits after.
+                    now);
+            toolErrorStates.clearPendingPin(projectId, bucketKey, now);
+            // The evidence behind the absorbed spell has been accepted, so it must stop counting
+            // against the reference that replaced it, or the accumulator stays where the outage
+            // left it and the tool alarms again on its next call.
+            toolErrorStates.reset(projectId, bucketKey, userId, resetReason, now);
+        } else {
+            // Too early to measure a new normal from: a burst alarms in about a dozen calls, and a
+            // dozen calls at 83% would become an 83% baseline. The decision is kept and installs
+            // itself once the run is thick enough.
+            toolErrorStates.markPendingPin(projectId, bucketKey, userId, now, epoch);
+        }
     }
 
     /**
@@ -519,78 +684,76 @@ public class BehaviorTriageSource implements TriageSource {
             String action,
             @Nullable String userId,
             String now) {
+        if (expected) repinShift(projectId, finding, userId, now);
+        // No annotation, deliberately: a distribution shift makes no per-trace claim, so there is
+        // nothing per-trace for a human correction to be about. The correction the person made here is
+        // to the reference itself, recorded as the BASELINE_REPINNED row above.
+        writeHumanRuling(projectId, finding.id(), expected, userId, now);
+        logResolved(projectId, finding.id(), finding.causeKind(), action);
+        return reread(projectId, finding.id());
+    }
+
+    /** The detector-state half of absorbing a metric-drift shift — see {@link #resolveShift}. */
+    private void repinShift(String projectId, FindingRow finding, @Nullable String userId, String now) {
         // Guaranteed by behavior_finding_scope_check, checked for the nullness checker and so that a
         // hand-written row with the wrong scope fails at the API rather than half-way through a write.
         String baselineId = finding.baselineId();
         if (baselineId == null) {
             throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
         }
-        if (expected) {
-            MetricBaselineRow baseline = baselines
-                    .findById(projectId, baselineId)
-                    .orElseThrow(() -> new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id()));
-            // PROGRAM.md §9 writes this as `pinned_sketch <- current`, and the column literally named
-            // `current_sketch_json` is the wrong one to read: it is the window still being FILLED, so
-            // pinning it would install a reference below min_sample that the detector then silences with
-            // BELOW_MIN_SAMPLE until something else replaces it. The newest COMPLETE summary of where the
-            // bucket now sits is the newest day of the rolling control, which holds every window that
-            // closed that day, the window the finding fired on among them, and now more traffic than
-            // one window's worth. `current` is the fallback only for a bucket that has somehow closed none.
-            MetricControl.Day recent =
-                    MetricControl.fromJson(baseline.controlJson()).newest();
-            String absorbed = recent != null ? recent.sketchJson() : baseline.currentSketchJson();
-            // Both sidecars come from whichever window the sketch did, never mixed: a pinned cost
-            // sketch explained by a different window's token decomposition would say the dollars were
-            // made of something they were not.
-            String absorbedWorkload = recent != null ? recent.workloadJson() : baseline.currentWorkloadJson();
-            String absorbedTokens = recent != null ? recent.tokensJson() : baseline.currentTokensJson();
-            baselines.repin(
-                    baselineId,
-                    absorbed,
-                    absorbedWorkload,
-                    absorbedTokens,
-                    // No refs with it: the absorbed sketch is a day of the rolling control, every window
-                    // that closed that day merged, and the ring keeps histograms, not the rows they were
-                    // folded from. A finding fired against a human-absorbed reference therefore carries
-                    // no baseline evidence until the sweep's own bootstrap pin replaces it.
-                    null,
-                    // The caller's clock here, unlike the sweep's bootstrap pin: this reference is dated
-                    // by the human decision that installed it, not by the traffic it summarizes.
-                    now,
-                    finding.sinceVersionId(),
-                    now);
-            // The changelog row, carrying the finding's own evidence as its detail: an online baseline
-            // cannot be stopped from absorbing drift, but every absorption can be made a durable,
-            // readable row, and this is the one absorption a person chose.
-            events.insert(BehaviorBaselineEventRow.forBaseline(
-                    Ids.ulid(),
-                    baselineId,
-                    projectId,
-                    BehaviorBaselineEventRow.Event.BASELINE_REPINNED,
-                    finding.nativeCauseKey(),
-                    now,
-                    finding.payloadJson()));
-        }
-        // BLOCKED is what "marks for escalation" means concretely: it stamps human_verdict_at, so
-        // recurrences_since_verdict starts counting windows that shifted after a person confirmed the
-        // regression. ALLOWLISTED closes the absorbed cause so it stops recurring; the re-pinned
-        // reference is what makes it stay closed.
-        findings.setStatus(
-                projectId, finding.id(), expected ? FindingRow.Status.ALLOWLISTED : FindingRow.Status.BLOCKED, now);
-        // No annotation, deliberately: a distribution shift makes no per-trace claim, so there is
-        // nothing per-trace for a human correction to be about. The correction the person made here is
-        // to the reference itself, recorded as the BASELINE_REPINNED row above.
-        logResolved(projectId, finding.id(), finding.causeKind(), action);
+        MetricBaselineRow baseline = baselines
+                .findById(projectId, baselineId)
+                .orElseThrow(() -> new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id()));
+        // PROGRAM.md §9 writes this as `pinned_sketch <- current`, and the column literally named
+        // `current_sketch_json` is the wrong one to read: it is the window still being FILLED, so
+        // pinning it would install a reference below min_sample that the detector then silences with
+        // BELOW_MIN_SAMPLE until something else replaces it. The newest COMPLETE summary of where the
+        // bucket now sits is the newest day of the rolling control, which holds every window that
+        // closed that day, the window the finding fired on among them, and now more traffic than
+        // one window's worth. `current` is the fallback only for a bucket that has somehow closed none.
+        MetricControl.Day recent =
+                MetricControl.fromJson(baseline.controlJson()).newest();
+        String absorbed = recent != null ? recent.sketchJson() : baseline.currentSketchJson();
+        // Both sidecars come from whichever window the sketch did, never mixed: a pinned cost
+        // sketch explained by a different window's token decomposition would say the dollars were
+        // made of something they were not.
+        String absorbedWorkload = recent != null ? recent.workloadJson() : baseline.currentWorkloadJson();
+        String absorbedTokens = recent != null ? recent.tokensJson() : baseline.currentTokensJson();
+        baselines.repin(
+                baselineId,
+                absorbed,
+                absorbedWorkload,
+                absorbedTokens,
+                // No refs with it: the absorbed sketch is a day of the rolling control, every window
+                // that closed that day merged, and the ring keeps histograms, not the rows they were
+                // folded from. A finding fired against a human-absorbed reference therefore carries
+                // no baseline evidence until the sweep's own bootstrap pin replaces it.
+                null,
+                // The caller's clock here, unlike the sweep's bootstrap pin: this reference is dated
+                // by the human decision that installed it, not by the traffic it summarizes.
+                now,
+                finding.sinceVersionId(),
+                now);
+        // The changelog row, carrying the finding's own evidence as its detail: an online baseline
+        // cannot be stopped from absorbing drift, but every absorption can be made a durable,
+        // readable row, and this is the one absorption a person chose.
+        events.insert(BehaviorBaselineEventRow.forBaseline(
+                Ids.ulid(),
+                baselineId,
+                projectId,
+                BehaviorBaselineEventRow.Event.BASELINE_REPINNED,
+                finding.nativeCauseKey(),
+                now,
+                finding.payloadJson()));
         if (userId != null) {
             StructuredLog.info(log, Markers.OPS, "metric.baseline.repinned")
                     .field("project", projectId)
                     .field("baseline", baselineId)
                     .field("cause", finding.nativeCauseKey())
                     .field("by", userId)
-                    .field("repinned", expected)
+                    .field("repinned", true)
                     .log();
         }
-        return reread(projectId, finding.id());
     }
 
     // ---- shared helpers -------------------------------------------------------------------------

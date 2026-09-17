@@ -139,6 +139,60 @@ INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, su
 VALUES ('fnd_fix', 'prj_fix', 'fixture_classifier', 'fixture_cause', 'classifier', 'cls_fix', 'cs_fix',
         'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
 
+-- A finding ruled `unclear` under the pre-0010 three-way vocabulary — the one row 0010's UPDATE and
+-- narrowed CHECK both have to survive: the rewrite must catch it, and the narrowed constraint must
+-- not choke validating it once it reads `negative`.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at,
+                     triage_verdict, triage_action, triage_summary, triaged_at)
+VALUES ('fnd_fix_unclear', 'prj_fix', 'fixture_classifier', 'fixture_cause_unclear', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        'unclear', 'closed', 'the evidence did not settle it', '2026-08-02T00:00:00Z');
+
+-- 0011's four legacy shapes: `blocked` (a person's Real deviation, no case standing on it, so it
+-- closes), `allowlisted` (a person's Legitimate, no verdict yet, so it closes negative),
+-- `graduated` (an old status the row mapping never names — the "every other status closes" arm,
+-- with no verdict to show for it), and an `open` row already ruled `positive` that a still-live
+-- case (below) stands on, the one shape that must stay open across the rewrite.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, human_verdict_at)
+VALUES ('fnd_fix_blocked', 'prj_fix', 'fixture_classifier', 'fixture_cause_blocked', 'classifier', 'cls_fix', 'cs_fix',
+        'blocked', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '2026-08-02T00:00:00Z');
+
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, human_verdict_at)
+VALUES ('fnd_fix_allowlisted', 'prj_fix', 'fixture_classifier', 'fixture_cause_allowlisted', 'classifier', 'cls_fix', 'cs_fix',
+        'allowlisted', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '2026-08-02T00:00:00Z');
+
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at)
+VALUES ('fnd_fix_graduated', 'prj_fix', 'fixture_classifier', 'fixture_cause_graduated', 'classifier', 'cls_fix', 'cs_fix',
+        'graduated', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at,
+                     triage_verdict, triage_action, triage_summary, triaged_at)
+VALUES ('fnd_fix_open_cased', 'prj_fix', 'fixture_classifier', 'fixture_cause_open_cased', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        'positive', 'opened_case', 'a triage run found the claim sound', '2026-08-02T00:00:00Z');
+
+-- 0013's two secret-leak shapes: an open, unruled finding recorded at high confidence (ruled positive by
+-- the migration) and one at low confidence (left unruled for triage). No cause_kind in the payload, so
+-- 0009's confidence backfill, which only rewrites armed_window rows, leaves both as written here.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, payload)
+VALUES ('fnd_fix_leak_high', 'prj_fix', 'secret_leak', 'fixture_cause_leak_high', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '{"confidence": "high"}');
+
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, payload)
+VALUES ('fnd_fix_leak_low', 'prj_fix', 'secret_leak', 'fixture_cause_leak_low', 'classifier', 'cls_fix', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '{"confidence": "low"}');
+
 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, call_site_id,
                        metric, state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at, finding_id)
 VALUES ('ec_fix_finding', 'prj_fix', 1, 'classifier', 'classifier', 'cls_fix', 'Fixture Classifier', 'cs_fix',
@@ -152,6 +206,15 @@ VALUES ('ec_fix_closed', 'prj_fix', 2, 'classifier', 'classifier', 'cls_fix', 'F
         'count', 'resolved', 'Fixture case already closed', 'fixture', 0.9,
         '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '2026-08-14T01:00:00Z',
         'recovered', NULL, '2026-08-14T01:00:00Z', NULL);
+
+-- The still-live case `fnd_fix_open_cased` backs: 0011's backfill must find it through
+-- `eval_case.finding_id` (still present at this point, pre-0011) and keep the finding open
+-- because this case's `state` is not `resolved`.
+INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, call_site_id,
+                       metric, state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at, finding_id)
+VALUES ('ec_fix_open_cased', 'prj_fix', 3, 'classifier', 'classifier', 'cls_fix_open_cased', 'Fixture Classifier', 'cs_fix',
+        'rate', 'open', 'Fixture case backing an open-positive finding', 'fixture', 0.5,
+        '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', 'fnd_fix_open_cased');
 
 -- ---------------------------------------------------------------- pre-deploy
 INSERT INTO pre_deploy_check (id, project_id, classifier_id, surface, failure_mode_id, intensity, status,

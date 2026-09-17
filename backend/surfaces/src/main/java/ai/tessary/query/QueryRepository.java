@@ -32,12 +32,14 @@ import org.springframework.stereotype.Repository;
  * cursor tiebreaks on {@link QueryDataset#keyColumns()} in the same order, so the cursor and the handle
  * always describe the same row.
  *
- * <p><b>Time column.</b> The {@code created_at} time column is native {@code timestamptz} for
- * {@code span} and ISO-8601 TEXT for the other datasets. Per
- * {@link QueryDataset#timeIsTimestamptz()} the range/keyset predicates cast the bound time params with
- * {@code ::timestamptz} for the timestamptz datasets (and read the column back as an ISO-8601 instant),
- * while the TEXT datasets compare lexicographically; both stay served by the {@code (project_id,
- * created_at)} indexes.
+ * <p><b>Time column.</b> Range, keyset and bucket predicates all run on {@link QueryDataset#timeColumn()},
+ * each dataset's own event clock — {@code started_at} for {@code span}/{@code tool_call},
+ * {@code subject_started_at} for {@code classifier_events}, {@code bucket_start} for
+ * {@code metric_rollups} — never a literal {@code "created_at"}. Per {@link QueryDataset#timeIsTimestamptz()} the
+ * predicates cast the bound time params with {@code ::timestamptz} for the timestamptz datasets (and read
+ * the column back as an ISO-8601 instant), while the TEXT datasets compare lexicographically; both stay
+ * served by the {@code (project_id, <time column>)} indexes. {@code created_at} (ingest time) still rides
+ * on every search row for display, read separately from the event clock.
  */
 @Repository
 public class QueryRepository {
@@ -88,8 +90,13 @@ public class QueryRepository {
      * a bare row id for the surrogate-keyed datasets, {@code "<trace_id>:<span_id>"} for {@code spans}.
      * The {@code spans} projection also carries {@code trace_id} and {@code span_id} as ordinary fields,
      * so a caller feeding {@code get_span} never has to parse the handle.
+     *
+     * <p>{@code createdAt} is always the row's literal {@code created_at} (ingest time), for display.
+     * {@code eventTs} is the dataset's own {@link QueryDataset#timeColumn()} value for THIS row — the
+     * keyset actually orders and tiebreaks on it — and is package-private: {@link QueryDtos} never
+     * projects it onto the wire, only {@link #search} reads it, to mint the next cursor.
      */
-    public record SearchRow(String id, String createdAt, Map<String, String> fields) {}
+    public record SearchRow(String id, String createdAt, String eventTs, Map<String, String> fields) {}
 
     /** A bounded page of search rows with an optional keyset continuation token. */
     public record SearchPage(List<SearchRow> rows, @Nullable String nextCursor) {}
@@ -119,8 +126,9 @@ public class QueryRepository {
     // ---- timeseries ----------------------------------------------------------------------------
 
     /**
-     * Bucketed {@code COUNT(*)} over {@code created_at} at {@code interval}, ascending. The bucket key is
-     * {@code date_trunc(:unit, created_at::timestamptz)} — the cast lives in the SELECT, never the WHERE.
+     * Bucketed {@code COUNT(*)} over the dataset's time column at {@code interval}, ascending. The bucket
+     * key is {@code date_trunc(:unit, <time column>::timestamptz)} — the cast lives in the SELECT, never
+     * the WHERE.
      */
     public List<Bucket> timeseries(Scope scope, QueryInterval interval) {
         List<String> where = new ArrayList<>();
@@ -166,23 +174,27 @@ public class QueryRepository {
 
     // ---- search --------------------------------------------------------------------------------
 
+    /** The cursor version prefix: bumped whenever the token's shape or the clock it orders on changes. */
+    private static final String CURSOR_VERSION = "e1";
+
     /**
      * A bounded, keyset-paginated page of matching rows (not aggregated). The optional keyword {@code q}
      * is matched case-insensitively (ILIKE) across the dataset's allow-listed text columns; {@code
      * filters} and {@code range} apply as in the aggregations. Keyset cursor is
-     * {@code (created_at, <keyColumns…>)} descending — newest first — mirroring
+     * {@code (<time column>, <keyColumns…>)} descending — newest first — mirroring
      * {@code SubstrateReadRepository}'s gap-free keyset shape. For {@code spans} that tuple is
-     * {@code (created_at, trace_id, id)}: the span's own id does not break ties on its own, because two
+     * {@code (started_at, trace_id, id)}: the span's own id does not break ties on its own, because two
      * different traces may legitimately contain a span with the same producer id.
      *
-     * <p>A cursor minted by an earlier release names a position that no longer exists. It is not an
-     * error — a cursor whose tuple has the wrong arity is ignored and the caller silently gets page one,
-     * which is the same degradation the traces list chose, and strictly better than a 500 on a bookmarked
-     * page token.
+     * <p>A cursor minted by an earlier release, or one with the wrong tuple arity, names a position that
+     * no longer exists or ranges on a clock this release does not use. It is not an error — an unprefixed
+     * or malformed cursor is ignored and the caller silently gets page one, which is the same degradation
+     * the traces list chose, and strictly better than a 500 on a bookmarked page token, or silently paging
+     * on the wrong column.
      *
      * @param displayColumns trusted {@code wire field -> column identifier} projection for each row's
      *     {@code fields} map (the column is SELECTed {@code AS} the wire field)
-     * @param cursor opaque {@code "<createdAt>|<handle>"} token from a previous page, or null for page one
+     * @param cursor opaque {@code "e1|<eventTs>|<handle>"} token from a previous page, or null for page one
      */
     public SearchPage search(
             Scope scope,
@@ -194,6 +206,7 @@ public class QueryRepository {
         List<String> where = new ArrayList<>();
         Map<String, Object> params = basePredicate(scope, where);
         List<String> keyColumns = scope.dataset().keyColumns();
+        String timeColumn = scope.dataset().timeColumn();
 
         if (q != null && !q.isBlank()) {
             List<String> ors = new ArrayList<>();
@@ -208,10 +221,14 @@ public class QueryRepository {
             }
         }
 
-        // Keyset: rows strictly before the cursor in (created_at DESC, keyColumns… DESC) order.
-        if (cursor != null && !cursor.isBlank()) {
-            int sep = cursor.lastIndexOf('|');
-            List<String> keyValues = sep > 0 ? splitHandle(cursor.substring(sep + 1), keyColumns.size()) : List.of();
+        // Keyset: rows strictly before the cursor in (timeColumn DESC, keyColumns… DESC) order. Only a
+        // cursor stamped with this release's version is trusted; anything else (unprefixed, or a future
+        // version this build predates) falls back to page one rather than paging on the wrong clock.
+        String versionPrefix = CURSOR_VERSION + "|";
+        if (cursor != null && cursor.startsWith(versionPrefix)) {
+            String rest = cursor.substring(versionPrefix.length());
+            int sep = rest.lastIndexOf('|');
+            List<String> keyValues = sep > 0 ? splitHandle(rest.substring(sep + 1), keyColumns.size()) : List.of();
             if (keyValues.size() == keyColumns.size()) {
                 String tsCast = scope.dataset().timeIsTimestamptz() ? "::timestamptz" : "";
                 List<String> placeholders = new ArrayList<>();
@@ -220,19 +237,20 @@ public class QueryRepository {
                     placeholders.add(":cur_k" + i);
                     params.put("cur_k" + i, keyValues.get(i));
                 }
-                where.add("(created_at, " + String.join(", ", keyColumns) + ") < (" + String.join(", ", placeholders)
-                        + ")");
-                params.put("cur_ts", cursor.substring(0, sep));
+                where.add("(" + timeColumn + ", " + String.join(", ", keyColumns) + ") < ("
+                        + String.join(", ", placeholders) + ")");
+                params.put("cur_ts", rest.substring(0, sep));
             }
         }
 
         int capped = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
-        StringBuilder select = new StringBuilder("SELECT " + scope.dataset().idExpr() + " AS row_handle, created_at");
+        StringBuilder select = new StringBuilder(
+                "SELECT " + scope.dataset().idExpr() + " AS row_handle, created_at, " + timeColumn + " AS event_ts");
         for (Map.Entry<String, String> col : displayColumns.entrySet()) {
             select.append(", ").append(col.getValue()).append(" AS ").append(col.getKey());
         }
-        var spec = jdbc.sql(select + " FROM " + relation(scope.dataset()) + whereClause(where)
-                + " ORDER BY created_at DESC, " + descending(keyColumns) + " LIMIT " + (capped + 1));
+        var spec = jdbc.sql(select + " FROM " + relation(scope.dataset()) + whereClause(where) + " ORDER BY "
+                + timeColumn + " DESC, " + descending(keyColumns) + " LIMIT " + (capped + 1));
         bind(spec, params);
 
         List<SearchRow> rows = spec.query((rs, n) -> {
@@ -240,7 +258,8 @@ public class QueryRepository {
                     for (String field : displayColumns.keySet()) {
                         fields.put(field, rs.getString(field));
                     }
-                    return new SearchRow(rs.getString("row_handle"), readTime(rs, scope), fields);
+                    return new SearchRow(
+                            rs.getString("row_handle"), readTime(rs, scope), readEventTime(rs, scope), fields);
                 })
                 .list();
 
@@ -249,7 +268,7 @@ public class QueryRepository {
         if (rows.size() > capped) {
             SearchRow last = rows.get(capped - 1);
             rows = rows.subList(0, capped);
-            next = last.createdAt() + "|" + last.id();
+            next = versionPrefix + last.eventTs() + "|" + last.id();
         }
         return new SearchPage(List.copyOf(rows), next);
     }
@@ -277,7 +296,8 @@ public class QueryRepository {
         if (orderedIds.isEmpty()) {
             return new SearchPage(List.of(), null);
         }
-        StringBuilder select = new StringBuilder("SELECT " + scope.dataset().idExpr() + " AS row_handle, created_at");
+        StringBuilder select = new StringBuilder("SELECT " + scope.dataset().idExpr() + " AS row_handle, created_at, "
+                + scope.dataset().timeColumn() + " AS event_ts");
         for (Map.Entry<String, String> col : displayColumns.entrySet()) {
             select.append(", ").append(col.getValue()).append(" AS ").append(col.getKey());
         }
@@ -295,7 +315,8 @@ public class QueryRepository {
                     for (String field : displayColumns.keySet()) {
                         fields.put(field, rs.getString(field));
                     }
-                    return new SearchRow(rs.getString("row_handle"), readTime(rs, scope), fields);
+                    return new SearchRow(
+                            rs.getString("row_handle"), readTime(rs, scope), readEventTime(rs, scope), fields);
                 })
                 .list()
                 .forEach(row -> byId.put(row.id(), row));
@@ -384,12 +405,12 @@ public class QueryRepository {
     /**
      * The always-applied project + time-range + equality-filter predicate. Mutates {@code where} with
      * clause fragments and returns the param map to bind. Filter columns are pre-resolved trusted
-     * identifiers; their values are bound. Range bounds compare on the raw TEXT column (index-served).
+     * identifiers; their values are bound. Range bounds compare on the dataset's own {@link
+     * QueryDataset#timeColumn()}, index-served either way (timestamptz or the lexicographic TEXT form).
      */
     private static Map<String, Object> basePredicate(Scope scope, List<String> where) {
         Map<String, Object> params = new LinkedHashMap<>();
-        // The time column is a trusted, allow-list-resolved identifier (created_at, or bucket_start for the
-        // pre-aggregated metric_rollups dataset) — never a request string.
+        // The time column is a trusted, allow-list-resolved identifier, per dataset — never a request string.
         String timeColumn = scope.dataset().timeColumn();
         // Bind-param cast for a native timestamptz time column; "" for the ISO-8601 TEXT
         // datasets (which compare lexicographically).
@@ -414,12 +435,23 @@ public class QueryRepository {
         return params;
     }
 
-    /** The row's {@code created_at} as an ISO-8601 instant: read a native timestamptz column back
-     *  via {@link ai.tessary.storage.Timestamps}, else the ISO-8601 TEXT column verbatim. */
+    /** The row's literal {@code created_at} (ingest time) as an ISO-8601 instant: read a native
+     *  timestamptz column back via {@link ai.tessary.storage.Timestamps}, else the ISO-8601 TEXT column
+     *  verbatim. Always {@code created_at}, regardless of the dataset's {@link QueryDataset#timeColumn()}. */
     private static String readTime(ResultSet rs, Scope scope) throws SQLException {
         String ts = scope.dataset().timeIsTimestamptz()
                 ? ai.tessary.storage.Timestamps.iso(rs, "created_at")
                 : rs.getString("created_at");
+        return ts == null ? "" : ts;
+    }
+
+    /** The row's {@code event_ts} alias — its value of {@link QueryDataset#timeColumn()} — the clock the
+     *  keyset actually orders on and the cursor is minted from. Same timestamptz/TEXT read as {@link
+     *  #readTime}, keyed off the same {@link QueryDataset#timeIsTimestamptz()} flag. */
+    private static String readEventTime(ResultSet rs, Scope scope) throws SQLException {
+        String ts = scope.dataset().timeIsTimestamptz()
+                ? ai.tessary.storage.Timestamps.iso(rs, "event_ts")
+                : rs.getString("event_ts");
         return ts == null ? "" : ts;
     }
 

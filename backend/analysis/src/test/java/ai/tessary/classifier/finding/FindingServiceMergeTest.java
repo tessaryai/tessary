@@ -164,24 +164,6 @@ class FindingServiceMergeTest {
         return out;
     }
 
-    @Test
-    @DisplayName("countWithheld is summed across sources and stays gated on confirmedOnly")
-    void withheld_count_is_summed_and_gated() {
-        StubSource first = new StubSource("behavior");
-        first.withheld = 7;
-        StubSource second = new StubSource(BuiltInDetector.Kind.SOP_CONFORMANCE);
-        second.withheld = 0; // the conformance source has no such state and answers zero
-
-        FindingService service = service(List.of(first, second));
-        assertEquals(7, service.findings(PROJECT, null, null, null, true).withheld());
-
-        first.confirmedOnlyGate = true;
-        assertEquals(
-                0,
-                service.findings(PROJECT, null, null, null, false).withheld(),
-                "confirmedOnly=false is the raw Layer-1 stream and reports no gate count");
-    }
-
     // ---- (d) the transaction boundary -----------------------------------------------------------
 
     @Test
@@ -245,7 +227,7 @@ class FindingServiceMergeTest {
                 null,
                 BehaviorFindingView.TriageStatus.PENDING,
                 null,
-                0,
+                null,
                 null);
     }
 
@@ -276,7 +258,7 @@ class FindingServiceMergeTest {
                 null,
                 null,
                 null,
-                0,
+                null,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z");
     }
@@ -285,8 +267,6 @@ class FindingServiceMergeTest {
     private static final class StubSource implements TriageSource {
         private final String kind;
         private final List<BehaviorFindingView> rows;
-        private long withheld;
-        private boolean confirmedOnlyGate;
         private @Nullable BehaviorFindingView resolved;
 
         StubSource(String kind, BehaviorFindingView... rows) {
@@ -317,11 +297,6 @@ class FindingServiceMergeTest {
                 @Nullable String detector,
                 boolean confirmedOnly) {
             return List.copyOf(rows);
-        }
-
-        @Override
-        public long countWithheld(String projectId, @Nullable String callSiteId, boolean confirmedOnly) {
-            return confirmedOnlyGate && !confirmedOnly ? 0 : withheld;
         }
 
         @Override

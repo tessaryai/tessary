@@ -64,11 +64,19 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
         }
     }
 
+    /**
+     * The event-time column migration {@code 0012} added to every open detection table, and which a
+     * paid overlay's own tables must carry in the same release ({@code AGENTS.md}'s paired-PR rule
+     * for that migration) — checked here rather than left for the writer's insert to fail on at the
+     * first detection, which would surface as a classifier silently never writing anything.
+     */
+    private static final String SUBJECT_STARTED_AT = "subject_started_at";
+
     private void assertExists(DataSource ds, DetectionTable table) {
         assertPlainIdentifier(table.table());
         try (Connection conn = ds.getConnection();
-                Statement stmt = conn.createStatement()) {
-            var rs = stmt.executeQuery("SELECT to_regclass('" + table.table() + "') IS NOT NULL");
+                Statement stmt = conn.createStatement();
+                var rs = stmt.executeQuery("SELECT to_regclass('" + table.table() + "') IS NOT NULL")) {
             if (!rs.next() || !rs.getBoolean(1)) {
                 throw new IllegalStateException(
                         "DetectionTable registered for kind '" + table.detectorKind() + "' names table '"
@@ -76,11 +84,24 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
                                 + "', which does not exist in the connected database — its owning module's"
                                 + " Liquibase changelog must run before this check does");
             }
+            assertHasColumn(stmt, table, SUBJECT_STARTED_AT);
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "failed to verify detection table '" + table.table() + "' for kind '" + table.detectorKind()
                             + "' exists",
                     e);
+        }
+    }
+
+    private static void assertHasColumn(Statement stmt, DetectionTable table, String column) throws SQLException {
+        try (var rs = stmt.executeQuery("SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+                + " WHERE table_schema = 'public' AND table_name = '" + table.table() + "' AND column_name = '"
+                + column + "')")) {
+            if (!rs.next() || !rs.getBoolean(1)) {
+                throw new IllegalStateException("DetectionTable registered for kind '" + table.detectorKind()
+                        + "' names table '" + table.table() + "', which has no '" + column
+                        + "' column — its owning module's Liquibase changelog is behind migration 0012");
+            }
         }
     }
 }

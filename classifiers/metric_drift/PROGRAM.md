@@ -251,16 +251,27 @@ window was as noisy as the window it judged, took whatever shape the clock gave 
 became the bar for a busy morning), and forgot a step change immediately, since the next window's
 previous IS the new level.
 
-The control is one slot per UTC day over 21 days, each an exact merge of the windows that closed in
-it, weighted `2^(-age/7)` per sample and reported to the detector at Kish's effective sample size
-`(Σ nᵢdᵢ)²/Σ nᵢdᵢ²`. Days per day rather than a slot per window, because a busy bucket closes one
+The control is one slot per UTC **event** day over 21 days, each an exact merge of the windows that
+closed in it, weighted `2^(-age/7)` per sample and reported to the detector at Kish's effective sample
+size `(Σ nᵢdᵢ)²/Σ nᵢdᵢ²`. Days per day rather than a slot per window, because a busy bucket closes one
 every few minutes and a bounded per-window ring would span hours — back to judging a morning against a
 night.
+
+Every key, age and weight is measured on the **event** clock — the day of a window's own closing
+sample — never on the clock the sweep happens to run the comparison on. A window is judged against its
+own trailing 21 event-days, so a replayed backfill compares each window with the history it actually
+had rather than with whatever the ring holds on the day it is replayed, and a historical regression can
+surface on import. Retention is anchored on the newest day the ring holds, not on wall-clock now, so an
+out-of-order import can never evict a day more recent than the one it is importing. A live install's
+event clock and wall clock stay within seconds of each other, so none of this changes ordinary
+ingestion.
 
 **Days a confirmed regression ran through are excluded**, so a shift under investigation cannot become
 the bar the next window is judged against. Windows ruled *expected* fold in normally. Exclusion is
 decided on every read rather than when the day was folded, because a ruling lands well after the
-window closed — the ring stays an exact record and the late verdict is retroactive.
+window closed — the ring stays an exact record and the late verdict is retroactive. The exclusion span
+itself — `finding.onset_at`/`last_seen_at` for a metric-drift cause — is now also EVENT time, so it
+lines up with the ring's own day keys.
 
 The wire word stays `previous`. It is the last segment of every `cause_key` ever written, so renaming
 it would split one bucket's history into two causes and reopen everything already resolved.
@@ -435,8 +446,8 @@ deviation.** Not on detection. This follows the existing precedent exactly —
 `CaseRow.Detector.BEHAVIOR_DRIFT` is documented as "a behaviour-drift finding *that survived
 triage*" — and it is what makes the no-alert-budget decision (§9) safe: findings stream
 freely onto the Classifiers page, but Triage is the screen people get paged from and only sees the
-triaged subset. So `detect()` returns findings whose `triage_verdict` is `sound`,
-plus any a human marked `not_expected` directly.
+triaged subset. So the finding qualifies once its verdict lands `positive`, whether that came from
+triage or from a human marking `not_expected` directly.
 
 **Amended (launch segment B, 2026-08-08): triage no longer requires a repository, and the
 case says what it ruled with.** The original Layer 2 needed a git integration, a clone token, a
@@ -448,14 +459,19 @@ dossier, the platform's read-only MCP surface for the traffic behind it, and a `
 agent writes its own scripts into. For a distribution shift that is a genuinely sufficient basis rather
 than a degraded one: the workload block (§7) is what separates "the agent changed" from "the traffic
 changed", and it is read off the traces, not off source. What triage rules on is the CLAIM — true,
-sufficiently sampled, properly evidenced — so a duration or cost *drop* is as `sound` as a rise, and
+sufficiently sampled, properly evidenced — so a duration or cost *drop* is as `positive` as a rise, and
 whether the change was welcome is a question for the human who reads the case.
 
-**The contract is "currently firing", not "newly fired".** `detect(projectId)` returns the full
-live set every pass and `CaseReconciler` closes the cases whose detections dropped out. This is a
-real design constraint, and it maps cleanly: a bucket whose current window has returned to its
-pinned reference stops appearing, and its case auto-closes. Implement the live-set semantics
-directly — do not emit a stream of new findings and expect reconciliation to work.
+**Amended (decision 1, 0011): event-driven, not swept.** A case used to open from a periodic
+reconciler asking every source "what is firing right now" and closing whatever a source stopped
+naming — `detect(projectId)` returning the live set, `CaseReconciler` diffing it pass over pass.
+Under the open/closed finding model a ruling freezes the row it landed on (`ux_finding_live` no
+longer matches it), so there is no live set left to sweep. `CaseOpener` calls `CaseSource.shape`
+once, at the moment a finding's ruling qualifies it, and `CaseLedger.openOrJoin` links the finding to
+a case in that same transaction — a fresh case if the key has none open, or the one already open for
+it otherwise. A bucket whose current window has returned to its pinned reference simply never files a
+positive finding again; nothing auto-closes the case, and only a person resolving or absorbing it
+does. `CaseReconciler` and `CaseWorker` are deleted with this decision.
 
 Fields to fill on `CaseDetection`:
 
@@ -528,7 +544,7 @@ quarantine. It needs a branch on `cause_kind`.
 | Verb (UI label) | Action string | Drift causes (today) | `distribution_shift` (new) |
 |---|---|---|---|
 | **Legitimate — absorb** | `expected` | allowlists the gram permanently, skips the graduation wait | **re-pins the reference**: `pinned_sketch ← current`, stamp `pinned_at` / `pinned_by_version_id`, append a baseline-changelog row |
-| **Real deviation** | `not_expected` | pins in quarantine so it never graduates and keeps firing | leaves the reference alone, marks for escalation. The reference must **not** move, or the next window silently normalizes the regression |
+| **Real deviation** | `not_expected` | pins in quarantine so it never graduates and keeps firing | leaves the reference alone, opens or joins a case with this person as the actor. The reference must **not** move, or the next window silently normalizes the regression |
 
 Both labels and both action strings already exist in `ClassifiersPage.tsx`; the branch is entirely
 server-side.
@@ -581,7 +597,7 @@ CREATE TABLE metric_baseline (
     pinned_by_version_id text,
     prev_sketch_json     text,            -- RETIRED: held the previously closed window; see control_json
     current_sketch_json  text,            -- window being filled
-    control_json         text,            -- rolling control: one slot per UTC day, 21 days, §4.3
+    control_json         text,            -- rolling control: one slot per UTC EVENT day, 21 days, §4.3
 
     current_opened_at    text,
     current_count        bigint NOT NULL DEFAULT 0,

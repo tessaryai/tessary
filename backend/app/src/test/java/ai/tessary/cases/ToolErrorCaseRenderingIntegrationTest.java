@@ -24,14 +24,13 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * A case opened from a finding in the shared {@code finding} table, rendered whole: the Layer-2 ruling
@@ -39,16 +38,10 @@ import org.springframework.test.context.DynamicPropertySource;
  *
  * <p>It seeds a {@code TOOL_ERROR} case through the open {@code FindingRepository} and
  * {@code FindingEvidenceRepository} and asserts on {@code CaseService.detail}, stating the
- * shared-table zone contract on its own. It sits beside {@code MetricDriftCaseGateIntegrationTest},
- * the other open-classifier case test.
+ * shared-table zone contract on its own.
  */
 @SpringBootTest
 class ToolErrorCaseRenderingIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.cases.heartbeat-ms", () -> "3600000");
-    }
 
     /** The citations a repo-grounded ruling rests on, in the stored shape. */
     private static final String CITATIONS = "[{\"path\":\"docs/sop/billing.md#L12\",\"reason\":"
@@ -96,8 +89,7 @@ class ToolErrorCaseRenderingIntegrationTest {
     void aBehaviourFindingCaseRendersAsItAlwaysDid() {
         Project p = project("conf-case-control");
         seedTrace(p, "trace-tool-1");
-        String findingId = behaviorFindings
-                .recordRecomputedCause(
+        String findingId = Objects.requireNonNull(behaviorFindings.recordRecomputedCause(
                         Ids.ulid(),
                         p.id(),
                         "tool:lookup_account",
@@ -105,8 +97,9 @@ class ToolErrorCaseRenderingIntegrationTest {
                         BehaviorSubstrateRepository.UNATTRIBUTED,
                         Instant.now().toString(),
                         "{\"failing_traces\":[]}",
+                        Instant.now().toString(),
                         Instant.parse("2020-01-01T00:00:00Z").toString(),
-                        Instant.now().toString())
+                        Instant.now().toString()))
                 .findingId();
         findingEvidence.recordExemplarTrace(
                 p.id(), findingId, "trace-tool-1", Instant.now().toString());

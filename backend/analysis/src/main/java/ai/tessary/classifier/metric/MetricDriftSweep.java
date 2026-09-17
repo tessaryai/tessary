@@ -80,6 +80,13 @@ import org.springframework.transaction.annotation.Transactional;
  * stuck queue restarts the sweep from a null cursor and would otherwise re-fold samples the sketch
  * already holds.
  *
+ * <p><b>The {@code :previous} control ring is on event time too</b> [R11]: a window is keyed, aged,
+ * weighted and compared against {@link MetricControl} entirely by the day of its own closing sample,
+ * never by the day the sweep happened to run the comparison on. A replayed backfill therefore judges
+ * every window against its own trailing 21 event-days, and a historical regression can surface on
+ * import — the ring's day keys are event-time, so absorb and the pinned-reference arm, which compare
+ * against a specific window rather than a rolling average, are unaffected.
+ *
  * <h2>Settle is not uniform</h2>
  *
  * <p>Cost and the token buckets sum over a trace's spans and must wait for every span to arrive;
@@ -698,10 +705,6 @@ public class MetricDriftSweep implements ClassifierSweep {
 
         Grid grid = spec.grid();
         String gridId = new MetricHistogram(grid).gridId();
-        // The sweep's wall clock as an instant. The control's day keys, weights and retention are all
-        // measured against it, and deriving it from the same string the rest of this method writes is
-        // what keeps the ring's ages and the row's timestamps from drifting apart.
-        Instant closedAt = Instant.parse(now);
         MetricControl control = MetricControl.fromJson(row.controlJson());
         // The days a confirmed regression ran through, resolved from this baseline's own findings. Held
         // for the whole page: a page can close several windows and every one of them is judged against a
@@ -779,11 +782,16 @@ public class MetricDriftSweep implements ClassifierSweep {
             if (!shouldClose(count, openedAt, sample.eventAt(), config)) continue;
 
             Window closedWindow = current.copy();
+            // The window's own EVENT day — the day of its closing sample, never the sweep's wall clock —
+            // is what every slot's age, weight and retention in the control is now measured against, so a
+            // replayed backfill judges each window against its own 21 event-days rather than against
+            // whichever day the replay itself happens to run on.
+            String eventDay = MetricControl.dayOf(Instant.parse(sample.eventAt()));
             // Compared BEFORE the fold, always. The control is what this bucket looked like BEFORE this
             // window, and folding first would compare the window against a reference that already
             // contains it — on a thin bucket, where one window is a large share of a day, that alone
             // would drag the bar most of the way to the window and hide the shift.
-            MetricControl.Resolved reference = control.resolve(grid, closedAt, excludedDays);
+            MetricControl.Resolved reference = control.resolve(grid, eventDay, excludedDays);
             Compared compared = compareAndPin(
                     projectId,
                     signal,
@@ -799,15 +807,7 @@ public class MetricDriftSweep implements ClassifierSweep {
                     Map.copyOf(callSites),
                     List.copyOf(windowRefs));
             control = control.fold(
-                    grid,
-                    // The day the window CLOSED, on the wall clock, so the ring's ages line up with the
-                    // clock its weights are measured against. Not the window's event span, which a
-                    // backfill puts months in the past.
-                    MetricControl.dayOf(closedAt),
-                    closedWindow.measure(),
-                    closedWindow.workload(),
-                    closedWindow.tokens(),
-                    closedAt);
+                    grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
             // Refs rotate with the sketch: the window just closed took its population with it into
             // the finding (compareAndPin, above), and the window opening here has none yet.
             baselines.closeWindow(row.id(), control.toJson(), null, null, null, null, null, 0, now);
@@ -1212,6 +1212,14 @@ public class MetricDriftSweep implements ClassifierSweep {
                 explains,
                 pending.control());
         Instant at = Instant.now();
+        // EVENT time of the window's own close — the same clock the ring now keys and weighs on [R11] —
+        // written into onset_at and last_seen_at, and what the quiet-spell horizon below is measured back
+        // from. A backfill therefore reads every window's spell exactly as it read at the time: history
+        // that has already gone quiet on the event clock reads as already over rather than as freshly
+        // firing the moment it is replayed. That is an accepted consequence of moving this to event time,
+        // not a bug — a live install's event clock and wall clock stay within seconds of each other, so
+        // nothing here changes for ordinary ingestion.
+        Instant eventAt = Instant.parse(pending.last().eventAt());
         var recorded = findings.recordShift(
                 Ids.ulid(),
                 projectId,
@@ -1226,40 +1234,28 @@ public class MetricDriftSweep implements ClassifierSweep {
                 pending.sinceVersionId(),
                 primaryCallSite(pending.callSites()),
                 evidence,
+                pending.last().eventAt(),
                 // The recovery horizon, and deliberately the SAME expression MetricDriftSource calls its
                 // quiet window: the longest a still-regressing bucket can go between two firings. A finding
                 // unrefreshed for longer had returned to its reference, so this window opens a new spell
                 // and its onset moves — without which a bucket that recovered and broke again inside the
                 // reopen window would never reopen its case.
-                //
-                // WALL clock, unlike the window bounds above, because the question is how long WE went
-                // without hearing rather than how long the traffic spanned. A backfill lands months of
-                // event time in one pass and would otherwise read every window as its own spell.
-                at.minus(Duration.ofHours(config.windowMaxHours())).toString(),
+                eventAt.minus(Duration.ofHours(config.windowMaxHours())).toString(),
                 at.toString());
-        // Both windows are re-pointed at the window that just fired, for as long as nothing has ruled
-        // on this finding: `recordShift` replaces the stated quantiles on every close, so leaving the
-        // evidence on an old window would let a persisting shift claim one window's numbers while
-        // enumerating another's — which Layer 2 (auditing the claim by reading the evidence) would
-        // read as the detector contradicting itself. Whichever half moves, both must.
-        //
-        // `ruled()` is the whole of the freeze, and it is enough because `reopenForTriage` NULLs
-        // `triage_action`: a finding sent back for a second look becomes re-pointable again, so the
-        // second look audits the window it is actually about.
-        if (!recorded.ruled()) {
-            evidenceRefs.replace(
-                    projectId,
-                    recorded.findingId(),
-                    FindingEvidenceRow.Role.MEMBER,
-                    pending.memberRefs(),
-                    at.toString());
-            evidenceRefs.replace(
-                    projectId,
-                    recorded.findingId(),
-                    FindingEvidenceRow.Role.BASELINE,
-                    pending.baselineRefs(),
-                    at.toString());
-        }
+        // Both windows are re-pointed at the window that just fired: `recordShift` replaces the stated
+        // quantiles on every close, so leaving the evidence on an old window would let a persisting
+        // shift claim one window's numbers while enumerating another's — which Layer 2 (auditing the
+        // claim by reading the evidence) would read as the detector contradicting itself. Whichever
+        // half moves, both must. No freeze guard needed here: `recordShift`'s conflict target already
+        // excludes a ruled row (see `FindingRepository`), so this call is always on an unruled finding.
+        evidenceRefs.replace(
+                projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, pending.memberRefs(), at.toString());
+        evidenceRefs.replace(
+                projectId,
+                recorded.findingId(),
+                FindingEvidenceRow.Role.BASELINE,
+                pending.baselineRefs(),
+                at.toString());
         StructuredLog.info(log, Markers.OPS, "metric.finding.recorded")
                 .field("project", projectId)
                 .field("baseline", pending.row().id())

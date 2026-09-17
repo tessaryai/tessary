@@ -266,7 +266,17 @@ public final class ToolErrorEvidence {
             List<String> failingTraces,
             @Nullable String onsetAt,
             @Nullable String windowOpenedAt,
-            @Nullable String windowClosedAt) {}
+            @Nullable String windowClosedAt,
+            /** {@code up} or {@code down}: the shift's own direction, never inferred from the rates. */
+            String direction,
+            /** The CUSUM accumulator this shift was ruled on, and the decision interval it crossed. */
+            double statistic,
+            double threshold,
+            /** Cohen's h between the baseline and current rate: how large the shift is, independent of
+             *  sample size. */
+            double effectSize,
+            /** The cross-detector ranked-list weight, 0..1 — see {@code ToolErrorEvidence#severity}. */
+            double criticality) {}
 
     /** Parse the blob for the detail surface, or null when it cannot be read. */
     public static @Nullable RateDetail detail(@Nullable String json) {
@@ -297,7 +307,12 @@ public final class ToolErrorEvidence {
                     failingTraces(json),
                     text(root.path("onset_at")),
                     text(window.path("opened_at")),
-                    text(window.path("closed_at")));
+                    text(window.path("closed_at")),
+                    root.path("direction").asText("up"),
+                    root.path("statistic").asDouble(0),
+                    root.path("threshold").asDouble(0),
+                    root.path("effect_size").asDouble(0),
+                    root.path("criticality").asDouble(0));
         } catch (JsonProcessingException e) {
             return null;
         }

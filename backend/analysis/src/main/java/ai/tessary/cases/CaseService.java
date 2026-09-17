@@ -11,12 +11,11 @@ import ai.tessary.cases.CaseDtos.TriageView;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
@@ -44,7 +43,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -79,7 +77,9 @@ public class CaseService {
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository findingEvidence;
-    private final FindingService drift;
+    /** Absorb's detector-state re-pin — see {@link #absorb}. */
+    private final BehaviorTriageSource behaviorTriage;
+
     private final ClassifierService classifiers;
     /** Cleared when a tool-error case is closed by hand; see {@link #resolve}. */
     private final ToolErrorStateRepository toolErrorStates;
@@ -102,7 +102,7 @@ public class CaseService {
             RcaTriggerService rcaTrigger,
             FindingRepository findings,
             FindingEvidenceRepository findingEvidence,
-            FindingService drift,
+            BehaviorTriageSource behaviorTriage,
             ClassifierService classifiers,
             ToolErrorStateRepository toolErrorStates,
             MalformedOutputRateRepository malformedOutputRates,
@@ -118,7 +118,7 @@ public class CaseService {
         this.rcaTrigger = rcaTrigger;
         this.findings = findings;
         this.findingEvidence = findingEvidence;
-        this.drift = drift;
+        this.behaviorTriage = behaviorTriage;
         this.classifiers = classifiers;
         this.toolErrorStates = toolErrorStates;
         this.malformedOutputRates = malformedOutputRates;
@@ -150,19 +150,17 @@ public class CaseService {
         return new TriageView(open, muted, resolved, watching(projectId, open.isEmpty()));
     }
 
-    /** The finished-RCA verdicts behind every case in {@code batches}, in one query. */
+    /** The finished-RCA verdicts behind every case in {@code batches}, in one query — keyed by CASE id
+     *  now (1b): a case reads over all of its findings, so the lookup can't key on any one finding. */
     @SafeVarargs
     private Map<String, CaseLead> leadsFor(String projectId, List<CaseRow>... batches) {
-        Set<String> findingIds = Arrays.stream(batches)
-                .flatMap(List::stream)
-                .map(CaseRow::findingId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        return rcaReports.leadsByFinding(projectId, findingIds);
+        Set<String> caseIds =
+                Arrays.stream(batches).flatMap(List::stream).map(CaseRow::id).collect(Collectors.toSet());
+        return rcaReports.leadsByCase(projectId, caseIds);
     }
 
     private static @Nullable CaseLead lead(Map<String, CaseLead> leads, CaseRow row) {
-        return row.findingId() == null ? null : leads.get(row.findingId());
+        return leads.get(row.id());
     }
 
     /**
@@ -235,7 +233,7 @@ public class CaseService {
                 substrate.countCallSitesSince(projectId, since),
                 substrate.countTracesSince(projectId, since),
                 includeEmptyStateCounts ? substrate.countTraces(projectId) : null,
-                includeEmptyStateCounts ? findings.countLive(projectId) : null);
+                includeEmptyStateCounts ? findings.countOpen(projectId) : null);
     }
 
     public CaseDetailView detail(String projectId, String id) {
@@ -261,10 +259,26 @@ public class CaseService {
                 shiftDetail(finding),
                 rateDetail(finding),
                 finding == null ? null : malformedOutputDetail.detail(finding),
-                finding == null ? null : secretLeakDetail.detail(finding),
+                finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
+    }
+
+    /**
+     * The findings a secret-leak case's keys-to-rotate and when-it-leaked read across: all of them, newest
+     * first, rather than only the newest one the rest of the page shows. A credential leaked in an earlier
+     * window is still exposed, so a later finding joining the case must not hide it. Any other case gets
+     * its newest finding alone, which the secret-leak reader returns null for.
+     */
+    private List<FindingRow> secretLeakFindings(String projectId, CaseRow row, FindingRow newest) {
+        if (!CaseRow.Detector.SECRET_LEAK.equals(row.detector())) return List.of(newest);
+        List<FindingRow> all = new ArrayList<>();
+        all.add(newest);
+        for (FindingRow f : findings.listByCase(projectId, row.id())) {
+            if (!f.id().equals(newest.id())) all.add(f);
+        }
+        return all;
     }
 
     /**
@@ -291,17 +305,16 @@ public class CaseService {
     }
 
     /**
-     * The finding a case came from, or null when it did not come from one.
+     * The case's newest finding, or null when it has none.
      *
      * <p>One lookup, one table: every detector's finding lives in {@code finding}, so there is no wrong
-     * table to ask.
-     *
-     * <p>A {@code finding_id} that no longer resolves reads the same as none. The FK is
-     * {@code ON DELETE RESTRICT}, so this can only happen to a row written before the constraint
-     * existed, and a case is not worth failing to render over.
+     * table to ask. {@code latest_finding_id} is a correlated subquery over {@code finding.case_id}
+     * (1b), so a finding that no longer resolves here reads the same as a case with none — {@code
+     * finding.case_id} is {@code ON DELETE SET NULL}, so this can only happen to a row read between the
+     * delete and this one, and a case is not worth failing to render over.
      */
     private @Nullable FindingRow findingBehind(String projectId, CaseRow row) {
-        String ref = row.findingId();
+        String ref = row.latestFindingId();
         if (ref == null || ref.isBlank()) return null;
         return findings.findById(projectId, ref).orElse(null);
     }
@@ -310,14 +323,11 @@ public class CaseService {
      * No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
      * rather than a button: there is nothing here for "move the bar" to move.
      *
-     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: absorb
-     * delegates to {@code FindingService.resolve(…, "expected")}, which for every other detector reaches
-     * {@code BehaviorTriageSource.resolve()}'s correction loop — and that loop only handles
-     * {@code DISTRIBUTION_SHIFT}/{@code RATE_SHIFT} causes or a finding with a non-null {@code
-     * profileId()}. Both new causes are {@code ARMED_WINDOW}/{@code MALFORMED_RATE} with a null
-     * profile id, so the press would 404 today. Excluded here rather than left to throw: a case page is
-     * not worth a broken button on it. Fixing the correction loop for these two causes is outside this
-     * step's scope.
+     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: neither
+     * cause has fitted detector state a re-pin could move — {@code BehaviorTriageSource#repin} is a
+     * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
+     * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
+     * than left to no-op silently: a case page is not worth a button that does nothing.
      */
     private static boolean absorbable(CaseRow row) {
         return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
@@ -340,7 +350,7 @@ public class CaseService {
      */
     private static @Nullable CaseRulingView ruling(CaseRow row, @Nullable FindingRow finding) {
         if (finding == null) return null;
-        if (FindingRow.Status.BLOCKED.equals(finding.status())) {
+        if (finding.humanVerdictAt() != null) {
             return new CaseRulingView(
                     finding.id(),
                     "Human",
@@ -427,14 +437,11 @@ public class CaseService {
         if (CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())) {
             malformedOutputRates.states().reset(projectId, row.subjectId(), actor, reason, now.toString());
         }
-        // A secret-leak finding stays live until a person closes it, since SecretLeakCaseSource has no
-        // recency window. Left open, it would be listed again next pass and, once the reopen window
-        // lapsed, open a fresh case for a credential already rotated. A later leak of the same facet
-        // files a new finding, so resolving this one does not silence the rule.
-        String findingId = row.findingId();
-        if (CaseRow.Detector.SECRET_LEAK.equals(row.detector()) && findingId != null && !findingId.isBlank()) {
-            findings.setStatus(projectId, findingId, FindingRow.Status.RESOLVED, now.toString());
-        }
+        // Resolving a case closes what it holds — every finding still open on it, whatever detector
+        // opened it. A secret-leak finding stays live until a person closes it (SecretLeakCaseSource
+        // keeps no recency window), so this is the only thing that ever closes one; every other
+        // detector's finding is usually already closed by its own ruling, and this is a no-op for it.
+        findings.closeByCase(projectId, row.id(), now.toString());
         return CaseView.of(require(projectId, id));
     }
 
@@ -450,53 +457,84 @@ public class CaseService {
      * new normal" has no way out of a case that is correct and unwanted, which is how a detector earns
      * the reputation that gets it turned off.
      *
-     * <p><b>The re-pin is the finding's job and is delegated, never reimplemented.</b>
-     * {@code FindingService.resolve(…, "expected")} is the one place that knows what "absorb" means
-     * for each cause kind, and it refuses rather than guesses when the numbers to accept are unreadable.
-     * That refusal propagates: if the reference cannot be moved, the case does not close, because a case
-     * closed as absorbed while the detector kept its old bar would reopen on the next pass and read as
-     * the button being broken.
+     * <p><b>The re-pin is the finding's job and is delegated, never reimplemented</b> — but not through
+     * {@code FindingService.resolve}. By the time a case exists to absorb, its findings already carry a
+     * positive ruling, so the ordinary correction loop would 409 on them: {@link BehaviorTriageSource}
+     * exposes {@code repinCase(...)} for exactly this, the detector-state half of "Legitimate" with no
+     * ruling write attached, folding every window the case holds into the reference at once (1b) rather
+     * than only its newest finding's. It refuses rather than guesses when the numbers to accept are
+     * unreadable, and that refusal propagates: if the reference cannot be moved, the case does not
+     * close, because a case closed as absorbed while the detector kept its old bar would fire again on
+     * the very next window and read as the button being broken.
      *
-     * <p>Not transactional across the two writes by choice: the finding resolution is its own
-     * transaction and commits first. If the case close then failed, the reference has still moved and the
-     * detection stops firing, so {@link CaseReconciler} closes the case as recovered on the next pass. The
-     * inverse order would be the dangerous one: a case closed against a bar that never moved.
+     * <p>Not transactional across the two writes by choice: the re-pin is its own transaction and
+     * commits first. If the case close then failed, the reference has still moved — the detector will
+     * not fire again on this population, so no new finding ever re-triggers this path — and the case is
+     * left open for a person to resolve by hand rather than silently reopening. The inverse order would
+     * be the dangerous one: a case closed as absorbed against a bar that never moved.
      */
     public CaseView absorb(String projectId, String id, @Nullable String actor) {
         CaseRow row = require(projectId, id);
         if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
-        String findingId = row.findingId();
-        if (findingId == null || findingId.isBlank() || !absorbable(row)) {
+        if (row.latestFindingId() == null || !absorbable(row)) {
             throw new TessaryException(CaseError.NOT_ABSORBABLE, row.reference());
         }
         if (!detectorAvailable(projectId, row)) {
             throw new TessaryException(CaseError.DETECTOR_UNAVAILABLE, row.detector());
         }
-        drift.resolve(projectId, findingId, BehaviorResolutionRequest.EXPECTED, actor);
-        // Through the ledger, not inline: the close and its trail line must commit together, and a
-        // @Transactional method on THIS class invoked through `this` gets no proxy and no transaction.
+        // Every window the case holds, not only the newest — 1b: an absorb that moved the reference off
+        // one finding but left an earlier spell's evidence still counting against it would leave the
+        // detector alarming on traffic the person just said was fine.
+        behaviorTriage.repinCase(projectId, findings.listByCase(projectId, row.id()), actor);
+        // Through the ledger, not inline: the close and its trail line — and the finding close that
+        // rides with it — must commit together, and a @Transactional method on THIS class invoked
+        // through `this` gets no proxy and no transaction.
         ledger.absorb(projectId, row.id(), actor, Instant.now());
         return CaseView.of(require(projectId, id));
     }
 
     /**
-     * Press RCA on this case: resolve the finding behind it and enqueue the lane on that id alone.
+     * Press RCA on this case (1c): lock it, record the press, and enqueue the lane on its newest
+     * finding alone.
      *
-     * <p>Deliberately NOT transactional and deliberately not conditional on the case's state. A closed
-     * or muted case is still worth root-causing ("we absorbed this, why did it happen" is a normal
-     * question), and the report is an immutable artefact that changes nothing about the case.
+     * <p><b>Locks the case at the moment of the press.</b> No finding can join a locked case — the
+     * cause's next positive opens a fresh case instead — so the agent's subject stays exactly what the
+     * person read when they pressed the button, and a case mid-analysis is never quietly widened under
+     * it. The lock, the {@code rca_requested} trail line and the trigger commit together: a lock with no
+     * line to explain it, or a running lane nobody can see was requested, is a state a reader cannot
+     * account for.
+     *
+     * <p>Not conditional on the case's state otherwise. A closed or muted case is still worth
+     * root-causing ("we absorbed this, why did it happen" is a normal question), and the report is an
+     * immutable artefact that changes nothing about the case. Re-pressing a locked case coalesces onto
+     * its one report, exactly as before locking existed.
      *
      * <p>A case with no finding behind it cannot be analysed: RCA is anchored on a claim and its
-     * recorded evidence, and there is nothing here to anchor on. Only rows written before
-     * {@code eval_case.finding_id} became mandatory can be in that state.
+     * recorded evidence, and there is nothing here to anchor on. Only rows written before a case's
+     * first finding link became mandatory can be in that state.
      */
+    @Transactional
     public RcaReportView runRca(String projectId, String id, @Nullable String actor) {
         CaseRow row = require(projectId, id);
-        String findingId = row.findingId();
-        if (findingId == null || findingId.isBlank()) {
+        List<FindingRow> caseFindings = findings.listByCase(projectId, row.id());
+        if (caseFindings.isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, row.reference());
         }
-        return rcaTrigger.trigger(projectId, findingId, actor, null);
+        String newestFindingId = caseFindings.get(0).id();
+
+        Instant now = Instant.now();
+        if (row.lockedAt() == null) {
+            cases.lock(projectId, row.id(), now);
+            events.append(
+                    projectId,
+                    row.id(),
+                    CaseEventRow.Kind.RCA_REQUESTED,
+                    actor,
+                    "Requested — locks the case to its finding; the cause's next positive opens a new case.",
+                    null,
+                    now);
+        }
+        return rcaTrigger.trigger(projectId, newestFindingId, actor, null);
     }
 
     /** Silence a case without closing it: "known, stop paging". Scoped to this case alone; silencing

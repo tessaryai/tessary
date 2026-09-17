@@ -115,9 +115,8 @@ class ProjectModelSettingControllerTest {
                     .findFirst()
                     .orElseThrow();
             assertEquals(LaneGroup.AGENT_VM, laneView.group());
-            // Provider first: every provider the sandbox can run appears on both lanes, whatever the
-            // model behind it turns out to be. Which model is the lane's own business (TRIAGE's price
-            // ceiling changes it), so this asserts the coverage rule rather than the model names.
+            // Provider first: every provider the sandbox can run appears on both lanes. Asserts the
+            // coverage rule rather than the model names, since which model is each lane's own business.
             assertEquals(
                     java.util.Arrays.stream(ModelProvider.values())
                             .map(ModelProvider::name)
@@ -132,9 +131,8 @@ class ProjectModelSettingControllerTest {
             assertTrue(
                     offered.contains("CUSTOM:custom-model"),
                     lane + "'s options must offer the CUSTOM catalog entry: " + offered);
-            // The pre-existing Bedrock offer list must still be reachable across the group's lanes,
-            // not replaced by the catalog keys. Per lane it is a subset — TRIAGE's ceiling leaves only
-            // Haiku — so the union across both lanes is what has to cover it.
+            // The pre-existing Bedrock offer list must still be reachable, not replaced by the catalog
+            // keys — TRIAGE and RCA now carry the same Bedrock models, so this holds per lane.
             assertTrue(
                     BedrockModelProfile.offeredFor(LaneGroup.AGENT_VM).stream().anyMatch(offered::contains),
                     lane + "'s options must still offer Bedrock models: " + offered);

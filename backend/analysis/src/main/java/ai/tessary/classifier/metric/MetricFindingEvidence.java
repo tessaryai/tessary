@@ -202,7 +202,42 @@ public final class MetricFindingEvidence {
             List<Pair> workload,
             List<Pair> tokens,
             @Nullable String windowOpenedAt,
-            @Nullable String windowClosedAt) {}
+            @Nullable String windowClosedAt,
+            /** {@code bucket.kind} — the scope this shift was measured over, e.g. {@code call_site}. */
+            String bucketKind,
+            /** {@code count} or {@code elapsed}: which close criterion fired this window. */
+            @Nullable String windowKind,
+            /** The project version running when this window closed, or null on a project with no
+             *  version tags. Not "since this version" — see {@code MetricFindingEvidence.Explained}. */
+            @Nullable String sinceVersionId,
+            /** How the rolling reference was composed, or null on the pinned arm, whose reference is a
+             *  window enumerated as {@code baseline} evidence rows instead. */
+            @Nullable Control control,
+            /** Other shifts this finding's own delta explains, so they were not opened as findings of
+             *  their own — empty for the ordinary case. */
+            List<Explains> explains) {}
+
+    /** {@link #ShiftDetail#control}: the rolling reference's own composition. */
+    public record Control(
+            int daysUsed,
+            int daysExcludedAsConfirmed,
+            @Nullable String oldestDay,
+            double halfLifeDays,
+            int retainDays) {}
+
+    /** One shift {@link #ShiftDetail#explains}, read back out of the blob {@link #toJson} wrote. */
+    public record Explains(
+            String measure,
+            String bucketKind,
+            String bucketKey,
+            String reference,
+            double w1Log,
+            double ratio,
+            String direction,
+            long nCur,
+            @Nullable Double refMillis,
+            @Nullable Double curMillis,
+            double covered) {}
 
     /** Parse the blob for the detail surface, or null when it cannot be read. */
     public static @Nullable ShiftDetail detail(@Nullable String json) {
@@ -210,7 +245,8 @@ public final class MetricFindingEvidence {
         try {
             JsonNode root = MetricHistogram.JSON.readTree(json);
             String measure = root.path("measure").asText("");
-            String bucketKey = root.path("bucket").path("key").asText("");
+            JsonNode bucket = root.path("bucket");
+            String bucketKey = bucket.path("key").asText("");
             if (measure.isEmpty() || bucketKey.isEmpty()) return null;
             JsonNode window = root.path("window");
             return new ShiftDetail(
@@ -227,10 +263,49 @@ public final class MetricFindingEvidence {
                     pairs(root.path("workload")),
                     pairs(root.path("tokens")),
                     text(window.path("opened_at")),
-                    text(window.path("closed_at")));
+                    text(window.path("closed_at")),
+                    bucket.path("kind").asText(""),
+                    text(window.path("kind")),
+                    text(root.path("since_version_id")),
+                    control(root.path("control")),
+                    explains(root.path("explains")));
         } catch (JsonProcessingException e) {
             return null;
         }
+    }
+
+    /** {@link ShiftDetail#control}, or null when the blob carries no rolling reference. */
+    private static @Nullable Control control(JsonNode node) {
+        if (!node.isObject()) return null;
+        return new Control(
+                node.path("days_used").asInt(0),
+                node.path("days_excluded_as_confirmed").asInt(0),
+                text(node.path("oldest_day")),
+                node.path("half_life_days").asDouble(0),
+                node.path("retain_days").asInt(0));
+    }
+
+    /** Every entry of {@link ShiftDetail#explains}, in the order {@link #toJson} wrote them. */
+    private static List<Explains> explains(JsonNode node) {
+        if (!node.isArray()) return List.of();
+        List<Explains> out = new java.util.ArrayList<>();
+        for (JsonNode e : node) {
+            JsonNode bucket = e.path("bucket");
+            JsonNode p50Ms = e.path("p50_ms");
+            out.add(new Explains(
+                    e.path("measure").asText(""),
+                    bucket.path("kind").asText(""),
+                    bucket.path("key").asText(""),
+                    e.path("reference").asText(""),
+                    e.path("w1_log").asDouble(0),
+                    e.path("ratio").asDouble(1),
+                    e.path("direction").asText("up"),
+                    e.path("n_cur").asLong(0),
+                    number(p50Ms.path(0)),
+                    number(p50Ms.path(1)),
+                    e.path("covered").asDouble(0)));
+        }
+        return List.copyOf(out);
     }
 
     /** Every {@code [then, now]} array on an object, in the order the writer put them. */

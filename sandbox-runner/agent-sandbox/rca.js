@@ -103,7 +103,20 @@ async function main() {
   process.stdout.write(JSON.stringify({ raw: run.resultRaw, turns: run.turns, startMs: run.startMs }));
 }
 
-main().catch((e) => {
-  console.error(describeError(e));
-  process.exit(1);
-});
+main()
+  .catch((e) => {
+    console.error(describeError(e));
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // Unref'd, so a clean exit is unaffected — node ignores an unref'd timer once nothing else
+    // holds the loop open. It only fires if something ELSE already is: a socket runAgent's
+    // `finally` failed to close, the exact shape of the hang decision 2 fixes at the source. Five
+    // seconds, not the launcher's own deadline, so a leak is diagnosed in the log within the run
+    // rather than surfacing only as a late timeout with no clue which handle caused it. Approved
+    // as the one exit-guard exception to the no-RCA-changes rule — see triage.js's identical copy.
+    setTimeout(() => {
+      console.error('still alive 5s after main() finished:', process.getActiveResourcesInfo());
+      process.exit(process.exitCode || 1);
+    }, 5000).unref();
+  });

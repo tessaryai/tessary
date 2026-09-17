@@ -202,25 +202,149 @@ class ToolErrorClassifierIntegrationTest {
                         .count(),
                 "a recompute must not deposit a second finding for a cause that already has one");
 
-        // The human arm of the case gate. BLOCKED is what `listLiveByCause` reads as confirmed.
+        // The human arm of the case gate: a positive ruling stays open, which is what the case source
+        // now reads as confirmed.
         var resolved = drift.resolve(pid, finding.id(), "not_expected", null);
         assertEquals(
-                FindingRow.Status.BLOCKED,
+                FindingRow.Status.OPEN,
                 resolved.status(),
                 "Real deviation must mark the finding confirmed — this 404'd before rate_shift had a "
                         + "branch in resolve, so no tool-error case could open by any path");
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, resolved.triageVerdict());
+    }
+
+    @Test
+    @DisplayName("a wholly historical backfill still fires — the replay anchors to the project's own "
+            + "traffic, not to wall-clock now")
+    void aBackfillOlderThanTheReplayWindowStillFires() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "toolerr-backfill").project().id();
+        // Ninety days old: well outside a `now - 28d` window, but the whole seeded span (sixty hours)
+        // sits comfortably inside 28 days of the LAST call this project ever made.
+        Instant start = Instant.now().minus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+
+        assertEquals(
+                1,
+                service.refresh(pid),
+                "wall-clock now-28d would read nothing but empty months; the project's own newest "
+                        + "tool-call event is the anchor instead");
+        assertTrue(
+                findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
+                        .anyMatch(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind())),
+                "a rate_shift finding was written from data entirely outside the wall-clock window");
+    }
+
+    @Test
+    @DisplayName("a resweep with no new traffic does not advance last_seen_at")
+    void lastSeenDoesNotAdvanceWithoutNewTraffic() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-stale").project().id();
+        Instant start = Instant.now().minus(60, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+
+        assertEquals(1, service.refresh(pid));
+        String firstLastSeen = firedFinding(pid).lastSeenAt();
+
+        assertEquals(1, service.refresh(pid), "still one tool in a spell");
+        String secondLastSeen = firedFinding(pid).lastSeenAt();
+
+        assertEquals(firstLastSeen, secondLastSeen, "no new buckets were folded, so the event clock must not move");
+    }
+
+    @Test
+    @DisplayName("a gap between folded buckets longer than the quiet window does not reset the onset "
+            + "while the underlying spell never actually recovered")
+    void aGapLongerThanTheQuietWindowKeepsTheOnsetWhileTheSpellIsUnbroken() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-gap").project().id();
+        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 10, 8); // breaks
+
+        assertEquals(1, service.refresh(pid));
+        FindingRow first = firedFinding(pid);
+        String onset = first.onsetAt();
+        assertNotNull(onset);
+
+        // Twenty hours with NOTHING for this tool at all — no upload, not a recovery: an hour with zero
+        // calls contributes no bucket to the replay, so the accumulator that is still broken has nothing
+        // to cool it in the gap. Still broken on the other side.
+        seedHours(pid, start.plus(QUIET_HOURS + 30L, ChronoUnit.HOURS), 10, 8);
+
+        assertEquals(1, service.refresh(pid), "still one tool in a spell, not a second one");
+        FindingRow second = firedFinding(pid);
+
+        assertEquals(
+                first.id(),
+                second.id(),
+                "the same finding — a gap the detector never recovered through is not a new spell");
+        assertEquals(
+                onset,
+                second.onsetAt(),
+                "the onset must not drift across a gap in the UPLOAD when the spell itself was never broken");
+        assertTrue(
+                Instant.parse(second.lastSeenAt()).isAfter(Instant.parse(first.lastSeenAt())),
+                "last_seen_at still advances to the newly folded traffic");
+    }
+
+    @Test
+    @DisplayName("last_seen_at, and the evidence bounded by it, stop at the last hour the detector "
+            + "folded, not at the moment the sweep ran")
+    void memberAndWitnessStopAtTheLastFoldedHour() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "toolerr-bounded").project().id();
+        // Ten days old — well inside a pre-fix `now - 28d` window too, so this isolates the event clock
+        // (last_seen_at, and the evidence bound it drives) from the anchor the backfill test above covers.
+        Instant start = Instant.now().minus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        // The detector's own last folded bucket, read back independently rather than hand-computed from
+        // the seeding parameters, so this asserts against what the replay actually saw.
+        String lastFoldedBucket = repo.hourlyTallies(pid, start).stream()
+                .filter(t -> t.toolKey().endsWith(TOOL))
+                .map(HourlyToolTally::bucket)
+                .max(String::compareTo)
+                .orElseThrow(() -> new AssertionError("no buckets tallied for " + TOOL));
+
+        assertEquals(1, service.refresh(pid));
+        FindingRow finding = firedFinding(pid);
+
+        assertEquals(
+                lastFoldedBucket,
+                finding.lastSeenAt(),
+                "last_seen_at is the last hour actually folded, not Instant.now() at write time");
+        assertTrue(
+                Instant.parse(finding.lastSeenAt()).isBefore(Instant.now().minus(1, ChronoUnit.DAYS)),
+                "the event clock, not the moment the sweep wrote the row");
+        assertNotNull(finding.onsetAt());
+
+        Instant onset = Instant.parse(finding.onsetAt());
+        Instant until = Instant.parse(finding.lastSeenAt()).plus(1, ChronoUnit.HOURS);
+        long expectedMembers =
+                repo.callRefsFor(pid, List.of(TOOL), onset, until).size();
+        long expectedWitnesses =
+                repo.failingCallRefsFor(pid, List.of(TOOL), onset, until).size();
+
+        Map<String, Long> byRole = evidence.countsByRole(pid, finding.id());
+        assertEquals(
+                expectedMembers,
+                byRole.getOrDefault(FindingEvidenceRow.Role.MEMBER, 0L),
+                "member is bounded to [onset, last folded hour], not to wall-clock now");
+        assertEquals(
+                expectedWitnesses,
+                byRole.getOrDefault(FindingEvidenceRow.Role.WITNESS, 0L),
+                "witness follows the same bound as member");
     }
 
     /**
      * A closed ruling hands the window back to the detector: the arm clears, and what it fired over
      * becomes part of normal.
      *
-     * <p><b>The state this replaces.</b> Triage wrote three columns on the finding and nothing else, so
-     * the accumulator kept the value it fired at — above its own threshold — and went on firing on
-     * evidence a ruling had already dismissed. Those firings feed {@code recurrences_since_verdict},
-     * which the re-open rule reads as the traffic contradicting the ruling, so a closed finding
-     * re-triaged itself and eventually opened a case off nothing new. On the websearch finding that
-     * prompted this the arm sat at 7.331 against a threshold of 6.0 for thirteen failure-free days.
+     * <p><b>The state this replaces.</b> Closing the finding alone does not touch the accumulator, so it
+     * kept the value it fired at — above its own threshold — and the very next sweep would open a fresh
+     * finding for a cause a human just dismissed, off nothing new. On the websearch finding that prompted
+     * this the arm sat at 7.331 against a threshold of 6.0 for thirteen failure-free days.
      *
      * <p><b>Folded, not replaced.</b> Absorb replaces the reference, because a human pressing
      * "legitimate" is saying this run IS the normal. A close is weaker — nobody said the old normal was
@@ -266,13 +390,8 @@ class ToolErrorClassifierIntegrationTest {
     /**
      * Which verdicts may move detector state, held directly rather than inferred.
      *
-     * <p>{@code negative} and {@code unclear} share an ACTION — both close the finding — and for one
-     * release the fold was gated on that action, so both folded. They do not assert the same thing. A
-     * negative says the rows do not carry the claim, which is a statement that the traffic was ordinary
-     * and belongs in the reference. An unclear says the run could not tell, and a run that could not
-     * tell has established nothing to fold. Two live rulings made the case: one {@code unclear} came
-     * from an agent that never reached the read surface and one from an agent miscounting the
-     * population, and each moved a baseline by thousands of calls.
+     * <p>{@code negative} is the only verdict that establishes the traffic was ordinary — a claim
+     * folding asserts by adding the window to the reference — so it is the only one that may fold.
      *
      * <p>{@code positive} opens a case. Moving the bar there would be the platform quietly agreeing to
      * a rate a human is about to be asked about, and clearing the arm would drop the evidence out from
@@ -284,10 +403,6 @@ class ToolErrorClassifierIntegrationTest {
         assertTrue(
                 FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.NEGATIVE),
                 "a negative is the one ruling that establishes the window was ordinary");
-        assertFalse(
-                FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.UNCLEAR),
-                "an unclear closes the finding without establishing anything — folding on it treats"
-                        + " 'we could not tell' as 'we checked, it was fine'");
         assertFalse(
                 FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.POSITIVE),
                 "a positive opens a case; the bar must not move under it");
@@ -315,6 +430,49 @@ class ToolErrorClassifierIntegrationTest {
 
         assertEquals(armed, armOf(pid), 1e-9, "nothing ran, so nothing moved");
         assertTrue(references.byTool(pid).isEmpty(), "and no reference was pinned behind the case");
+    }
+
+    /**
+     * A positive ruling keeps the finding open but takes it out of {@code ux_finding_live}, and the
+     * recompute re-derives the same spell every minute. The pass after the ruling used to INSERT a second,
+     * unruled finding with the same onset for the window just ruled on. Only traffic in a later hour may
+     * file a new one.
+     */
+    @Test
+    @DisplayName("a recompute after a positive ruling files nothing until a later hour of traffic arrives")
+    void aRuledSpellIsNotReFiledUntilNewerTraffic() {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-ruled-resweep")
+                .project()
+                .id();
+        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        service.refresh(pid);
+        FindingRow ruled = firedFinding(pid);
+        assertEquals(
+                1,
+                findings.recordTriage(
+                        pid,
+                        ruled.id(),
+                        FindingRow.TriageVerdict.POSITIVE,
+                        "The failure rate rose.",
+                        null,
+                        Instant.now().toString()));
+
+        assertEquals(1, service.refresh(pid), "the spell is still running");
+        assertEquals(1, rateShiftFindings(pid), "an unchanged recompute must not re-file the ruled window");
+
+        seedHours(pid, start.plus(QUIET_HOURS + 20L, ChronoUnit.HOURS), 2, 8);
+        service.refresh(pid);
+        assertEquals(2, rateShiftFindings(pid), "a later hour of traffic is a window nobody ruled on");
+        FindingRow fresh = findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
+                .filter(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind()) && !f.id().equals(ruled.id()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no fresh rate_shift finding was written"));
+        assertNull(fresh.triageVerdict(), "the fresh finding is unruled");
+        assertTrue(
+                Instant.parse(fresh.lastSeenAt()).isAfter(Instant.parse(ruled.lastSeenAt())),
+                "and covers only the newer traffic's clock");
     }
 
     /**
@@ -415,6 +573,13 @@ class ToolErrorClassifierIntegrationTest {
                 .filter(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no rate_shift finding was written"));
+    }
+
+    private long rateShiftFindings(String projectId) {
+        return jdbc.sql("SELECT count(*) FROM finding WHERE project_id = :pid AND classifier_key = 'tool_error'")
+                .param("pid", projectId)
+                .query(Long.class)
+                .single();
     }
 
     /** The up arm, read from the row rather than from the payload's frozen copy of it. */

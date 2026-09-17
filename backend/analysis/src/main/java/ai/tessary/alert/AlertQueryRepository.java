@@ -83,12 +83,16 @@ public class AlertQueryRepository {
     public List<OpenedCase> casesOpenedBetween(String projectId, String since, String until, int limit) {
         return jdbc.sql("""
                 SELECT c.id, c.seq, c.detector, c.title, c.basis, c.call_site_id, c.opened_at,
-                       f.triage_verdict, f.triage_summary, f.status AS finding_status,
+                       f.triage_verdict, f.triage_summary, f.human_verdict_at,
                        o.slug AS org_slug, p.slug AS project_slug
                 FROM eval_case c
                   JOIN project p ON p.id = c.project_id
                   JOIN organization o ON o.id = p.org_id
-                  LEFT JOIN finding f ON f.id = c.finding_id AND f.project_id = c.project_id
+                  LEFT JOIN LATERAL (
+                      SELECT * FROM finding
+                       WHERE case_id = c.id AND project_id = c.project_id
+                       ORDER BY created_at DESC LIMIT 1
+                  ) f ON true
                 WHERE c.project_id = :pid
                   AND c.state = 'open'
                   AND c.opened_at::timestamptz > :since::timestamptz
@@ -111,7 +115,7 @@ public class AlertQueryRepository {
                             rs.getString("opened_at"),
                             rs.getString("triage_verdict"),
                             rs.getString("triage_summary"),
-                            "blocked".equals(rs.getString("finding_status")),
+                            rs.getString("human_verdict_at") != null,
                             rs.getString("org_slug"),
                             rs.getString("project_slug"));
                 })

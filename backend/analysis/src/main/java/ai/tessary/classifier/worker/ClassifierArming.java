@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.ClassifierDetectionWriteRepository.CountedWindow;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository.FacetWindow;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository.FiredFacet;
+import ai.tessary.classifier.ClassifierDetectionWriteRepository.FiredWindow;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository.SpanKey;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
@@ -16,7 +19,6 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -51,9 +53,9 @@ import org.springframework.transaction.annotation.Transactional;
  * A built-in may ship armed, because the platform authored both the detector and the bar.
  *
  * <p><b>Two shapes.</b> By default a classifier holds one finding, keyed on the classifier, counted over
- * the window {@code now} falls in. A classifier in {@link #FACET_KEYS} instead holds one finding per call
- * site and per facet of what it detected, counted over the window each span actually happened in; see
- * {@link #evaluateFaceted}.
+ * every event-time window this sweep's firings touched, oldest first — never only the window {@code now}
+ * falls in, or a backfill would never file. A classifier in {@link #FACET_KEYS} instead holds one finding
+ * per call site and per facet of what it detected, counted the same way; see {@link #evaluateFaceted}.
  */
 @Component
 public class ClassifierArming {
@@ -88,20 +90,29 @@ public class ClassifierArming {
      */
     static final int MAX_WITNESSES = 50;
 
+    /** The ruling a high-confidence leak is written with at arming, in place of a triage run's summary. */
+    public static final String HIGH_CONFIDENCE_LEAK_SUMMARY =
+            "A high-confidence credential pattern matched in the agent's output, so this leak was ruled real without triage.";
+
     private final ClassifierDetectionWriteRepository detections;
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
     private final ObjectMapper mapper;
+    /** Opens or joins the case for a facet finding this class just ruled positive at high confidence; see
+     *  {@link #evaluateFaceted}. */
+    private final CaseOpener caseOpener;
 
     public ClassifierArming(
             ClassifierDetectionWriteRepository detections,
             FindingRepository findings,
             FindingEvidenceRepository evidence,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            CaseOpener caseOpener) {
         this.detections = detections;
         this.findings = findings;
         this.evidence = evidence;
         this.mapper = mapper;
+        this.caseOpener = caseOpener;
     }
 
     /**
@@ -148,79 +159,92 @@ public class ClassifierArming {
         if (config == null) return List.of();
         String facetKey = FACET_KEYS.get(signal.detector());
         if (facetKey != null) return evaluateFaceted(signal, projectId, firedRefs, config, facetKey, now);
-        String findingId = evaluateWhole(signal, projectId, firedRefs, config, now);
-        return findingId == null ? List.of() : List.of(findingId);
+        return evaluateWhole(signal, projectId, firedRefs, config, now);
     }
 
     /**
-     * The classifier-wide shape: one finding, counted over the window {@code now} falls in.
+     * The classifier-wide shape: one finding, counted over event-time windows — the same walk
+     * {@link #evaluateFaceted} does, minus a facet or call site to key on: a classifier is project-wide,
+     * so its finding implicates no single call site.
      *
-     * <p>The window is QUANTIZED — {@code floor(now / W) * W} — for the reason the alert evaluator
-     * quantized it: a free-floating {@code [now - W, now)} would make the count, and therefore the
-     * finding's payload, different on every heartbeat inside one window. The bucket is the unit the
-     * owner configured, and it is what the finding reports.
+     * <p><b>Every window this sweep touched is evaluated, not only the one {@code now} falls in.</b>
+     * Windows are bucketed on when the span happened, and a backfill or a late upload hands the sweep
+     * detections from weeks ago; evaluating only the current window would never file those. Filed
+     * oldest first, so a classifier that keeps firing walks forward through its windows, and {@link
+     * FindingRepository#recordArmedWindow} keeps a window that arrives out of order from moving the
+     * finding backwards.
      */
-    private @Nullable String evaluateWhole(
+    private List<String> evaluateWhole(
             ClassifierRow signal,
             String projectId,
             List<FindingEvidenceRepository.Ref> firedRefs,
             Config config,
             Instant now) {
-        long win = config.windowSeconds();
-        Instant windowStart = Instant.ofEpochSecond(Math.floorDiv(now.getEpochSecond(), win) * win);
-        Instant windowEnd = windowStart.plus(Duration.ofSeconds(win));
-        boolean highOnly = config.highOnly(signal);
+        List<SpanKey> spans = new ArrayList<>(firedRefs.size());
+        for (FindingEvidenceRepository.Ref ref : firedRefs) {
+            if (ref.traceId() != null && ref.spanId() != null) spans.add(new SpanKey(ref.traceId(), ref.spanId()));
+        }
+        if (spans.isEmpty()) return List.of();
 
-        long observed = config.bySession()
-                ? detections.countDistinctSessionsInWindow(
-                        signal.detector(),
-                        projectId,
-                        signal.id(),
-                        windowStart.toString(),
-                        windowEnd.toString(),
-                        highOnly)
-                : detections.countInWindow(
-                        signal.detector(),
-                        projectId,
-                        signal.id(),
-                        windowStart.toString(),
-                        windowEnd.toString(),
-                        highOnly);
-        if (observed < config.threshold()) return null;
+        long win = config.windowSeconds();
+        boolean highOnly = config.highOnly(signal);
+        List<FiredWindow> fired =
+                detections.firedWindows(signal.detector(), projectId, signal.id(), spans, win, highOnly);
+        if (fired.isEmpty()) return List.of();
+
+        Map<Long, List<FindingEvidenceRepository.Ref>> members = new LinkedHashMap<>();
+        for (FiredWindow f : fired) {
+            members.computeIfAbsent(f.windowStartEpochSecond(), k -> new ArrayList<>())
+                    .add(FindingEvidenceRepository.Ref.span(f.traceId(), f.spanId()));
+        }
+        List<CountedWindow> windows = detections.countWindows(
+                signal.detector(), projectId, signal.id(), win, highOnly, config.bySession(), fired);
 
         String at = now.toString();
-        String quietBefore = now.minus(Duration.ofSeconds(win * QUIET_WINDOWS)).toString();
-        FindingRepository.Recorded recorded = findings.recordArmedWindow(
-                Ids.ulid(),
-                projectId,
-                signal.classifierKey(),
-                signal.id(),
-                signal.name(),
-                observed,
-                /* callSiteId */ null, // a classifier is project-wide; it implicates no single call site
-                payload(signal.classifierKey(), config, observed, windowStart, windowEnd, null, null, null),
-                quietBefore,
-                at);
+        List<String> filed = new ArrayList<>();
+        for (CountedWindow w : windows) {
+            if (w.observed() < config.threshold()) continue;
+            Instant windowStart = Instant.ofEpochSecond(w.windowStartEpochSecond());
+            Instant windowEnd = windowStart.plusSeconds(win);
+            FindingRepository.Recorded recorded = findings.recordArmedWindow(
+                    Ids.ulid(),
+                    projectId,
+                    signal.classifierKey(),
+                    signal.id(),
+                    signal.name(),
+                    w.observed(),
+                    /* callSiteId */ null, // a classifier is project-wide; it implicates no single call site
+                    payload(signal.classifierKey(), config, w.observed(), windowStart, windowEnd, null, null, null),
+                    windowStart.toString(),
+                    w.lastSeenAt().toString(),
+                    windowStart.minusSeconds(win * QUIET_WINDOWS).toString(),
+                    at);
+            if (recorded == null) continue; // a ruled finding already covers this window or a newer one
 
-        // Same transaction as the finding write, so a finding never exists without the evidence that
-        // justified it. Calling it on every armed sweep adds new members while the finding is open.
-        int stored = evidence.record(projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, firedRefs, at);
+            // Same transaction as the finding write, so a finding never exists without the evidence that
+            // justified it. Scoped to this window's own spans: a later refresh adds new members, and the
+            // per-ref idempotency means a re-swept window never re-adds what it already recorded.
+            List<FindingEvidenceRepository.Ref> refs = members.getOrDefault(w.windowStartEpochSecond(), List.of());
+            int stored = evidence.record(projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, refs, at);
+            filed.add(recorded.findingId());
 
-        StructuredLog.info(log, Markers.OPS, "signal.armed")
-                .message(
-                        "%s crossed its bar — %d detection(s) in %ds",
-                        signal.classifierKey(), observed, config.windowSeconds())
-                .field("project", projectId)
-                .field("signal", signal.classifierKey())
-                .field("classifierId", signal.id())
-                .field("finding", recorded.findingId())
-                .field("opened", recorded.created())
-                .field("observed", observed)
-                .field("threshold", config.threshold())
-                .field("windowSeconds", config.windowSeconds())
-                .field("evidenceStored", stored)
-                .log();
-        return recorded.findingId();
+            StructuredLog.info(log, Markers.OPS, "signal.armed")
+                    .message(
+                            "%s crossed its bar at %s — %d detection(s) in the %ds window",
+                            signal.classifierKey(), windowStart, w.observed(), win)
+                    .field("project", projectId)
+                    .field("signal", signal.classifierKey())
+                    .field("classifierId", signal.id())
+                    .field("finding", recorded.findingId())
+                    .field("opened", recorded.created())
+                    .field("windowStart", windowStart.toString())
+                    .field("observed", w.observed())
+                    .field("threshold", config.threshold())
+                    .field("windowSeconds", win)
+                    .field("evidenceStored", stored)
+                    .log();
+        }
+        return filed;
     }
 
     /**
@@ -235,6 +259,15 @@ public class ClassifierArming {
      * and {@link FindingRepository#recordArmedFacet} keeps a window that arrives out of order from moving
      * the finding backwards. Evidence is {@link FindingEvidenceRow.Role#WITNESS}, capped at
      * {@link #MAX_WITNESSES}: instances to open, not an enumeration of the population.
+     *
+     * <p><b>A high-confidence facet is ruled positive here, without triage.</b> A credential in a format
+     * its provider stamps into the key is a leak whoever looks at it, so the finding is written {@code
+     * positive} with {@link #HIGH_CONFIDENCE_LEAK_SUMMARY} and its case opens (or joins) in the same
+     * transaction. A low-confidence facet stays unruled and goes to triage like any other finding. The
+     * ruling takes the row out of {@code ux_finding_live} (decision 1), so the next re-sweep of the same
+     * window finds no live row to refresh; {@link FindingRepository#recordArmedFacet} returns null for it
+     * rather than forking a duplicate, and only a newer window files a fresh finding, which is ruled here
+     * in turn and joins the same unlocked case.
      */
     private List<String> evaluateFaceted(
             ClassifierRow signal,
@@ -295,10 +328,26 @@ public class ClassifierArming {
                             w.anyHigh() ? FindingRow.Confidence.HIGH : FindingRow.Confidence.LOW),
                     windowStart.minusSeconds(win * QUIET_WINDOWS).toString(),
                     at);
+            if (recorded == null) continue; // a ruled finding already covers this window or a newer one
             List<FindingEvidenceRepository.Ref> refs = witnesses.getOrDefault(
                     new FacetScope(w.callSiteId(), w.facet(), w.windowStartEpochSecond()), List.of());
             int stored = evidence.recordUpTo(
                     projectId, recorded.findingId(), FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES, at);
+            // Re-read rather than taken from this window: confidence is sticky across the row's windows, so
+            // an older high window can make a low one's refresh high.
+            boolean high = findings.findById(projectId, recorded.findingId())
+                    .map(FindingRow::highConfidence)
+                    .orElse(false);
+            if (high) {
+                findings.recordTriage(
+                        projectId,
+                        recorded.findingId(),
+                        FindingRow.TriageVerdict.POSITIVE,
+                        HIGH_CONFIDENCE_LEAK_SUMMARY,
+                        null,
+                        at);
+                caseOpener.ensureCaseFor(projectId, recorded.findingId(), null);
+            }
             if (recorded.created()) opened++;
             filed.add(recorded.findingId());
 

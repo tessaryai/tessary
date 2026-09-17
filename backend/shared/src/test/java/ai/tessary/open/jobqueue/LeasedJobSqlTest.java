@@ -37,6 +37,19 @@ class LeasedJobSqlTest {
         assertTrue(sql.contains("status = 'failed'"), sql);
         assertTrue(sql.contains("attempts >= :maxAttempts"), sql);
         assertTrue(sql.contains("(hung or crashed mid-sweep)"), sql);
+        assertTrue(sql.contains("COALESCE('; last: ' || left(last_error, 500), '')"), sql);
+    }
+
+    @Test
+    void everyDeadLetterVariantCarriesThePreviousError() {
+        // The exhausted phrase alone erased why the attempts failed; each variant must keep it.
+        String carried = LeasedJobSql.exhaustedLastError("hung");
+        assertEquals(
+                "'exhausted: ' || attempts || ' attempts (hung)' || COALESCE('; last: ' || left(last_error, 500), '')",
+                carried);
+        assertTrue(LeasedJobSql.failExhausted("job", "hung", "dead").contains(carried));
+        assertTrue(LeasedJobSql.failExhaustedOfKind("job", "hung").contains(carried));
+        assertTrue(LeasedJobSql.failExhaustedOfKind("job", "hung", "dead").contains(carried));
     }
 
     @Test

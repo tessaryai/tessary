@@ -18,7 +18,7 @@ import { useMemo } from "react";
 import type { components } from "../../api/generated/schema";
 import type { BehaviorFinding } from "../../api/types";
 import { PageHeader } from "../../ui";
-import { detectorLabel, triageState, VerbButton } from "./shared";
+import { RunTriageButton, detectorLabel, triageState } from "./shared";
 import { Pin, PinList } from "./rateStory";
 
 type SecretLeakDetail = components["schemas"]["SecretLeakDetail"];
@@ -308,14 +308,12 @@ export function SecretHeader({
   secretLeak,
   finding,
   basePath,
-  inFlight,
   busy,
   onAnalyze,
 }: {
   secretLeak: SecretLeakDetail;
   finding: BehaviorFinding;
   basePath: string;
-  inFlight: boolean;
   busy: boolean;
   onAnalyze: () => void;
 }) {
@@ -347,9 +345,7 @@ export function SecretHeader({
             {triageState(finding).label}
           </span>
         ) : (
-          <VerbButton kind="filled" disabled={busy || inFlight} onClick={onAnalyze}>
-            {inFlight ? "Triaging…" : "Run triage"}
-          </VerbButton>
+          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
         )
       }
     />

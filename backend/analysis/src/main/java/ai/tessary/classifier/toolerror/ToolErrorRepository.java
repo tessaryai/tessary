@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -95,6 +96,31 @@ public class ToolErrorRepository {
 
     /** One failure signature's count for one tool over the whole window. */
     public record SignatureTally(String toolKey, String signature, String source, long count) {}
+
+    /**
+     * The most recent event a project has ANY tool-call traffic for — {@code MAX(started_at)} across
+     * every non-deleted call, with no bucketing and no per-tool split.
+     *
+     * <p>The anchor {@link ToolErrorService#refresh} replays its 28-day window back from, in place of
+     * wall-clock {@code now}: a project whose traffic is all months old still gets a window that
+     * contains it, where {@code now - 28d} would read nothing but the empty months since.
+     *
+     * <p>Empty for a project with no tool-call traffic at all — served by {@code
+     * ix_tool_call_project_started}, an index scan backward on {@code (project_id, started_at)} that
+     * stops at the first undeleted row rather than a sequential scan.
+     */
+    public Optional<Instant> newestEventAt(String projectId) {
+        return jdbc.sql("""
+                        SELECT MAX(tc.started_at) AS newest
+                        FROM tool_call tc
+                        WHERE tc.project_id = :pid
+                          AND tc.is_deleted IS NOT TRUE
+                        """)
+                .param("pid", projectId)
+                .query((rs, n) -> rs.getObject("newest", OffsetDateTime.class))
+                .optional()
+                .map(OffsetDateTime::toInstant);
+    }
 
     /**
      * Hourly call and failure counts per tool since {@code from}.

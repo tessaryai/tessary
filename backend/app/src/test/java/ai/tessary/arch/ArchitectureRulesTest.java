@@ -213,15 +213,17 @@ public class ArchitectureRulesTest {
 
     /**
      * Triage must not resolve a finding. The worker is legitimately injected {@code FindingRepository}
-     * (it reads the finding and records the verdict), so this is enforced per method rather than by
-     * banning the dependency outright.
+     * (it reads the finding and records its own machine ruling via {@code recordTriage}), so this is
+     * enforced per method rather than by banning the dependency outright. The banned names are the
+     * human-decision writes: {@code recordHumanRuling} stamps a person's verdict, {@code close} /
+     * {@code closeByCase} / {@code closeForNativeCause} close a finding with no ruling at all.
      */
     @ArchTest
     static final ArchRule behaviour_triage_never_resolves_a_finding = noClasses()
             .that()
             .haveNameMatching(LAYER_2_LANES)
             .should()
-            .callMethodWhere(target(nameMatching("setStatus|resolve|resolveForNativeCause"))
+            .callMethodWhere(target(nameMatching("recordHumanRuling|close|closeByCase|closeForNativeCause"))
                     .and(target(owner(nameMatching(".*FindingRepository")))))
             .because("resolving a finding is a human decision (tessary-paid/classifiers/behavior_drift/PROGRAM.md §9); "
                     + "an automatic 'expected' from a single exemplar would blind the detector permanently");

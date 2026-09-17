@@ -353,10 +353,18 @@ echo "fixture coverage (every value a rename could touch must be present BEFORE 
 echo "-- open lane, always --"
 expect "job.kind='classifier'"                1 "SELECT count(*) FROM job WHERE kind='classifier'"
 expect "classifier row"                       1 "SELECT count(*) FROM classifier"
-expect "eval_case.detector='classifier'"      2 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
-expect "eval_case both finding arms"          2 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
+expect "eval_case.detector='classifier'"      3 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
+expect "eval_case both finding arms"          3 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
                                                       + (SELECT count(*) FROM eval_case WHERE finding_id IS NULL AND state='resolved')"
-expect "finding rows"                         1 "SELECT count(*) FROM finding"
+expect "finding rows"                         8 "SELECT count(*) FROM finding"
+expect "secret_leak findings open, unruled, one per band (pre-0013)" "high,low" "SELECT string_agg(payload->>'confidence', ',' ORDER BY payload->>'confidence')
+                                                      FROM finding WHERE classifier_key='secret_leak' AND status='open' AND triage_verdict IS NULL"
+expect "finding ruled unclear (pre-0010)"     1 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
+expect "finding legacy statuses (pre-0011)"   3 "SELECT count(*) FROM finding WHERE status IN ('blocked','allowlisted','graduated')"
+expect "finding open+positive backing a live case (pre-0011)" 1 "SELECT count(*) FROM finding
+                                                      WHERE id='fnd_fix_open_cased' AND status='open' AND triage_verdict='positive'"
+expect "eval_case backing the open+positive finding" 1 "SELECT count(*) FROM eval_case
+                                                      WHERE finding_id='fnd_fix_open_cased' AND state<>'resolved'"
 expect "annotation all three grains"          3 "SELECT count(DISTINCT subject_kind) FROM annotation"
 expect "failure_mode_instance both grains"    2 "SELECT count(DISTINCT subject_kind) FROM failure_mode_instance"
 expect "metric_rollup metering metrics"       2 "SELECT count(*) FROM metric_rollup WHERE metric IN ('l1_evals','l2_evals')"
@@ -427,6 +435,70 @@ if [ "$(q "SELECT to_regclass('public.telemetry_instance') IS NOT NULL")" = "t" 
   expect "ping_seq survived the rename"         0 "SELECT ping_seq FROM telemetry_instance"
 else
   skip "0008 telemetry instance rename" "telemetry_instance is absent, 0008 has not landed"
+fi
+
+echo
+echo "0010: triage verdict narrows to positive/negative"
+if [ "$(q "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'finding_triage_verdict_check'
+                                  AND pg_get_constraintdef(oid) LIKE '%unclear%')")" = "t" ]; then
+  expect "no finding still reads unclear"       0 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
+  expect "the fixture's unclear finding is now negative" negative "SELECT triage_verdict FROM finding WHERE id='fnd_fix_unclear'"
+  expect "its action is untouched by the rewrite" closed "SELECT triage_action FROM finding WHERE id='fnd_fix_unclear'"
+else
+  skip "0010 triage verdict binary" "finding_triage_verdict_check still allows unclear, 0010 has not landed"
+fi
+
+echo
+echo "0011: findings are open or closed; eval_case.finding_id becomes finding.case_id"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_name='finding' AND column_name='case_id')")" = "t" ]; then
+  expect "finding_status_check no longer allows graduated" f "SELECT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname='finding_status_check'
+                                  AND pg_get_constraintdef(oid) LIKE '%graduated%')"
+  expect "eval_case.finding_id is gone"         f "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name='eval_case' AND column_name='finding_id')"
+  expect "eval_case.locked_at exists"           t "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name='eval_case' AND column_name='locked_at')"
+  expect "finding.recurrences_since_verdict is gone" f "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_name='finding' AND column_name='recurrences_since_verdict')"
+  expect "eval_case_event_kind_check allows recurred" t "SELECT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname='eval_case_event_kind_check'
+                                  AND pg_get_constraintdef(oid) LIKE '%recurred%')"
+  # A person's ruling (blocked), no case standing on it: closes, with the fixed positive summary.
+  # (q() strips whitespace for the comparison, so the summary check asks Postgres for a boolean
+  # rather than round-tripping the sentence through a whitespace-hostile shell comparison.)
+  expect "blocked -> closed/positive"           "closed|positive" "SELECT status || '|' || triage_verdict
+                                FROM finding WHERE id='fnd_fix_blocked'"
+  expect "blocked's fixed summary"              t "SELECT triage_summary = 'A person ruled this a real deviation.'
+                                FROM finding WHERE id='fnd_fix_blocked'"
+  # A person's ruling (allowlisted), no verdict yet: closes negative with the fixed summary.
+  expect "allowlisted -> closed/negative"       "closed|negative" "SELECT status || '|' || triage_verdict
+                                FROM finding WHERE id='fnd_fix_allowlisted'"
+  # An old status this migration never names: closes, with no verdict to show for it.
+  expect "graduated -> closed, no verdict"      "closed|" "SELECT status || '|' || COALESCE(triage_verdict, '')
+                                FROM finding WHERE id='fnd_fix_graduated'"
+  # The one shape that must survive open: a positive ruling backing a still-live case, linked
+  # through the new reverse pointer.
+  expect "open+positive stays open, case-linked" "open|ec_fix_open_cased" "SELECT status || '|' || case_id
+                                FROM finding WHERE id='fnd_fix_open_cased'"
+else
+  skip "0011 finding open/closed" "finding.case_id is absent, 0011 has not landed"
+fi
+
+echo
+echo "0013: high-confidence secret leaks are ruled positive"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0013-rule-high-confidence-leaks')")" = "t" ]; then
+  expect "high leak -> open/positive/opened_case" "open|positive|opened_case" "SELECT status || '|' || triage_verdict || '|' || triage_action
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "high leak's fixed summary"            t "SELECT triage_summary = 'A high-confidence credential pattern matched in the agent''s output, so this leak was ruled real without triage.'
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "high leak's triaged_at parses as a timestamp" t "SELECT CAST(triaged_at AS timestamptz) IS NOT NULL
+                                FROM finding WHERE id='fnd_fix_leak_high'"
+  expect "low leak stays open and unruled"      "open|" "SELECT status || '|' || COALESCE(triage_verdict, '')
+                                FROM finding WHERE id='fnd_fix_leak_low'"
+else
+  skip "0013 rule high-confidence leaks" "0013 is not in databasechangelog, it has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

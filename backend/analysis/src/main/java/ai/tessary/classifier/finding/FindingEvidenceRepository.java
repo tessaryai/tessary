@@ -4,6 +4,7 @@ package ai.tessary.classifier.finding;
 import ai.tessary.ingest.PreviewCursor;
 import ai.tessary.redaction.CredentialMasking;
 import ai.tessary.tenant.Ids;
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
@@ -329,9 +330,27 @@ public class FindingEvidenceRepository {
             @Nullable String errorType,
             @Nullable String startedAt,
             @Nullable Long latencyMs,
+            /**
+             * On a single-step row, this span's own total; on a whole-run row ({@link #spanId} null),
+             * the trace rollup, since a run's tokens and cost are not one span's property. Null on a
+             * tool span, which has neither, and on a whole-run row whose trace has not rolled up.
+             */
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            @Nullable String model,
+            /**
+             * The distinct {@code provided_model_name} values behind this row: one entry (or none, on a
+             * tool span) for a single-step row, every model the run called for a whole-run row.
+             */
+            List<String> models,
+            /** True on a whole-run row whose trace has not rolled up yet: {@link #totalTokens} and
+             *  {@link #totalCost} are not yet trustworthy. Always false on a single-step row. */
+            boolean notRolledUp,
+            /** True on a whole-run row whose trace carries unpriced spans: {@link #totalCost} is a
+             *  floor, not the true total. Always false on a single-step row. */
+            boolean partialCost,
+            /** True on a whole-run row whose trace rollup is not settled: late spans can still change
+             *  {@link #totalTokens} and {@link #totalCost}. Always false on a single-step row. */
+            boolean staleTotals,
             @Nullable String callSiteId,
             /**
              * The first {@link #PREVIEW_CHARS} characters of what the span was given and what it
@@ -405,7 +424,13 @@ public class FindingEvidenceRepository {
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
                 + " s.name, s.kind, s.status, s.level, s.error_type, s.started_at, s.latency_ms,"
-                + " s.total_tokens, s.total_cost, s.provided_model_name, s.call_site_id,"
+                + " CASE WHEN e.span_id IS NULL THEN t.total_tokens ELSE s.total_tokens END AS total_tokens,"
+                + " CASE WHEN e.span_id IS NULL THEN t.total_cost ELSE s.total_cost END AS total_cost,"
+                + " m.models,"
+                + " (e.span_id IS NULL AND t.rolled_up_at IS NULL) AS not_rolled_up,"
+                + " (e.span_id IS NULL AND COALESCE(t.unpriced_spans, 0) > 0) AS partial_cost,"
+                + " (e.span_id IS NULL AND COALESCE(t.is_settled, false) = false) AS stale_totals,"
+                + " s.call_site_id,"
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
                 + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview,"
                 + (secretLeak
@@ -428,6 +453,13 @@ public class FindingEvidenceRepository {
                 + "    LIMIT 1) s ON true"
                 + " LEFT JOIN span_payload pl ON pl.project_id = s.project_id"
                 + "   AND pl.trace_id = s.trace_id AND pl.span_id = s.id"
+                + " LEFT JOIN trace t ON t.project_id = e.project_id AND t.id = e.trace_id AND t.is_deleted = false"
+                + " LEFT JOIN LATERAL ("
+                + "   SELECT array_agg(DISTINCT sp2.provided_model_name ORDER BY sp2.provided_model_name)"
+                + "          FILTER (WHERE sp2.provided_model_name IS NOT NULL) AS models"
+                + "     FROM span sp2"
+                + "    WHERE sp2.project_id = e.project_id AND sp2.trace_id = e.trace_id AND sp2.is_deleted = false"
+                + "      AND (e.span_id IS NULL OR sp2.id = e.span_id)) m ON true"
                 + (secretLeak
                         ? " LEFT JOIN LATERAL (SELECT sld.evidence FROM secret_leak_detection sld"
                                 + "   WHERE sld.project_id = e.project_id AND sld.subject_trace_id = e.trace_id"
@@ -623,6 +655,17 @@ public class FindingEvidenceRepository {
     }
 
     private static SpanRef mapSpan(ResultSet rs) throws SQLException {
+        Array modelsArray = rs.getArray("models"); // NOPMD - CloseResource: freed below; Array has no close()
+        List<String> models;
+        if (modelsArray == null) {
+            models = List.of();
+        } else {
+            try {
+                models = List.of((String[]) modelsArray.getArray());
+            } finally {
+                modelsArray.free();
+            }
+        }
         return new SpanRef(
                 rs.getString("role"),
                 (Integer) rs.getObject("rank"),
@@ -647,7 +690,10 @@ public class FindingEvidenceRepository {
                 rs.getObject("total_cost") == null
                         ? null
                         : rs.getBigDecimal("total_cost").doubleValue(),
-                rs.getString("provided_model_name"),
+                models,
+                rs.getBoolean("not_rolled_up"),
+                rs.getBoolean("partial_cost"),
+                rs.getBoolean("stale_totals"),
                 rs.getString("call_site_id"),
                 CredentialMasking.mask(rs.getString("input_preview")),
                 CredentialMasking.mask(rs.getString("output_preview")),

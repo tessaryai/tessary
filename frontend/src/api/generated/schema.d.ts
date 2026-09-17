@@ -2424,6 +2424,18 @@ export interface components {
             /** Format: int64 */
             startupDate?: number;
         };
+        ArmedWindowDetail: {
+            basis: string;
+            confidence: string | null;
+            /** Format: int64 */
+            observed: number;
+            /** Format: int64 */
+            threshold: number;
+            windowEnd: string | null;
+            /** Format: int64 */
+            windowSeconds: number;
+            windowStart: string | null;
+        };
         AuditLog: {
             action: string;
             attributes: string | null;
@@ -2454,6 +2466,7 @@ export interface components {
             workflowKey: string | null;
         };
         BehaviorFindingDetailView: {
+            armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
             baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
@@ -2463,6 +2476,7 @@ export interface components {
         };
         BehaviorFindingView: {
             callSiteId: string | null;
+            caseId: string | null;
             causeKey: string;
             causeKind: string;
             conformanceKind: string | null;
@@ -2472,8 +2486,6 @@ export interface components {
             humanVerdictAt: string | null;
             id: string;
             lastSeenAt: string;
-            /** Format: int64 */
-            recurrencesSinceVerdict: number;
             status: string;
             title: string;
             /** Format: int64 */
@@ -2489,8 +2501,6 @@ export interface components {
         BehaviorFindingsView: {
             findings: components["schemas"]["BehaviorFindingView"][];
             lane: string;
-            /** Format: int64 */
-            withheld: number;
         };
         BehaviorProfileDebugView: {
             /** Format: int32 */
@@ -2568,7 +2578,7 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
-            finding_id: string | null;
+            latest_finding_id: string | null;
             malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             rca: components["schemas"]["RcaReportView"] | null;
@@ -2620,9 +2630,12 @@ export interface components {
             /** Format: double */
             delta: number | null;
             detector: string;
-            finding_id: string | null;
+            /** Format: int64 */
+            finding_count: number;
             id: string;
             last_seen_at: string;
+            latest_finding_id: string | null;
+            locked_at: string | null;
             metric: string;
             muted_at: string | null;
             muted_by: string | null;
@@ -2679,7 +2692,6 @@ export interface components {
         Citation: {
             path: string;
             reason: string;
-            recomputed: components["schemas"]["Recomputed"][];
             stdout: string | null;
         };
         CitationView: {
@@ -2711,6 +2723,7 @@ export interface components {
             detected_at: string;
             evidence_json: string | null;
             id: string;
+            occurred_at: string | null;
             project_version_id: string | null;
             severity: string | null;
             subject_id: string;
@@ -2781,6 +2794,17 @@ export interface components {
             description: string;
             enforcement: string;
             kind: string;
+        };
+        Control: {
+            /** Format: int32 */
+            daysExcludedAsConfirmed: number;
+            /** Format: int32 */
+            daysUsed: number;
+            /** Format: double */
+            halfLifeDays: number;
+            oldestDay: string | null;
+            /** Format: int32 */
+            retainDays: number;
         };
         Cost: {
             baseline_usd: number | null;
@@ -2896,15 +2920,18 @@ export interface components {
             /** Format: int64 */
             latencyMs: number | null;
             level: string | null;
-            model: string | null;
+            models: string[];
             name: string | null;
+            notRolledUp: boolean;
             outputPreview: string | null;
+            partialCost: boolean;
             /** Format: int32 */
             rank: number | null;
             role: string;
             secretKey: string | null;
             sessionId: string | null;
             spanId: string | null;
+            staleTotals: boolean;
             startedAt: string | null;
             status: string | null;
             storedAs: string | null;
@@ -2925,6 +2952,25 @@ export interface components {
             match_field: string;
             match_pattern: string;
             source: string;
+        };
+        Explains: {
+            bucketKey: string;
+            bucketKind: string;
+            /** Format: double */
+            covered: number;
+            /** Format: double */
+            curMillis: number | null;
+            direction: string;
+            measure: string;
+            /** Format: int64 */
+            nCur: number;
+            /** Format: double */
+            ratio: number;
+            /** Format: double */
+            refMillis: number | null;
+            reference: string;
+            /** Format: double */
+            w1Log: number;
         };
         FacetBucket: {
             /** Format: int64 */
@@ -3463,9 +3509,14 @@ export interface components {
         RateDetail: {
             bucketKey: string;
             /** Format: double */
+            criticality: number;
+            /** Format: double */
             curRate: number;
             /** Format: double */
             deltaPp: number;
+            direction: string;
+            /** Format: double */
+            effectSize: number;
             failingTraces: string[];
             /** Format: int64 */
             failuresCur: number;
@@ -3478,6 +3529,10 @@ export interface components {
             patternsTruncated: boolean;
             /** Format: double */
             refRate: number;
+            /** Format: double */
+            statistic: number;
+            /** Format: double */
+            threshold: number;
             windowClosedAt: string | null;
             windowOpenedAt: string | null;
         };
@@ -3508,11 +3563,6 @@ export interface components {
             window_from: string;
             window_split: string;
             window_to: string;
-        };
-        Recomputed: {
-            pointer: string;
-            /** Format: double */
-            value: number;
         };
         RedirectView: {
             applicationContext?: components["schemas"]["ApplicationContext"];
@@ -3665,6 +3715,7 @@ export interface components {
             rows: components["schemas"]["SearchRow"][];
         };
         SecretLeakDetail: {
+            basis: string;
             confidence: string;
             firstAt: string | null;
             keys: components["schemas"]["SecretLeakKeyView"][];
@@ -3674,7 +3725,13 @@ export interface components {
             leaks: components["schemas"]["SecretLeakLeakView"][];
             rule: string;
             /** Format: int64 */
+            threshold: number;
+            /** Format: int64 */
             traceCount: number;
+            windowEnd: string | null;
+            /** Format: int64 */
+            windowSeconds: number;
+            windowStart: string | null;
         };
         SecretLeakKeyView: {
             lastAt: string | null;
@@ -3690,7 +3747,7 @@ export interface components {
             masked: string;
             spanId: string | null;
             stored: string;
-            traceId: string;
+            traceId: string | null;
         };
         SelectInstallationRequest: {
             /** Format: int64 */
@@ -3905,7 +3962,10 @@ export interface components {
         };
         ShiftDetail: {
             bucketKey: string;
+            bucketKind: string;
+            control: components["schemas"]["Control"] | null;
             direction: string;
+            explains: components["schemas"]["Explains"][];
             /** Format: double */
             floor: number;
             measure: string;
@@ -3917,10 +3977,12 @@ export interface components {
             /** Format: double */
             ratio: number;
             reference: string;
+            sinceVersionId: string | null;
             tokens: components["schemas"]["Pair"][];
             /** Format: double */
             w1Log: number;
             windowClosedAt: string | null;
+            windowKind: string | null;
             windowOpenedAt: string | null;
             workload: components["schemas"]["Pair"][];
         };

@@ -55,13 +55,18 @@ public final class ToolErrorTrend {
      *     field that silently meant "everything" on a rebuild and "the last hour" on a resume would be
      *     worse than one that means the same thing every time
      * @param onsetBucket the hour the spell began, or null when the detector could not bracket it
+     * @param lastBucket the last hourly bucket this replay folded — the tool's own event clock, and what
+     *     a persisted finding's {@code last_seen_at} is written from instead of the sweep's wall clock.
+     *     Non-null whenever the spell fired: {@link #replay} only returns a firing {@code Spell} once at
+     *     least one bucket has advanced the watermark, resumed or fresh
      */
     public record Spell(
             String toolKey,
             Decision decision,
             ToolErrorRate baseline,
             ToolErrorRate observed,
-            @Nullable String onsetBucket) {}
+            @Nullable String onsetBucket,
+            @Nullable String lastBucket) {}
 
     /**
      * What one sweep produced: the tools alarming now, and the state every tool should carry forward.
@@ -191,7 +196,10 @@ public final class ToolErrorTrend {
                 carried == null ? null : carried.pendingPinAt());
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
-                next, decision.fired() ? new Spell(toolKey, decision, baseline, observed, decision.onsetAt()) : null);
+                next,
+                decision.fired()
+                        ? new Spell(toolKey, decision, baseline, observed, decision.onsetAt(), watermark)
+                        : null);
     }
 
     /** Fold a bucket's counts into a rate. Bulk, for the reason {@link ToolErrorRate#addCounts} gives. */

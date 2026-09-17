@@ -62,7 +62,8 @@ type ColumnKey =
   | "latency"
   | "tokens"
   | "cost"
-  | "model"
+  | "models"
+  | "flags"
   | "trace";
 type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean };
 
@@ -79,11 +80,30 @@ const COLUMNS: ColumnDef[] = [
   { key: "latency", label: "Latency (ms)", numeric: true },
   { key: "tokens", label: "Total tokens", numeric: true },
   { key: "cost", label: "Cost ($)", numeric: true },
-  { key: "model", label: "Model" },
+  { key: "models", label: "Models" },
+  { key: "flags", label: "Flags" },
   { key: "trace", label: "Trace" },
 ];
 
-const DEFAULT_VISIBLE: ColumnKey[] = ["role", "name", "status", "started", "latency", "trace"];
+const DEFAULT_VISIBLE: ColumnKey[] = [
+  "role",
+  "name",
+  "status",
+  "started",
+  "latency",
+  "tokens",
+  "cost",
+  "models",
+  "flags",
+  "trace",
+];
+
+/** A whole-run row's rollup caveats, spelled for a reader. Never set on a single-step row. */
+const FLAG_LABEL: Record<"notRolledUp" | "partialCost" | "staleTotals", string> = {
+  notRolledUp: "not rolled up yet",
+  partialCost: "partial cost",
+  staleTotals: "stale totals",
+};
 
 /** How a masked-key value is read out. Only "raw" is ever coloured — a stored credential is the one
  *  fact on this table worth a reader's alarm. */
@@ -285,8 +305,16 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
       return row.totalTokens != null ? row.totalTokens.toLocaleString() : NONE;
     case "cost":
       return row.totalCost != null ? row.totalCost.toFixed(4) : NONE;
-    case "model":
-      return row.model ?? NONE;
+    case "models":
+      return row.models && row.models.length > 0 ? row.models.join(", ") : NONE;
+    case "flags": {
+      const flags = (["notRolledUp", "partialCost", "staleTotals"] as const).filter((f) => row[f]);
+      return flags.length > 0 ? (
+        <span className="text-warning">{flags.map((f) => FLAG_LABEL[f]).join(", ")}</span>
+      ) : (
+        NONE
+      );
+    }
     case "trace":
       return row.traceId ? (
         <Link

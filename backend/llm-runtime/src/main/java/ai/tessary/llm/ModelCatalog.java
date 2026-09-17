@@ -199,11 +199,8 @@ public final class ModelCatalog {
                     false),
             // The GPT-5.6 line over OpenRouter, the two agentic lanes' defaults for this provider. Named
             // with the route, like the OpenAI-direct and mantle spellings of the same models, since three
-            // providers reach Terra and Luna at three different prices.
-            //
-            // Unpriced today: substrate/pricing/litellm-model-prices.json carries no
-            // `openrouter/openai/gpt-5.6*` row. TRIAGE's ceiling is taken on trust for Luna here, as it
-            // is for CUSTOM.
+            // providers reach Terra and Luna at three different prices. Priced via #pricingId's
+            // "openrouter/" prefix, not by modelName alone — see that method's javadoc.
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
@@ -356,11 +353,11 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.GROK, "xAI", "grok-4.6", "Grok 4.6", false, NO_EFFORT, "https://api.x.ai/v1", true),
 
-            // One current-generation model per provider that fits the TRIAGE lane's price ceiling
-            // (<= $1 in / <= $5 out per MTok, see LanePriority): triage runs unattended, once per
-            // distinct cause, so the ceiling keeps an automatic choice from being an expensive one. Kimi
-            // and Haiku are declared with their provider's own rows above instead, since each is that
-            // provider's only current-generation model at its size.
+            // One small current-generation model per provider, selectable but not anyone's default (see
+            // LanePriority): a project running TRIAGE unattended, once per distinct cause, can point it
+            // here on purpose to spend less than the shared RCA/TRIAGE default. Kimi and Haiku are
+            // declared with their provider's own rows above instead, since each is that provider's only
+            // current-generation model at its size.
             //
             // Luna is named for its route, since the platform also reaches it over bedrock-mantle at a
             // different price on a different credential.
@@ -391,7 +388,7 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://open.bigmodel.cn/api/paas/v4",
                     true),
-            // xAI's only current-generation model under the ceiling; its coding tier is what fits.
+            // xAI's small model: every grok-4.x chat model starts at $1.25 input, so its coding tier.
             new CatalogEntry(
                     ModelProvider.GROK,
                     "xAI",
@@ -413,37 +410,28 @@ public final class ModelCatalog {
     }
 
     /**
-     * Fail at class load if what {@link LanePriority}'s lanes name and what those lanes' group offers
+     * Fail at class load if what a {@link LanePriority} lane names and what that lane's group offers
      * are not the same set of models.
      *
      * <p>Two directions, catching different mistakes: a model a lane names that its group doesn't
-     * offer renders in the dropdown and 400s on save, while a model the group offers that no lane
-     * names is unreachable, in no picker and no automatic choice.
-     *
-     * <p>The union is taken across lanes rather than lane by lane, since the two lanes in
-     * {@link LaneGroup#AGENT_VM} deliberately differ: TRIAGE carries only the models under its price
-     * ceiling, so demanding the full set from each lane individually would forbid the ceiling itself.
+     * offer renders in the dropdown and 400s on save, while a model the group offers that the lane
+     * doesn't name is missing from that lane's picker even though the group permits it.
      */
     private static void verifyLanePriorities() {
-        Map<LaneGroup, Set<String>> namedByLanes = new LinkedHashMap<>();
         for (ModelLane lane : ModelLane.values()) {
             Set<String> offered = offeredFor(lane.group());
-            for (String key : LanePriority.modelKeys(lane)) {
+            Set<String> named = new LinkedHashSet<>(LanePriority.modelKeys(lane));
+            for (String key : named) {
                 if (!offered.contains(key)) {
                     throw new IllegalStateException(
                             "lane " + lane + " offers " + key + ", which " + lane.group() + " does not permit");
                 }
             }
-            namedByLanes
-                    .computeIfAbsent(lane.group(), g -> new LinkedHashSet<>())
-                    .addAll(LanePriority.modelKeys(lane));
-        }
-        for (Map.Entry<LaneGroup, Set<String>> e : namedByLanes.entrySet()) {
-            Set<String> unreachable = new LinkedHashSet<>(offeredFor(e.getKey()));
-            unreachable.removeAll(e.getValue());
-            if (!unreachable.isEmpty()) {
-                throw new IllegalStateException(e.getKey() + " offers " + unreachable
-                        + ", which no lane in it names — nothing can ever select them");
+            Set<String> missing = new LinkedHashSet<>(offered);
+            missing.removeAll(named);
+            if (!missing.isEmpty()) {
+                throw new IllegalStateException(lane.group() + " permits " + missing + ", which lane " + lane
+                        + " does not name, so its picker cannot offer them");
             }
         }
     }
@@ -470,6 +458,31 @@ public final class ModelCatalog {
      */
     public static String key(CatalogEntry entry) {
         return entry.provider().name() + ":" + entry.modelName();
+    }
+
+    /**
+     * The id this {@code (provider, modelName)} pair is priced under in the vendored LiteLLM book,
+     * distinct from {@code modelName} for the routes whose book keys carry a prefix this catalog's own
+     * names do not: {@code xai/}, {@code zai/}, {@code moonshot/}, {@code openrouter/}, and
+     * {@link BedrockModelProfile#MANTLE_ROUTE_PREFIX} for {@link ModelProvider#BEDROCK_MANTLE} (the
+     * same split {@link BedrockModelProfile.ModelDescriptor#inferenceProfileId} documents for the
+     * platform-funded lanes). Every other provider's book keys are bare, so {@code modelName} is
+     * returned unchanged.
+     *
+     * <p>This is a rate-lookup id only. It never ships to the sandbox agent and never lands in
+     * {@code llm_call.model} — both of those stay {@code modelName}, the name a person actually chose
+     * (see {@link ProjectModelSettings.ResolvedAgenticModel}), so a project reading its own usage sees
+     * "grok-4.6", not "xai/grok-4.6".
+     */
+    public static String pricingId(ModelProvider provider, String modelName) {
+        return switch (provider) {
+            case GROK -> "xai/" + modelName;
+            case GLM -> "zai/" + modelName;
+            case MOONSHOT -> "moonshot/" + modelName;
+            case OPENROUTER -> "openrouter/" + modelName;
+            case BEDROCK_MANTLE -> BedrockModelProfile.MANTLE_ROUTE_PREFIX + modelName;
+            default -> modelName;
+        };
     }
 
     public static Optional<CatalogEntry> find(ModelProvider provider, String modelName) {

@@ -1,24 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
-import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
-import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Read;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.OptionalDouble;
 import java.util.Set;
@@ -28,35 +19,24 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Turns triaged metric-drift findings into cases: a bucket's duration or cost distribution sitting
+ * Shapes a triaged metric-drift finding into a case: a bucket's duration or cost distribution sitting
  * measurably away from its own earlier baseline.
  *
- * <p>A case opens only for a finding a triage run ruled a real positive, or one a human marked
- * "Real deviation" directly. Layer 1 detects change, not whether the change is a problem, so an
- * unfiltered finding stays a lead on the Classifiers page; {@link #gateSentence} records which of
- * the two authorities ruled.
- *
- * <p>{@link #detect} returns the live set of currently-firing findings every pass, and {@link
- * CaseReconciler} closes whatever drops out. Title, basis, and values are read back from the
- * finding's own evidence blob via {@link MetricFindingEvidence#read}, so a case can't disagree
- * with the finding it came from; when that blob is unreadable the case still opens, without
- * inventing numbers.
+ * <p>{@link CaseOpener} only calls {@link #shape} once a finding's ruling has already qualified it — a
+ * triage run's positive, or a human's "Real deviation" — so this class has no gate of its own to apply.
+ * {@link #gateSentence} still records which of the two authorities ruled, since that is part of the
+ * case's own account of itself. Title, basis, and values are read back from the finding's own evidence
+ * blob via {@link MetricFindingEvidence#read}, so a case can't disagree with the finding it came from;
+ * when that blob is unreadable the case still opens, without inventing numbers.
  */
 @Component
 public class MetricDriftSource implements CaseSource {
 
     private static final Logger log = LoggerFactory.getLogger(MetricDriftSource.class);
 
-    /** The detectors whose signals carry a {@link MetricDriftConfig}, and so a window horizon. */
-    private static final Set<String> METRIC_DETECTORS =
+    /** The classifiers whose findings this source shapes. */
+    private static final Set<String> METRIC_CLASSIFIERS =
             Set.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
-
-    /**
-     * Upper bound on the live set read per pass, not a page size: a truncated read would look like
-     * recovery and close cases that are still firing. If this is ever hit, find out why a project
-     * has a thousand confirmed shifts before raising it.
-     */
-    private static final int LIVE_SET_CAP = 1_000;
 
     /**
      * Severity saturates at {@code ln(3)}, a 3x move: past a tripling, "more" stops changing triage
@@ -70,58 +50,18 @@ public class MetricDriftSource implements CaseSource {
      */
     private static final double UNKNOWN_SEVERITY = 0.5;
 
-    private final FindingRepository findings;
-    private final ClassifierRepository signals;
-    private final ObjectMapper mapper;
-
-    /** The classifiers whose findings open a metric-drift case; duration and cost are armed separately. */
-    private static final List<String> METRIC_CLASSIFIERS =
-            List.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
-
-    public MetricDriftSource(FindingRepository findings, ClassifierRepository signals, ObjectMapper mapper) {
-        this.findings = findings;
-        this.signals = signals;
-        this.mapper = mapper;
-    }
-
     @Override
     public String detector() {
         return CaseRow.Detector.METRIC_DRIFT;
     }
 
     @Override
-    public List<CaseDetection> detect(String projectId) {
-        String seenSince = Instant.now().minus(quietWindow(projectId)).toString();
-        List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, METRIC_CLASSIFIERS, SurvivalGate.MACHINE_OR_HUMAN, seenSince, LIVE_SET_CAP)) {
-            out.add(toDetection(finding));
-        }
-        return out;
+    public boolean owns(String classifierKey) {
+        return METRIC_CLASSIFIERS.contains(classifierKey);
     }
 
-    /**
-     * How long a confirmed shift may go quiet before its case counts as recovered: the longest
-     * window any of this project's metric-drift classifiers is configured to close.
-     *
-     * <p>Derived from the project's own configuration rather than a fixed constant, so a bucket
-     * that closes windows weekly doesn't get its case reopened between two consecutive firings,
-     * while one that closes hourly still recovers within one horizon of actually stopping.
-     *
-     * <p>Trade-off: recovery latency. A bucket that already recovered still shows a case until its
-     * window would have closed.
-     */
-    private Duration quietWindow(String projectId) {
-        int hours = 0;
-        for (ClassifierRow signal : signals.listByProject(projectId)) {
-            if (!METRIC_DETECTORS.contains(signal.detector())) continue;
-            hours = Math.max(
-                    hours, MetricDriftConfig.of(mapper, signal.configJson()).windowMaxHours());
-        }
-        return Duration.ofHours(hours > 0 ? hours : MetricDriftConfig.DEFAULT_WINDOW_MAX_HOURS);
-    }
-
-    private static CaseDetection toDetection(FindingRow finding) {
+    @Override
+    public CaseDetection shape(FindingRow finding) {
         Read read = MetricFindingEvidence.read(finding.payloadJson());
         if (read == null) {
             log.warn(
@@ -192,7 +132,7 @@ public class MetricDriftSource implements CaseSource {
      * deciding whether to page someone needs to know which one they're looking at.
      */
     private static String gateSentence(FindingRow finding) {
-        if (FindingRow.Status.BLOCKED.equals(finding.status())) {
+        if (finding.humanVerdictAt() != null) {
             return "A human ruled this a real deviation.";
         }
         return "A triage run audited this claim and found it sound.";
@@ -229,10 +169,9 @@ public class MetricDriftSource implements CaseSource {
     }
 
     /**
-     * When the current spell began: the first window that showed this shift
-     * ({@code behavior_finding.first_seen_at}). Stamped once per spell and stable until a
-     * recovery, because {@link CaseLedger} reopens a case only when the onset moves: an onset
-     * that advanced on every pass would reopen cases a human had just resolved.
+     * When the current spell began: the finding's own onset, moved only across an observed recovery
+     * (see {@code FindingRepository}). A case's own onset is stamped once, at open, and never moves —
+     * this is only ever read on the finding that opens or joins a case.
      *
      * <p>Trade-off: under a backfill this isn't exact; the finding's own evidence carries the true
      * window bounds for a reader who needs them.

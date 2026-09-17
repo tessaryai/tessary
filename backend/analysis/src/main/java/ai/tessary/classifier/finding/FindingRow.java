@@ -55,9 +55,9 @@ public record FindingRow(
          * intent: a cost drop is as {@code positive} a claim as a cost rise, since "improvement"
          * needs evidence triage does not have.
          *
-         * <p>Null is not a ruling. A run that did not happen leaves this null and lets its job
-         * retry into the dead letter, which is what makes {@code unclear} safe to close on: every
-         * value here was written by a run that read the evidence.
+         * <p>Null is not a ruling. A run that did not happen, never reached the evidence, or did not
+         * settle the question leaves this null and lets its job retry into the dead letter: every
+         * value here was written by a run that actually established what it says.
          */
         @Nullable String triageVerdict,
         /** What the ruling did ({@link TriageAction}), fixed by the verdict and written with it. */
@@ -67,8 +67,9 @@ public record FindingRow(
         @Nullable String triagedAt,
         /** When a human ruled. Their verdict outranks any later machine one. */
         @Nullable String humanVerdictAt,
-        /** Firings since that ruling: the number behind "you blocked this and it kept happening". */
-        long recurrencesSinceVerdict,
+        /** The case this finding opened or joined, or null while it backs none. Set once a ruling is
+         *  positive; the finding stays {@link Status#OPEN} for as long as that case is unresolved. */
+        @Nullable String caseId,
         String createdAt,
         String updatedAt) {
 
@@ -149,16 +150,17 @@ public record FindingRow(
         return FindingPayload.tree(payloadJson);
     }
 
-    /** {@code finding.status} values. */
+    /**
+     * {@code finding.status} values: open or closed, and nothing else. A ruling freezes the row by
+     * construction — see {@code ux_finding_live} — so status alone no longer distinguishes an
+     * untriaged finding from a positively-ruled one still backing a case; {@link #triageVerdict} does
+     * that.
+     */
     public static final class Status {
         private Status() {}
 
         public static final String OPEN = "open";
-        public static final String GRADUATED = "graduated";
-        public static final String ALLOWLISTED = "allowlisted";
-        public static final String BLOCKED = "blocked";
-        public static final String RESOLVED = "resolved";
-        public static final String ABSORBED = "absorbed";
+        public static final String CLOSED = "closed";
     }
 
     /**
@@ -249,8 +251,7 @@ public record FindingRow(
     /**
      * {@code finding.triage_verdict} values: what Layer 2 concluded about the claim, and nothing
      * else. These ask whether the finding is true: {@link #POSITIVE} it is, {@link #NEGATIVE} the
-     * detector fired on something that is not there, {@link #UNCLEAR} the evidence does not settle
-     * it.
+     * detector fired on something that is not there.
      */
     public static final class TriageVerdict {
         private TriageVerdict() {}
@@ -265,28 +266,20 @@ public record FindingRow(
          *
          * <p>The only verdict that moves detector state. See {@code ToolErrorService.foldRuledNegative}:
          * folding a window into a reference asserts the traffic in it was normal, and only this verdict
-         * asserts that.
+         * asserts that. Closes the finding, deliberately: recurrence is the recovery, not a queue. A
+         * cause that is real keeps firing and comes back for a second look; a cause that never fires
+         * again cost nobody a decision.
          */
         public static final String NEGATIVE = "negative";
-
-        /**
-         * The evidence does not settle it. Closes the finding like {@link #NEGATIVE}, deliberately:
-         * recurrence is the recovery, not a queue. A cause that is real keeps firing and comes back
-         * for a second look; a cause that never fires again cost nobody a decision.
-         *
-         * <p>Changes nothing else: an unsettled run has not established that the window was normal,
-         * so nothing may be folded on the strength of it.
-         */
-        public static final String UNCLEAR = "unclear";
 
         /**
          * Whether a ruling may move the detector state behind the finding, today whether a
          * tool-error window folds into the tool's reference.
          *
-         * <p>Deliberately not derived from {@link TriageAction}: {@link #NEGATIVE} and
-         * {@link #UNCLEAR} share an action, and gating the fold on that action is how an unsettled
-         * run could move a baseline. They close the finding alike but assert nothing alike: a
-         * negative says the traffic was ordinary, an unclear says the run could not tell.
+         * <p>Deliberately not derived from {@link TriageAction}: a positive shares no action with a
+         * negative, but the reverse — deriving the fold from the action alone — would move a baseline
+         * on any verdict that happens to close, rather than only on the one that asserts the traffic
+         * was ordinary.
          */
         public static boolean movesDetectorState(@Nullable String verdict) {
             return NEGATIVE.equals(verdict);

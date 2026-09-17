@@ -113,40 +113,43 @@ public class RcaReportRepository {
                 .list();
     }
 
+    /** What a finished RCA gives a case row: its verdict, and the leading hypothesis if it reached one. */
+    public record CaseLead(
+            @Nullable String verdict, @Nullable String cause) {}
+
     /**
-     * What a finished RCA concluded about each of {@code findingIds} — its verdict and the leading
-     * hypothesis title — as the Triage queue reads it.
+     * What a finished RCA concluded about each of {@code caseIds} — its verdict and the leading
+     * hypothesis title — as the Triage queue reads it. ONE query for a whole page, served by
+     * {@code ix_rca_report_finding} through the {@code finding} join, rather than a report fetch per
+     * row: Triage lists every live case, and a per-row read would put an RCA lookup behind the app's
+     * first screen.
      *
-     * <p>ONE query for a whole page, served by {@code ix_rca_report_finding}, rather than a report fetch
-     * per row: Triage lists every live case, and a per-row read would put an RCA lookup behind the app's
-     * first screen. The two values are pulled straight out instead of mapping {@link RcaReportRow},
-     * because building a one-line caption does not justify hydrating hypotheses, a checklist and a
-     * markdown report.
+     * <p>Keyed on the CASE (1b: a case reads over all of its findings, so a lookup keyed on any one
+     * finding id can't be looked up by the case alone) via {@code DISTINCT ON (f.case_id)} rather than
+     * {@code r.finding_id}. RCA locks a case the moment it is pressed, so in practice at most one finding
+     * of a case is ever analysed (1c) — but the join still routes through {@code finding.case_id} rather
+     * than assume that.
      *
      * <p>Only a {@code done} run counts, and {@code done} is the JOB's status for the reason the rest of
      * this file joins {@code job}: an exhaustion sweep flips the job and not the report. A failed or
      * running analysis has concluded nothing, and a row captioned from one would state a cause nobody
      * established.
      */
-    public Map<String, CaseLead> leadsByFinding(String projectId, Collection<String> findingIds) {
-        if (findingIds.isEmpty()) return Map.of();
+    public Map<String, CaseLead> leadsByCase(String projectId, Collection<String> caseIds) {
+        if (caseIds.isEmpty()) return Map.of();
         Map<String, CaseLead> out = new HashMap<>();
-        jdbc.sql("SELECT DISTINCT ON (r.finding_id) r.finding_id, r.verdict,"
+        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, r.verdict,"
                         + " r.hypotheses -> 0 ->> 'title' AS cause "
-                        + FROM
-                        + " WHERE r.project_id = :pid AND r.finding_id IN (:fids) AND j.status = 'done'"
-                        + " ORDER BY r.finding_id, r.created_at DESC")
+                        + FROM + " JOIN finding f ON f.id = r.finding_id"
+                        + " WHERE r.project_id = :pid AND f.case_id IN (:caseIds) AND j.status = 'done'"
+                        + " ORDER BY f.case_id, r.created_at DESC")
                 .param("pid", projectId)
-                .param("fids", findingIds)
-                .query((rs, n) -> out.put(
-                        rs.getString("finding_id"), new CaseLead(rs.getString("verdict"), rs.getString("cause"))))
+                .param("caseIds", caseIds)
+                .query((rs, n) ->
+                        out.put(rs.getString("case_id"), new CaseLead(rs.getString("verdict"), rs.getString("cause"))))
                 .list();
         return out;
     }
-
-    /** What a finished RCA gives a case row: its verdict, and the leading hypothesis if it reached one. */
-    public record CaseLead(
-            @Nullable String verdict, @Nullable String cause) {}
 
     public Optional<RcaReportRow> findByJobId(String projectId, String jobId) {
         return jdbc.sql("SELECT " + COLS + " " + FROM + " WHERE r.project_id = :pid AND r.job_id = :jobId")

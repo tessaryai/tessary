@@ -71,6 +71,7 @@ function tempDir(prefix) {
 }
 
 const LOCALHOST_URLS = [
+  'http://localhost',
   'http://localhost:8000',
   'http://127.0.0.1:8000',
   'http://[::1]:8000',
@@ -190,9 +191,9 @@ test('docker backend: the SAME localhost mcp.url is accepted unchanged (guard is
   });
 
   try {
-    // docker-compose.dev.yml's own default (localhost:8000) — must keep working unchanged.
+    // docker-compose.dev.yml's own default (http://localhost) — must keep working unchanged.
     const res = await postJson(port, '/triage', {
-      files: [], prompt: 'x', json_schema: {}, mcp: { url: 'http://localhost:8000', token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
+      files: [], prompt: 'x', json_schema: {}, mcp: { url: 'http://localhost', token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200, `expected the docker backend to accept a localhost mcp.url unchanged, got: ${res.body}`);
     assert.deepEqual(JSON.parse(res.body), { raw: 'fake-ok' });

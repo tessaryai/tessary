@@ -97,4 +97,31 @@ class ModelCatalogTest {
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(ModelProvider.OPENAI, List.of());
         assertTrue(merged.stream().allMatch(e -> e.provider() == ModelProvider.OPENAI));
     }
+
+    @Test
+    void pricingIdRoutePrefixesTheSevenModelsWhoseBookKeysCarryOne() {
+        // The seven catalog entries the vendored book prices only under a route-prefixed key (see
+        // LanePriority's TRIAGE comment for their per-MTok rates); everything else is bare.
+        assertEquals("xai/grok-4.6", ModelCatalog.pricingId(ModelProvider.GROK, "grok-4.6"));
+        assertEquals("xai/grok-code-fast-1", ModelCatalog.pricingId(ModelProvider.GROK, "grok-code-fast-1"));
+        assertEquals("zai/glm-5.3", ModelCatalog.pricingId(ModelProvider.GLM, "glm-5.3"));
+        assertEquals("zai/glm-5.3-flash", ModelCatalog.pricingId(ModelProvider.GLM, "glm-5.3-flash"));
+        assertEquals("moonshot/kimi-k2.6", ModelCatalog.pricingId(ModelProvider.MOONSHOT, "kimi-k2.6"));
+        assertEquals(
+                "openrouter/openai/gpt-5.6-terra",
+                ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-5.6-terra"));
+        assertEquals(
+                "openrouter/openai/gpt-5.6-luna",
+                ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-5.6-luna"));
+    }
+
+    @Test
+    void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantleLikeChatModelFactoryAlreadyDid() {
+        assertEquals("gpt-5.6-terra", ModelCatalog.pricingId(ModelProvider.OPENAI, "gpt-5.6-terra"));
+        assertEquals("claude-sonnet-5", ModelCatalog.pricingId(ModelProvider.ANTHROPIC, "claude-sonnet-5"));
+        assertEquals("gemini-3.1-pro-preview", ModelCatalog.pricingId(ModelProvider.GEMINI, "gemini-3.1-pro-preview"));
+        assertEquals(
+                "bedrock_mantle/openai.gpt-5.6-luna",
+                ModelCatalog.pricingId(ModelProvider.BEDROCK_MANTLE, "openai.gpt-5.6-luna"));
+    }
 }

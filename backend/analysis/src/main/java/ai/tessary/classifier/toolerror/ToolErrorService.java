@@ -53,27 +53,24 @@ public class ToolErrorService {
      * How far back a replay reads. Long enough to hold a reference plus a spell, short enough that the
      * aggregate stays a cheap read; the same 28 days {@code TrendService} replays for grader pass rate.
      *
-     * <p>PROGRAM.md §5.3 records the limit this imposes and the mitigation: once a spell is open the
-     * window anchors to its onset instead, so an unresolved regression cannot age out of the replay and
-     * silently read as recovered.
+     * <p>PROGRAM.md §5.3 records the limit this imposes. Anchored to the project's newest tool-call
+     * event ({@link ToolErrorRepository#newestEventAt}), not to wall-clock now: a backfill whose traffic
+     * is all months old still gets a window that contains it, where {@code now - 28d} would read nothing
+     * but the empty months since.
      */
     static final Duration REPLAY_WINDOW = Duration.ofDays(28);
 
     /**
-     * How long a confirmed shift may go unrefreshed before it counts as recovered.
+     * How long a confirmed shift may go unrefreshed, in event time, before the next firing starts a new
+     * spell rather than continuing this one — the gap {@link FindingRepository#recordRecomputedCause}
+     * reads against {@code last_seen_at} to decide.
      *
      * <p>Short, and it can be, unlike metric drift, which must wait for a bucket's next window to close
-     * and so derives its horizon from {@code window_max_hours}, this detector re-evaluates every tool on
-     * every pass. A tool that has recovered stops appearing immediately, so the horizon only has to
-     * outlast the interval between passes (the case heartbeat, five minutes) rather than the detector's
-     * own clock.
+     * and so derives its horizon from {@code window_max_hours}: this detector re-evaluates every tool on
+     * every pass, so a tool that has recovered stops being refreshed as soon as the sweep next runs.
      *
-     * <p><b>One constant, two jobs, and they must be the same number.</b> It is the horizon
-     * {@code ToolErrorCaseSource} uses to decide a case has recovered, AND the gap past which
-     * {@link FindingRepository#recordRecomputedCause} treats the next firing as a new spell. Two
-     * separate values could disagree, and the shape of the disagreement is a case that closed as
-     * recovered but whose finding still carries the old spell's onset, which is the reopen blind spot
-     * this pairing exists to close.
+     * <p>Measured from the spell's own last folded hour, never from wall clock: a backfill's gap between
+     * two spells is a gap in the traffic, not in when somebody happened to run a sweep.
      */
     public static final Duration QUIET_WINDOW = Duration.ofHours(6);
 
@@ -131,7 +128,12 @@ public class ToolErrorService {
         if (signal.isEmpty()) return 0;
         ToolErrorConfig config = ToolErrorConfig.of(mapper, signal.get().configJson());
 
-        Instant from = Instant.now().minus(REPLAY_WINDOW);
+        // The replay anchors to the project's own traffic, not to wall-clock now — see REPLAY_WINDOW.
+        // Empty means no tool-call traffic has ever reached this project, the same "nothing to do" the
+        // old empty-tallies check caught, just before paying for the tallies query.
+        Optional<Instant> anchor = repo.newestEventAt(projectId);
+        if (anchor.isEmpty()) return 0;
+        Instant from = anchor.get().minus(REPLAY_WINDOW);
         List<HourlyToolTally> tallies = repo.hourlyTallies(projectId, from);
         if (tallies.isEmpty()) return 0;
         // Read beside the tallies, not derived from a spell's bucket key: the key is a normalization of the
@@ -148,9 +150,9 @@ public class ToolErrorService {
                 .collect(Collectors.toCollection(HashSet::new));
 
         ToolErrorTrend.Sweep sweep = ToolErrorTrend.sweep(tallies, config, references.byTool(projectId), carriedByTool);
-        Instant at = Instant.now();
-        String now = at.toString();
-        String quietBefore = at.minus(QUIET_WINDOW).toString();
+        // Wall clock, for bookkeeping only: state saves, pins and the finding's own created_at/updated_at.
+        // last_seen_at and the quiet test are the spell's event clock instead — see persist().
+        String now = Instant.now().toString();
 
         // State first, findings second. If this call dies between the two, the next pass re-derives the
         // same findings from the same state and writes them; the other order would advance the watermark
@@ -164,25 +166,18 @@ public class ToolErrorService {
         // still waiting for the run to thicken. Both are the same fact, a human has already accepted this
         // rate, and writing the spell hands them back the finding they accepted.
         //
-        // The pending arm is not belt-and-braces. `resolve` sets the finding ALLOWLISTED, and
-        // `ux_finding_live` covers only ('open','blocked'), so the ON CONFLICT in `recordRecomputedCause`
-        // does not see the allowlisted row: every pass through the deferral window INSERTS A SECOND,
-        // FRESH, OPEN finding for a cause the human has settled. Nothing closes it, and the absorb reads
-        // as having done nothing. That window used to be the width of one Triage page load, because this
-        // was a read path that recomputed; it is now however long the tool takes to reach
-        // `minBaselineCalls`, with `ToolErrorSweep` running the whole time.
+        // The pending arm is not belt-and-braces. A person's absorb closes the finding, and
+        // `ux_finding_live` only covers an unruled `open` row, so the ON CONFLICT in
+        // `recordRecomputedCause` does not see the closed row: every pass through the deferral window
+        // INSERTS A SECOND, FRESH, OPEN finding for a cause the human has settled. Nothing closes it, and
+        // the absorb reads as having done nothing. That window used to be the width of one Triage page
+        // load, because this was a read path that recomputed; it is now however long the tool takes to
+        // reach `minBaselineCalls`, with `ToolErrorSweep` running the whole time.
         List<Spell> spells = sweep.spells().stream()
                 .filter(s -> !absorbed.contains(s.toolKey()) && !awaitingPin.contains(s.toolKey()))
                 .toList();
         for (Spell spell : spells) {
-            persist(
-                    projectId,
-                    spell,
-                    config,
-                    from,
-                    quietBefore,
-                    now,
-                    namesByToolKey.getOrDefault(spell.toolKey(), List.of()));
+            persist(projectId, spell, config, from, now, namesByToolKey.getOrDefault(spell.toolKey(), List.of()));
         }
 
         StructuredLog.info(log, Markers.OPS, "toolerror.refresh")
@@ -201,12 +196,10 @@ public class ToolErrorService {
      * Fold a negatively-ruled finding's window into the tool's reference, and clear the arm it fired on.
      *
      * <p><b>What a negative means.</b> Triage ruled the claim does not hold: the rows do not carry what
-     * the detector asserted, so the traffic it fired on was ordinary. Until now that wrote three columns
-     * on the finding and nothing else, the accumulator kept the value it fired at, above its own
-     * threshold, so the spell went on firing on evidence a ruling had already dismissed. Those firings
-     * land in {@code recurrences_since_verdict}, which the re-open rule reads as "the traffic
-     * contradicted the ruling", so a dismissed finding re-triaged itself and eventually opened a case
-     * off nothing new. The recurrence signal only means something if a negative resets the arm.
+     * the detector asserted, so the traffic it fired on was ordinary. Closing the finding does not by
+     * itself fix that: the accumulator still sits above its own threshold, so the very next sweep opens a
+     * FRESH finding for a cause a human just dismissed, off nothing new. Folding the window into the
+     * reference is what actually resets the arm.
      *
      * <p><b>Why the window folds into the reference rather than replacing it.</b> Absorb REPLACES: a
      * human pressing "legitimate" is saying this run is the normal, and the run is the whole of it. A
@@ -223,10 +216,7 @@ public class ToolErrorService {
      *
      * <p><b>Only on a negative, and this is the whole of the gate.</b> A {@code positive} opens a case:
      * the regression is real, and moving the bar to accommodate it would be the platform quietly
-     * agreeing to a rate a human is about to be asked about. An {@code unclear} closes the finding
-     * without establishing anything at all, it is the verdict for a run that read the evidence and
-     * could not settle the question, and one that reads no evidence has even less standing to move a
-     * reference. Folding on it treated "we do not know" as "we checked, it was fine".
+     * agreeing to a rate a human is about to be asked about.
      *
      * <p>Never throws. A ruling that is already recorded must not be undone by the state write that
      * follows it, so every failure here is a log line and a return.
@@ -326,14 +316,17 @@ public class ToolErrorService {
     }
 
     private void persist(
-            String projectId,
-            Spell spell,
-            ToolErrorConfig config,
-            Instant from,
-            String quietBefore,
-            String now,
-            List<String> toolNames) {
-        Failures failing = patternsFor(projectId, spell, config, from, toolNames);
+            String projectId, Spell spell, ToolErrorConfig config, Instant from, String now, List<String> toolNames) {
+        // The finding's own event clock: the hour the detector last folded into this spell, not the
+        // moment this sweep happened to run. last_seen_at, the quiet test and the evidence window all
+        // measure from here, so a backfill replays on the traffic's timeline instead of the sweep's.
+        // Falls back to wall clock only in the unreachable case a firing spell carries no watermark —
+        // see Spell#lastBucket.
+        String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
+        Instant until = Instant.parse(eventAt).plus(Duration.ofHours(1));
+        String quietBefore = Instant.parse(eventAt).minus(QUIET_WINDOW).toString();
+
+        Failures failing = patternsFor(projectId, spell, config, from, until, toolNames);
         String evidence = ToolErrorEvidence.toJson(
                 spell.toolKey(),
                 spell.decision(),
@@ -341,7 +334,7 @@ public class ToolErrorService {
                 failing.patterns().size() >= config.maxPatterns(),
                 failing.traceIds(),
                 from.toString(),
-                now);
+                until.toString());
         var recorded = findings.recordRecomputedCause(
                 Ids.ulid(),
                 projectId,
@@ -350,9 +343,11 @@ public class ToolErrorService {
                 ai.tessary.classifier.substrate.BehaviorSubstrateRepository.UNATTRIBUTED,
                 spell.onsetBucket(),
                 evidence,
+                eventAt,
                 quietBefore,
                 now);
-        recordPopulation(projectId, recorded.findingId(), spell, toolNames, now);
+        if (recorded == null) return; // a ruled finding already covers this spell up to eventAt
+        recordPopulation(projectId, recorded.findingId(), spell, toolNames, until, now);
     }
 
     /**
@@ -374,8 +369,14 @@ public class ToolErrorService {
      * <p>Written on every recompute rather than only at open, because the spell's window grows with it
      * and a denominator frozen at open would stop matching the numerator. The unique index makes the
      * overlap a no-op.
+     *
+     * @param until the end of the last hour the detector folded — the spell's own event clock, not the
+     *     moment this method runs. Bounding the population there, rather than at wall-clock now, is what
+     *     keeps {@code member}/{@code witness} matching {@code toolError.nCur}: both stop at the same
+     *     hour instead of one reading a few calls later than the other.
      */
-    private void recordPopulation(String projectId, String findingId, Spell spell, List<String> toolNames, String now) {
+    private void recordPopulation(
+            String projectId, String findingId, Spell spell, List<String> toolNames, Instant until, String now) {
         Instant onset = parseInstant(spell.onsetBucket());
         // Skipped rather than widened to the replay horizon: refs to traffic from before the spell would
         // enumerate a population the claim is not about. Unreachable while an alarm implies an arm above
@@ -389,7 +390,6 @@ public class ToolErrorService {
                     .log();
             return;
         }
-        Instant until = Instant.now();
         record(
                 projectId,
                 findingId,
@@ -441,13 +441,22 @@ public class ToolErrorService {
      * <p>{@code toolNames} are the bucket's RAW names, carried down from the same read that produced the
      * tallies. They are not recoverable from {@code spell.toolKey()}, which is a lossy normalization of
      * them, and a caller that tries anyway gets an empty result rather than an error.
+     *
+     * @param until the end of the last hour the detector folded, the same bound {@link #recordPopulation}
+     *     enumerates evidence to — never wall-clock now, or a backfilled replay would read patterns from
+     *     traffic outside the spell it is describing.
      */
     private Failures patternsFor(
-            String projectId, Spell spell, ToolErrorConfig config, Instant from, List<String> toolNames) {
+            String projectId,
+            Spell spell,
+            ToolErrorConfig config,
+            Instant from,
+            Instant until,
+            List<String> toolNames) {
         Instant since = spell.onsetBucket() == null ? from : parseOr(spell.onsetBucket(), from);
         ToolErrorRate observed = new ToolErrorRate();
         List<String> traces = new ArrayList<>();
-        for (RawFailure f : repo.failuresFor(projectId, toolNames, since, Instant.now(), SIGNATURE_SAMPLE)) {
+        for (RawFailure f : repo.failuresFor(projectId, toolNames, since, until, SIGNATURE_SAMPLE)) {
             ToolFailure.Recognized r = ToolFailure.recognize(
                     f.errorType(), f.isError(), f.errorTypeAttr(), f.exceptionAttr(), parseJson(f.resultJson()));
             // A row the predicate selected that no rule recognizes changed under the read. Dropped rather

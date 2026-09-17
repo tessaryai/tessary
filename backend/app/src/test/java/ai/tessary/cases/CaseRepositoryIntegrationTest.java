@@ -17,18 +17,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
 /**
@@ -41,21 +33,11 @@ import org.springframework.test.context.TestPropertySource;
  * that the string was assembled.
  */
 @SpringBootTest
-// Own context on purpose: CaseWorker's sweep is parked here, and its assertions read the case table without a project
-// filter.
 @TestPropertySource(properties = "test.context-group=case-repository")
 class CaseRepositoryIntegrationTest {
 
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.cases.heartbeat-ms", () -> "3600000");
-    }
-
     @Autowired
     CaseRepository cases;
-
-    @Autowired
-    CaseLedger ledger;
 
     @Autowired
     FindingRepository findings;
@@ -123,52 +105,14 @@ class CaseRepositoryIntegrationTest {
                         .seq());
     }
 
-    /**
-     * The regression for the silent-drop defect, exercised the only way it actually arises.
-     *
-     * <p>{@code MAX(seq)+1} cannot collide with itself inside one transaction — it collides when two
-     * transactions read the same {@code MAX} before either commits, which is precisely two backends
-     * sweeping one project. The loser's insert was swallowed by a bare {@code ON CONFLICT DO NOTHING}
-     * and its detection vanished: no row, no event, no log. Both cases must survive, on distinct
-     * numbers.
-     */
-    @Test
-    void concurrentReconcilesPlaceEveryCaseOnItsOwnNumber() throws Exception {
-        Project p = project("repo-seq-race");
-        int backends = 4;
-        int subjects = 6;
-        // Every backend reports the SAME live set — which is what N replicas of CaseWorker actually do,
-        // and why the opens race while nobody's sweep closes anybody else's case.
-        List<CaseDetection> firing = IntStream.range(0, subjects)
-                .mapToObj(i -> detection(p, "grader-" + i))
-                .toList();
-
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService pool = Executors.newFixedThreadPool(backends);
-        try {
-            List<Future<?>> futures = new ArrayList<>();
-            for (int i = 0; i < backends; i++) {
-                futures.add(pool.submit(() -> {
-                    start.await();
-                    // Through the ledger, not the repository: apply() is the transactional unit that
-                    // takes the advisory lock, and the lock is what makes this deterministic.
-                    ledger.apply(p.id(), CaseRow.Detector.BEHAVIOR_DRIFT, firing, Instant.now());
-                    return null;
-                }));
-            }
-            start.countDown();
-            for (Future<?> f : futures) f.get(120, TimeUnit.SECONDS);
-        } finally {
-            pool.shutdownNow();
-        }
-
-        List<CaseRow> live = cases.listLive(p.id());
-        assertEquals(subjects, live.size(), "every detection must have produced exactly one case");
-        assertEquals(
-                subjects,
-                live.stream().map(CaseRow::seq).distinct().count(),
-                "and each must hold its own display number");
-    }
+    // Deliberately no concurrent-seq-race test here any more. The old one exercised CaseLedger#apply's
+    // project-wide advisory lock, which existed to serialize a periodic reconciler's batch of opens —
+    // that reconciler is gone (decision 1: a case opens once, from the ruling that qualified it), and
+    // each ruling now opens or joins at most ONE case rather than a whole project's live set at once.
+    // A residual race remains — two DIFFERENT causes ruled positive at the same instant, both mapping
+    // onto the SAME CaseKey (e.g. tool_error's up/down directions on one tool) — but it is now a rare
+    // ux_eval_case_seq collision that fails the ruling's own transaction for a retry, not a silent drop,
+    // and CaseLedger no longer holds a lock to make it deterministic to test.
 
     // ---- the paged, filtered read ------------------------------------------------------------
 

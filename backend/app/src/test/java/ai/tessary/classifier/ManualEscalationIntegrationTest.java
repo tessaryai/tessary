@@ -158,6 +158,7 @@ class ManualEscalationIntegrationTest {
                         null,
                         BUCKET,
                         TOOL_ERROR_EVIDENCE,
+                        Instant.now().toString(),
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
@@ -214,6 +215,7 @@ class ManualEscalationIntegrationTest {
                         null,
                         BUCKET,
                         EVIDENCE,
+                        Instant.now().toString(),
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
@@ -382,6 +384,7 @@ class ManualEscalationIntegrationTest {
                         "pv-deploy-9",
                         BUCKET,
                         EVIDENCE,
+                        Instant.now().toString(),
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();

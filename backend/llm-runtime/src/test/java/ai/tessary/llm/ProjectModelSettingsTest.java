@@ -116,7 +116,7 @@ class ProjectModelSettingsTest {
         assertEquals(ServiceTier.STANDARD, rca.serviceTier());
 
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
-        assertEquals(HAIKU, triage.modelKey(), "Bedrock's default on TRIAGE is the one model under the ceiling");
+        assertEquals(SONNET_5, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
         assertTrue(triage.automatic());
     }
 
@@ -139,35 +139,20 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void everyTriageModelIsUnderThePriceCeiling() {
-        // The ceiling is $1 in / $5 out per MTok, curated into TRIAGE's list against the vendored
-        // LiteLLM book. Pinning the list itself is what catches a model added to the lane without
-        // anyone checking its rate — the rate lookup lives in the price book, not here.
-        assertEquals(
-                List.of(
-                        "GLM:glm-5.3-flash",
-                        "OPENAI:gpt-5.6-luna",
-                        LUNA,
-                        "GEMINI:gemini-3.7-flash",
-                        "MOONSHOT:kimi-k2.6",
-                        "GROK:grok-code-fast-1",
-                        "ANTHROPIC:claude-haiku-4-5",
-                        HAIKU,
-                        "OPENROUTER:openai/gpt-5.6-luna",
-                        "CUSTOM:custom-model"),
-                LanePriority.modelKeys(ModelLane.TRIAGE));
+    void triageOffersExactlyRcasModelListInTheSameOrder() {
+        // The triage price ceiling is gone (decision 20): TRIAGE is no longer a curated subset, it is
+        // RCA's own list, unchanged. Pinning equality rather than re-listing every key is deliberate —
+        // a model added to one lane without the other now fails here immediately.
+        assertEquals(LanePriority.modelKeys(ModelLane.RCA), LanePriority.modelKeys(ModelLane.TRIAGE));
+        assertEquals(LanePriority.of(ModelLane.RCA), LanePriority.of(ModelLane.TRIAGE), "same order, same defaults");
     }
 
     @Test
-    void triageRefusesAFrontierModelEvenThoughItsGroupPermitsIt() {
-        // Sonnet 5 is agentic, offered for AGENT_VM, and valid at Standard — every check that existed
-        // before the ceiling passes it. The lane-scoped offer list is the only thing that stops it
-        // landing on the lane that runs unattended once per cause.
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null));
-        assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error());
-        // ...and the same model is perfectly valid on RCA, which has no ceiling.
+    void triageAcceptsTheSameFrontierModelRcaDoes() {
+        // Sonnet 5 is RCA's own default on Bedrock. With the ceiling gone it is also TRIAGE's default,
+        // and a raw PUT naming it explicitly on either lane now succeeds identically.
+        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
         settings.set(PID, ORG, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
         verify(repo).upsert(PID, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
     }
@@ -188,15 +173,14 @@ class ProjectModelSettingsTest {
     @Test
     void aLaneFallsToTheNextProviderInItsOrder() {
         // The org holds one key, for a provider well down both orders. Every lane still gets a model
-        // rather than nothing: the order is a preference, not a requirement. The two lanes land on
-        // different xAI models because TRIAGE's ceiling excludes the flagship — every grok-4.x chat
-        // model starts at $1.25 input, so the coding tier is xAI's only way onto that lane.
+        // rather than nothing: the order is a preference, not a requirement. Both lanes land on the
+        // same xAI model now, since TRIAGE no longer carries a separate cheap-tier ceiling.
         configured(ModelProvider.GROK);
         assertEquals(
                 "GROK:grok-4.6",
                 settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey());
         assertEquals(
-                "GROK:grok-code-fast-1",
+                "GROK:grok-4.6",
                 settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey());
     }
 
@@ -224,10 +208,12 @@ class ProjectModelSettingsTest {
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
         assertEquals(HAIKU, rca.modelKey());
         assertFalse(rca.automatic());
-        assertEquals(
-                "GLM:glm-5.3-flash",
-                settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey(),
-                "an unset lane must not inherit another lane's choice; it follows its own provider order");
+        // TRIAGE has no row of its own, so it resolves independently through its own (now identical)
+        // provider order rather than inheriting RCA's pinned Haiku — it lands on SONNET_5 only because
+        // that is Bedrock's default on both lanes, not because the two lanes are coupled.
+        var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
+        assertEquals(SONNET_5, triage.modelKey());
+        assertTrue(triage.automatic());
     }
 
     @Test
@@ -369,6 +355,7 @@ class ProjectModelSettingsTest {
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.GEMINI, resolved.provider());
         assertEquals("gemini-3.1-pro-preview", resolved.modelId());
+        assertEquals("gemini-3.1-pro-preview", resolved.pricingId(), "Gemini's book keys are bare, same as modelId");
     }
 
     @Test
@@ -377,15 +364,27 @@ class ProjectModelSettingsTest {
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK, resolved.provider());
         assertEquals("global.anthropic.claude-haiku-4-5-20251001-v1:0", resolved.modelId());
+        assertEquals(resolved.modelId(), resolved.pricingId(), "Bedrock's inferenceProfileId is already priceable");
     }
 
     @Test
     void resolveAgenticModel_forAMantleRow_returnsBedrockMantle() {
-        // RCA, not TRIAGE: Terra is $2/$12 per MTok, over TRIAGE's ceiling, so that lane does not
-        // offer it and a row naming it there would fall back to the automatic answer.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, TERRA, ServiceTier.STANDARD)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK_MANTLE, resolved.provider());
+        assertEquals(resolved.modelId(), resolved.pricingId(), "mantle's inferenceProfileId is already priceable");
+    }
+
+    @Test
+    void resolveAgenticModel_forACatalogRowOnARoutePrefixedProvider_pricingIdCarriesThePrefix() {
+        // Decision 19: Grok, GLM, Moonshot and OpenRouter book keys carry a route prefix ModelCatalog's
+        // own model names do not — modelId (what the agent runs and llm_call.model records) must stay
+        // bare, and pricingId must carry it, or these models price as unknown.
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
+        var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
+        assertEquals(ModelProvider.GROK, resolved.provider());
+        assertEquals("grok-4.6", resolved.modelId());
+        assertEquals("xai/grok-4.6", resolved.pricingId());
     }
 
     @Test
@@ -400,5 +399,6 @@ class ProjectModelSettingsTest {
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.CUSTOM, resolved.provider());
         assertEquals("my-self-hosted-model", resolved.modelId());
+        assertEquals("my-self-hosted-model", resolved.pricingId(), "no book carries a rate for a custom endpoint");
     }
 }

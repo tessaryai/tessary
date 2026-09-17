@@ -17,6 +17,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -146,8 +147,8 @@ public class ProjectModelSettingController {
      * One model's live per-MTok rate, read from the same {@code price_book}
      * {@link ai.tessary.pricing.PlatformCallPricer} prices a completed sandbox run from: not a static
      * capability, so it does not belong on {@link BedrockModelProfile.ModelDescriptor}. Powers the
-     * settings page's price-gated warning on the TRIAGE lane: a project must never hardcode "$1 / $5"
-     * as Haiku's rate, because the book can move.
+     * settings page's warning before a costlier model is saved on the TRIAGE lane, which reads rates
+     * from here rather than hardcoding them, because the book can move.
      *
      * <p>Either field null means unpriced (no book in force carries a rate for this model), which the
      * UI must read as "unknown", never as free, the same convention
@@ -258,7 +259,10 @@ public class ProjectModelSettingController {
                 lanes,
                 models,
                 agenticCatalog,
-                models.stream().map(this::rateView).toList(),
+                Stream.concat(
+                                models.stream().map(this::rateView),
+                                agenticCatalog.stream().map(this::rateView))
+                        .toList(),
                 settings.list(r.project().id()),
                 configured));
     }
@@ -271,10 +275,20 @@ public class ProjectModelSettingController {
      * whole settings page over one row.
      */
     private ModelRateView rateView(BedrockModelProfile.ModelDescriptor d) {
+        return rateView(d.modelKey(), d.inferenceProfileId());
+    }
+
+    /** A catalog entry's rate, looked up by {@link ModelCatalog#pricingId}, not the bare model name a
+     *  sandbox run reports under (see {@code ResolvedAgenticModel}'s javadoc for why they differ). */
+    private ModelRateView rateView(ModelCatalog.CatalogEntry entry) {
+        return rateView(ModelCatalog.key(entry), ModelCatalog.pricingId(entry.provider(), entry.modelName()));
+    }
+
+    private ModelRateView rateView(String modelKey, String pricedName) {
         Optional<ai.tessary.pricing.ModelRate> rate =
-                priceModels.resolve(d.inferenceProfileId()).flatMap(priceBooks::rateFor);
+                priceModels.resolve(pricedName).flatMap(priceBooks::rateFor);
         return new ModelRateView(
-                d.modelKey(),
+                modelKey,
                 rate.map(r -> r.rates().inputPerMtok()).orElse(null),
                 rate.map(r -> r.rates().outputPerMtok()).orElse(null));
     }

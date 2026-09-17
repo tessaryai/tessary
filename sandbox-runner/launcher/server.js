@@ -41,22 +41,21 @@
  * Env:
  *   PORT                  (default 8080)
  *   SANDBOX_API_KEY       shared secret the backend must present
- *   SANDBOX_BACKEND       'docker' (default) | 'e2b' | 'local'. Three DISTINCT isolation
- *                         guarantees, not interchangeable:
+ *   SANDBOX_BACKEND       'docker' (default) | 'e2b'. Two DISTINCT isolation guarantees, both
+ *                         equally isolated, not interchangeable:
  *                           'docker' — the agentic paths (/rca, /triage) each run in a
  *                             FRESH, hardened sibling container spawned
  *                             from AGENT_IMAGE over the mounted Docker socket, one per request,
  *                             removed on completion. This is the open default: no E2B key, no
- *                             Tessary cloud credential, isolation equivalent to the E2B path.
- *                           'e2b'    — the original path: a fresh E2B microVM per request.
- *                           'local'  — agentic paths run DIRECTLY ON THIS HOST process against a
- *                             locally installed `opencode`, with NO container/VM isolation at
- *                             all. A developer convenience only (`task dev:local`) — do not
- *                             confuse with 'docker', which is the isolated option.
- *                         All three backends get the SAME provider config and the SAME model
- *                         (see agentEnvs / toProviderModel), so they cannot drift apart.
+ *                             Tessary cloud credential. `task dev` builds AGENT_IMAGE from this
+ *                             checkout's sandbox-runner/agent-sandbox/ (see scripts/lib/dev-choices.sh),
+ *                             so a dev container always runs the agent scripts you have on disk.
+ *                           'e2b'    — a fresh E2B microVM per request, from the published
+ *                             tessary/tessary-agent-sandbox template (E2B_ANALYZER_TEMPLATE below).
+ *                         Both backends get the SAME provider config and the SAME model (see
+ *                         agentEnvs / toProviderModel), so they cannot drift apart.
  *   E2B_API_KEY           E2B cloud key (stays here, never sent to the backend) — E2B backend only
- *   E2B_ANALYZER_TEMPLATE agent sandbox template name/id (default
+ *   E2B_ANALYZER_TEMPLATE the published E2B template name/id (default
  *                         tessary/tessary-agent-sandbox:latest). NAMESPACED because E2B scopes a
  *                         template name to the project that built it: a bare
  *                         `tessary-agent-sandbox` resolves only for a key belonging to the Tessary
@@ -72,12 +71,14 @@
  *   DOCKER_SOCKET_PATH    unix socket the docker backend talks the Engine API over
  *                         (default /var/run/docker.sock — the socket docker-compose.yml mounts
  *                         read-write into this container). Docker backend only.
- *   AGENT_IMAGE            the published agent image the docker backend runs one sibling
- *                         container from per request (default
- *                         tessaryai/tessary:agent-sandbox-latest — the agent-sandbox tag name
- *                         matches the E2B template alias tessary-agent-sandbox — see
- *                         sandbox-runner/agent-sandbox/Dockerfile and
- *                         .github/workflows/release.yml). Docker backend only.
+ *   AGENT_IMAGE            the agent image the docker backend runs one sibling container from
+ *                         per request (default tessaryai/tessary:agent-sandbox-latest, the
+ *                         published image — the agent-sandbox tag name matches the E2B template
+ *                         alias tessary-agent-sandbox — see sandbox-runner/agent-sandbox/Dockerfile
+ *                         and .github/workflows/release.yml). `task dev` overrides this to a tag
+ *                         built from the checkout (see scripts/lib/dev-choices.sh), so the default
+ *                         above is only ever reached by a self-hosted install or a bare compose
+ *                         invocation. Docker backend only.
  *   SANDBOX_DOCKER_CONCURRENCY  max sibling containers running at once (default 1).
  *                         One in-process semaphore guards the single container-spawn call site, so
  *                         every route shares one limiter rather than each keeping its own in sync.
@@ -143,12 +144,10 @@
  */
 const http = require('node:http');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
 
-// `e2b` is required LAZILY (only inside the E2B code paths) so the host launcher
-// in local mode needs no `e2b` install — only the analyzer scripts' own deps.
+// `e2b` is required LAZILY (only inside the E2B code paths) so the docker backend, the default,
+// needs no `e2b` install at all.
 let _Sandbox = null;
 function Sandbox() {
   if (!_Sandbox) ({ Sandbox: _Sandbox } = require('e2b'));
@@ -157,7 +156,7 @@ function Sandbox() {
 
 const PORT = Number(process.env.PORT || 8080);
 // Docker is the open default so the triage/RCA flow needs zero Tessary cloud credentials
-// (no E2B key) out of the box. 'e2b' and 'local' are both still explicit opt-ins.
+// (no E2B key) out of the box. 'e2b' is still an explicit opt-in.
 const BACKEND = (process.env.SANDBOX_BACKEND || 'docker').toLowerCase();
 const SANDBOX_API_KEY = process.env.SANDBOX_API_KEY || '';
 const E2B_API_KEY = process.env.E2B_API_KEY;
@@ -172,9 +171,9 @@ const E2B_API_KEY = process.env.E2B_API_KEY;
 const ANALYZER_TEMPLATE = process.env.E2B_ANALYZER_TEMPLATE || 'tessary/tessary-agent-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 60000);
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-// Cap on accumulated child stdout in the local and docker backends (neither honors a
-// `maxBuffer`-style cap by default, so we enforce this ourselves — see runScriptLocally and
-// runScriptInDocker) to keep a runaway agent from OOMing us.
+// Cap on accumulated stdout from a sibling container (the Engine API's log stream honors no
+// `maxBuffer`-style cap, so we enforce this ourselves — see runScriptInDocker) to keep a runaway
+// agent from OOMing us.
 const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
 
 // --- Docker backend (SANDBOX_BACKEND=docker) config — see the Env block above for what each
@@ -485,19 +484,20 @@ function requirePosture(posture, where) {
     throw new TypeError(`${where}: a sandbox posture is required (AGENT_POSTURE or UNTRUSTED_POSTURE); got ${posture === undefined ? 'undefined' : JSON.stringify(posture)}`);
   }
 }
-// The child env for a LOCAL-backend spawn under a posture. PATH is kept for UNTRUSTED too: without
-// it Node's execvp-based lookup can't resolve the bare `node` argv[0] and every request would
-// ENOENT. It names directories, not secrets. Exported for the unit test in
-// test/sandbox-posture.test.js. `credential` is UNUSED under UNTRUSTED_POSTURE (that branch
-// returns before it is ever read) — it exists so AGENT_POSTURE can build agentEnvs() from it.
-function childEnvFor(posture, workDir, credential, qualifiedModel) {
-  requirePosture(posture, 'childEnvFor');
-  return posture === AGENT_POSTURE
-    ? { ...process.env, ...agentEnvs(credential, qualifiedModel), WORK_DIR: workDir }
-    : { PATH: process.env.PATH, WORK_DIR: workDir };
+// The `Env` array the docker backend passes to POST /containers/create under a posture — the
+// seam runScriptInDockerInner calls, pulled out so it can be unit-tested with no Docker daemon
+// (see test/sandbox-posture.test.js). WORK_DIR is fixed at '/work': that's where the sibling's
+// only mount (SANDBOX_WORK_VOLUME's per-request subpath, see runScriptInDockerInner) always lands,
+// unlike an E2B microVM or a HOST spawn, both of which pick their own per-run directory. `credential`
+// is UNUSED under UNTRUSTED_POSTURE (that branch returns before it is ever read) — it exists so
+// AGENT_POSTURE can build agentEnvs() from it.
+function containerEnvFor(posture, credential, qualifiedModel) {
+  requirePosture(posture, 'containerEnvFor');
+  const envs = posture === AGENT_POSTURE ? agentEnvs(credential, qualifiedModel) : {};
+  return [...Object.entries(envs).map(([k, v]) => `${k}=${v}`), 'WORK_DIR=/work'];
 }
 
-// Credentials + provider config for the sandbox. Identical for the E2B and local backends, so a
+// Credentials + provider config for the sandbox. Identical for both backends, so a
 // developer's local run cannot silently exercise a different provider than production.
 // SigV4 only, deliberately. A Bedrock API key would be the smaller thing to hand a sandbox, but
 // a Bedrock IAM policy that grants `bedrock-mantle:CreateInference` does not thereby grant
@@ -626,12 +626,12 @@ function scrubToken(s) {
 const DETAIL_MAX = 200;
 
 // An E2B microVM is a separate machine on E2B's network, not a process on this host — a
-// callback URL of `http://localhost:8000` (docker-compose.dev.yml's own default, and the value the
+// callback URL of `http://localhost` (docker-compose.dev.yml's own default, and the value the
 // RCA/triage MCP base URL resolves to whenever nothing else is configured) means "call yourself
 // back" from inside the microVM, which is unreachable and guaranteed to fail the run after burning
 // a full sandbox create + the platform's evidence door never opening. Checked ONLY on the `e2b`
-// backend (see the call site in runAgenticScript): 'docker' and 'local' run as siblings/children of
-// THIS host, where the same `localhost` value is exactly right, so this must never fire there.
+// backend (see the call site in runAgenticScript): the docker backend runs a sibling of THIS
+// host, where the same `localhost` value is exactly right, so this must never fire there.
 // An unparseable URL is treated the same as localhost — it is equally unusable.
 //
 // `0.0.0.0` (a real deployment-config typo, not just a curiosity — Linux happily lets a client
@@ -804,106 +804,6 @@ function parseScriptOutput(scriptName, stdout) {
     e.launcherKind = 'bad_output';
     throw e;
   }
-}
-
-// Local backend (SANDBOX_BACKEND=local): run an analyzer script on the HOST instead of in
-// an E2B microVM. A fresh temp dir is the per-request work root (WORK_DIR) — the script
-// clones into it and starts the locally installed `opencode` with the same credentials and
-// provider config the E2B path injects. Same token-safety discipline as the E2B paths: the
-// script's stderr can carry the tokenized clone URL, so we never put it into the thrown error /
-// HTTP response (a truncated copy is console.error'd to the launcher console for debugging).
-function runScriptLocally(scriptName, payload, timeoutMs, posture, credential) {
-  requirePosture(posture, 'runScriptLocally');
-  return new Promise((resolve, reject) => {
-    // Setup failures (no temp space, unwritable tmpdir) never reach the script; they still name it
-    // so the 502 says which path died. See buildErrorBody.
-    const withSetupMeta = (e) => stampFailure(e, { launcherMeta: { script: scriptName, timeout_ms: timeoutMs } });
-    let workDir;
-    try {
-      workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'launcher-'));
-    } catch (e) {
-      reject(withSetupMeta(e));
-      return;
-    }
-    const cleanup = () => { try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ } };
-    const inputPath = path.join(workDir, 'input.json');
-    try {
-      fs.writeFileSync(inputPath, JSON.stringify(payload));
-    } catch (e) {
-      cleanup();
-      reject(withSetupMeta(e));
-      return;
-    }
-    const scriptPath = path.join(__dirname, '..', 'agent-sandbox', scriptName);
-    // `spawn` does NOT honor `maxBuffer` (only exec/execFile do), so the manual `stdout`
-    // accumulation below is unbounded — a runaway agent could OOM the launcher. Enforce an
-    // explicit byte cap ourselves: kill the child and reject (token-free message) on overflow.
-    const startedAt = Date.now();
-    const childEnv = childEnvFor(posture, workDir, credential, payload.model);
-    const child = spawn('node', [scriptPath, inputPath], {
-      cwd: workDir,
-      env: childEnv,
-      timeout: timeoutMs,
-    });
-    // `error` and `close` can BOTH fire (e.g. ENOENT spawns `error` then `close` with code -2),
-    // and the overflow path settles early — guard so cleanup + settle happen exactly once.
-    let settled = false;
-    const settle = (fn, arg) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      fn(arg);
-    };
-    // Every rejection from here on carries the launcher diagnostics the 502 body is built from.
-    const withMeta = (e) => stampFailure(e, {
-      launcherMeta: { script: scriptName, elapsed_ms: Date.now() - startedAt, timeout_ms: timeoutMs },
-    });
-    let stdout = '';
-    let stderr = '';
-    let stdoutBytes = 0;
-    child.stdout.on('data', (d) => {
-      stdoutBytes += d.length;
-      if (stdoutBytes > MAX_STDOUT_BYTES) {
-        child.kill('SIGKILL');
-        settle(reject, withMeta(new Error(`${scriptName} stdout exceeded ${MAX_STDOUT_BYTES} bytes`)));
-        return;
-      }
-      stdout += d.toString();
-    });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (e) => { settle(reject, withMeta(e)); });
-    child.on('close', (code, signal) => {
-      if (settled) return;
-      const elapsedMs = Date.now() - startedAt;
-      try {
-        if (code !== 0) {
-          // `spawn({timeout})` kills the child with SIGTERM on the deadline, which surfaces as a
-          // NULL exit code plus a signal. Classify that as a timeout rather than a script failure:
-          // the two need completely different fixes, and the backend only ever saw a bare 502.
-          const timedOut = code === null && elapsedMs >= timeoutMs * 0.98;
-          // The script's stderr can carry the tokenized clone URL — log a scrubbed, truncated copy
-          // to the local console only, NEVER into the thrown error (which reaches the HTTP client).
-          console.error(`${scriptName} ${timedOut ? 'timed out' : 'failed'} after ${elapsedMs}ms of ${timeoutMs}ms (exit ${code}, signal ${signal || 'none'})`);
-          if (stderr) console.error('--- script stderr ---\n' + scrubToken(stderr).slice(-4000));
-          if (stdout) console.error('--- script stdout ---\n' + scrubToken(stdout).slice(0, 2000));
-          const e = new Error(timedOut ? `${scriptName} timed out after ${elapsedMs}ms` : `${scriptName} exit ${code}`);
-          if (timedOut) e.launcherKind = 'timeout';
-          else e.exitCode = code; // classifies as script_exit; the message stays launcher-authored
-          // F1: a non-timeout exit is exactly the shape triage.js/rca.js's failure envelope
-          // targets — extract its usage (if any) so buildErrorBody can carry it to the backend.
-          if (!timedOut) {
-            const usage = usageFromFailureStdout(stdout);
-            if (usage) e.usage = usage;
-          }
-          settle(reject, withMeta(e));
-          return;
-        }
-        settle(resolve, parseScriptOutput(scriptName, stdout));
-      } catch (e) {
-        settle(reject, withMeta(e));
-      }
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,11 +1045,10 @@ async function reapOrphanSandboxContainers() {
 
 // Docker backend (SANDBOX_BACKEND=docker): run an analyzer script in a FRESH, hardened sibling
 // container spawned from AGENT_IMAGE, one per request, removed on completion — the open default.
-// Cloned from runScriptLocally's shape (mkdtemp work dir -> write input.json -> run with an
-// MAX_STDOUT_BYTES cap and a timeout -> cleanup in `finally`), swapping "spawn node on the host"
-// for "create+start a sibling container that runs node inside it". agentEnvs() passes through
-// unchanged for the agentic callers below (AGENT_POSTURE), which is what keeps E2B/local/docker
-// credential resolution identical (see the Env-block comment at the top of this file).
+// mkdtemp work dir -> write input.json -> run with an MAX_STDOUT_BYTES cap and a timeout ->
+// cleanup in `finally`. agentEnvs() (via containerEnvFor) passes through unchanged for the
+// agentic callers below (AGENT_POSTURE), which is what keeps E2B/docker credential resolution
+// identical (see the Env-block comment at the top of this file).
 // Every surviving route passes AGENT_POSTURE. UNTRUSTED_POSTURE has no caller since removing
 // /grade and /lint — see the posture block above for why the constant stays anyway.
 function runScriptInDocker(scriptName, payload, timeoutMs, posture, credential) {
@@ -1162,7 +1061,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   const withMeta = (e) => stampFailure(e, { launcherMeta: { script: scriptName, elapsed_ms: Date.now() - startedAt, timeout_ms: timeoutMs } });
 
   // workDir is a path INSIDE this container, under the shared LAUNCHER_WORK_DIR mount — see that
-  // constant's comment for why it cannot be os.tmpdir() here the way runScriptLocally uses it.
+  // constant's comment for why it cannot be os.tmpdir() here.
   let workDir;
   try {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
@@ -1181,8 +1080,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   // shared volume's root (see LAUNCHER_WORK_DIR's comment).
   const workSubpath = path.basename(workDir);
 
-  const envList = Object.entries(posture === AGENT_POSTURE ? agentEnvs(credential, payload.model) : {}).map(([k, v]) => `${k}=${v}`);
-  envList.push('WORK_DIR=/work');
+  const envList = containerEnvFor(posture, credential, payload.model);
 
   let containerId;
   try {
@@ -1290,7 +1188,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
       if (stdout) console.error('--- container stdout ---\n' + scrubToken(stdout).slice(0, 2000));
       const e = new Error(`${scriptName} exit ${exitCode}`);
       e.exitCode = exitCode;
-      // F1: same failure-envelope extraction as the local backend above.
+      // F1: same failure-envelope extraction pattern as the E2B backend below.
       const usage = usageFromFailureStdout(stdout);
       if (usage) e.usage = usage;
       throw e;
@@ -1360,7 +1258,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   // /home/user/input.json), so a credential secret riding on `payload` would leak onto disk
   // inside the sandbox — the exact leak class UNTRUSTED_POSTURE's no-credential-leak property
   // guards against for the untrusted-content route this one is NOT. `credential` reaches the
-  // agent ONLY via env vars (agentEnvs(), below and in runScriptLocally/runScriptInDockerInner),
+  // agent ONLY via env vars (agentEnvs(), below and in containerEnvFor/runScriptInDockerInner),
   // the same channel every provider secret has always traveled on.
   const { credential, ...rest } = rawPayload;
   requireCredential(credential, scriptName);
@@ -1370,7 +1268,6 @@ async function runAgenticScript(scriptName, rawPayload) {
   // and a wrong provider prefix surfaces as an agent-side 404 with no clue where it came from.
   // A model id is neither a secret nor model output, so it is safe on this console.
   console.log(`${scriptName}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
-  if (BACKEND === 'local') return runScriptLocally(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
   if (BACKEND === 'docker') return runScriptInDocker(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
   // Both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
   // file). Reject a missing or localhost-pointed callback URL BEFORE spending an E2B sandbox create
@@ -1384,7 +1281,7 @@ async function runAgenticScript(scriptName, rawPayload) {
       const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
         + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
         + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
-        + 'SANDBOX_BACKEND to docker/local for development');
+        + 'SANDBOX_BACKEND to docker for development');
       e.launcherKind = 'bad_request';
       throw e;
     }
@@ -1569,7 +1466,7 @@ if (require.main === module && BACKEND === 'docker') {
 
 if (require.main === module) server.listen(PORT, () => {
   const detail = BACKEND === 'docker' ? `backend=docker, image=${AGENT_IMAGE}, concurrency=${SANDBOX_DOCKER_CONCURRENCY}`
-    : BACKEND === 'local' ? 'backend=local' : `backend=e2b, template=${ANALYZER_TEMPLATE}`;
+    : `backend=e2b, template=${ANALYZER_TEMPLATE}`;
   // The BOUND port, not the configured one: PORT=0 asks the OS for a free port, and the tests
   // read the assignment back off this line rather than guessing a port that may be taken.
   // No more deployment-wide provider note — every request's provider now rides on its
@@ -1579,7 +1476,7 @@ if (require.main === module) server.listen(PORT, () => {
 
 // Test seam only (test/sandbox-posture.test.js): requiring this module never listens or touches Docker.
 module.exports = {
-  childEnvFor,
+  containerEnvFor,
   AGENT_POSTURE,
   UNTRUSTED_POSTURE,
   // The provider-dispatch seam, exported for test/provider-dispatch.test.js — see that file's

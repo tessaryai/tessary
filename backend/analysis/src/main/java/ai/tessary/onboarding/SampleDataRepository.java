@@ -143,16 +143,20 @@ public class SampleDataRepository {
                 .update();
     }
 
-    /** An open {@code eval_case} row, referencing a triaged finding. */
+    /**
+     * An open {@code eval_case} row, and the reverse link a triaged finding takes now instead of the
+     * case carrying a forward {@code finding_id} (migration {@code 0011}): {@code finding.case_id} is
+     * set directly here, same table both statements touch, so the case and its finding commit
+     * together in the caller's transaction.
+     */
     public void insertCase(SampleCase c) {
         jdbc.sql("""
                 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
                     subject_label, call_site_id, metric, state, title, basis, severity, onset_at,
-                    current_value, baseline_value, delta, opened_at, last_seen_at, updated_at,
-                    finding_id)
+                    current_value, baseline_value, delta, opened_at, last_seen_at, updated_at)
                 VALUES (:id, :pid, :seq, :detector, :subjectKind, :subjectId, :label, :csid,
                     :metric, 'open', :title, :basis, :severity, :onset, :current, :baseline,
-                    :delta, :onset, :now, :now, :findingId)
+                    :delta, :onset, :now, :now)
                 """)
                 .param("id", c.id())
                 .param("pid", c.projectId())
@@ -171,7 +175,12 @@ public class SampleDataRepository {
                 .param("baseline", c.baselineValue())
                 .param("delta", c.delta())
                 .param("now", c.now())
-                .param("findingId", c.findingId())
+                .update();
+        jdbc.sql("UPDATE finding SET case_id = :cid, updated_at = :now WHERE project_id = :pid AND id = :fid")
+                .param("cid", c.id())
+                .param("now", c.now())
+                .param("pid", c.projectId())
+                .param("fid", c.findingId())
                 .update();
     }
 

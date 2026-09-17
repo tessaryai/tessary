@@ -34,11 +34,10 @@ import org.springframework.stereotype.Repository;
  * leaves the case page pointing at a trace with no text, the same broken evidence link by a slower
  * route.
  *
- * <p>It has two legs and needs both. The finding leg holds while the claim is live
- * ({@code status IN ('open','blocked')}); the case leg holds while a human still has the case in front
- * of them ({@code state <> 'resolved'}, muted included: muted is "not now", not "done with"). Neither
- * subsumes the other: a finding can be resolved under a case someone is still reading, and a finding
- * can be live before any case has been opened on it.
+ * <p><b>One leg now, not two.</b> A finding stays {@code open} for as long as it is unruled OR its
+ * positive ruling backs a case nobody has resolved — the case model's own liveness is folded into the
+ * finding's status by construction, so pinning on {@code status = 'open'} alone covers both what it
+ * used to take a finding leg and a case leg to say.
  *
  * <p>It reads at both grains evidence can carry. A span-grain row pins its parent trace through the
  * denormalized {@code trace_id} the grain check requires alongside every span id, so no statement here
@@ -63,10 +62,8 @@ public class RetentionRepository {
                 SELECT 1 FROM finding_evidence e
                 WHERE e.project_id = :pid
                   AND (e.trace_id = {trace} OR e.session_id = {session})
-                  AND (EXISTS (SELECT 1 FROM finding f
-                                WHERE f.id = e.finding_id AND f.status IN ('open', 'blocked'))
-                    OR EXISTS (SELECT 1 FROM eval_case c
-                                WHERE c.finding_id = e.finding_id AND c.state <> 'resolved')))""";
+                  AND EXISTS (SELECT 1 FROM finding f
+                              WHERE f.id = e.finding_id AND f.status = 'open'))""";
 
     /** Splice {@link #PINNED} into a statement's {@code {pin}} slot, reading it off the named columns. */
     private static String withPin(String sql, String traceId, String sessionId) {
@@ -152,10 +149,10 @@ public class RetentionRepository {
      * is a pin rather than a leak.
      *
      * <p>The predicate is the whole guard, in both directions. A row is collected only once its finding
-     * has left {@code open}/{@code blocked} and no unresolved case stands on that finding and the row's
-     * own substrate has already been deleted, which, by the statements above, can only have happened
-     * while both of those were already true. So this never removes a reference that still resolves, and
-     * never removes one a live claim depends on; it removes the dangling remainder of a closed claim.
+     * has closed and the row's own substrate has already been deleted, which, by the statements above,
+     * can only have happened while both of those were already true. So this never removes a reference
+     * that still resolves, and never removes one a live claim depends on; it removes the dangling
+     * remainder of a closed claim.
      *
      * <p>Deliberately not a FK cascade. A NO ACTION FK into {@code trace} would make retention fail
      * rather than skip, and a CASCADE would silently rewrite a closed finding's evidence set the moment

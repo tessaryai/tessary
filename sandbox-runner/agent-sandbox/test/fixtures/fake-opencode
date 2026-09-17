@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * A stand-in for `opencode serve`, for tests that need a REAL child process rather than a mocked
+ * spawn. Not a test file: it has no .js extension so `node --test` does not collect it. Tests put it
+ * on PATH as `opencode` through makeFakeOpencodeBin() below.
+ *
+ * It parses --port, answers the three session routes runAgent uses, and announces itself the way
+ * opencode does. Behaviour is chosen by env:
+ *   FAKE_OPENCODE_RECORD_DIR  write <pid>.json = {pid, args, config} there on start
+ *   FAKE_OPENCODE_EXIT_BEFORE_READY=1  exit 1 right after recording, never announcing
+ *   FAKE_OPENCODE_IGNORE_SIGTERM=1  survive SIGTERM, so only SIGKILL stops it (the bug's shape)
+ *   FAKE_OPENCODE_REPLY  the assistant's text; unset or empty = an empty completion
+ */
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
+
+if (require.main !== module && !process.env.FAKE_OPENCODE_AS_CHILD) {
+  // Required by a test for the helper only.
+  module.exports = { makeFakeOpencodeBin };
+} else {
+  serve();
+}
+
+/** A fresh directory holding an executable `opencode` that runs this file with this node. */
+function makeFakeOpencodeBin(dir) {
+  const bin = path.join(dir, 'opencode');
+  fs.writeFileSync(
+    bin,
+    `#!${process.execPath}\nprocess.env.FAKE_OPENCODE_AS_CHILD = '1';\nrequire(${JSON.stringify(__filename)});\n`,
+  );
+  fs.chmodSync(bin, 0o755);
+  return dir;
+}
+
+function serve() {
+  const args = process.argv.slice(2);
+  const port = Number((args.find((a) => a.startsWith('--port=')) || '').slice('--port='.length));
+  if (process.env.FAKE_OPENCODE_IGNORE_SIGTERM === '1') process.on('SIGTERM', () => {});
+  if (process.env.FAKE_OPENCODE_RECORD_DIR) {
+    fs.writeFileSync(
+      path.join(process.env.FAKE_OPENCODE_RECORD_DIR, `${process.pid}.json`),
+      JSON.stringify({ pid: process.pid, args, config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}') }),
+    );
+  }
+  if (process.env.FAKE_OPENCODE_EXIT_BEFORE_READY === '1') {
+    process.stderr.write('fake opencode: exiting before ready\n');
+    process.exit(1);
+  }
+  const text = process.env.FAKE_OPENCODE_REPLY || '';
+  const assistant = {
+    info: {
+      role: 'assistant',
+      modelID: 'fake/model',
+      time: { completed: Date.now() },
+      tokens: { input: 10, output: text ? 5 : 0, cache: { read: 0, write: 0 } },
+    },
+    parts: text ? [{ type: 'text', text }] : [],
+  };
+  let sessions = 0;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const send = (body) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    req.resume();
+    req.on('end', () => {
+      if (req.method === 'POST' && url.pathname === '/session') return send({ id: `s${++sessions}` });
+      if (/^\/session\/[^/]+\/message$/.test(url.pathname)) return send(req.method === 'GET' ? [assistant] : assistant);
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  server.listen(port, '127.0.0.1', () => {
+    process.stdout.write(`opencode server listening on http://127.0.0.1:${port}\n`);
+  });
+}

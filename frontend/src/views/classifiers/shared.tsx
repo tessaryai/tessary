@@ -103,12 +103,45 @@ export function VerbButton({
 }
 
 /**
- * The human verdicts on one finding: the override, available on every finding including one
- * triage already closed. Both are `outline` for the reason VerbButton's own note gives.
+ * The triage verb a finding's own page offers before there is a ruling.
  *
- * <p>They stay reachable after a closure because triage closing a finding is a machine ruling on a
- * claim, not a decision about what matters, and a person who disagrees needs somewhere to say so.
- * A human verdict outranks the machine's wherever the two are read together.
+ * <p>A run that gave up says so beside the button, in the label and tone the findings list uses, and
+ * the button offers the run again rather than staying on "Triaging…" for a job nothing is running.
+ */
+export function RunTriageButton({
+  finding,
+  busy,
+  onAnalyze,
+}: {
+  finding: BehaviorFinding;
+  busy: boolean;
+  onAnalyze: () => void;
+}) {
+  const inFlight = finding.triageStatus === "in_flight";
+  const failed = finding.triageStatus === "failed";
+  const button = (
+    <VerbButton kind="filled" disabled={busy || inFlight} onClick={onAnalyze}>
+      {inFlight ? "Triaging…" : failed ? "Run triage again" : "Run triage"}
+    </VerbButton>
+  );
+  if (!failed) return button;
+  return (
+    <span className="flex flex-wrap items-center gap-2.5">
+      <span className="text-error text-small">{triageState(finding).label}</span>
+      {button}
+    </span>
+  );
+}
+
+/**
+ * The human verdicts on one finding. Both are `outline` for the reason VerbButton's own note
+ * gives.
+ *
+ * <p>A ruling freezes the finding by construction (decision 1): the first one to land, triage's or
+ * a person's, leaves it outside `ux_finding_live` and every verb on it after that 409s. So a
+ * caller renders this only while the finding is still unruled (`!triaged`) — there is no override
+ * of a standing ruling any more, machine or human; a cause that disagrees with the traffic again
+ * simply opens a fresh finding, which is triaged like any other.
  *
  * <p>Conformance gets one verb. The two-verb split exists to correct a fitted reference (absorbing
  * a gram or re-pinning a baseline teaches the detector that what it saw is normal), and an SOP
@@ -166,9 +199,18 @@ export function triageState(finding: BehaviorFinding): TriageState {
   // Without this branch, a run that gave up is indistinguishable from one in flight and sits on
   // "Triaging" forever, the row looking busy while nothing is happening to it.
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
-  if (finding.triageVerdict === "positive") return { label: "Positive", tone: "positive" };
-  if (finding.triageVerdict === "negative") return { label: "Closed · negative", tone: "closed" };
-  if (finding.triageVerdict === "unclear") return { label: "Closed · unclear", tone: "closed" };
+  // `humanVerdictAt` set means a PERSON's ruling won the race to land first, not triage's — say so
+  // in the verb they actually pressed rather than in triage's own words, which would claim a run
+  // that never happened.
+  const byPerson = finding.humanVerdictAt != null;
+  if (finding.triageVerdict === "positive") {
+    return byPerson ? { label: "Real deviation", tone: "positive" } : { label: "Positive", tone: "positive" };
+  }
+  if (finding.triageVerdict === "negative") {
+    return byPerson
+      ? { label: "Legitimate, absorb", tone: "closed" }
+      : { label: "Closed · negative", tone: "closed" };
+  }
   return { label: "Closed", tone: "closed" };
 }
 
@@ -186,14 +228,13 @@ export function isBaselineFinding(finding: BehaviorFinding): boolean {
 }
 
 /**
- * The chain on one line: how much traffic, what triage made of it, and what has happened since.
+ * The chain on one line: how much traffic, and what triage made of it.
  *
  * <p>A baseline finding's traffic is not firings. Its count is the population its violations were
  * counted over, once, at fit time, so "seen 257×" would report a fitted fact as a recurring event.
  *
- * <p>The recurrence count is what a closed finding is read by: triage closing a claim it could not
- * settle is a bet that the cause has stopped, and the counter is the bet being called. At the
- * threshold the finding re-opens and goes back through triage once.
+ * <p>No recurrence count any more: a ruling freezes the finding, so a cause that fires again after
+ * one opens a fresh finding rather than reopening this one — there is nothing left to count here.
  */
 export function chainWords(finding: BehaviorFinding): string {
   return [
@@ -201,13 +242,12 @@ export function chainWords(finding: BehaviorFinding): string {
       ? `${finding.traceCount} applicable turns when the rule was fitted`
       : `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
-      ? `triage ruled ${finding.triageVerdict ?? "unclear"}`
+      ? `${finding.humanVerdictAt != null ? "a person" : "triage"} ruled ${finding.triageVerdict ?? "unknown"}`
       : finding.triageStatus === "in_flight"
         ? "triage running"
         : finding.triageStatus === "failed"
           ? "triage failed"
           : "not triaged yet",
-    finding.recurrencesSinceVerdict > 0 ? `${finding.recurrencesSinceVerdict} since that ruling` : null,
   ]
     .filter(Boolean)
     .join(" · ");

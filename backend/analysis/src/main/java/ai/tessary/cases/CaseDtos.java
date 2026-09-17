@@ -49,13 +49,20 @@ public final class CaseDtos {
             @JsonProperty("resolved_by") @Nullable String resolvedBy,
             @JsonProperty("muted_at") @Nullable String mutedAt,
             @JsonProperty("muted_by") @Nullable String mutedBy,
+            /** How many findings this case holds (1b: a case reads over all of them; the newest stands
+             *  in for the case's own numbers until the multi-finding case page — issue #76 — ships). */
+            @JsonProperty("finding_count") long findingCount,
             /**
-             * The finding this case was opened from, or null for a case that came in some other way.
+             * The newest of this case's findings, or null for an archived case that predates {@code
+             * finding.case_id}.
              *
              * <p>Carried on the list row, not only {@link CaseDetailView}: the classifiers queue reads
              * this in reverse, resolving finding to case, and needs it without a fetch per open case.
              */
-            @JsonProperty("finding_id") @Nullable String findingId,
+            @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
+            /** When a person pressed <em>Run RCA</em> on this case (1c) — locked against a new finding
+             *  joining it — or null if nobody has. */
+            @JsonProperty("locked_at") @Nullable String lockedAt,
             /**
              * The leading hypothesis's title from the finished RCA behind this case, or null where none
              * has run, none finished, or the run reached no hypothesis. Null is the common case, not a
@@ -100,7 +107,9 @@ public final class CaseDtos {
                     row.resolvedBy(),
                     row.mutedAt(),
                     row.mutedBy(),
-                    row.findingId(),
+                    row.findingCount(),
+                    row.latestFindingId(),
+                    row.lockedAt(),
                     lead == null ? null : lead.cause(),
                     lead == null ? null : lead.verdict());
         }
@@ -178,8 +187,8 @@ public final class CaseDtos {
 
     /**
      * Who ruled this case's detection real, and on what: a person pressing "Real deviation," or a
-     * triage run finding the claim {@code positive}. Every field reads straight off the finding
-     * named by {@code eval_case.finding_id}, so the case and the finding cannot disagree.
+     * triage run finding the claim {@code positive}. Every field reads straight off the case's newest
+     * finding (via {@code finding.case_id}), so the case and the finding cannot disagree.
      *
      * @param verdict the triage verdict, always {@code positive} for a machine ruling that reached
      *     a case, null when a human ruled
@@ -264,9 +273,11 @@ public final class CaseDtos {
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
             List<CaseEventView> events,
-            /** The finding this case is about — the subject an RCA run is anchored on. Null only on an
-             *  archived case from a retired detector, which by construction never had one. */
-            @JsonProperty("finding_id") @Nullable String findingId,
+            /** The newest finding this case holds — the subject an RCA run is anchored on (1c: RCA
+             *  still runs on one finding, always the case's newest). Null only on an archived case from
+             *  a retired detector, or one that predates {@code finding.case_id}, either of which never
+             *  had one by construction. */
+            @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
             @Nullable CaseRulingView ruling,
             List<CaseExemplarView> exemplars,
             @JsonProperty("rca_report_id") @Nullable String rcaReportId,

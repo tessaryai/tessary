@@ -19,7 +19,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, EvidenceRef, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import { CONTAINER, ResolveVerbs, VerbButton, chainWords, detectorLabel, triageState } from "./shared";
+import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, triageState } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
@@ -87,7 +87,6 @@ export function FindingPage() {
   const detail: Detail = detailQ.data;
   const finding = detail.finding;
   const triaged = finding.triageStatus === "done";
-  const inFlight = finding.triageStatus === "in_flight";
   const busy = resolveM.isPending || analyzeM.isPending;
   const state = triageState(finding);
 
@@ -103,15 +102,14 @@ export function FindingPage() {
   return (
     <div style={CONTAINER}>
       {shift ? (
-        <ShiftHeader shift={shift} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
+        <ShiftHeader shift={shift} finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
       ) : rate ? (
-        <RateHeader rate={rate} finding={finding} inFlight={inFlight} busy={busy} onAnalyze={() => analyzeM.mutate()} />
+        <RateHeader rate={rate} finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
       ) : secretLeak ? (
         <SecretHeader
           secretLeak={secretLeak}
           finding={finding}
           basePath={basePath}
-          inFlight={inFlight}
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
@@ -120,7 +118,6 @@ export function FindingPage() {
           rate={malformedOutput.rate}
           finding={finding}
           basePath={basePath}
-          inFlight={inFlight}
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
@@ -144,21 +141,41 @@ export function FindingPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-4">
             {!triaged && (
-              <VerbButton kind="filled" disabled={busy || inFlight} onClick={() => analyzeM.mutate()}>
-                {inFlight ? "Triaging…" : "Run triage"}
-              </VerbButton>
+              <RunTriageButton finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
             )}
-            <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+            {/* A ruling freezes the finding by construction (decision 1): once triaged is true a
+                verdict is stood, and every verb on it — triage's own or a person's — 409s. So the
+                verbs stop being offered the moment there is one, rather than staying up as an
+                "override" that would just fail. */}
+            {!triaged && (
+              <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+            )}
+            {finding.caseId && (
+              <Link
+                to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+                className="text-link hover:text-link-hover text-small"
+              >
+                Opened case →
+              </Link>
+            )}
           </div>
         </>
       )}
 
       {resolveM.isError && <ErrorNote error={resolveM.error} />}
       {analyzeM.isError && <ErrorNote error={analyzeM.error} />}
+      {/* A dead-lettered run is revived only once its cooldown has passed; before that the press lands
+          on the same dead job, and saying nothing would read as the button not working. */}
+      {analyzeM.data?.jobStatus === "dead" && (
+        <p className="text-muted text-small mt-2 mb-0">
+          Triage gave up on this finding recently. It can run again once its cooldown has passed.
+        </p>
+      )}
 
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
-          the ruling, and checking comes after reading what was ruled on. */}
+          the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
+          finding is frozen (decision 1), so there is nothing left to override. */}
       {story && triaged && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
@@ -167,14 +184,14 @@ export function FindingPage() {
               {finding.triageSummary}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-2 mt-1">
-            <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
-            {finding.triageAction === "closed" && (
-              <span className="text-subtle ml-1 text-small">
-                Triage closed this finding. These override the ruling.
-              </span>
-            )}
-          </div>
+          {finding.caseId && (
+            <Link
+              to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+              className="text-link hover:text-link-hover text-small"
+            >
+              Opened case →
+            </Link>
+          )}
         </div>
       )}
 
@@ -261,7 +278,7 @@ export function FindingPage() {
         </p>
       )}
 
-      {triaged && !story && <TriageRuling finding={finding} />}
+      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
       <section className="mt-7">
         <h2 className="font-mono text-label uppercase text-muted mb-1.5">
@@ -286,13 +303,11 @@ export function FindingPage() {
   function ShiftHeader({
     shift: sh,
     finding: f,
-    inFlight: running,
     busy: disabled,
     onAnalyze,
   }: {
     shift: NonNullable<Detail["metric"]>;
     finding: Detail["finding"];
-    inFlight: boolean;
     busy: boolean;
     onAnalyze: () => void;
   }) {
@@ -339,9 +354,7 @@ export function FindingPage() {
               {triageState(f).label}
             </span>
           ) : (
-            <VerbButton kind="filled" disabled={disabled || running} onClick={onAnalyze}>
-              {running ? "Triaging…" : "Run triage"}
-            </VerbButton>
+            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
           )
         }
       />
@@ -358,13 +371,11 @@ export function FindingPage() {
   function RateHeader({
     rate: r,
     finding: f,
-    inFlight: running,
     busy: disabled,
     onAnalyze,
   }: {
     rate: NonNullable<Detail["toolError"]>;
     finding: Detail["finding"];
-    inFlight: boolean;
     busy: boolean;
     onAnalyze: () => void;
   }) {
@@ -407,9 +418,7 @@ export function FindingPage() {
               {triageState(f).label}
             </span>
           ) : (
-            <VerbButton kind="filled" disabled={disabled || running} onClick={onAnalyze}>
-              {running ? "Triaging…" : "Run triage"}
-            </VerbButton>
+            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
           )
         }
       />
@@ -421,17 +430,16 @@ export function FindingPage() {
  * What triage ruled, and everything it ruled on.
  *
  * <p>The verdict line first, because the verdict is what happened to this finding (`positive`
- * handed it to a person, the other two ended it), and a reader who stops after one line should
+ * handed it to a person, `negative` closed it), and a reader who stops after one line should
  * have that fact rather than the prose.
  *
- * <p>Then the citations, which are now two different objects wearing the same shape. An evidence
+ * <p>Then the citations, which are two different objects wearing the same shape. An evidence
  * pointer is a claim about something already on this page ("window.n_cur", a trace id the agent
  * fetched) and reads as one line. A check script is code the agent wrote, ran in its sandbox, and
- * is offering as a receipt, so it is shown as code, with what it printed under it and the
- * detector numbers it re-derived beside that. Flattening a script into a line of prose would hide
- * the one part of a ruling a reader can actually re-run.
+ * is offering as a receipt, so it is shown as code, with what it printed under it. Flattening a
+ * script into a line of prose would hide the one part of a ruling a reader can actually re-run.
  */
-function TriageRuling({ finding }: { finding: Detail["finding"] }) {
+function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; basePath: string }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
   const pointers = finding.triageCitations.filter((c) => c.stdout === null);
   return (
@@ -443,6 +451,14 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
         <span className="text-fg text-body">
           {VERDICT_WORDS[finding.triageVerdict ?? ""] ?? finding.triageVerdict}
         </span>
+        {finding.caseId && (
+          <Link
+            to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+            className="text-link hover:text-link-hover text-small"
+          >
+            Opened case →
+          </Link>
+        )}
         {finding.triagedAt && (
           <span className="text-subtle text-small">
             {new Date(finding.triagedAt).toLocaleString()}
@@ -477,9 +493,7 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
             What it computed
           </h3>
           <p className="text-subtle mt-0 mx-0 mb-2.5 text-small" style={{ maxWidth: 620 }}>
-            Scripts the agent wrote and ran against the evidence, with what they printed. A number one
-            of these re-derived that disagreed with the detector's own would have aborted the run
-            instead of becoming a ruling, so every figure below already agrees with the payload.
+            Scripts the agent wrote and ran against the evidence, with what they printed.
           </p>
           {scripts.map((c, i) => (
             <CheckScript key={`${c.path}-${i}`} citation={c} />
@@ -494,10 +508,9 @@ function TriageRuling({ finding }: { finding: Detail["finding"] }) {
 const VERDICT_WORDS: Record<string, string> = {
   positive: "Positive: the claim holds, and a case is open on it.",
   negative: "Negative: the measurement is wrong, so there is nothing to explain.",
-  unclear: "Unclear: the evidence could not settle it, so the finding closed.",
 };
 
-/** One check script: the file, what it established, its output, and the numbers it re-derived. */
+/** One check script: the file, what it established, and its output. */
 function CheckScript({ citation }: { citation: TriageCitation }) {
   return (
     <div className="rounded-card border border-border bg-surface py-2.5 px-3 mt-2.5">
@@ -516,15 +529,6 @@ function CheckScript({ citation }: { citation: TriageCitation }) {
         >
           {citation.stdout}
         </pre>
-      )}
-      {citation.recomputed.length > 0 && (
-        <div className="flex flex-wrap gap-3 mt-2">
-          {citation.recomputed.map((r) => (
-            <span key={r.pointer} className="font-mono text-subtle text-label">
-              {r.pointer} = <span className="text-fg">{r.value}</span>
-            </span>
-          ))}
-        </div>
       )}
     </div>
   );

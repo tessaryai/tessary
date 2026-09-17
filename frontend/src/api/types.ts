@@ -332,16 +332,12 @@ export type BehaviorCauseKind =
   | "sop_conformance";
 
 /** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */
-export type BehaviorFindingStatus = "open" | "graduated" | "allowlisted" | "blocked" | "resolved";
+export type BehaviorFindingStatus = "open" | "closed";
 
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
 
-/**
- * The findings page. `withheld` is what the Layer-2 gate is holding back: un-triaged findings
- * plus those a ruling called legitimate or could not settle, so an empty list can be told apart
- * from a filtered one. `lane` is which Layer-2 lane this project's findings get ruled on.
- */
+/** The findings page. `lane` is which Layer-2 lane this project's findings get ruled on. */
 export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings" | "lane"> & {
   findings: BehaviorFinding[];
   lane: TriageLane;
@@ -367,13 +363,14 @@ export type TriageLane = "evidence_only" | "grader";
  *
  * - `positive`: the claim is true, sufficiently sampled and properly evidenced. Opens a case.
  * - `negative`: the measurement is wrong, so there is nothing to explain. Closes the finding.
- * - `unclear`: the evidence could not settle it. Also closes: recurrence is the recovery, not a
- *   person reading a queue.
+ *
+ * A run that could not settle the question, or never reached the evidence, records no verdict at
+ * all — recurrence is the recovery for a wrong close, not a third outcome to rule.
  *
  * A cost or duration drop rules `positive` like any other true claim. "Improvement" is a judgement about
  * intent, and triage has no evidence with which to make one.
  */
-export type TriageVerdict = "positive" | "negative" | "unclear";
+export type TriageVerdict = "positive" | "negative";
 
 /**
  * What the ruling did. Fixed by the verdict (`sound → opened_case`, everything else → `closed`) and
@@ -444,9 +441,10 @@ export type SecretLeakLeak = S["SecretLeakLeakView"];
  * One finding, with the triage fields narrowed to the vocabulary the server writes.
  *
  * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never
- * happened leaves them null rather than writing `unclear`: that is what makes "unsure means close"
- * safe to automate, and it is why `triageStatus` is a separate field: a null verdict alone cannot
- * tell a finding nobody has looked at from one whose infra blipped.
+ * settled the question or never reached the evidence leaves them null rather than writing a verdict
+ * for a run that established nothing: that is what makes "closing on negative" safe to automate, and
+ * it is why `triageStatus` is a separate field: a null verdict alone cannot tell a finding nobody has
+ * looked at from one whose infra blipped.
  */
 export type BehaviorFinding = Omit<
   S["BehaviorFindingView"],
@@ -461,10 +459,9 @@ export type BehaviorFinding = Omit<
 };
 
 /**
- * One thing a ruling rests on. Part prose, part code: `stdout` is set only for a citation that IS a
- * check script the agent wrote and ran, and `recomputed` are the detector's own numbers that script
- * re-derived: every one of them already agreed with the payload, because a disagreement aborts the
- * run instead of becoming a ruling.
+ * One thing a ruling rests on: an evidence pointer, an id the agent fetched, or a check script it
+ * wrote. `stdout` is set only for a citation that IS a check script — exactly what running it
+ * printed.
  */
 export type TriageCitation = S["Citation"];
 

@@ -8,7 +8,7 @@
 //
 // Protobuf is hand-encoded (same approach as scripts/emit-span.js) so this depends on nothing.
 //
-//   node otlp-load.js --url http://localhost:8000/v1/traces --token tsy_... \
+//   node otlp-load.js --url http://localhost/v1/traces --token tsy_... \
 //     --rate 400 --spans-per-request 40 --payload-bytes 2048 --duration 120 --out run.jsonl
 "use strict";
 const http = require("node:http");
@@ -21,7 +21,7 @@ function arg(name, def) {
   return i === -1 ? def : process.argv[i + 1];
 }
 
-const URL_ = arg("url", "http://localhost:8000/v1/traces");
+const URL_ = arg("url", "http://localhost/v1/traces");
 const TOKEN = arg("token");
 // A list of tokens, one per line, round-robined per request. Several projects is the only way to see
 // what a per-project-partitioned drain does: one project is pinned to one drainer by construction.

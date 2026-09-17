@@ -8,6 +8,10 @@ public enum ClassifierError implements ErrorCode {
     UNKNOWN_DETECTOR(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown classifier detector: %s"),
     INVALID_MODE(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid classifier mode: %s (expected 'discovery' or 'tracking')"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
+    // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
+    // set), so a verb reaching here found zero rows: something else — another triage run, or a
+    // person's own press a moment earlier — ruled first, and this one is moot rather than wrong.
+    FINDING_CLOSED(HttpStatus.CONFLICT, "Finding '%s' has already been ruled on"),
     INVALID_RESOLUTION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Invalid behaviour-drift resolution: %s (expected 'expected' or 'not_expected')"),
@@ -31,9 +35,9 @@ public enum ClassifierError implements ErrorCode {
     // all — nothing written, or everything aged out — and that is what this now says.
     FINDING_HAS_NO_EVIDENCE(HttpStatus.CONFLICT, "Finding '%s' cites no trace to anchor an analysis on"),
     // Never reaches a controller: the triage worker is the only thrower, and it exists so that a run
-    // which did not happen leaves triage_verdict NULL and lets the job retry. Before this, the engine
-    // degraded to `unclear` at confidence 0 — a ruling recorded for a run nobody made, which permanently
-    // disqualified the finding from ever being looked at again.
+    // which did not happen leaves triage_verdict NULL and lets the job retry, rather than recording a
+    // ruling for a run nobody made — which would permanently disqualify the finding from ever being
+    // looked at again.
     TRIAGE_RUN_INCOMPLETE(HttpStatus.INTERNAL_SERVER_ERROR, "Triage of finding '%s' produced no ruling: %s"),
     // The launcher, not the run. Separated from TRIAGE_RUN_INCOMPLETE because the two want opposite
     // handling: a run that failed should spend an attempt and retry, while a launcher that is refusing

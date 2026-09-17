@@ -128,6 +128,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                 projectId,
                 ModelLane.RCA.wire(),
                 model(projectId),
+                pricingId(projectId),
                 // Never platform-funded any more — the run carries the org's own injected
                 // credential (AgenticCredentialResolver), so this lane's spend belongs to the org's
                 // bill, not the platform's.
@@ -155,6 +156,17 @@ public class E2bRcaSandbox implements RcaSandbox {
     private String model(String projectId) {
         return resolvedModel(projectId)
                 .map(ProjectModelSettings.ResolvedAgenticModel::modelId)
+                .orElseGet(() -> observerProps.getAgentic().getModel());
+    }
+
+    /**
+     * The id this run is priced under — equal to {@link #model} for the deployment default (a Bedrock
+     * inference-profile id, already the priced spelling) and for a resolved Bedrock row, but distinct
+     * for a resolved catalog row on the four providers {@code ModelCatalog#pricingId} route-prefixes.
+     */
+    private String pricingId(String projectId) {
+        return resolvedModel(projectId)
+                .map(ProjectModelSettings.ResolvedAgenticModel::pricingId)
                 .orElseGet(() -> observerProps.getAgentic().getModel());
     }
 

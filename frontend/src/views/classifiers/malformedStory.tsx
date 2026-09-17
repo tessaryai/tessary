@@ -21,7 +21,7 @@ import type { components } from "../../api/generated/schema";
 import type { BehaviorFinding, MalformedOutputDetail, MalformedOutputRow, MalformedOutputSchemaField } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, IconButton, PageHeader, TableSkeleton, cn } from "../../ui";
-import { detectorLabel, triageState, VerbButton } from "./shared";
+import { RunTriageButton, detectorLabel, triageState } from "./shared";
 import { RateChart, RatePins } from "./rateStory";
 
 type RateDetail = components["schemas"]["RateDetail"];
@@ -39,14 +39,12 @@ export function MalformedHeader({
   rate,
   finding,
   basePath,
-  inFlight,
   busy,
   onAnalyze,
 }: {
   rate: RateDetail;
   finding: BehaviorFinding;
   basePath: string;
-  inFlight: boolean;
   busy: boolean;
   onAnalyze: () => void;
 }) {
@@ -82,9 +80,7 @@ export function MalformedHeader({
             {triageState(finding).label}
           </span>
         ) : (
-          <VerbButton kind="filled" disabled={busy || inFlight} onClick={onAnalyze}>
-            {inFlight ? "Triaging…" : "Run triage"}
-          </VerbButton>
+          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
         )
       }
     />

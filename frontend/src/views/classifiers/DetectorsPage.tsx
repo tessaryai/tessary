@@ -346,7 +346,9 @@ function RailFindingRow({
         >
           {triaged ? "Triaged" : inFlight ? "Triaging…" : "Run triage"}
         </VerbButton>
-        <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />
+        {/* A ruling freezes the finding by construction (decision 1): once triaged, every verb on
+            it 409s, so the verbs stop being offered rather than staying up as a dead override. */}
+        {!triaged && <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />}
         {summary && (
           <button
             type="button"
@@ -401,7 +403,7 @@ function truncate(s: string, max: number): string {
  * confirming. Analysis is offered on the finding, where the cause has already been made, and the
  * grader lane is one of the choices there.
  */
-function DetectionRow({ event }: { event: ClassifierEvent }) {
+export function DetectionRow({ event }: { event: ClassifierEvent }) {
   const summary = evidenceSummary(event.evidence_json);
   // Severity reads as text, never a red pill: Classifiers is amber-only by design.
   const severe = event.severity === "warn" || event.severity === "critical";
@@ -421,7 +423,7 @@ function DetectionRow({ event }: { event: ClassifierEvent }) {
           </span>
         )}
         <span className="shrink-0 text-subtle text-label">
-          {ago(event.detected_at)}
+          {ago(event.occurred_at ?? event.detected_at)}
         </span>
       </div>
       {summary && (

@@ -110,17 +110,27 @@ Three things were wrong with one window, and the control fixes all three:
   level. The control fades a change out over a fortnight instead, and holds a confirmed one out
   indefinitely.
 
-**Days a confirmed regression ran through are excluded.** A window whose finding Layer 2 ruled a
-`deviation`, or that a human blocked, never enters the control — otherwise the shift under
-investigation quietly becomes the bar the next window is judged against, which is the silent
-normalization the pin exists to prevent, arriving through the other reference. Windows ruled
-*expected* fold in normally, so an "expected" ruling does real work.
+**Days a confirmed regression ran through are excluded.** A window whose finding carries an open,
+`positive` verdict — from Layer 2 or from a person's *Real deviation* — never enters the control —
+otherwise the shift under investigation quietly becomes the bar the next window is judged against,
+which is the silent normalization the pin exists to prevent, arriving through the other reference.
+Windows ruled `negative` (*Legitimate, absorb*) fold in normally, so an absorb ruling does real work.
+No horizon is needed to let a day back in: resolving or absorbing the case closes every finding it
+holds, and a closed finding drops out of this set the moment the transaction commits.
 
 The exclusion is applied **at read time, not at fold time**. A ruling lands well after the window
 closed, so the ring stores an exact record of what closed when and every pass re-decides what to leave
-out. That is what makes a late verdict retroactive. Weights are on the **wall clock**, so a backfill
-that lands a month of event time in one pass does not resolve to a ring whose every day is
-simultaneously fresh and ancient.
+out. That is what makes a late verdict retroactive.
+
+Every day key, age and weight is on **event time** — the day of the window's own closing sample, never
+the clock the sweep happened to run the comparison on. A window is judged against the 21 event-days
+before it, so a replayed backfill compares each window with its own trailing history rather than with
+whatever the ring happens to hold on the day it is replayed, and a historical regression can surface on
+import. Retention is anchored on the newest day the ring holds, not on wall-clock now, so folding in an
+out-of-order import can never evict a day more recent than the one just imported. A live install's event
+clock and wall clock stay within seconds of each other, so none of this changes ordinary ingestion —
+only a backfill landing days out of order, or an install importing history it has not caught up to, sees
+the difference.
 
 Weighting applies to the measure sketch alone. The workload and token blocks are merged exactly over
 the same retained days — they are context for a human, never an input to the decision, and a median of
@@ -362,11 +372,17 @@ indistinguishable, in a log or an eval report, from one that was never asked.
 **Findings are deduplicated by cause, not by firing.** One `finding` row per `cause_key`,
 with `onset_at` holding the onset of the **current spell**: frozen for as long as the detection
 keeps firing, and moved only when the row goes unrefreshed for longer than its detector's quiet window
-(6h for tool errors, `window_max_hours` for metric drift).
+(6h for tool errors, `window_max_hours` for metric drift). For metric drift, `onset_at` and
+`last_seen_at` hold the closing window's EVENT time — the same clock the control ring itself now runs
+on [R11] — so the quiet-window test is measured back from when the traffic happened rather than from
+when the sweep happened to run.
 
 That gap **is** the recovery observation. Nothing writes "this came back": a recovered detection simply
-stops appearing, so its finding stops being bumped. Freezing the onset within a spell is what stops a
-recomputed onset from reopening a case a human just closed; moving it across a gap is what lets a
-detection that recovered and re-fired reopen one. The reopen test in `CaseLedger` reads "did the onset
-move", which under this rule means "did we watch this recover and break again". See
+stops appearing, so its finding stops being bumped. Freezing the onset within a spell keeps a live,
+unruled finding's onset stable while it keeps firing; moving it across a gap is what lets a detection
+that recovered and re-fired read as a fresh spell rather than a continuation of the old one. A ruled
+finding is frozen a second, stronger way — it has left `ux_finding_live` by construction (0011), so no
+recompute can touch its onset at all, and the same cause firing again always inserts a brand-new
+finding rather than reviving the ruled one. There is no reopen any more: a closed case is final, and a
+new positive finding either joins a case still open on that key or opens a fresh one. See
 [`alerting.md`](./alerting.md) for how a finding becomes a case.

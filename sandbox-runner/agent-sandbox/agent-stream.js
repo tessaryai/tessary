@@ -12,10 +12,14 @@
  * WHY THE SERVER, NOT `opencode run`: `run --format json` drops text and step_finish events in
  * containers (anomalyco/opencode#31435) — which is exactly this microVM.
  *
- * THE SDK OWNS THE LIFECYCLE. createOpencodeServer spawns the process and waits for its own
- * `opencode server listening on <url>` announcement; we do not spawn or poll ourselves. The
- * hand-rolled version treated "the TCP port accepts" as ready, and every RCA hung in the ~320ms
- * between accept and readiness (measured), burning Node's 300s fetch cap before failing.
+ * WE OWN THE PROCESS, THE SDK OWNS THE PROTOCOL. spawnOpencodeServer starts `opencode serve` and
+ * waits for its own `opencode server listening on <url>` announcement, never for "the TCP port
+ * accepts": an earlier hand-rolled version did that, and every RCA hung in the ~320ms between
+ * accept and readiness (measured), burning Node's 300s fetch cap before failing. The spawn is ours
+ * rather than the SDK's createOpencodeServer because that one's close() is a lone SIGTERM that
+ * neither waits nor escalates, and an opencode that ignores it kept the lane's process alive after
+ * the run was over. Ours SIGTERMs, waits, SIGKILLs, and releases the child's pipes, and runAgent
+ * awaits all of it. Everything spoken over HTTP still goes through the SDK's client.
  *
  * WHY WE LIST MESSAGES INSTEAD OF STREAMING: nothing here renders live progress. The
  * backend reads one payload at the end, so reading the session's messages once the
@@ -27,11 +31,30 @@
  * template.ts `.copy('agent-stream.js', ...)`) — a missing copy turns every analyzer run
  * into a require-not-found crash.
  */
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
 const { Agent, fetch: undiciFetch } = require('undici');
+const { startMcpRelay } = require('./mcp-relay');
+
+// The custom opencode agent triage runs under (see runAgent's spec.systemPrompt branch). Chosen
+// with `body.agent` on every session.prompt call for that run, never on the RCA path.
+const TRIAGE_AGENT = 'tessary-triage';
+
+// opencode's own scratch directories, where its bash tool already tells the model it may write
+// without asking — the agent-facing prompt promises this, so denying it at the permission layer
+// (the blanket `external_directory: {'*': 'deny'}` below) would just contradict what the agent was
+// told. Triage only (see runAgent's `external_directory` branch below): RCA's own config never
+// runs a bash-heavy enough workflow to have grown a dependency on either path.
+const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
+const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
+  process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+  'opencode',
+  'tool-output',
+  '*',
+);
 
 // How long the sandbox may run when the caller does not say. The launcher always passes the
 // run's real deadline; this only covers a direct/local invocation.
@@ -231,19 +254,114 @@ function quarantineRepo() {
 
 // --- server lifecycle --------------------------------------------------------
 //
-// The SDK's createOpencodeServer owns spawning and readiness; we do NOT hand-roll either.
+// Readiness is opencode's own announcement, not "the port accepts". This used to spawn
+// `opencode serve` and treat an accepted TCP connection as ready. It is not. Measured in the E2B
+// template: the port accepts at 3.22s and the server announces itself at 3.54s, and a request that
+// lands in that ~320ms window HANGS FOREVER rather than being queued. Every RCA died there — the
+// hang burned Node's 300s fetch cap and surfaced as `fetch failed` at ~309s, with no model ever
+// invoked (Bedrock logged zero invocations for those runs).
 //
-// This used to spawn `opencode serve` directly and treat "the TCP port accepts a connection"
-// as ready. It is not. Measured in the E2B template: the port accepts at 3.22s and the server
-// announces itself at 3.54s, and a request that lands in that ~320ms window HANGS FOREVER
-// rather than being queued. Every RCA died there — the hang burned Node's 300s fetch cap and
-// surfaced as `fetch failed` at ~309s, with no model ever invoked (Bedrock logged zero
-// invocations for those runs).
+// So spawnOpencodeServer waits for the process to print `opencode server listening on <url>` on
+// stdout and hands back that url — the same contract, arguments, env and failure messages as the
+// SDK's createOpencodeServer (@opencode-ai/sdk 1.18.30, dist/server.js), which this replaced. It
+// still takes a TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — a hand-built
+// JSON string is how an invalid `permission.webfetch` shape once shipped unnoticed.
 //
-// createOpencodeServer waits for the process to print `opencode server listening on <url>` on
-// stdout, which is the server's own readiness signal, and hands back that url. It also takes a
-// TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — the hand-built JSON is
-// how an invalid `permission.webfetch` shape shipped unnoticed.
+// WHY NOT THE SDK'S OWN: its close() is a single fire-and-forget SIGTERM. No wait for the exit, no
+// SIGKILL if the process ignores it, and the child's stdio pipes stay referenced. An opencode that
+// has just served a session does not always exit on SIGTERM, so the lane's node process was held
+// open by the child and its pipes after main() returned, until triage.js's 5s exit guard killed it
+// (`still alive ... PipeWrap, ProcessWrap`). The SDK hands back no process handle, so the only way
+// to stop the child deterministically is to own the spawn.
+
+/** How long a SIGTERM'd opencode gets to exit on its own before it is SIGKILLed. */
+const STOP_GRACE_MS = 3_000;
+/** How long to wait for the exit a SIGKILL causes before giving up on observing it. */
+const KILL_WAIT_MS = 1_000;
+
+/**
+ * Stop `proc` and resolve once it is gone: SIGTERM, up to STOP_GRACE_MS for it to exit, then
+ * SIGKILL. Either way its stdio pipes are destroyed at the end, so nothing of the child holds this
+ * process's event loop — even a grandchild that inherited the child's stdout cannot. Never rejects.
+ */
+function stopProcess(proc) {
+  return new Promise((resolve) => {
+    let timer = null;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      proc.off('exit', finish);
+      for (const stream of [proc.stdin, proc.stdout, proc.stderr]) if (stream) stream.destroy();
+      resolve();
+    };
+    // Never spawned (ENOENT: no pid) or already gone: nothing to signal, only pipes to release.
+    if (proc.pid === undefined || proc.exitCode !== null || proc.signalCode !== null) return finish();
+    proc.once('exit', finish);
+    proc.kill('SIGTERM');
+    timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      timer = setTimeout(finish, KILL_WAIT_MS);
+    }, STOP_GRACE_MS);
+  });
+}
+
+/**
+ * Spawn `opencode serve` and resolve with `{url, close}` once it announces itself. `close()`
+ * returns a promise that settles only when the process is gone (see stopProcess).
+ *
+ * Rejects, after stopping the process, with the same messages createOpencodeServer used:
+ *   - the process exits → `Server exited with code N` plus the stdout+stderr it printed,
+ *   - no announcement within `timeout` → `Timeout waiting for server to start after Nms`, now
+ *     also with whatever it printed (the SDK discarded that),
+ *   - an announcement with no url in it → `Failed to parse server url from output: <line>`,
+ *   - the spawn itself fails (a missing binary) → the spawn error as-is.
+ */
+function spawnOpencodeServer({ hostname, port, timeout, config }) {
+  const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
+  if (config && config.logLevel) args.push(`--log-level=${config.logLevel}`);
+  const proc = spawn('opencode', args, {
+    env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config || {}) },
+  });
+  const close = () => stopProcess(proc);
+
+  return new Promise((resolve, reject) => {
+    let output = '';
+    let settled = false;
+    const withOutput = (msg) => (output.trim() ? `${msg}\nServer output: ${output}` : msg);
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      close().then(() => reject(err));
+    };
+    const timer = setTimeout(
+      () => fail(new Error(withOutput(`Timeout waiting for server to start after ${timeout}ms`))),
+      timeout,
+    );
+
+    // Both streams stay drained for the life of the process, not just until the announcement: an
+    // unread pipe fills and blocks opencode on its next write.
+    proc.stdout.on('data', (chunk) => {
+      if (settled) return;
+      output += chunk.toString();
+      for (const line of output.split('\n')) {
+        if (!line.startsWith('opencode server listening')) continue;
+        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+        if (!match) return fail(new Error(`Failed to parse server url from output: ${line}`));
+        settled = true;
+        clearTimeout(timer);
+        return resolve({ url: match[1], close });
+      }
+    });
+    proc.stderr.on('data', (chunk) => {
+      if (!settled) output += chunk.toString();
+    });
+    proc.on('exit', (code) => fail(new Error(withOutput(`Server exited with code ${code}`))));
+    proc.on('error', (err) => fail(err));
+  });
+}
 
 /**
  * The launcher's provider config (agentEnvs), passed down in the env var OpenCode reads. Must be
@@ -264,38 +382,28 @@ function inheritedConfig() {
 }
 
 /**
- * Start the server through the SDK, on loopback, rooted at AGENT_CWD.
+ * Start the server on loopback, rooted at AGENT_CWD.
  *
  * No basic auth: the server is bound to 127.0.0.1 inside a single-tenant microVM that is torn
  * down after one run, so a password would only protect the sandbox from the agent we are
  * deliberately running in it.
  *
- * Two things the SDK does NOT do for us, so we do them here, before it spawns:
- *   - cwd. createOpencodeServer inherits the parent's working directory, and the agent's start
- *     directory is a SECURITY boundary (see AGENT_CWD) — so chdir first rather than hope the
- *     launcher invoked us from the right place.
- *   - the OPENCODE_DISABLE_* pins. It forwards process.env, so setting them on ourselves is
- *     what reaches the child: auto-update (a network fetch mid-run), LSP downloads (nothing
- *     here needs a language server) and .claude compatibility reads (a customer repo must not
- *     reach our system prompt).
+ * Two things the spawn does NOT do for us, so we do them here, before it:
+ *   - cwd. The child inherits the parent's working directory, and the agent's start directory is
+ *     a SECURITY boundary (see AGENT_CWD) — so chdir first rather than hope the launcher invoked
+ *     us from the right place.
+ *   - the OPENCODE_DISABLE_* pins. The child gets process.env, so setting them on ourselves is
+ *     what reaches it: auto-update (a network fetch mid-run), LSP downloads (nothing here needs a
+ *     language server) and .claude compatibility reads (a customer repo must not reach our system
+ *     prompt).
  *
- * The port is chosen HERE rather than left to the SDK. Its default is a fixed 4096, which two
- * concurrent runs on one host (local mode) would collide on, and `port: 0` does NOT mean
- * "any free port" — measured, opencode ignores it and binds 4096 anyway. An explicitly chosen
- * free port is honoured, and the SDK still reads the real url back off the announcement.
+ * The port is chosen HERE. opencode's default is a fixed 4096, which two concurrent runs on one
+ * host (local mode) would collide on, and `port: 0` does NOT mean "any free port" — measured,
+ * opencode ignores it and binds 4096 anyway. An explicitly chosen free port is honoured, and the
+ * real url is still read back off the announcement.
  *
- * Timeout is generous because a cold microVM is slow to boot: the SDK's own default is 5s and
- * we measured 3.5s warm, which leaves no headroom at all.
- *
- * The SDK's two start failures are NOT equally informative, which is worth knowing before
- * reading a log written by one of them (read its dist/server.js):
- *   - the process EXITS (the usual shape of a bad config or a missing binary) → it rejects with
- *     `Server exited with code N` AND the stdout+stderr it collected. That is the good case.
- *   - the timeout fires (the process is up but never announced) → it rejects with a bare
- *     `Timeout waiting for server to start after Nms` and DISCARDS everything it collected.
- * The SDK hands back no process handle, so there is no way to tap that output ourselves. All we
- * can do is say so at the point of failure, rather than let a contentless timeout read like a
- * slow boot — hence the wrap below.
+ * Timeout is generous because a cold microVM is slow to boot: the SDK's own default was 5s and we
+ * measured 3.5s warm, which leaves no headroom at all.
  */
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -309,21 +417,19 @@ function freePort() {
 }
 
 async function startServer(configJson) {
-  const { createOpencodeServer } = await import('@opencode-ai/sdk');
   process.chdir(AGENT_CWD);
   process.env.OPENCODE_DISABLE_AUTOUPDATE = '1';
   process.env.OPENCODE_DISABLE_LSP_DOWNLOAD = '1';
   process.env.OPENCODE_DISABLE_CLAUDE_CODE = '1';
   // Run-scoped keys last, so the lane's permission rules win over anything inherited. Read
-  // BEFORE handing the merged object over, because the SDK overwrites the var with its own.
+  // BEFORE the spawn, which overwrites the var in the child's env with the merged object.
   const config = { ...inheritedConfig(), ...configJson };
   const startMs = Date.now();
   try {
-    return await createOpencodeServer({ hostname: '127.0.0.1', port: await freePort(), timeout: 120_000, config });
+    return await spawnOpencodeServer({ hostname: '127.0.0.1', port: await freePort(), timeout: 120_000, config });
   } catch (e) {
-    const hint = /Timeout waiting/.test(String((e && e.message) || ''))
-      ? ' — the process was up but never announced itself, and the SDK discards its output on this' +
-        ' path, so there is none to show'
+    const hint = /Timeout waiting/.test(String((e && e.message) || '')) && !/Server output:/.test(e.message)
+      ? ' — the process was up but never announced itself, and printed nothing'
       : '';
     throw new Error(`opencode server did not start after ${Date.now() - startMs}ms: ${describeError(e)}${hint}`, {
       cause: e,
@@ -595,7 +701,8 @@ function usageOf(message) {
  * and all, with nothing in it (anomalyco/opencode#31430, closed as a provider bug). An agent
  * reads it as "the task is done", so a run that hit one has silently truncated — which is worse
  * than a crash, because the caller cannot tell. runAgent retries once when the LAST assistant
- * message looks like this.
+ * message looks like this — a fresh session normally, but a same-session, no-tools resume when
+ * it is triage hitting its own turn cap after real work (see the isEmptyCompletion branch below).
  */
 function isEmptyCompletion(turns) {
   const last = turns[turns.length - 1];
@@ -656,7 +763,7 @@ function toEnvelope(turns, structured, text) {
  *
  * @param {{model: string, prompt: string, jsonSchema?: object, mcp?: {url: string, token: string},
  *          permission?: object, rejectOn?: 'error'|'no-result'|'never', timeoutMs?: number,
- *          maxTurns?: number}} spec
+ *          maxTurns?: number, systemPrompt?: string}} spec
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: when set, the reply is schema-constrained and lands in `structured_output`.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
@@ -667,12 +774,23 @@ function toEnvelope(turns, structured, text) {
  *     is a file the agent wrote (codegen).
  *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
  *   - maxTurns: the operator-configured turn BUDGET (triage/RCA only; every other
- *     caller omits this). Passed to the SDK as `config.agent.build.maxSteps`, whose own doc
- *     comment ("Maximum number of agentic iterations before forcing text-only response") is the
- *     mechanism this relies on for a soft landing rather than a hard kill — set 2 LOWER than the
- *     budget so the forced text-only turn lands with margin, per the issue's "two turns before the
- *     cap" ask. NOT independently confirmed against a live run in the change that added this field
- *     — see that change's PR description.
+ *     caller omits this). Without systemPrompt, passed to the SDK as `config.agent.build.maxSteps`
+ *     (see the `steps` doc below for the with-systemPrompt case), whose own doc comment ("Maximum
+ *     number of agentic iterations before forcing text-only response") is the mechanism this
+ *     relies on for a soft landing rather than a hard kill — set 2 LOWER than the budget so the
+ *     forced text-only turn lands with margin, per the issue's "two turns before the cap" ask. NOT
+ *     independently confirmed against a live run in the change that added this field — see that
+ *     change's PR description.
+ *   - systemPrompt: triage only (RCA and every other caller omit it). When set, this run starts an
+ *     `mcp-relay` in front of `spec.mcp` (so opencode's own config carries no platform token — see
+ *     mcp-relay.js) and defines a custom opencode agent (`TRIAGE_AGENT`) whose `prompt` REPLACES
+ *     the provider's default system prompt, `steps` carries the same maxTurns-2 budget as
+ *     `build.maxSteps` above, and whose `permission` denies `task`/`skill` (sub-agents and skills
+ *     are not this lane's to run) while allowing `todowrite`. It also opens `external_directory` to
+ *     opencode's own tmp and tool-output globs (see OPENCODE_TMP_GLOB above), which the base config
+ *     otherwise denies outright. Selected on every `session.prompt` call via `body.agent`. Omitting
+ *     it (RCA) leaves every part of this function byte-for-byte the same as before this field
+ *     existed.
  * @returns {Promise<{startMs: number, turns: object[], resultRaw: string}>}
  */
 async function runAgent(spec) {
@@ -687,7 +805,10 @@ async function runAgent(spec) {
   // answer it and would burn the run's wall-clock waiting. bash is on for all five lanes (git, the
   // baked validator, the codegen harness, triage's own check scripts); webfetch is off for all five —
   // nothing here has a reason to reach the network, and it would be the cheapest exfiltration channel
-  // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD.
+  // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD,
+  // with two named exceptions for triage (see OPENCODE_TMP_GLOB above) — opencode matches multiple
+  // rules on the SAME map by taking the last one that matches a given path, so listing the allows
+  // after the `'*': 'deny'` is what makes them win rather than be shadowed by it.
   //
   // webfetch/websearch take a BARE action, not a `{'*': ...}` map — those two are not
   // pattern-scoped the way bash/edit/external_directory are. Sending the map form makes the
@@ -700,30 +821,63 @@ async function runAgent(spec) {
       websearch: 'deny',
       edit: { '*': 'deny' },
       ...(spec.permission || {}),
-      external_directory: { '*': 'deny' },
+      external_directory: spec.systemPrompt
+        ? { '*': 'deny', [OPENCODE_TMP_GLOB]: 'allow', [OPENCODE_TOOL_OUTPUT_GLOB]: 'allow' }
+        : { '*': 'deny' },
     },
     lsp: {},
   };
-  if (spec.mcp && spec.mcp.url && spec.mcp.token) {
-    // Config, never argv: the platform key must not be visible in the process table.
-    config.mcp = {
-      'tessary-evals': {
-        type: 'remote',
-        url: spec.mcp.url,
-        enabled: true,
-        headers: { Authorization: `Bearer ${spec.mcp.token}` },
+  // The turn budget as an opencode step count, shared by both branches below — 2 lower than the
+  // configured maxTurns so the forced text-only turn lands with margin (see the JSDoc).
+  const steps = Number.isFinite(spec.maxTurns) && spec.maxTurns > 0 ? Math.max(1, spec.maxTurns - 2) : undefined;
+
+  let relay = null;
+  if (spec.systemPrompt) {
+    // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
+    // it (see mcp-relay.js's header for why that split matters).
+    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
+      relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
+      config.mcp = {
+        'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
+      };
+    }
+    // The custom agent's `prompt` REPLACES the provider's default system prompt (verified against
+    // opencode source, see the research notes this change was built from). `task`/`skill` are
+    // denied because this lane runs no sub-agents and ships no skills of its own; `todowrite`
+    // stays allowed — the agent may still track its own steps.
+    config.agent = {
+      [TRIAGE_AGENT]: {
+        mode: 'primary',
+        prompt: spec.systemPrompt,
+        ...(steps !== undefined ? { steps } : {}),
+        permission: { task: 'deny', skill: 'deny', todowrite: 'allow' },
       },
     };
-  }
-  if (Number.isFinite(spec.maxTurns) && spec.maxTurns > 0) {
-    // See the JSDoc above for the mechanism and its margin. No prompt selects a
-    // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
-    // opencode's default agent identity, which is `build` — the one this config key names.
-    config.agent = { build: { maxSteps: Math.max(1, spec.maxTurns - 2) } };
+  } else {
+    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
+      // Config, never argv: the platform key must not be visible in the process table.
+      config.mcp = {
+        'tessary-evals': {
+          type: 'remote',
+          url: spec.mcp.url,
+          enabled: true,
+          headers: { Authorization: `Bearer ${spec.mcp.token}` },
+        },
+      };
+    }
+    if (steps !== undefined) {
+      // See the JSDoc above for the mechanism and its margin. No prompt selects a
+      // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
+      // opencode's default agent identity, which is `build` — the one this config key names.
+      config.agent = { build: { maxSteps: steps } };
+    }
   }
 
-  const server = await startServer(config);
+  // Null until startServer() resolves, so the `finally` below can tell a start failure (nothing to
+  // close) from a start success (something to close) — see there for why that distinction matters.
+  let server = null;
   try {
+    server = await startServer(config);
     const client = createOpencodeClient({
       baseUrl: server.url,
       fetch: makeFetch(spec.timeoutMs || DEFAULT_RUN_MS),
@@ -759,7 +913,10 @@ async function runAgent(spec) {
     // An EMPTY completion is the opposite case: the session itself produced nothing, so the
     // retry has to start clean — UNLESS (E) that session already did real work and only its LAST
     // turn came back empty, in which case a fresh session would re-pay for that work rather than
-    // recover it; see the isEmptyCompletion branch below.
+    // recover it. For triage specifically, that shape is also what opencode's own turn cap looks
+    // like — a forced text-only turn with nothing in it — and the fix there is neither a fresh
+    // session nor letting the run fail: it is THIS same resume, telling the agent to stop calling
+    // tools and answer with what it already has. See the isEmptyCompletion branch below.
     let resume = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!resume) {
@@ -776,7 +933,11 @@ async function runAgent(spec) {
       const prompt = resume
         ? correction.trim() + (spec.jsonSchema ? schemaInstruction(spec.jsonSchema) : '')
         : (spec.jsonSchema ? spec.prompt + schemaInstruction(spec.jsonSchema) : spec.prompt) + correction;
-      const body = { model: splitModel(spec.model), parts: [{ type: 'text', text: prompt }] };
+      const body = {
+        model: splitModel(spec.model),
+        parts: [{ type: 'text', text: prompt }],
+        ...(spec.systemPrompt ? { agent: TRIAGE_AGENT } : {}),
+      };
 
       const reply = await client.session.prompt({ path: { id: sessionID }, body });
       const listed = await client.session.messages({ path: { id: sessionID } });
@@ -794,11 +955,28 @@ async function runAgent(spec) {
         // already ran a multi-turn investigation and only stumbled on its FINAL reply is not: a
         // fresh-session retry would throw away everything it learned and re-run the whole
         // investigation inside whatever wall-clock is left, silently doubling the run's cost for a
-        // failure that a retry is not even likely to fix (the same model, the same task). Let it
-        // fail instead — `unusable` below will reject it, and Step 1's accumulation means the
-        // failure's usage line/envelope still carries every token this session actually spent.
+        // failure that a retry is not even likely to fix (the same model, the same task).
         const substantialWork = turns.length > 1 || turns.some((t) => (t.tool_calls || []).length > 0);
-        if (substantialWork) break;
+        if (substantialWork) {
+          // Triage only, and only once (attempt 0): this shape — real work, then an empty final
+          // turn — is exactly what opencode's own step cap produces (a forced text-only turn with
+          // no tool budget left), not a provider that gave up. A new prompt on the SAME session
+          // reopens the step count with tools enabled again (checked against opencode 1.18.30), so
+          // the correction has to tell the agent not to use them — an instruction, not an enforced
+          // limit. A real run that ignores it still ends on its own deadline, and decision 3 spends
+          // that as a normal run failure rather than this loop retrying further.
+          if (spec.systemPrompt && attempt === 0) {
+            console.error('empty completion at the turn cap after real work: resuming the same session once, no tools');
+            resume = true;
+            correction =
+              'You have no tool budget left. Do NOT call any tool. Using only the evidence you have already ' +
+              'read, reply now with the ruling JSON object and nothing else.';
+            continue;
+          }
+          // Let it fail instead — `unusable` below will reject it, and Step 1's accumulation means
+          // the failure's usage line/envelope still carries every token this session actually spent.
+          break;
+        }
         resume = false;
         continue;
       }
@@ -868,7 +1046,20 @@ async function runAgent(spec) {
 
     return { startMs, turns: finalTurns, resultRaw: toEnvelope(finalTurns, structured, text) };
   } finally {
-    server.close();
+    // The relay is started BEFORE startServer(), so a start failure never reaches this `try` but
+    // still leaves the relay's listening socket open. Closing it here, not only on success, is
+    // what stops a failed server start from hanging the process until the run's outer deadline.
+    //
+    // The server close is AWAITED: it resolves only once opencode is gone (see stopProcess), so
+    // runAgent never returns while the child and its pipes still hold the event loop. A close
+    // failure is logged, never thrown — a throw here would replace the run's own error.
+    try {
+      if (server) await server.close();
+    } catch (e) {
+      console.error(`opencode server did not close cleanly: ${describeError(e)}`);
+    } finally {
+      if (relay) relay.close();
+    }
   }
 }
 

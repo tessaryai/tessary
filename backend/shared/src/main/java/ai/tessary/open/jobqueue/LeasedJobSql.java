@@ -115,10 +115,30 @@ public final class LeasedJobSql {
         return String.format(Locale.ROOT, """
                 UPDATE %s
                    SET status = '%s',
-                       last_error = 'exhausted: ' || attempts || ' attempts (%s)',
+                       last_error = %s,
                        updated_at = :now
                  WHERE status = 'claimed' AND lease_expires_at < :now AND attempts >= :maxAttempts
-                """, table, terminalStatus, reason);
+                """, table, terminalStatus, exhaustedLastError(reason));
+    }
+
+    /** How much of the previous {@code last_error} a dead-letter message carries forward. */
+    static final int PREVIOUS_ERROR_CHARS = 500;
+
+    /**
+     * The {@code last_error} expression a dead-letter writes: the exhausted phrase, then the error the
+     * last attempt recorded when there is one (e.g. {@code exhausted: 5 attempts (hung or crashed
+     * mid-triage); last: launcher failed kind=timeout}).
+     *
+     * <p>The phrase alone erased the one fact a reader of a dead job needs: why the attempts failed. The
+     * carried error is bounded so the message stays readable. It cannot accumulate across sweeps
+     * because every dead-letter statement only matches {@code claimed} rows, and it moves each match out
+     * of that state.
+     *
+     * @param reason the same code-level constant phrase {@link #failExhausted} takes
+     */
+    public static String exhaustedLastError(String reason) {
+        return "'exhausted: ' || attempts || ' attempts (" + reason + ")'"
+                + " || COALESCE('; last: ' || left(last_error, " + PREVIOUS_ERROR_CHARS + "), '')";
     }
 
     /**
@@ -140,10 +160,10 @@ public final class LeasedJobSql {
         return String.format(Locale.ROOT, """
                 UPDATE %s
                    SET status = '%s',
-                       last_error = 'exhausted: ' || attempts || ' attempts (%s)',
+                       last_error = %s,
                        updated_at = :now
                  WHERE kind = :kind AND status = 'claimed' AND lease_expires_at < :now AND attempts >= :maxAttempts
-                """, table, terminalStatus, reason);
+                """, table, terminalStatus, exhaustedLastError(reason));
     }
 
     /**

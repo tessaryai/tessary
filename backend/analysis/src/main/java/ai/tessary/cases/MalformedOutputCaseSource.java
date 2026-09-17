@@ -2,30 +2,25 @@
 package ai.tessary.cases;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.finding.FindingRepository;
-import ai.tessary.classifier.finding.FindingRepository.SurvivalGate;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputRateService;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Call sites whose declared-schema failure rate survived triage, from the CUSUM
+ * Shapes a call site whose declared-schema failure rate survived triage into a case, from the CUSUM
  * {@link MalformedOutputRateService} replays through tool_error's engine.
  *
- * <p><b>Same gate as tool error</b>, and shared by name rather than restated: a case opens only once
- * triage has ruled the shift's claim sound or a human has pressed <em>Real deviation</em>
- * ({@code listSurvivingAnalysis}, {@link SurvivalGate#MACHINE_OR_HUMAN}), so a Triage row means the
- * same thing whichever of the two rate-shaped detectors found it.
+ * <p><b>Same gate as tool error</b>: {@link CaseOpener} only calls {@link #shape} once triage has ruled
+ * the shift's claim sound or a human has pressed <em>Real deviation</em>, so a Triage row means the same
+ * thing whichever of the two rate-shaped detectors found it.
  *
  * <p>One case per call site: {@code malformed_rate}'s subject is already scoped that way ({@code
  * CauseKey.malformedOutput}), and a call site's schema and its fix both live at that call site alone.
@@ -33,38 +28,18 @@ import org.springframework.stereotype.Component;
 @Component
 public class MalformedOutputCaseSource implements CaseSource {
 
-    /** Bound on one pass's live set, mirroring the other sources. */
-    private static final int LIVE_SET_CAP = 200;
-
-    private static final List<String> MALFORMED_OUTPUT_CLASSIFIERS = List.of(BuiltInDetector.Kind.MALFORMED_OUTPUT);
-
-    /** Same spell-recovery horizon the write side uses, mirroring {@link ToolErrorCaseSource}'s own
-     *  reuse of {@code ToolErrorService.QUIET_WINDOW}. */
-    private static final Duration QUIET_WINDOW = MalformedOutputRateService.QUIET_WINDOW;
-
-    private final FindingRepository findings;
-
-    public MalformedOutputCaseSource(FindingRepository findings) {
-        this.findings = findings;
-    }
-
     @Override
     public String detector() {
         return CaseRow.Detector.MALFORMED_OUTPUT;
     }
 
     @Override
-    public List<CaseDetection> detect(String projectId) {
-        String seenSince = Instant.now().minus(QUIET_WINDOW).toString();
-        List<CaseDetection> out = new ArrayList<>();
-        for (FindingRow finding : findings.listSurvivingAnalysis(
-                projectId, MALFORMED_OUTPUT_CLASSIFIERS, SurvivalGate.MACHINE_OR_HUMAN, seenSince, LIVE_SET_CAP)) {
-            out.add(toDetection(finding));
-        }
-        return out;
+    public boolean owns(String classifierKey) {
+        return BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(classifierKey);
     }
 
-    private static CaseDetection toDetection(FindingRow finding) {
+    @Override
+    public CaseDetection shape(FindingRow finding) {
         // The case's basis only needs the rate, never a specific failing output, so the witness list
         // this reader would otherwise thread through stays empty — see MalformedOutputEvidence#rateDetail.
         RateDetail read = MalformedOutputEvidence.rateDetail(finding, List.of());

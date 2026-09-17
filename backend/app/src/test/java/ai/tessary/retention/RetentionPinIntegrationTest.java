@@ -30,6 +30,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * then structure, then the evidence whose substrate has gone). A test that called the repository methods
  * in its own order would pass while the sweeper called them in the wrong one.
  *
+ * <p><b>One rule now, not two.</b> A finding stays {@code open} for as long as it is unruled OR its
+ * positive ruling backs a case nobody has resolved — the case model's own liveness is folded into
+ * {@code finding.status} by construction (migration {@code 0011}), so the pin reads {@code status =
+ * 'open'} alone. There is no separate case leg to test: a case's own state cannot keep a CLOSED
+ * finding's substrate alive, because closing a case closes the findings it holds in the same
+ * transaction.
+ *
  * <p>Every fixture trace is aged 200 days against the 90-day platform default, so the only reason any of
  * them survives a pass is the pin. Other tests' projects are untouched by construction — their traffic is
  * minutes old.
@@ -74,77 +81,58 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * {@code blocked} is inside the live predicate, exactly as it is inside {@code ux_finding_live}.
-     * Dropping it here would age out the evidence under a finding a human has ruled on — the one row
-     * whose substrate is most worth keeping, because someone is going to be asked about it again.
+     * A positive human ruling keeps the finding {@code open} — the same status column an unruled
+     * finding carries — so it pins exactly as hard, through the one rule rather than a second arm.
      */
     @Test
-    @DisplayName("a blocked finding pins as hard as an open one")
-    void blockedFindingPins() {
-        Project p = project("pin-blocked");
-        trace(p, "trace-blocked", null);
+    @DisplayName("a finding a human ruled a real deviation pins as hard as an unruled one")
+    void humanRuledFindingPins() {
+        Project p = project("pin-human-ruled");
+        trace(p, "trace-ruled", null);
         trace(p, "trace-loose", null);
-        String finding = finding(p, "cause-blocked", "blocked");
-        evidence(p, finding, null, "trace-blocked", null);
+        String finding = finding(p, "cause-ruled", "open");
+        evidence(p, finding, null, "trace-ruled", null);
 
         sweep();
 
-        assertTrue(traceExists(p, "trace-blocked"), "a human's ruling keeps its substrate readable");
+        assertTrue(traceExists(p, "trace-ruled"), "a human's ruling keeps its substrate readable");
         assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
     }
 
     /**
-     * The case leg, which the finding leg does not subsume. A finding resolves the moment the detector
-     * stops seeing the cause; the case someone opened on it stays in their queue until they close it, and
-     * their queue is the surface that renders the traces.
+     * The case leg is gone: closing a case closes the findings it holds in the same transaction
+     * (migration {@code 0011}), so a case's own {@code state} cannot keep a CLOSED finding's substrate
+     * alive even in the inconsistent state of a case row that was never updated to match. Retention
+     * reads the finding, and only the finding.
      */
     @Test
-    @DisplayName("a resolved finding still pins while an unresolved case stands on it")
-    void unresolvedCasePinsAResolvedFinding() {
-        Project p = project("pin-case-open");
+    @DisplayName("a closed finding ages out even if a case row pointing at it still reads open")
+    void aClosedFindingAgesOutRegardlessOfItsCase() {
+        Project p = project("pin-case-orphan");
         trace(p, "trace-cased", null);
         trace(p, "trace-loose", null);
-        String finding = finding(p, "cause-cased", "resolved");
+        String finding = finding(p, "cause-cased", "closed");
         evidence(p, finding, null, "trace-cased", null);
         openCase(p, finding, "open");
 
         sweep();
 
-        assertTrue(traceExists(p, "trace-cased"), "the case is still on someone's desk");
-        assertTrue(payloadExists(p, "trace-cased"), "with its text intact");
-        assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
-    }
-
-    /** Muted is "not now", not "done with" — {@code state <> 'resolved'} is deliberate. */
-    @Test
-    @DisplayName("a muted case pins, because muted is not resolved")
-    void mutedCasePins() {
-        Project p = project("pin-muted");
-        trace(p, "trace-muted", null);
-        trace(p, "trace-loose", null);
-        String finding = finding(p, "cause-muted", "resolved");
-        evidence(p, finding, null, "trace-muted", null);
-        openCase(p, finding, "muted");
-
-        sweep();
-
-        assertTrue(traceExists(p, "trace-muted"), "an unmute must not reveal a page of dead links");
+        assertFalse(traceExists(p, "trace-cased"), "the finding closed, so its substrate is no longer pinned");
         assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
     }
 
     /**
-     * The release. Both legs terminal means nobody can act on the claim any more, so its substrate ages on
-     * the ordinary clock and the evidence rows follow it — collected only once the thing they point at is
+     * The release. Closed means nobody can act on the claim any more, so its substrate ages on the
+     * ordinary clock and the evidence rows follow it — collected only once the thing they point at is
      * already gone, which keeps a closed finding's reference count honest right up until it is unusable.
      */
     @Test
-    @DisplayName("a resolved finding under a resolved case releases, substrate and evidence both")
-    void bothTerminalAgesOut() {
+    @DisplayName("a closed finding with no case releases, substrate and evidence both")
+    void aClosedFindingWithoutACaseAgesOut() {
         Project p = project("pin-released");
         trace(p, "trace-released", null);
-        String finding = finding(p, "cause-released", "resolved");
+        String finding = finding(p, "cause-released", "closed");
         evidence(p, finding, null, "trace-released", null);
-        openCase(p, finding, "resolved");
 
         sweep();
 
@@ -210,7 +198,7 @@ class RetentionPinIntegrationTest {
         Project p = project("pin-session-release");
         session(p, "sess-released");
         trace(p, "trace-only-turn", "sess-released");
-        String finding = finding(p, "cause-session-released", "resolved");
+        String finding = finding(p, "cause-session-released", "closed");
         evidence(p, finding, "sess-released", null, null);
 
         sweep();
@@ -229,7 +217,7 @@ class RetentionPinIntegrationTest {
     void evidenceSurvivesWhileItsSubstrateDoes() {
         Project p = project("pin-evidence-live-substrate");
         freshTrace(p, "trace-recent");
-        String finding = finding(p, "cause-recent", "resolved");
+        String finding = finding(p, "cause-recent", "closed");
         evidence(p, finding, null, "trace-recent", null);
 
         sweep();
@@ -271,7 +259,7 @@ class RetentionPinIntegrationTest {
 
         assertEquals(1, retention.countPinnedTraces(p.id()), "one trace is held open");
 
-        setStatus(p, finding, "resolved");
+        setStatus(p, finding, "closed");
         assertEquals(0, retention.countPinnedTraces(p.id()), "and the count follows the claim's lifecycle");
     }
 
@@ -388,24 +376,32 @@ class RetentionPinIntegrationTest {
                 .update();
     }
 
+    /** A case row pointing at {@code findingId} through {@code finding.case_id} — the reverse of the
+     *  old forward pointer. Retention no longer reads this table at all; it exists only so the "even
+     *  if a case row still reads open" test has a case to be inconsistent with. */
     private void openCase(Project p, String findingId, String state) {
         String now = Instant.now().toString();
+        String caseId = Ids.ulid();
         jdbc.sql("""
                         INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
-                                               subject_label, metric, finding_id, state, resolved_at, title,
+                                               subject_label, metric, state, resolved_at, title,
                                                basis, severity, onset_at, opened_at, last_seen_at, updated_at)
                         SELECT :id, :pid, COALESCE(MAX(seq), 0) + 1, 'behavior_drift', 'behavior_profile',
-                               :subject, 'label', 'pass_rate', :fid, :state, :resolved, 'title', 'basis',
+                               :subject, 'label', 'pass_rate', :state, :resolved, 'title', 'basis',
                                0.5, :now, :now, :now, :now
                           FROM eval_case WHERE project_id = :pid
                         """)
-                .param("id", Ids.ulid())
+                .param("id", caseId)
                 .param("pid", p.id())
                 .param("subject", "subject-" + Ids.ulid())
-                .param("fid", findingId)
                 .param("state", state)
                 .param("resolved", "resolved".equals(state) ? now : null)
                 .param("now", now)
+                .update();
+        jdbc.sql("UPDATE finding SET case_id = :cid WHERE project_id = :pid AND id = :fid")
+                .param("cid", caseId)
+                .param("pid", p.id())
+                .param("fid", findingId)
                 .update();
     }
 

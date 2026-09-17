@@ -190,8 +190,10 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 callSite,
                 decision.onsetAt(),
                 payload(callSite, decision),
+                now,
                 at.minus(QUIET_WINDOW).toString(),
                 now);
+        if (recorded == null) return; // a ruled finding already covers this call site up to now
 
         // Read once: an accessor called in the guard and again in the branch is two calls that only happen to agree.
         String onset = decision.onsetAt();

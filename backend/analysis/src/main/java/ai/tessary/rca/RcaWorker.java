@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.cases.CaseEventRepository;
+import ai.tessary.cases.CaseEventRow;
+import ai.tessary.classifier.finding.FindingRepository;
+import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +43,11 @@ public class RcaWorker {
     private final RcaProperties props;
     private final TaskExecutor executor;
     private final TraceMdcBridge traceBridge;
+    /** The finding a finished report was about, so a successful run can find the case that owns it —
+     *  see {@link #appendRcaCompleted}. */
+    private final FindingRepository findings;
+
+    private final CaseEventRepository caseEvents;
     private final String leaseOwner =
             shortHost() + "-" + UUID.randomUUID().toString().substring(0, 8);
 
@@ -47,12 +57,16 @@ public class RcaWorker {
             RcaAnalysisService analysis,
             RcaProperties props,
             TraceMdcBridge traceBridge,
+            FindingRepository findings,
+            CaseEventRepository caseEvents,
             @Qualifier("rcaTaskExecutor") TaskExecutor executor) {
         this.jobs = jobs;
         this.reports = reports;
         this.analysis = analysis;
         this.props = props;
         this.traceBridge = traceBridge;
+        this.findings = findings;
+        this.caseEvents = caseEvents;
         this.executor = executor;
     }
 
@@ -106,6 +120,7 @@ public class RcaWorker {
         try (LogContext ignored = LogContext.put(ctx)) {
             analysis.analyze(job);
             jobs.markDone(job.id());
+            appendRcaCompleted(job);
         } catch (RuntimeException e) {
             // Log the error CODE, not just the message: it is the one field that separates "the
             // launcher is down" from "the agent returned junk", and it is bounded enough to egress.
@@ -129,6 +144,31 @@ public class RcaWorker {
             } catch (RuntimeException stampFailure) {
                 log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
             }
+        }
+    }
+
+    /**
+     * Append {@code rca_completed} to the case that owns the report's finding (1c), so its trail says
+     * the analysis {@link CaseService#runRca its own press} requested has landed.
+     *
+     * <p>Never rethrown: a failure here costs one trail line, not the report a person is waiting on —
+     * the run genuinely finished and {@code markDone} has already committed by the time this runs.
+     */
+    private void appendRcaCompleted(RcaJobRow job) {
+        try {
+            findings.findById(job.projectId(), job.findingId())
+                    .map(FindingRow::caseId)
+                    .filter(id -> id != null)
+                    .ifPresent(caseId -> caseEvents.append(
+                            job.projectId(),
+                            caseId,
+                            CaseEventRow.Kind.RCA_COMPLETED,
+                            null,
+                            "Finished — see the report.",
+                            null,
+                            Instant.now()));
+        } catch (RuntimeException e) {
+            log.warn(Markers.OPS, "rca completed trail line failed job={}: {}", job.id(), e.getMessage());
         }
     }
 

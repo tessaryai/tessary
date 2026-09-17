@@ -10,15 +10,16 @@
  * tomorrow than it was today. That is the queue this whole redesign exists to remove.
  *
  * What replaced them: every finding that opens gets exactly one triage run, and that run ends in
- * exactly one of two acts. `positive` opens a case, which is where a person picks the work up. `negative`
- * and `unclear` both CLOSE the finding — the second is a bet that the cause has stopped, and the bet is
- * called by recurrence rather than by somebody reading a list. So this page is a record of what has
- * been decided, not a pile of what has not.
+ * exactly one of two acts. `positive` opens or joins a case and the finding stays open; `negative`
+ * CLOSES the finding outright. A ruling freezes the row — the same cause firing again files a FRESH
+ * finding rather than reopening this one, so there is no re-open to wait on. So this page is a record
+ * of what has been decided, not a pile of what has not.
  *
  * <h2>The two sections</h2>
- * Open findings (pending, in flight, or sound and now a case) and closed history. The split is
- * `triage_action`, never `status`: closing is a triage act, and the row deliberately stays in the live
- * index so its cause can keep firing against it and drive the re-open.
+ * Open findings (pending, in flight, or sound and now a case) and closed history. `status` and
+ * `triage_action` agree by construction now — a ruling sets both in the same write — so the split
+ * reads `isClosedByTriage` for the reason it always did: it is closing that decides the section, not
+ * the bare fact of the status word.
  *
  * <h2>The title is the classifier's own sentence</h2>
  * There is deliberately no "reading" column restating the shift. Each detector writes its finding's
@@ -72,29 +73,8 @@ export function ClassifiersPage() {
     queryFn: () => api.listBehaviorFindings("open", "all"),
   });
 
-  /**
-   * The open cases, read from the same cache the Triage nav badge already fills, so resolving a sound
-   * finding to the case it opened costs no extra request. A case that has since been resolved is in
-   * neither bucket, and its finding's row simply names the ruling without linking — the case is
-   * history at that point, and Triage is where history is read.
-   */
-  const casesQ = useQuery({ queryKey: ["cases", api.base], queryFn: api.getTriage, retry: false });
-
   const classifiers = classifiersQ.data ?? [];
   const enabled = enabledDetectors(classifiers);
-
-  /**
-   * Both live buckets, because muting silences a case rather than closing it. A muted case is still
-   * open and still at its own URL, so dropping it here would leave its finding reading `Sound` with
-   * nowhere to go — indistinguishable from a finding whose case was resolved.
-   */
-  const caseByFinding = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of [...(casesQ.data?.cases ?? []), ...(casesQ.data?.muted ?? [])]) {
-      if (c.finding_id) map.set(c.finding_id, c.id);
-    }
-    return map;
-  }, [casesQ.data]);
 
   const { live, closed } = useMemo(() => {
     const findings = allQ.data?.findings ?? [];
@@ -141,11 +121,7 @@ export function ClassifiersPage() {
 
       {live.length > 0 && (
         <Section title="Open" subtitle={openSubtitle(live)}>
-          <FindingTable
-            findings={live}
-            caseByFinding={caseByFinding}
-            onOpen={(id) => navigate(findingPath(id))}
-          />
+          <FindingTable findings={live} onOpen={(id) => navigate(findingPath(id))} />
         </Section>
       )}
 
@@ -154,11 +130,7 @@ export function ClassifiersPage() {
           title="Closed by triage"
           subtitle="Ruled a measurement artifact, or unsettled on the evidence. Each one re-opens by itself if its cause keeps firing."
         >
-          <FindingTable
-            findings={closed}
-            caseByFinding={caseByFinding}
-            onOpen={(id) => navigate(findingPath(id))}
-          />
+          <FindingTable findings={closed} onOpen={(id) => navigate(findingPath(id))} />
         </Section>
       )}
 
@@ -199,11 +171,9 @@ function findingPath(id: string): string {
  */
 function FindingTable({
   findings,
-  caseByFinding,
   onOpen,
 }: {
   findings: BehaviorFinding[];
-  caseByFinding: Map<string, string>;
   onOpen: (id: string) => void;
 }) {
   return (
@@ -234,7 +204,7 @@ function FindingTable({
               {isBaselineFinding(f) && <span className="text-subtle"> · baseline</span>}
             </TD>
             <TD>
-              <TriageCell finding={f} caseId={caseByFinding.get(f.id)} />
+              <TriageCell finding={f} />
             </TD>
             <TD className="text-subtle whitespace-nowrap" title={new Date(f.firstSeenAt).toLocaleString()}>
               {ago(f.firstSeenAt)}
@@ -263,8 +233,9 @@ function FindingTable({
  * that a reader means differently: the row is "show me the evidence", the link is "take me to the
  * work". Only `positive` ever gets one — nothing else opened a case to link to.
  */
-function TriageCell({ finding, caseId }: { finding: BehaviorFinding; caseId: string | undefined }) {
+function TriageCell({ finding }: { finding: BehaviorFinding }) {
   const state = triageState(finding);
+  const caseId = finding.caseId;
   const tone =
     state.tone === "positive"
       ? "text-fg"

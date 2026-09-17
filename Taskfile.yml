@@ -5,8 +5,8 @@ version: '3'
 # Three services run together in dev:
 #   - backend (Spring Boot)  on :8080
 #   - frontend (Vite)        on :5173
-#   - caddy (reverse proxy)  on :8000
-# Open http://localhost:8000 in the browser.
+#   - caddy (reverse proxy)  on :8000 bare metal (`task caddy`)
+# `task dev` serves the whole stack at http://localhost (TESSARY_DEV_PORT, default 80).
 
 vars:
   SESSION: tessary-dev
@@ -35,6 +35,12 @@ vars:
   # covers that case too.
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
+  # For anything that creates or recreates dev containers (`up`, `--force-recreate`). DC_DEV alone
+  # exports none of the choices `task dev` resolved (launcher URL, MCP base URL, AGENT_IMAGE,
+  # COMPOSE_PROFILES, sign-in), so compose would recreate the container from the file's empty
+  # defaults. This re-resolves the saved choices without prompting, then runs DC_DEV's command.
+  # Read-only calls (logs, exec, ps) stay on DC_DEV.
+  DC_DEV_UP: 'bash scripts/lib/dev-choices.sh compose'
   # The prod stack. A file-exists probe, never an env var and never a flag someone has to
   # remember: the open tree has to be coherent with ZERO configuration, and with no
   # tessary-paid/docker-compose.yml on disk this always resolves to the base compose file alone.
@@ -69,16 +75,17 @@ tasks:
 
   # ---- dev: run everything (docker + tmux) ----
   dev:
-    desc: Launch the dev stack inside tmux (logs in tabbed windows + a shell). Use `dev:local` to also run a HOST launcher on your local `opencode` (no E2B).
+    desc: 'Launch the dev stack inside tmux (logs in tabbed windows + a shell). Runs like a self-hosted install: on first run it asks where triage and RCA agents run, whether to run the encoder classifier service, and whether to enforce sign-in, then remembers the answers in .local/dev-choices.env.'
     cmds:
       - bash scripts/dev.sh
 
-  dev:local:
-    desc: Dev stack + a HOST launcher running your local `opencode` (no E2B) for the agentic paths (/analyze, /rca, /triage, /synthesize, /codegen). Needs `opencode` + git on PATH.
-    env:
-      TESSARY_LOCAL_AGENT: "1"
+  # The questions `task dev` asks once, asked again, and nothing started. The stack picks the new
+  # answers up on its next `task dev` or `task dev:up`.
+  dev:configure:
+    desc: 'Answer the dev stack''s questions again (agents: docker/e2b/off, encoder classifiers, sign-in) and save them. Restart the stack to apply.'
+    interactive: true
     cmds:
-      - bash scripts/dev.sh
+      - bash scripts/lib/dev-choices.sh configure
 
   # Profiling is a MODIFIER, not a separate stack: scripts/dev.sh reads TESSARY_PROFILING and
   # self-heals the agent jar, so `TESSARY_PROFILING=1 task dev:slim` (or any other dev mode) works
@@ -90,16 +97,8 @@ tasks:
     cmds:
       - bash scripts/dev.sh
 
-  dev:local:profiling:
-    desc: Like `dev:local` (HOST launcher on your local `opencode`, no E2B) plus continuous CPU profiling at http://localhost:4040.
-    env:
-      TESSARY_LOCAL_AGENT: "1"
-      TESSARY_PROFILING: "1"
-    cmds:
-      - bash scripts/dev.sh
-
   # Slim mode. What actually runs: postgres, backend, frontend, caddy, alloy — the whole
-  # product, the browser entry point unchanged on :8000. What does NOT: classify (the encoder
+  # product, the browser entry point unchanged. What does NOT: classify (the encoder
   # service; its build downloads the gated encoder weights and its container is capped at 8 GB)
   # and compile (the SOP-conformance fitter, which is `depends_on: classify` and can only
   # dead-letter without it). So the encoder classifier heads and SOP-conformance fits are the one
@@ -108,7 +107,7 @@ tasks:
     # Renamed from dev:2gb — the number was never the point, and it stopped being true when
     # classify's mem_limit went to 8 GB. Alias kept so the old name and old shell history work.
     aliases: [dev:2gb]
-    desc: 'Like `dev` minus the classify + compile services: no gated encoder-weight download, no 8 GB container. Runs postgres, backend, frontend, caddy, alloy — only encoder classifier heads and SOP-conformance fits stay dormant.'
+    desc: '`task dev` with the encoder classifier service already answered "no": no classify or compile, no gated encoder-weight download, no 8 GB container. Only encoder classifier heads and SOP-conformance fits stay dormant.'
     env:
       TESSARY_SKIP_CLASSIFY: "1"
     cmds:
@@ -126,7 +125,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:backend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate backend"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate backend"
       - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
 
   rf:
@@ -135,7 +134,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:frontend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate frontend"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate frontend"
       - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
 
   rc:
@@ -144,7 +143,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:caddy C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate caddy"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate caddy"
       - tmux send-keys -t {{.SESSION}}:caddy "{{.DC_DEV}} logs -f --no-log-prefix caddy" Enter
 
   rb:full:
@@ -152,7 +151,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:backend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --build --force-recreate --no-deps backend"
+      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps backend"
       - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
 
   rf:full:
@@ -161,7 +160,7 @@ tasks:
       - tmux send-keys -t {{.SESSION}}:frontend C-c
       - sleep 1
       - docker volume rm -f tessary_frontend-node-modules 2>/dev/null || true
-      - "{{.DC_DEV}} up -d --build --force-recreate --no-deps frontend"
+      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps frontend"
       - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
 
   logs:
@@ -616,7 +615,7 @@ tasks:
       - bash scripts/check.sh --edition open "{{.CLI_ARGS}}"
 
   check:open:boot:
-    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
+    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves the dev port with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
     cmds:
       # check-open-boot.sh derives OPEN_BOOT_OVERLAY_DIR itself (tessary-paid/pom.xml present or
       # not), so this target does not duplicate that probe — the dispatch-only CI workflow's direct
@@ -683,7 +682,7 @@ tasks:
   # the same service-list derivation `task dev:slim` uses — inline, it started every service and
   # died on classify's HF-gated weight download with zero containers created.
   dev:up:
-    desc: Start the dev stack detached, no tmux (build on demand). `TESSARY_SKIP_CLASSIFY=1 task dev:up` skips classify + compile, like `dev:slim`.
+    desc: 'Start the dev stack detached, no tmux (build on demand). Same questions as `task dev` on a terminal; saved answers or the non-interactive defaults otherwise.'
     cmds:
       - bash scripts/dev-up.sh
 
@@ -729,7 +728,7 @@ tasks:
   classifiers:up:
     desc: Start the dev-only classifier tooling (Argilla on :16900, MLflow on :15000) alongside the dev stack.
     cmds:
-      - "{{.DC_DEV}} --profile classifiers up -d"
+      - "{{.DC_DEV_UP}} --profile classifiers up -d"
 
   classifiers:down:
     desc: Stop just the classifier tooling containers (core dev stack keeps running; volumes kept).

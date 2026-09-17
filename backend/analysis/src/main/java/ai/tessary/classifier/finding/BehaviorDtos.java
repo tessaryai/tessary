@@ -8,6 +8,8 @@ import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
+import ai.tessary.classifier.worker.ArmedWindowEvidence;
+import ai.tessary.classifier.worker.ArmedWindowEvidence.ArmedWindowDetail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.NotBlank;
@@ -32,13 +34,11 @@ public final class BehaviorDtos {
     /**
      * The findings page: what the Layer-2 gate let through, and enough context to read that honestly.
      *
-     * @param withheld open findings the gate is holding: un-triaged, or ruled legitimate/unclear.
-     *     Surfaced as a count so "nothing here" can never be confused with "nothing got through".
      * @param lane which Layer-2 lane this project's findings are ruled on, as
      *     {@link TriageLane#wire()}. Always the same value: triage reads no repository, so there
      *     is nothing left for it to vary with.
      */
-    public record BehaviorFindingsView(List<BehaviorFindingView> findings, long withheld, String lane) {}
+    public record BehaviorFindingsView(List<BehaviorFindingView> findings, String lane) {}
 
     /**
      * One row of {@code finding_evidence} on the wire: a reference into substrate, never a copy.
@@ -128,9 +128,18 @@ public final class BehaviorDtos {
             @Nullable String errorType,
             @Nullable String startedAt,
             @Nullable Long latencyMs,
+            /** See {@code FindingEvidenceRepository.SpanRef#totalTokens}: this span's own total on a
+             *  single-step row, the trace rollup on a whole-run row. */
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            @Nullable String model,
+            /** The distinct models behind this row — see {@code FindingEvidenceRepository.SpanRef#models}. */
+            List<String> models,
+            /** True on a whole-run row whose trace has not rolled up yet. Always false on a single-step row. */
+            boolean notRolledUp,
+            /** True on a whole-run row whose trace carries unpriced spans. Always false on a single-step row. */
+            boolean partialCost,
+            /** True on a whole-run row whose trace rollup is not settled. Always false on a single-step row. */
+            boolean staleTotals,
             @Nullable String callSiteId,
             /** The head of what the span was given and what it returned: see
              *  {@code FindingEvidenceRepository.SpanRef}. Null where the payload aged out. */
@@ -164,7 +173,10 @@ public final class BehaviorDtos {
                     r.latencyMs(),
                     r.totalTokens(),
                     r.totalCost(),
-                    r.model(),
+                    r.models(),
+                    r.notRolledUp(),
+                    r.partialCost(),
+                    r.staleTotals(),
                     r.callSiteId(),
                     r.inputPreview(),
                     r.outputPreview(),
@@ -193,12 +205,12 @@ public final class BehaviorDtos {
      * and for a rate shift the signature that took over), so this view renders the numbers
      * themselves rather than a prose summary of them.
      *
-     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput} and {@code
-     * secretLeak} is set, chosen by cause kind, and all four are null for a behaviour-drift cause
-     * (which carries no measured shift) or for any finding whose blob is missing or unreadable. A
-     * caller renders the finding regardless: the headline and the verdict don't depend on the evidence
-     * parsing, and a page that vanished because one column was malformed would be a worse failure than
-     * a page with no chart on it.
+     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code
+     * secretLeak} and {@code armedWindow} is set, chosen by cause kind, and all five are null for a
+     * behaviour-drift cause (which carries no measured shift) or for any finding whose blob is missing
+     * or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
+     * on the evidence parsing, and a page that vanished because one column was malformed would be a
+     * worse failure than a page with no chart on it.
      */
     public record BehaviorFindingDetailView(
             BehaviorFindingView finding,
@@ -223,7 +235,14 @@ public final class BehaviorDtos {
              * leak count, and the per-key and per-leak breakdowns. Also DB-backed rather than payload
              * alone — see {@link ai.tessary.classifier.secretleak.SecretLeakDetailService#detail}.
              */
-            @Nullable SecretLeakDetail secretLeak) {
+            @Nullable SecretLeakDetail secretLeak,
+            /**
+             * Set exactly on an {@code armed_window} finding from a classifier with no richer detail of
+             * its own — frustration, groundedness, and any regex/threshold classifier. Null for Secret
+             * Leak, whose {@link #secretLeak} carries the same bar plus the per-key and per-leak
+             * breakdowns it enumerates from the detection table.
+             */
+            @Nullable ArmedWindowDetail armedWindow) {
 
         /** For a caller with no malformed-output or secret-leak detail to attach. */
         public static BehaviorFindingDetailView of(FindingRow row) {
@@ -232,16 +251,28 @@ public final class BehaviorDtos {
 
         public static BehaviorFindingDetailView of(
                 FindingRow row, @Nullable MalformedDetail malformedOutput, @Nullable SecretLeakDetail secretLeak) {
+            return of(row, malformedOutput, secretLeak, null);
+        }
+
+        /** As above, carrying the finding's dead-lettered triage when it has one; see {@link BehaviorFindingView#of(FindingRow, FailedTriage)}. */
+        public static BehaviorFindingDetailView of(
+                FindingRow row,
+                @Nullable MalformedDetail malformedOutput,
+                @Nullable SecretLeakDetail secretLeak,
+                @Nullable FailedTriage failed) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
-                    BehaviorFindingView.of(row),
+                    BehaviorFindingView.of(row, failed),
                     FindingRow.Cause.DISTRIBUTION_SHIFT.equals(row.causeKind())
                             ? MetricFindingEvidence.detail(evidence)
                             : null,
                     FindingRow.Cause.RATE_SHIFT.equals(row.causeKind()) ? ToolErrorEvidence.detail(evidence) : null,
                     null,
                     malformedOutput,
-                    secretLeak);
+                    secretLeak,
+                    secretLeak == null && FindingRow.Cause.ARMED_WINDOW.equals(row.causeKind())
+                            ? ArmedWindowEvidence.detail(evidence)
+                            : null);
         }
     }
 
@@ -285,12 +316,12 @@ public final class BehaviorDtos {
      *
      * <p>The triage fields are exposed, and they are a decision rather than a second opinion: the
      * ruling decided whether a person ever sees this finding ({@code positive} opened a case,
-     * {@code negative} and {@code unclear} closed it). It doesn't touch detector state: the status,
-     * the allowlist, and the reference are still only a human's to move.
+     * {@code negative} closed it). It doesn't touch detector state: the status, the allowlist, and
+     * the reference are still only a human's to move.
      *
      * <p>{@code triageCitations} carries what the ruling rests on: evidence pointers, repo paths,
-     * and the agent's own check scripts. An uncited ruling is already downgraded to
-     * {@code unclear}, so the citations are the reason a human should believe a cited one.
+     * and the agent's own check scripts. An uncited ruling is never recorded at all, so the
+     * citations are the reason a human should believe the one that made it here.
      */
     public record BehaviorFindingView(
             String id,
@@ -343,12 +374,6 @@ public final class BehaviorDtos {
             /** When a human ruled on this cause; null while it is still an unreviewed lead. */
             @Nullable String humanVerdictAt,
             /**
-             * Firings since that ruling. Non-zero on a BLOCKED finding is the strongest thing this
-             * feature can say: the agent is doing something its owner explicitly said it must not do,
-             * and it has happened this many times since they said so.
-             */
-            long recurrencesSinceVerdict,
-            /**
              * Which of the two claims an SOP-conformance row is making: {@code drift} ("this got
              * worse") or {@code baseline} ("this has always been broken"). Null for every finding
              * that is not one.
@@ -358,7 +383,10 @@ public final class BehaviorDtos {
              * not a number of firings, and a reader who took it for one would read a fitted fact as a
              * recurring event.
              */
-            @Nullable String conformanceKind) {
+            @Nullable String conformanceKind,
+            /** The case this finding opened or joined ({@code finding.case_id}), or null while it backs
+             *  none — a negative verdict, or a positive still waiting on {@code CaseOpener}. */
+            @Nullable String caseId) {
 
         /**
          * Where this finding is in the Layer-2 pipeline. A null verdict alone is ambiguous: it is
@@ -459,8 +487,8 @@ public final class BehaviorDtos {
                     row.triagedAt(),
                     triageStatus(row, failed),
                     row.humanVerdictAt(),
-                    row.recurrencesSinceVerdict(),
-                    null);
+                    null,
+                    row.caseId());
         }
 
         /**
@@ -494,9 +522,14 @@ public final class BehaviorDtos {
                     List.of(),
                     null,
                     triageStatus,
-                    humanVerdictAt,
-                    recurrencesSinceVerdict,
-                    conformanceKind);
+                    // Nulled along with the verdict: under the open/closed model a human ruling is a
+                    // ruling like any other, so leaving this set would tell RCA the direction a person
+                    // decided even though the columns that say what they decided are gone.
+                    null,
+                    conformanceKind,
+                    // caseId survives: it says which case this finding backs, carrying no opinion about
+                    // who ruled it or which way — the same reason triageStatus survives just above.
+                    caseId);
         }
     }
 

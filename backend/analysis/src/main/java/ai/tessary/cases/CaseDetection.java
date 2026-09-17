@@ -5,8 +5,9 @@ import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One currently-firing detection, in the detector-neutral shape {@link CaseReconciler} consumes. A
- * {@link CaseSource} produces these; nothing downstream knows or cares which detector it came from.
+ * One case-worthy finding, in the detector-neutral shape {@link CaseOpener} hands to
+ * {@link CaseLedger#openOrJoin}. A {@link CaseSource} shapes one of these from a single finding;
+ * nothing downstream knows or cares which detector filed it.
  *
  * @param title the sentence a human reads first, written by the source ("Prospect qualification rigor
  *     fell 67 pts"). Sentences over metrics: it says what happened, not what the number is.
@@ -15,18 +16,18 @@ import org.jspecify.annotations.Nullable;
  *     reader learns whether "crossed" meant a sustained change against a frozen baseline or a
  *     configured limit. Never normalize it away.
  * @param severity 0..1, for ordering the list only. Comparable across detectors by construction and
- *     by nothing else — never render it as a number.
+ *     by nothing else — never render it as a number. A case's own severity is the highest ever shaped
+ *     for it across every finding it holds ({@link CaseLedger#openOrJoin}); it only rises.
  * @param onsetAt when the spell began, not when it was noticed. CUSUM's change point; a classifier
  *     rule's quantized window start; the human verdict that made a finding's recurrences mean
  *     something. <b>Null means the detector could not bracket this spell</b>, and a source must say so
- *     rather than substituting {@code now}: {@link CaseLedger} keys reopen-vs-stay-closed on whether
- *     the onset moved, so an onset that advances every pass reopens every resolved case on the next
- *     tick. A null onset is stamped once, at open, and never claims a new spell after that.
- * @param findingId the finding this case is about, and never null. Every source is now a lister over
- *     the {@code finding} table — the two detectors that opened a case without one (CUSUM grader
- *     degradation and the user-signal source) are gone. A case with no finding behind it has no
- *     evidence, no ruling, no absorb verb and no RCA lane, so it was never a case anyone could act on;
- *     the archived rows that predate the FK stay nullable on {@link CaseRow}, but nothing writes one.
+ *     rather than substituting {@code now}. A case's own onset is stamped once, at open, from the
+ *     finding that opened it, and never moves after that — later findings that join only refresh the
+ *     headline, not the onset.
+ * @param findingId the finding this case is about, and never null: every source shapes exactly one
+ *     finding at a time. A case with no finding behind it has no evidence, no ruling, no absorb verb
+ *     and no RCA lane, so it was never a case anyone could act on; the archived rows that predate the
+ *     reverse {@code finding.case_id} link stay finding-less on {@link CaseRow}, but nothing writes one.
  */
 public record CaseDetection(
         CaseKey key,

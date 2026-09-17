@@ -11,6 +11,9 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.malformed.MalformedOutputEvidence;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
@@ -354,8 +357,8 @@ public class McpToolRegistry {
 
         add(new McpTool(
                 "get_case",
-                "Fetch one case by id, scoped to this token's project: the case, its activity trail, the"
-                        + " classifier finding it is about (finding_id — pass it to get_finding), the ruling, the"
+                "Fetch one case by id, scoped to this token's project: the case, its activity trail, the newest"
+                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the ruling, the"
                         + " exemplar traces, and the RCA report INLINE in rca when one has finished — its"
                         + " verdict, hypotheses, the checks it ruled out, and the agent's full written"
                         + " investigation. rca is null while a report is still running (rca_report_id names it,"
@@ -553,7 +556,7 @@ public class McpToolRegistry {
                 "list_spans",
                 "Find spans in this token's project — the step grain: one LLM call, tool call or sub-agent."
                         + " Newest-first, keyset-paged. Filter by trace_id, call_site_id, kind, name, status,"
-                        + " model_id, session_id and a half-open created_at range; match text with"
+                        + " model_id, session_id and a half-open started_at range; match text with"
                         + " q. One mode, 'keyword' (the only supported value): matches the span name and the"
                         + " stored previews case-insensitively and pages with cursor. Rows are COMPACT: typed columns"
                         + " plus input_preview/output_preview and payload_available, which says whether the full"
@@ -717,12 +720,13 @@ public class McpToolRegistry {
         add(new McpTool(
                 "get_finding",
                 "Fetch one classifier finding by id, scoped to this token's project — the aggregated cause"
-                        + " behind a behaviour-drift, metric-drift, or tool-error-rate-drift detection (many"
-                        + " individual firings rolled into one cause), the same object the Classifiers findings"
-                        + " page renders. Distinct from a single firing (see the classifier_events dataset in"
-                        + " query_search/query_facets) and from an RCA report, which reads inline on the case"
-                        + " that owns it (see get_case). For the rows the detector measured, page"
-                        + " get_finding_evidence.",
+                        + " behind a detection (many individual firings rolled into one cause), with a complete"
+                        + " summary of every number its classifier measured: the shift or rate, its statistic and"
+                        + " threshold, and the reference it was judged against. Carries no sample and no trace or"
+                        + " span id of any kind — for the population the detector measured, page"
+                        + " get_finding_evidence. Distinct from a single firing (see the classifier_events dataset"
+                        + " in query_search/query_facets) and from an RCA report, which reads inline on the case"
+                        + " that owns it (see get_case).",
                 schema(Map.of("id", strField("Finding id, e.g. from a Classifiers findings page URL.")), List.of("id")),
                 (ctx, args) -> getFinding(ctx, requireStr(args, "id"))));
 
@@ -733,8 +737,11 @@ public class McpToolRegistry {
                         + " 'baseline' is the reference window's rows; 'exemplar' / 'witness' / 'changepoint' are"
                         + " the reading aids). Each row carries what was MEASURED on it, not just a pointer to"
                         + " it: role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType,"
-                        + " startedAt, latencyMs, totalTokens, totalCost, model, callSiteId. So compare, rank and"
-                        + " pick rows from the page itself, and open only the ones you decided to open — the"
+                        + " startedAt, latencyMs, totalTokens, totalCost, models, callSiteId. On a whole-run"
+                        + " row (no spanId), totalTokens/totalCost are the trace's rollup and models lists"
+                        + " every model the run called; notRolledUp/partialCost/staleTotals flag a rollup"
+                        + " that has not finished, is missing priced spans, or can still change. So compare,"
+                        + " rank and pick rows from the page itself, and open only the ones you decided to open — the"
                         + " payloads are NOT here, and get_span (trace id plus span id) is where a body comes"
                         + " from. Call it with count_only=true first: that returns the"
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
@@ -751,7 +758,8 @@ public class McpToolRegistry {
                         Map.ofEntries(
                                 Map.entry(
                                         "finding_id",
-                                        strField("Finding id — a list_findings row's id, or a case's finding_id.")),
+                                        strField("Finding id — a list_findings row's id, or a case's"
+                                                + " latest_finding_id.")),
                                 Map.entry(
                                         "role",
                                         enumField(
@@ -794,7 +802,6 @@ public class McpToolRegistry {
                     view.findings().stream()
                             .map(BehaviorDtos.BehaviorFindingView::withoutTriage)
                             .toList(),
-                    view.withheld(),
                     view.lane());
         } catch (TessaryException e) {
             String message = e.getMessage();
@@ -803,28 +810,86 @@ public class McpToolRegistry {
     }
 
     /**
-     * A finding detail with the triage ruling removed. RCA receives a finding id and nothing else: no
-     * ruling, no summary, no rule-outs, not even the fact that a triage pass happened, because "nothing
-     * happened here" is a supported RCA conclusion and the only check on the triage gate. The RCA agent
-     * runs with its own finding id against this same tool, so the firewall has to hold here too, not only
-     * in the dossier and the prompt, and is applied to every caller since the RCA key family is not
+     * A finding detail for an agent's eyes: the triage ruling removed, and every sample and trace/span
+     * id removed from the summary blocks too. RCA receives a finding id and nothing else: no ruling, no
+     * summary, no rule-outs, not even the fact that a triage pass happened, because "nothing happened
+     * here" is a supported RCA conclusion and the only check on the triage gate. The RCA agent runs with
+     * its own finding id against this same tool, so the firewall has to hold here too, not only in the
+     * dossier and the prompt, and is applied to every caller since the RCA key family is not
      * distinguishable at this layer.
+     *
+     * <p>The id stripping is the second, separate firewall this method carries: {@code get_finding} is a
+     * SUMMARY surface, complete on its numbers but carrying no undeclared sample of instances — an agent
+     * handed a handful of ids reads those and calls the claim audited. Evidence, ids included, is what
+     * {@code get_finding_evidence} pages on purpose. The UI's own {@code GET /findings/{id}} renders the
+     * unstripped {@link BehaviorFindingDetailView} directly (a human following a link is a reading aid,
+     * not a biased sample), so this trimming happens here, at the agent door, and nowhere upstream of it.
      */
-    private static BehaviorFindingDetailView withoutTriage(BehaviorFindingDetailView detail) {
+    private static BehaviorFindingDetailView agentView(BehaviorFindingDetailView detail) {
+        ToolErrorEvidence.RateDetail toolError = detail.toolError();
+        MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
+        SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
-                detail.toolError(),
+                toolError == null ? null : withoutIds(toolError),
                 detail.baseline(),
-                detail.malformedOutput(),
-                detail.secretLeak());
+                malformedOutput == null ? null : withoutIds(malformedOutput),
+                secretLeak == null ? null : withoutIds(secretLeak),
+                detail.armedWindow());
     }
 
-    /** See {@link #withoutTriage}: the same firewall applies here. */
+    private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {
+        return new ToolErrorEvidence.RateDetail(
+                rate.bucketKey(),
+                rate.refRate(),
+                rate.curRate(),
+                rate.deltaPp(),
+                rate.nRef(),
+                rate.nCur(),
+                rate.failuresCur(),
+                rate.patterns(),
+                rate.patternsTruncated(),
+                List.of(),
+                rate.onsetAt(),
+                rate.windowOpenedAt(),
+                rate.windowClosedAt(),
+                rate.direction(),
+                rate.statistic(),
+                rate.threshold(),
+                rate.effectSize(),
+                rate.criticality());
+    }
+
+    private static MalformedOutputEvidence.MalformedDetail withoutIds(MalformedOutputEvidence.MalformedDetail detail) {
+        return new MalformedOutputEvidence.MalformedDetail(
+                withoutIds(detail.rate()), detail.fields(), detail.notJson(), detail.other());
+    }
+
+    private static SecretLeakEvidence.SecretLeakDetail withoutIds(SecretLeakEvidence.SecretLeakDetail detail) {
+        return new SecretLeakEvidence.SecretLeakDetail(
+                detail.rule(),
+                detail.confidence(),
+                detail.leakCount(),
+                detail.traceCount(),
+                detail.firstAt(),
+                detail.lastAt(),
+                detail.keys(),
+                detail.leaks().stream()
+                        .map(l -> new SecretLeakEvidence.SecretLeakLeakView(l.at(), l.masked(), l.stored(), null, null))
+                        .toList(),
+                detail.basis(),
+                detail.threshold(),
+                detail.windowSeconds(),
+                detail.windowStart(),
+                detail.windowEnd());
+    }
+
+    /** See {@link #agentView}. */
     private BehaviorFindingDetailView getFinding(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         try {
-            return withoutTriage(behaviorDrift.finding(projectId, id));
+            return agentView(behaviorDrift.finding(projectId, id));
         } catch (TessaryException e) {
             String message = e.getMessage();
             throw new McpTool.ToolException(message == null ? "finding not found: " + id : message, e);
@@ -900,7 +965,17 @@ public class McpToolRegistry {
             @Nullable Long latencyMs,
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            @Nullable String model,
+            /** The distinct models behind this row: one entry on a single-step row, every model the
+             *  run called on a whole-run row. */
+            List<String> models,
+            /** True on a whole-run row whose trace has not rolled up yet: {@code totalTokens} and
+             *  {@code totalCost} are not yet trustworthy. */
+            boolean notRolledUp,
+            /** True on a whole-run row whose trace carries unpriced spans: {@code totalCost} is a floor. */
+            boolean partialCost,
+            /** True on a whole-run row whose trace rollup is not settled: late spans can still change
+             *  the totals. */
+            boolean staleTotals,
             @Nullable String callSiteId,
             /** The masked key that leaked and whether it is still stored raw — already masked, never
              *  the credential itself, so kept alongside the measurements rather than dropped with the
@@ -928,7 +1003,10 @@ public class McpToolRegistry {
                     v.latencyMs(),
                     v.totalTokens(),
                     v.totalCost(),
-                    v.model(),
+                    v.models(),
+                    v.notRolledUp(),
+                    v.partialCost(),
+                    v.staleTotals(),
                     v.callSiteId(),
                     v.secretKey(),
                     v.storedAs(),
@@ -1110,7 +1188,7 @@ public class McpToolRegistry {
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
-                    detail.findingId(),
+                    detail.latestFindingId(),
                     null,
                     detail.exemplars(),
                     detail.rcaReportId(),
@@ -1428,8 +1506,8 @@ public class McpToolRegistry {
      * empty {@code input_preview} means the call genuinely had no input.
      *
      * <p>{@code created_at} rides beside {@code started_at} because they're different clocks: started_at is
-     * the producer's own timing, created_at is when we received it and the column this page's {@code range}
-     * and keyset actually run on.
+     * the producer's own timing, and it is the column this page's {@code range} and keyset actually run on;
+     * created_at is when we received it, shown on every row but never filtered.
      */
     private static Map<String, Object> spanListRow(
             SpanRow s, boolean payloadAvailable, boolean includePayload, @Nullable SpanPayloadRow payload) {
@@ -1806,14 +1884,17 @@ public class McpToolRegistry {
     }
 
     /**
-     * A half-open time window {@code [from, to)} on the dataset's time column (ISO-8601 strings). Named as
-     * "the dataset's time column" rather than {@code created_at} because {@code metric_rollups} buckets on
-     * {@code bucket_start} instead.
+     * A half-open time window {@code [from, to)} on the dataset's own event clock (ISO-8601 strings), not
+     * necessarily {@code created_at}: {@code spans} and {@code tool_calls} range on {@code started_at},
+     * {@code classifier_events} on {@code subject_started_at} (the span or trace it judged), and
+     * {@code metric_rollups} on {@code bucket_start} (ingest time — billing). {@code describe_dataset}'s
+     * {@code time_column} names it per dataset.
      */
     private static Map<String, Object> rangeField() {
         return rangeField(
-                "Optional half-open time window [from, to) on the dataset's time column — created_at,"
-                        + " or bucket_start for metric_rollups (ISO-8601).",
+                "Optional half-open time window [from, to) on the dataset's own event clock — started_at for"
+                        + " spans and tool_calls, subject_started_at for classifier_events, or bucket_start"
+                        + " (ingest time) for metric_rollups (ISO-8601). See describe_dataset's time_column.",
                 "Optional inclusive lower bound (ISO-8601).",
                 "Optional exclusive upper bound (ISO-8601).");
     }
