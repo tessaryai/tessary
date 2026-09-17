@@ -626,7 +626,7 @@ function scrubToken(s) {
 const DETAIL_MAX = 200;
 
 // An E2B microVM is a separate machine on E2B's network, not a process on this host — a
-// callback URL of `http://localhost:8000` (docker-compose.dev.yml's own default, and the value the
+// callback URL of `http://localhost` (docker-compose.dev.yml's own default, and the value the
 // RCA/triage MCP base URL resolves to whenever nothing else is configured) means "call yourself
 // back" from inside the microVM, which is unreachable and guaranteed to fail the run after burning
 // a full sandbox create + the platform's evidence door never opening. Checked ONLY on the `e2b`

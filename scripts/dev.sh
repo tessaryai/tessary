@@ -8,7 +8,7 @@
 #   [2] frontend   frontend logs
 #   [3] caddy      caddy logs
 #
-# Open http://localhost:8000 once Spring Boot has booted (watch window 1
+# Open http://localhost (or http://localhost:$TESSARY_DEV_PORT) once Spring Boot has booted (watch window 1
 # for "Started TessaryApplication"). The status bar at the bottom of tmux
 # shows all four window names; the active one is highlighted.
 #
@@ -143,7 +143,7 @@ $COMPOSE up -d --build $UP_SERVICES
 CHEATSHEET="$REPO_ROOT/.cache/dev-cheatsheet.txt"
 mkdir -p "$(dirname "$CHEATSHEET")"
 cat > "$CHEATSHEET" <<EOF
-Stack is up at http://localhost:${HOST_PORT:-8000}
+Stack is up at ${TESSARY_DEV_ORIGIN}
 
 $(dev_choices_summary_text)
 

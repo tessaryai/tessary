@@ -4,14 +4,17 @@
 # - postgres  Postgres 16, named-volume data dir, exposed on localhost:5433 for psql
 # - backend   JVM mode (Spring Boot + devtools), source bind-mounted, talks to postgres
 # - frontend  Vite dev server with HMR, source bind-mounted
-# - caddy     reverse proxy on :8000 (the entry point you hit in the browser)
+# - caddy     reverse proxy on host port TESSARY_DEV_PORT, default 80 (the entry point you hit in the browser)
 #
 # Usage:
 #   echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
 #   task docker:dev:tmux         # launches tmux + compose up
 # or (PNPM_VERSION defaults to the Taskfile's pin; a raw compose call needs nothing exported):
 #     docker compose -f docker-compose.dev.yml up -d --build
-#   open http://localhost:8000
+#   open http://localhost
+#
+# Serving on a port other than 80 (TESSARY_DEV_PORT)? The backend also needs the matching origin in
+# TESSARY_DEV_ORIGIN, which scripts/lib/dev-choices.sh derives for `task dev`; a raw compose call sets both.
 
 # Pin the Compose project name so the stack is identical from any directory
 # (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
@@ -74,7 +77,7 @@ services:
       # tessary.ingest.otlp.enabled=true AND tessary.ingest.otlp.transport is grpc|both.
       - "4317"
     ports:
-      # Publish only the debug port to the host; HTTP still flows through Caddy (:8000). JDWP has no
+      # Publish only the debug port to the host; HTTP still flows through Caddy (TESSARY_DEV_PORT). JDWP has no
       # authentication of any kind -- reaching this port is arbitrary code execution in the backend
       # JVM -- so the publish is pinned to host loopback. The agent itself stays address=*:5005:
       # Docker forwards a published port to the container's bridge IP, so an in-container loopback
@@ -110,6 +113,9 @@ services:
       # with TESSARY_AUTH_DISABLED=true, knowing the sign-in flow cannot complete in that mode.
       # scripts/check-open-boot.sh already exported "false" for its authenticated-flow proof.
       TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-false}
+      # Where sign-in, sign-out, device-link and GitHub callbacks send the browser. The backend's own
+      # default is :8000, the bare-metal `task caddy` port, so the dev origin is passed explicitly.
+      TESSARY_AUTH_FRONTEND_URL: ${TESSARY_AUTH_FRONTEND_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}/}
       # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
       # with no .env and mints run-scoped random values for both (see its boot-recipe comment).
       # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`.
@@ -188,12 +194,12 @@ services:
       # The evidence door, for BOTH agent lanes, and neither has another one: their dossiers carry
       # the detector's claim and every row behind it is fetched over MCP, so a blank value here is a
       # broken deployment rather than a degraded mode (the engines refuse to run). Defaulted to the
-      # dev API origin — Caddy on :8000. agents=docker overrides this to http://backend:8080 (see
+      # dev API origin — Caddy on TESSARY_DEV_ORIGIN. agents=docker overrides this to http://backend:8080 (see
       # dev-choices.sh) since a sibling container reaches the backend by service name, not
       # localhost. agents=e2b is the exception either way: the microVM cannot see your localhost or
       # the service network, so point this at a public tunnel.
-      TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}
-      TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://localhost:8000}}
+      TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}
+      TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}}
       # Encoder classification — the classify service below. Same service that runs on
       # ECS Fargate in production; the dev key just has a working default.
       TESSARY_OBSERVER_ENCODER_URL: http://classify:8080
@@ -291,7 +297,11 @@ services:
       # point this port is the entire application with authentication off. On 0.0.0.0 that is every
       # trace, every credential and every admin surface offered to whoever shares the network. Set
       # HOST_BIND=0.0.0.0 to test from a phone on the same wifi.
-      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-8000}:8000"
+      #
+      # Host port TESSARY_DEV_PORT, default 80, so the stack is plain http://localhost. Set it (e.g.
+      # 8100) when 80 is taken or not bindable; `task dev` derives TESSARY_DEV_ORIGIN from it for the
+      # backend. The container side stays 8000, the port the Caddyfile listens on.
+      - "${HOST_BIND:-127.0.0.1}:${TESSARY_DEV_PORT:-80}:8000"
     environment:
       BACKEND_URL: backend:8080
       FRONTEND_URL: frontend:5173

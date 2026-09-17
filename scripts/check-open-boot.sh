@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Detached boot check for a stack with tessary-paid/ removed: with the directory genuinely gone
 # (not just moved aside), the slim dev stack must still come up: backend healthy, frontend up,
-# caddy serving :8000, and no tessary-paid/ skeleton left on disk afterward.
+# caddy serving the dev port, and no tessary-paid/ skeleton left on disk afterward.
 #
 # Also checks a credential deny-list before and after boot, brings the classify service into the
 # stack keyless, and drives an authenticated triage flow through tessary's own identity provider.
@@ -110,8 +110,9 @@ _run_cookie_password="$(openssl rand -base64 32)"
     exit 1
 }
 
-HOST_PORT="${HOST_PORT:-8000}"
-BASE="http://localhost:${HOST_PORT}"
+# Caddy's host port, the same default docker-compose.dev.yml publishes (the export has no .env).
+DEV_PORT="${TESSARY_DEV_PORT:-80}"
+BASE="http://localhost:${DEV_PORT}"
 
 # Auto-detect tessary-paid/ on $ROOT (the pre-export checkout) so the post-boot table-absence
 # assertion below runs without a caller having to remember to set this. An explicit value wins.
@@ -138,7 +139,7 @@ fail=0
 _wait_for "GET /healthz         (classify, direct :18080)"     "http://localhost:18080/healthz" 200 90 || fail=1
 
 # A public page, the OpenAPI document, and an authenticated-only route correctly answering
-# unauthenticated, all through caddy on :8000, since that's what a real deployment reaches.
+# unauthenticated, all through caddy on the dev port, since that's what a real deployment reaches.
 _wait_for "GET /              (frontend, via caddy)" "$BASE/"             200 || fail=1
 _wait_for "GET /v3/api-docs   (backend,  via caddy)" "$BASE/v3/api-docs"  200 || fail=1
 _wait_for "GET /api/v1/me     (backend,  via caddy)" "$BASE/api/v1/me"    401 || fail=1
@@ -211,7 +212,7 @@ open_boot_check_denied_credentials "check-open-boot" "$TMP" "$COMPOSE" \
     exit 1
 }
 echo "check-open-boot: the open edition boots keyless - backend healthy, frontend up, classify" \
-     "warm with no HF_TOKEN, caddy serving :${HOST_PORT}, no denied credential anywhere, no" \
+     "warm with no HF_TOKEN, caddy serving :${DEV_PORT}, no denied credential anywhere, no" \
      "tessary-paid/ left behind"
 
 # --------------------------------------------------------------------------------------------------

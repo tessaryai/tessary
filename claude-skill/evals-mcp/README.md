@@ -55,7 +55,7 @@ In the UI: pick a project → **Settings → MCP tokens** → **Create token** �
   "mcpServers": {
     "evals-mcp": {
       "type": "http",
-      "url": "http://localhost:8000/mcp",
+      "url": "http://localhost/mcp",
       "headers": {
         "Authorization": "Bearer tsy_a_xxxxxxxxxxxxxxxxxxxxxx"
       }
@@ -64,7 +64,7 @@ In the UI: pick a project → **Settings → MCP tokens** → **Create token** �
 }
 ```
 
-For prod: replace `http://localhost:8000` with your platform URL. Restart Claude Code. The
+For prod: replace `http://localhost` with your platform URL. Restart Claude Code. The
 token binds the session to one project; every tool reads `ctx.projectId()`.
 
 ## Tools shipped today

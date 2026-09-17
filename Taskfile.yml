@@ -5,8 +5,8 @@ version: '3'
 # Three services run together in dev:
 #   - backend (Spring Boot)  on :8080
 #   - frontend (Vite)        on :5173
-#   - caddy (reverse proxy)  on :8000
-# Open http://localhost:8000 in the browser.
+#   - caddy (reverse proxy)  on :8000 bare metal (`task caddy`)
+# `task dev` serves the whole stack at http://localhost (TESSARY_DEV_PORT, default 80).
 
 vars:
   SESSION: tessary-dev
@@ -98,7 +98,7 @@ tasks:
       - bash scripts/dev.sh
 
   # Slim mode. What actually runs: postgres, backend, frontend, caddy, alloy — the whole
-  # product, the browser entry point unchanged on :8000. What does NOT: classify (the encoder
+  # product, the browser entry point unchanged. What does NOT: classify (the encoder
   # service; its build downloads the gated encoder weights and its container is capped at 8 GB)
   # and compile (the SOP-conformance fitter, which is `depends_on: classify` and can only
   # dead-letter without it). So the encoder classifier heads and SOP-conformance fits are the one
@@ -615,7 +615,7 @@ tasks:
       - bash scripts/check.sh --edition open "{{.CLI_ARGS}}"
 
   check:open:boot:
-    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves :8000 with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
+    desc: "The detached open-edition BOOT check (EXCLUDED from `task check`/`check:open` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe with tessary-paid/ stripped, boots the slim dev stack (classify included, keyless) in that export, and asserts caddy serves the dev port with an authenticated triage flow producing a real classifier verdict, no denied credential anywhere, no tessary-paid/ ghost directory left behind, and none of the paid overlay's own tables present in the open-only database either. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or the dispatch-only boot-checks.yml CI workflow, never run by an agent (see CLAUDE.md's toolchain notes)."
     cmds:
       # check-open-boot.sh derives OPEN_BOOT_OVERLAY_DIR itself (tessary-paid/pom.xml present or
       # not), so this target does not duplicate that probe — the dispatch-only CI workflow's direct

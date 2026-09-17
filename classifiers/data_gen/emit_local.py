@@ -70,7 +70,7 @@ ZIPEATS_FILE = REPO / "classifiers" / "data" / "food_delivery" / "conversations.
 POLICYGPT_DIR = Path(os.environ.get("POLICYGPT_STATE_DIR", Path.home() / "Downloads" / "pr2" / "state"))
 LEDGER_DIR = REPO / "classifiers" / "data" / ".emit_local"
 
-DEFAULT_ENDPOINT = "http://localhost:8000/v1/traces"
+DEFAULT_ENDPOINT = "http://localhost/v1/traces"
 NS = 1_000_000_000
 MAX_PAYLOAD_CHARS = 4000
 

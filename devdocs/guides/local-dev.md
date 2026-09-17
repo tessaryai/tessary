@@ -58,6 +58,8 @@ With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` imag
 
 Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and the launcher key default to the same placeholders `docker-compose.yml` ships. Set real ones in `.env` for anything beyond local development.
 
+`task dev` serves the stack at http://localhost. Set `TESSARY_DEV_PORT` (e.g. `8100`, in the environment or `.env`) if port 80 is taken or not bindable, and it serves at http://localhost:8100 instead.
+
 ### Slim mode — what runs
 
 `dev:slim` (and `TESSARY_SKIP_CLASSIFY=1` in front of any dev task) starts everything except the two encoder services. The list is derived from compose itself in `scripts/lib/dev-services.sh`, so a new service joins slim mode automatically and both entry points agree by construction.
@@ -67,7 +69,7 @@ Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and 
 | `postgres` | ✅ | Postgres 16 + pgvector, on `localhost:5433` for `psql` |
 | `backend` | ✅ | Spring Boot + devtools, JDWP on `:5005` |
 | `frontend` | ✅ | Vite dev server, HMR over the bind mount |
-| `caddy` | ✅ | Reverse proxy on `:8000` — the entry point, unchanged |
+| `caddy` | ✅ | Reverse proxy on `TESSARY_DEV_PORT` (default 80) — the entry point, unchanged |
 | `alloy` | ❌ | Opt-in: behind the `observability` Compose profile, off by default. `COMPOSE_PROFILES=observability` to forward `gen_ai` judge spans to Langfuse |
 | `classify` | ❌ | Encoder service. Build downloads gated HF weights (`BAKE_EMBEDDERS` bakes ~1.7 GB into the dev image); container capped at 8 GB |
 | `compile` | ❌ | SOP-conformance fitter. `depends_on: classify`, and every fit calls its `/embed` — without classify it can only dead-letter, so it goes too |

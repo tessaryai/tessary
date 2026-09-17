@@ -173,6 +173,31 @@ dev_choices_resolve() {
             exit 1
             ;;
     esac
+
+    dev_origin_export
+}
+
+# The browser origin the dev stack serves on, derived from TESSARY_DEV_PORT (the environment, then
+# .env, then 80) and exported as TESSARY_DEV_ORIGIN: http://localhost on port 80, else
+# http://localhost:<port>. docker-compose.dev.yml publishes Caddy on the port and hands the origin to
+# the backend (sign-in redirects, the agents' MCP callback). Compose interpolation has no
+# conditionals, so the origin is computed here; a raw `docker compose` on another port must set both.
+dev_origin_export() {
+    local port="${TESSARY_DEV_PORT:-}"
+    [ -z "$port" ] && port="$(dev_dotenv_value TESSARY_DEV_PORT)"
+    port="${port:-80}"
+    case "$port" in
+        '' | *[!0-9]*)
+            echo "error: TESSARY_DEV_PORT='$port' is not a port number." >&2
+            exit 1
+            ;;
+    esac
+    export TESSARY_DEV_PORT="$port"
+    if [ "$port" = "80" ]; then
+        export TESSARY_DEV_ORIGIN="http://localhost"
+    else
+        export TESSARY_DEV_ORIGIN="http://localhost:$port"
+    fi
 }
 
 # One line naming each answer and where it came from. Printed to stderr on every run, and written
