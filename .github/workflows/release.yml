@@ -299,9 +299,10 @@ jobs:
       # profile activates on a sibling pom merely existing, and that path is not inside
       # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
       # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
-      - id: build
+      - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
+        continue-on-error: true
+        with: &backend-push
           context: ./backend
           file: backend/Dockerfile
           target: runtime
@@ -318,13 +319,24 @@ jobs:
           cache-from: type=gha,scope=tessary-backend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-backend-${{ matrix.arch }}
 
+      # ONE RETRY, FOR THE REGISTRY AND NOT THE BUILD. Docker Hub's token endpoint resets
+      # connections now and then (run 35216660274 lost two images to one reset), and
+      # build-push-action has no retry of its own. A real build error fails twice, the second
+      # time from warm layers; a digest push re-sends only blobs the registry lacks.
+      - if: steps.push.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.push.outcome == 'failure'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with: *backend-push
+
       # The digest is the only handle this build leaves, so it travels to the jobs that
       # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/digests"
-          printf '%s' "${{ steps.build.outputs.digest }}" \
+          printf '%s' "${{ steps.retry.outputs.digest || steps.push.outputs.digest }}" \
             > "${{ runner.temp }}/digests/backend-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -357,9 +369,10 @@ jobs:
       # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
       # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
       # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
-      - id: build
+      - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
+        continue-on-error: true
+        with: &frontend-push
           context: .
           file: frontend/Dockerfile
           target: runtime
@@ -376,13 +389,21 @@ jobs:
           cache-from: type=gha,scope=tessary-frontend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-frontend-${{ matrix.arch }}
 
+      # One retry for a registry blip, as in build-backend.
+      - if: steps.push.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.push.outcome == 'failure'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with: *frontend-push
+
       # The digest is the only handle this build leaves, so it travels to the jobs that
       # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/digests"
-          printf '%s' "${{ steps.build.outputs.digest }}" \
+          printf '%s' "${{ steps.retry.outputs.digest || steps.push.outputs.digest }}" \
             > "${{ runner.temp }}/digests/frontend-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -413,9 +434,10 @@ jobs:
 
       # No build-once optimization here: re2@1.26.1 is a native addon compiled by node-gyp in
       # the image, so this pnpm install genuinely happens twice, once per native arch runner.
-      - id: build
+      - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
+        continue-on-error: true
+        with: &sandbox-runner-push
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
           platforms: linux/${{ matrix.arch }}
@@ -434,13 +456,21 @@ jobs:
           cache-from: type=gha,scope=tessary-sandbox-runner-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-sandbox-runner-${{ matrix.arch }}
 
+      # One retry for a registry blip, as in build-backend.
+      - if: steps.push.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.push.outcome == 'failure'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with: *sandbox-runner-push
+
       # The digest is the only handle this build leaves, so it travels to the jobs that
       # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/digests"
-          printf '%s' "${{ steps.build.outputs.digest }}" \
+          printf '%s' "${{ steps.retry.outputs.digest || steps.push.outputs.digest }}" \
             > "${{ runner.temp }}/digests/sandbox-runner-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -471,9 +501,10 @@ jobs:
 
       # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above (re2 again).
       # Repo-root context: this Dockerfile's own header requires it (reaches contract/).
-      - id: build
+      - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
+        continue-on-error: true
+        with: &agent-sandbox-push
           context: .
           file: sandbox-runner/agent-sandbox/Dockerfile
           platforms: linux/${{ matrix.arch }}
@@ -489,13 +520,21 @@ jobs:
           cache-from: type=gha,scope=tessary-agent-sandbox-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-agent-sandbox-${{ matrix.arch }}
 
+      # One retry for a registry blip, as in build-backend.
+      - if: steps.push.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.push.outcome == 'failure'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with: *agent-sandbox-push
+
       # The digest is the only handle this build leaves, so it travels to the jobs that
       # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/digests"
-          printf '%s' "${{ steps.build.outputs.digest }}" \
+          printf '%s' "${{ steps.retry.outputs.digest || steps.push.outputs.digest }}" \
             > "${{ runner.temp }}/digests/agent-sandbox-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
