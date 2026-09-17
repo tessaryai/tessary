@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -119,15 +120,15 @@ public class ProjectDeleteJobRepository {
      * shared helper has no {@code RETURNING} — every other queue it serves only needs the row count.
      */
     public List<String> failExhausted(int maxAttempts) {
-        return jdbc.sql("""
+        return jdbc.sql(String.format(Locale.ROOT, """
                         UPDATE job
                            SET status = 'failed',
-                               last_error = 'exhausted: ' || attempts || ' attempts (hung or crashed mid-purge)',
+                               last_error = %s,
                                updated_at = :now
                          WHERE kind = 'project_delete' AND status = 'claimed'
                            AND lease_expires_at < :now AND attempts >= :maxAttempts
                         RETURNING payload->>'project_id' AS project_id
-                        """)
+                        """, LeasedJobSql.exhaustedLastError("hung or crashed mid-purge")))
                 .param("now", Instant.now().toString())
                 .param("maxAttempts", maxAttempts)
                 .query(String.class)

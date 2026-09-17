@@ -92,6 +92,49 @@ class JobRepositoryTest {
     }
 
     @Test
+    void deadLetterKeepsTheLastAttemptsError_andAReSweepLeavesItAlone() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "job-dead-reason").project().id();
+        String past = Instant.now().minus(Duration.ofHours(1)).toString();
+        JobRow base = job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.CLAIMED, null, 3, past);
+        JobRow poison = new JobRow(
+                base.id(),
+                base.projectId(),
+                base.kind(),
+                base.status(),
+                base.leaseOwner(),
+                base.leaseExpiresAt(),
+                base.attempts(),
+                "run failed: kind=timeout detail=deadline hit",
+                base.dedupeKey(),
+                base.cursorAt(),
+                base.cursorId(),
+                base.progress(),
+                base.payload(),
+                base.createdAt(),
+                base.updatedAt());
+        jobs.insert(poison);
+        JobRow silent = job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.CLAIMED, null, 3, past);
+        jobs.insert(silent);
+
+        assertTrue(jobs.failExhausted(JobRow.Kind.CLASSIFIER, "hung mid-sweep", POLICY) >= 2);
+        assertEquals(
+                "exhausted: 3 attempts (hung mid-sweep); last: run failed: kind=timeout detail=deadline hit",
+                jobs.findById(poison.id()).orElseThrow().lastError(),
+                "a dead-lettered job must still say why its attempts failed");
+        assertEquals(
+                "exhausted: 3 attempts (hung mid-sweep)",
+                jobs.findById(silent.id()).orElseThrow().lastError(),
+                "no recorded error means no dangling suffix");
+
+        jobs.failExhausted(JobRow.Kind.CLASSIFIER, "hung mid-sweep", POLICY);
+        assertEquals(
+                "exhausted: 3 attempts (hung mid-sweep); last: run failed: kind=timeout detail=deadline hit",
+                jobs.findById(poison.id()).orElseThrow().lastError(),
+                "a second sweep only matches claimed rows, so it cannot append to a dead one");
+    }
+
+    @Test
     void claimIsScopedToItsKind() {
         String pid = TenantFixture.bootstrap(tenants, "job-kind").project().id();
         jobs.insert(job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.PENDING, null, 0, null));
