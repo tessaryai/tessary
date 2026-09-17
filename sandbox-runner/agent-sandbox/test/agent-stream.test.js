@@ -14,9 +14,14 @@
  * — everything this file is responsible for (accumulating turns across a fresh-session retry,
  * gating that retry, summing usage) sits entirely on top of that client's return values, so faking
  * them exercises the real code under test without needing a live agent, a model, or a network call.
- * `createOpencodeServer`/`createOpencodeClient` are the ONLY two SDK entry points runAgent touches
- * (see startServer/runAgent) — mocking exactly those two keeps the rest of the module (splitModel,
- * toTurns, sumUsage, toEnvelope, the retry loop itself) genuinely under test.
+ * `createOpencodeClient` is the ONLY SDK entry point runAgent touches — mocking exactly that keeps
+ * the rest of the module (splitModel, toTurns, sumUsage, toEnvelope, the retry loop itself)
+ * genuinely under test.
+ *
+ * THE SERVER PROCESS IS REAL, just not opencode. agent-stream.js spawns `opencode serve` itself
+ * (see its header), so the `opencode` on this process's PATH is test/fixtures/fake-opencode: it
+ * announces itself like opencode and records the config it was started with, which is how the
+ * tests below read what runAgent configured. Its HTTP routes go unused here (the client is mocked).
  *
  * WHY NOT DRIVE triage.js/rca.js DIRECTLY for the failure-envelope shape (b): their `main()` is not
  * exported and ends in `process.exit`, which is awkward to assert against in-process without a
@@ -37,6 +42,34 @@ const path = require('node:path');
 // on a dev/CI host.
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-stream-test-'));
 process.env.WORK_DIR = workDir;
+
+const { makeFakeOpencodeBin } = require('./fixtures/fake-opencode');
+const fakeBin = makeFakeOpencodeBin(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-stream-test-bin-')));
+const recordDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-stream-test-record-'));
+process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH}`;
+process.env.FAKE_OPENCODE_RECORD_DIR = recordDir;
+
+/** What every fake opencode started since the last clearRecords() was launched with, in start order. */
+function serverRecords() {
+  return fs
+    .readdirSync(recordDir)
+    .map((f) => JSON.parse(fs.readFileSync(path.join(recordDir, f), 'utf8')))
+    .sort((a, b) => fs.statSync(path.join(recordDir, `${a.pid}.json`)).mtimeMs - fs.statSync(path.join(recordDir, `${b.pid}.json`)).mtimeMs);
+}
+
+function clearRecords() {
+  for (const f of fs.readdirSync(recordDir)) fs.rmSync(path.join(recordDir, f));
+}
+
+/** Whether a process with this pid still exists. */
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
 
 /**
  * One assistant turn in the shape `toTurns` reads (see agent-stream.js's partsOf/toolCallsOf/
@@ -67,22 +100,19 @@ function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
  * array `session.messages` answers with for that session id on its Nth call (1-based) — modelling
  * the real API, where messages() always returns a session's FULL history so far.
  *
- * Also records what runAgent handed the SDK: every `config` createOpencodeServer was started with
- * (`serverConfigs`), and every `body` session.prompt was called with (`promptBodies`) — the two
- * places the systemPrompt/no-systemPrompt split (custom triage agent vs. the RCA path) is visible.
+ * Also records what runAgent handed over: `serverConfigs()` returns every config a (fake) opencode
+ * was started with, and `promptBodies` every `body` session.prompt was called with — the two places
+ * the systemPrompt/no-systemPrompt split (custom triage agent vs. the RCA path) is visible.
  */
 function mockSdk({ messagesById }) {
   let sessionCounter = 0;
   const createCalls = [];
-  const serverConfigs = [];
   const promptBodies = [];
   const callCountById = {};
+  clearRecords();
+  const serverConfigs = () => serverRecords().map((r) => r.config);
   mock.module('@opencode-ai/sdk', {
     namedExports: {
-      createOpencodeServer: async (opts) => {
-        serverConfigs.push(opts && opts.config);
-        return { url: 'http://127.0.0.1:1', close() {} };
-      },
       createOpencodeClient: () => ({
         session: {
           create: async () => {
@@ -293,8 +323,8 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
     timeoutMs: 1000,
   });
 
-  assert.equal(serverConfigs.length, 1);
-  const config = serverConfigs[0];
+  assert.equal(serverConfigs().length, 1);
+  const config = serverConfigs()[0];
   const agentCfg = config.agent && config.agent['tessary-triage'];
   assert.ok(agentCfg, 'the custom triage agent is defined');
   assert.equal(agentCfg.mode, 'primary');
@@ -327,7 +357,7 @@ test('5: triage opens external_directory to opencode\'s own tmp and tool-output 
     timeoutMs: 1000,
   });
 
-  const extDir = serverConfigs[0].permission.external_directory;
+  const extDir = serverConfigs()[0].permission.external_directory;
   const keys = Object.keys(extDir);
   assert.equal(keys.length, 3, 'the base deny plus exactly the two allows, nothing more');
   assert.equal(extDir['*'], 'deny');
@@ -347,7 +377,7 @@ test('5: RCA (no systemPrompt) keeps external_directory as a blanket deny, uncha
 
   await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', timeoutMs: 1000 });
 
-  assert.deepEqual(serverConfigs[0].permission.external_directory, { '*': 'deny' });
+  assert.deepEqual(serverConfigs()[0].permission.external_directory, { '*': 'deny' });
 });
 
 test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt', async (t) => {
@@ -365,7 +395,7 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
     timeoutMs: 1000,
   });
 
-  const config = serverConfigs[0];
+  const config = serverConfigs()[0];
   assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'the RCA path still runs under opencode\'s default agent');
   assert.deepEqual(config.mcp['tessary-evals'], {
     type: 'remote',
@@ -389,21 +419,23 @@ async function relayRefusesConnections(relayUrl) {
 test('decision 2: a failed server start still closes the relay, so it cannot hang the process', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
-  const serverConfigs = [];
   // No mock of mcp-relay.js here either (see the systemPrompt test above for why that is cheap and
   // real): the whole point of this test is that a REAL listening socket gets closed, which a mocked
   // relay could not demonstrate.
   mock.module('@opencode-ai/sdk', {
     namedExports: {
-      createOpencodeServer: async (opts) => {
-        serverConfigs.push(opts && opts.config);
-        throw new Error('spawn opencode ENOENT');
-      },
       createOpencodeClient: () => {
         throw new Error('must not be reached: the server never started');
       },
     },
   });
+  // The fake records its config, then exits before announcing — the "Server exited with code 1"
+  // start failure (a bad config, say), after the relay is already listening.
+  process.env.FAKE_OPENCODE_EXIT_BEFORE_READY = '1';
+  t.after(() => {
+    delete process.env.FAKE_OPENCODE_EXIT_BEFORE_READY;
+  });
+  clearRecords();
 
   await assert.rejects(
     runAgent({
@@ -416,7 +448,7 @@ test('decision 2: a failed server start still closes the relay, so it cannot han
     /opencode server did not start/,
   );
 
-  const relayUrl = serverConfigs[0].mcp['tessary-evals'].url;
+  const relayUrl = serverRecords()[0].config.mcp['tessary-evals'].url;
   assert.match(relayUrl, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/, 'the relay really did start, on a real loopback port');
   assert.ok(
     await relayRefusesConnections(relayUrl),
@@ -439,8 +471,34 @@ test('decision 2: a successful run also closes the relay once it is done', async
     timeoutMs: 1000,
   });
 
-  const relayUrl = serverConfigs[0].mcp['tessary-evals'].url;
+  const relayUrl = serverConfigs()[0].mcp['tessary-evals'].url;
   assert.ok(await relayRefusesConnections(relayUrl), 'the relay closes on the success path too, same as it always did');
+});
+
+test('shutdown: runAgent does not return until an opencode that ignores SIGTERM is gone', async (t) => {
+  t.after(() => mock.reset());
+  // The live bug: the SDK's close() sent one SIGTERM and returned, an opencode that did not exit on
+  // it kept its pipes open, and the lane's process outlived its own run. Both outcomes are covered —
+  // the close sits in runAgent's `finally`, which a failed run reaches by a different path.
+  process.env.FAKE_OPENCODE_IGNORE_SIGTERM = '1';
+  t.after(() => {
+    delete process.env.FAKE_OPENCODE_IGNORE_SIGTERM;
+  });
+  const { runAgent } = require('../agent-stream');
+
+  mockSdk({ messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })] });
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 });
+  const [ok] = serverRecords();
+  assert.equal(isAlive(ok.pid), false, 'a successful run returns only once the server process is gone');
+
+  mock.reset();
+  mockSdk({ messagesById: () => [assistantMessage({ usage: { input_tokens: 10, output_tokens: 0 } })] });
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 }),
+    /opencode produced no usable reply/,
+  );
+  const [failed] = serverRecords();
+  assert.equal(isAlive(failed.pid), false, 'a failed run rejects only once the server process is gone');
 });
 
 test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeric-only usage object', () => {

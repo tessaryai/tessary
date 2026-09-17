@@ -12,10 +12,14 @@
  * WHY THE SERVER, NOT `opencode run`: `run --format json` drops text and step_finish events in
  * containers (anomalyco/opencode#31435) — which is exactly this microVM.
  *
- * THE SDK OWNS THE LIFECYCLE. createOpencodeServer spawns the process and waits for its own
- * `opencode server listening on <url>` announcement; we do not spawn or poll ourselves. The
- * hand-rolled version treated "the TCP port accepts" as ready, and every RCA hung in the ~320ms
- * between accept and readiness (measured), burning Node's 300s fetch cap before failing.
+ * WE OWN THE PROCESS, THE SDK OWNS THE PROTOCOL. spawnOpencodeServer starts `opencode serve` and
+ * waits for its own `opencode server listening on <url>` announcement, never for "the TCP port
+ * accepts": an earlier hand-rolled version did that, and every RCA hung in the ~320ms between
+ * accept and readiness (measured), burning Node's 300s fetch cap before failing. The spawn is ours
+ * rather than the SDK's createOpencodeServer because that one's close() is a lone SIGTERM that
+ * neither waits nor escalates, and an opencode that ignores it kept the lane's process alive after
+ * the run was over. Ours SIGTERMs, waits, SIGKILLs, and releases the child's pipes, and runAgent
+ * awaits all of it. Everything spoken over HTTP still goes through the SDK's client.
  *
  * WHY WE LIST MESSAGES INSTEAD OF STREAMING: nothing here renders live progress. The
  * backend reads one payload at the end, so reading the session's messages once the
@@ -27,7 +31,7 @@
  * template.ts `.copy('agent-stream.js', ...)`) — a missing copy turns every analyzer run
  * into a require-not-found crash.
  */
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -250,19 +254,114 @@ function quarantineRepo() {
 
 // --- server lifecycle --------------------------------------------------------
 //
-// The SDK's createOpencodeServer owns spawning and readiness; we do NOT hand-roll either.
+// Readiness is opencode's own announcement, not "the port accepts". This used to spawn
+// `opencode serve` and treat an accepted TCP connection as ready. It is not. Measured in the E2B
+// template: the port accepts at 3.22s and the server announces itself at 3.54s, and a request that
+// lands in that ~320ms window HANGS FOREVER rather than being queued. Every RCA died there — the
+// hang burned Node's 300s fetch cap and surfaced as `fetch failed` at ~309s, with no model ever
+// invoked (Bedrock logged zero invocations for those runs).
 //
-// This used to spawn `opencode serve` directly and treat "the TCP port accepts a connection"
-// as ready. It is not. Measured in the E2B template: the port accepts at 3.22s and the server
-// announces itself at 3.54s, and a request that lands in that ~320ms window HANGS FOREVER
-// rather than being queued. Every RCA died there — the hang burned Node's 300s fetch cap and
-// surfaced as `fetch failed` at ~309s, with no model ever invoked (Bedrock logged zero
-// invocations for those runs).
+// So spawnOpencodeServer waits for the process to print `opencode server listening on <url>` on
+// stdout and hands back that url — the same contract, arguments, env and failure messages as the
+// SDK's createOpencodeServer (@opencode-ai/sdk 1.18.30, dist/server.js), which this replaced. It
+// still takes a TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — a hand-built
+// JSON string is how an invalid `permission.webfetch` shape once shipped unnoticed.
 //
-// createOpencodeServer waits for the process to print `opencode server listening on <url>` on
-// stdout, which is the server's own readiness signal, and hands back that url. It also takes a
-// TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — the hand-built JSON is
-// how an invalid `permission.webfetch` shape shipped unnoticed.
+// WHY NOT THE SDK'S OWN: its close() is a single fire-and-forget SIGTERM. No wait for the exit, no
+// SIGKILL if the process ignores it, and the child's stdio pipes stay referenced. An opencode that
+// has just served a session does not always exit on SIGTERM, so the lane's node process was held
+// open by the child and its pipes after main() returned, until triage.js's 5s exit guard killed it
+// (`still alive ... PipeWrap, ProcessWrap`). The SDK hands back no process handle, so the only way
+// to stop the child deterministically is to own the spawn.
+
+/** How long a SIGTERM'd opencode gets to exit on its own before it is SIGKILLed. */
+const STOP_GRACE_MS = 3_000;
+/** How long to wait for the exit a SIGKILL causes before giving up on observing it. */
+const KILL_WAIT_MS = 1_000;
+
+/**
+ * Stop `proc` and resolve once it is gone: SIGTERM, up to STOP_GRACE_MS for it to exit, then
+ * SIGKILL. Either way its stdio pipes are destroyed at the end, so nothing of the child holds this
+ * process's event loop — even a grandchild that inherited the child's stdout cannot. Never rejects.
+ */
+function stopProcess(proc) {
+  return new Promise((resolve) => {
+    let timer = null;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      proc.off('exit', finish);
+      for (const stream of [proc.stdin, proc.stdout, proc.stderr]) if (stream) stream.destroy();
+      resolve();
+    };
+    // Never spawned (ENOENT: no pid) or already gone: nothing to signal, only pipes to release.
+    if (proc.pid === undefined || proc.exitCode !== null || proc.signalCode !== null) return finish();
+    proc.once('exit', finish);
+    proc.kill('SIGTERM');
+    timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      timer = setTimeout(finish, KILL_WAIT_MS);
+    }, STOP_GRACE_MS);
+  });
+}
+
+/**
+ * Spawn `opencode serve` and resolve with `{url, close}` once it announces itself. `close()`
+ * returns a promise that settles only when the process is gone (see stopProcess).
+ *
+ * Rejects, after stopping the process, with the same messages createOpencodeServer used:
+ *   - the process exits → `Server exited with code N` plus the stdout+stderr it printed,
+ *   - no announcement within `timeout` → `Timeout waiting for server to start after Nms`, now
+ *     also with whatever it printed (the SDK discarded that),
+ *   - an announcement with no url in it → `Failed to parse server url from output: <line>`,
+ *   - the spawn itself fails (a missing binary) → the spawn error as-is.
+ */
+function spawnOpencodeServer({ hostname, port, timeout, config }) {
+  const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
+  if (config && config.logLevel) args.push(`--log-level=${config.logLevel}`);
+  const proc = spawn('opencode', args, {
+    env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config || {}) },
+  });
+  const close = () => stopProcess(proc);
+
+  return new Promise((resolve, reject) => {
+    let output = '';
+    let settled = false;
+    const withOutput = (msg) => (output.trim() ? `${msg}\nServer output: ${output}` : msg);
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      close().then(() => reject(err));
+    };
+    const timer = setTimeout(
+      () => fail(new Error(withOutput(`Timeout waiting for server to start after ${timeout}ms`))),
+      timeout,
+    );
+
+    // Both streams stay drained for the life of the process, not just until the announcement: an
+    // unread pipe fills and blocks opencode on its next write.
+    proc.stdout.on('data', (chunk) => {
+      if (settled) return;
+      output += chunk.toString();
+      for (const line of output.split('\n')) {
+        if (!line.startsWith('opencode server listening')) continue;
+        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+        if (!match) return fail(new Error(`Failed to parse server url from output: ${line}`));
+        settled = true;
+        clearTimeout(timer);
+        return resolve({ url: match[1], close });
+      }
+    });
+    proc.stderr.on('data', (chunk) => {
+      if (!settled) output += chunk.toString();
+    });
+    proc.on('exit', (code) => fail(new Error(withOutput(`Server exited with code ${code}`))));
+    proc.on('error', (err) => fail(err));
+  });
+}
 
 /**
  * The launcher's provider config (agentEnvs), passed down in the env var OpenCode reads. Must be
@@ -283,38 +382,28 @@ function inheritedConfig() {
 }
 
 /**
- * Start the server through the SDK, on loopback, rooted at AGENT_CWD.
+ * Start the server on loopback, rooted at AGENT_CWD.
  *
  * No basic auth: the server is bound to 127.0.0.1 inside a single-tenant microVM that is torn
  * down after one run, so a password would only protect the sandbox from the agent we are
  * deliberately running in it.
  *
- * Two things the SDK does NOT do for us, so we do them here, before it spawns:
- *   - cwd. createOpencodeServer inherits the parent's working directory, and the agent's start
- *     directory is a SECURITY boundary (see AGENT_CWD) — so chdir first rather than hope the
- *     launcher invoked us from the right place.
- *   - the OPENCODE_DISABLE_* pins. It forwards process.env, so setting them on ourselves is
- *     what reaches the child: auto-update (a network fetch mid-run), LSP downloads (nothing
- *     here needs a language server) and .claude compatibility reads (a customer repo must not
- *     reach our system prompt).
+ * Two things the spawn does NOT do for us, so we do them here, before it:
+ *   - cwd. The child inherits the parent's working directory, and the agent's start directory is
+ *     a SECURITY boundary (see AGENT_CWD) — so chdir first rather than hope the launcher invoked
+ *     us from the right place.
+ *   - the OPENCODE_DISABLE_* pins. The child gets process.env, so setting them on ourselves is
+ *     what reaches it: auto-update (a network fetch mid-run), LSP downloads (nothing here needs a
+ *     language server) and .claude compatibility reads (a customer repo must not reach our system
+ *     prompt).
  *
- * The port is chosen HERE rather than left to the SDK. Its default is a fixed 4096, which two
- * concurrent runs on one host (local mode) would collide on, and `port: 0` does NOT mean
- * "any free port" — measured, opencode ignores it and binds 4096 anyway. An explicitly chosen
- * free port is honoured, and the SDK still reads the real url back off the announcement.
+ * The port is chosen HERE. opencode's default is a fixed 4096, which two concurrent runs on one
+ * host (local mode) would collide on, and `port: 0` does NOT mean "any free port" — measured,
+ * opencode ignores it and binds 4096 anyway. An explicitly chosen free port is honoured, and the
+ * real url is still read back off the announcement.
  *
- * Timeout is generous because a cold microVM is slow to boot: the SDK's own default is 5s and
- * we measured 3.5s warm, which leaves no headroom at all.
- *
- * The SDK's two start failures are NOT equally informative, which is worth knowing before
- * reading a log written by one of them (read its dist/server.js):
- *   - the process EXITS (the usual shape of a bad config or a missing binary) → it rejects with
- *     `Server exited with code N` AND the stdout+stderr it collected. That is the good case.
- *   - the timeout fires (the process is up but never announced) → it rejects with a bare
- *     `Timeout waiting for server to start after Nms` and DISCARDS everything it collected.
- * The SDK hands back no process handle, so there is no way to tap that output ourselves. All we
- * can do is say so at the point of failure, rather than let a contentless timeout read like a
- * slow boot — hence the wrap below.
+ * Timeout is generous because a cold microVM is slow to boot: the SDK's own default was 5s and we
+ * measured 3.5s warm, which leaves no headroom at all.
  */
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -328,21 +417,19 @@ function freePort() {
 }
 
 async function startServer(configJson) {
-  const { createOpencodeServer } = await import('@opencode-ai/sdk');
   process.chdir(AGENT_CWD);
   process.env.OPENCODE_DISABLE_AUTOUPDATE = '1';
   process.env.OPENCODE_DISABLE_LSP_DOWNLOAD = '1';
   process.env.OPENCODE_DISABLE_CLAUDE_CODE = '1';
   // Run-scoped keys last, so the lane's permission rules win over anything inherited. Read
-  // BEFORE handing the merged object over, because the SDK overwrites the var with its own.
+  // BEFORE the spawn, which overwrites the var in the child's env with the merged object.
   const config = { ...inheritedConfig(), ...configJson };
   const startMs = Date.now();
   try {
-    return await createOpencodeServer({ hostname: '127.0.0.1', port: await freePort(), timeout: 120_000, config });
+    return await spawnOpencodeServer({ hostname: '127.0.0.1', port: await freePort(), timeout: 120_000, config });
   } catch (e) {
-    const hint = /Timeout waiting/.test(String((e && e.message) || ''))
-      ? ' — the process was up but never announced itself, and the SDK discards its output on this' +
-        ' path, so there is none to show'
+    const hint = /Timeout waiting/.test(String((e && e.message) || '')) && !/Server output:/.test(e.message)
+      ? ' — the process was up but never announced itself, and printed nothing'
       : '';
     throw new Error(`opencode server did not start after ${Date.now() - startMs}ms: ${describeError(e)}${hint}`, {
       cause: e,
@@ -962,8 +1049,17 @@ async function runAgent(spec) {
     // The relay is started BEFORE startServer(), so a start failure never reaches this `try` but
     // still leaves the relay's listening socket open. Closing it here, not only on success, is
     // what stops a failed server start from hanging the process until the run's outer deadline.
-    if (server) server.close();
-    if (relay) relay.close();
+    //
+    // The server close is AWAITED: it resolves only once opencode is gone (see stopProcess), so
+    // runAgent never returns while the child and its pipes still hold the event loop. A close
+    // failure is logged, never thrown — a throw here would replace the run's own error.
+    try {
+      if (server) await server.close();
+    } catch (e) {
+      console.error(`opencode server did not close cleanly: ${describeError(e)}`);
+    } finally {
+      if (relay) relay.close();
+    }
   }
 }
 
