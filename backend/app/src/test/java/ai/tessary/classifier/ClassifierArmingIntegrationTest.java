@@ -517,6 +517,62 @@ class ClassifierArmingIntegrationTest {
     }
 
     @Test
+    void aLaterLeakInARuledWindowFilesNothing_onlyTheNextWindowFilesAFreshRuledFinding() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-ruled-same-window")
+                .project()
+                .id();
+        String classifierId = armedSecretLeak(pid);
+        Instant day = windowStart(daysAgo(3));
+
+        String firstId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(3_600))),
+                        Instant.now())
+                .get(0);
+        FindingRow ruled = findings.findById(pid, firstId).orElseThrow();
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict());
+
+        // The same day, detected later: the window's last-seen moves past the ruled finding's, but the
+        // window is the one the ruling already covers.
+        assertTrue(
+                arming.evaluate(
+                                secretLeakRow(pid, classifierId),
+                                pid,
+                                List.of(leak(
+                                        pid,
+                                        classifierId,
+                                        "cs-a",
+                                        "aws-access-key-id",
+                                        "high",
+                                        day.plusSeconds(5 * 3_600))),
+                                Instant.now())
+                        .isEmpty(),
+                "a later leak in the ruled window files nothing");
+        assertEquals(1, findingsFor(pid), "and forks no second finding for the same day");
+
+        String secondId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(
+                                pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(DAY + 3_600))),
+                        Instant.now())
+                .get(0);
+        assertTrue(!secondId.equals(firstId), "the next day's window files a fresh finding");
+        assertEquals(2, findingsFor(pid));
+        FindingRow fresh = findings.findById(pid, secondId).orElseThrow();
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, fresh.triageVerdict(), "ruled at arming in turn");
+        assertEquals(ruled.caseId(), fresh.caseId(), "and joins the cause's case");
+        assertEquals(
+                1L,
+                jdbc.sql("SELECT COUNT(*) FROM eval_case_event WHERE case_id = :id AND kind = 'recurred'")
+                        .param("id", ruled.caseId())
+                        .query(Long.class)
+                        .single(),
+                "as a recurrence");
+    }
+
+    @Test
     void witnessesStopAtTheCap() {
         String pid = TenantFixture.bootstrap(tenants, "arming-cap").project().id();
         String classifierId = armedSecretLeak(pid);

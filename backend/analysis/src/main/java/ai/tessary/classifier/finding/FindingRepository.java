@@ -441,13 +441,15 @@ public class FindingRepository {
      * follows a quiet gap, never because an old window arrived late.
      *
      * <p><b>A window no newer than an already-ruled finding opens nothing.</b> [decision 8b, interactions
-     * with 1, question 11] A ruled finding leaves {@code ux_finding_live} by construction (see the class
-     * javadoc), so without this guard a re-sweep of a window someone already ruled on would INSERT a brand
-     * new open finding for it. Ruled means a verdict of either sign: a negative closes the row, but a
-     * positive keeps it {@code open} with its case, and both must cover the windows they ruled on. The
-     * guard only ever suppresses a fresh INSERT: a window that lands while THIS cause's live row is still
-     * unruled always reaches the conflict target below and refreshes it, whatever any older ruled finding
-     * says.
+     * with 1, question 11] The guard compares windows, not detection instants: a ruled finding covers every
+     * window it saw activity in, so a later detection in that window (a backfill delivered in pieces, or more
+     * traffic the same day) opens nothing, and only a strictly later window can. A ruled finding leaves
+     * {@code ux_finding_live} by construction (see the class javadoc), so without this guard a re-sweep of
+     * a window someone already ruled on would INSERT a brand new open finding for it. Ruled means a verdict
+     * of either sign: a negative closes the row, but a positive keeps it {@code open} with its case, and
+     * both must cover the windows they ruled on. The guard only ever suppresses a fresh INSERT: a window
+     * that lands while THIS cause's live row is still unruled always reaches the conflict target below and
+     * refreshes it, whatever any older ruled finding says.
      *
      * <p>The comparisons cast to {@code timestamptz}. The columns are text, and {@code Instant#toString}
      * drops a zero fraction, so {@code ...:00.5Z} sorts before {@code ...:00Z} as a string while being
@@ -482,7 +484,7 @@ public class FindingRepository {
                 OR NOT EXISTS (SELECT 1 FROM finding
                             WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
                               AND (status = 'closed' OR triage_verdict IS NOT NULL)
-                              AND CAST(last_seen_at AS timestamptz) >= CAST(:lastSeenAt AS timestamptz))
+                              AND CAST(last_seen_at AS timestamptz) >= CAST(:onsetAt AS timestamptz))
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 updated_at = EXCLUDED.updated_at,
