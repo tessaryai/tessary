@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The decisions a dev stack needs, asked once and remembered: `task dev`, `task dev:up`, and
-# `task dev:configure` all source this.
+# `task dev:configure` all source this, and the restart tasks run it (see `compose` at the bottom).
 #
 # The dev stack used to encode every one of these as a default nobody chose, and two of those
 # defaults made it a different product from the one `docker compose -f oci://…` installs: auth
@@ -220,6 +220,12 @@ dev_docker_agent_image_ensure() {
         echo "dev stack: AGENT_IMAGE=$AGENT_IMAGE is already set; skipping the checkout build." >&2
         return 0
     fi
+    # A restart (the `compose` command below) reuses an existing build: it must stay fast, and
+    # `task dev` is where the image is brought up to date with the checkout.
+    if [ "${DEV_AGENT_IMAGE_REUSE:-0}" = "1" ] && docker image inspect "$DEV_AGENT_IMAGE_TAG" >/dev/null 2>&1; then
+        export AGENT_IMAGE="$DEV_AGENT_IMAGE_TAG"
+        return 0
+    fi
     echo "dev stack: building the agent-sandbox image from this checkout (sandbox-runner/agent-sandbox/)…" >&2
     local revision
     revision="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -265,6 +271,8 @@ dev_choices_export_sandbox_env() {
 }
 
 # `bash scripts/lib/dev-choices.sh <command>` for the Taskfile, which cannot source a file.
+#   configure         re-ask every question and save the answers
+#   compose <args>    run the dev compose command with the saved choices exported
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     set -euo pipefail
     case "${1:-}" in
@@ -279,8 +287,25 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
             dev_choices_summary
             echo "Saved to .local/dev-choices.env. Restart the stack to apply: task dev" >&2
             ;;
+        compose)
+            # Any compose command that creates or recreates dev containers (task rb/rf/rc and
+            # their :full variants, classifiers:up). Compose interpolates docker-compose.dev.yml
+            # on every `up`, so a restart that skips the exports `task dev` made recreates the
+            # backend with its empty defaults: no launcher URL, and an MCP base URL a sandbox
+            # container cannot reach. Never prompts; saved answers, else the defaults.
+            shift
+            cd "$REPO_ROOT"
+            TESSARY_DEV_NONINTERACTIVE=1
+            dev_choices_resolve
+            DEV_AGENT_IMAGE_REUSE=1
+            dev_choices_export_sandbox_env
+            compose_cmd="$(bash scripts/lib/dev-compose.sh)"
+            # shellcheck disable=SC2086  # the printed command word-splits by design.
+            exec $compose_cmd "$@"
+            ;;
         *)
             echo "usage: bash scripts/lib/dev-choices.sh configure" >&2
+            echo "       bash scripts/lib/dev-choices.sh compose <docker compose args...>" >&2
             exit 2
             ;;
     esac

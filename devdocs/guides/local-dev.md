@@ -93,6 +93,8 @@ Quick restart shortcuts (run from the tmux shell window; they target the matchin
 - `task rb:full` / `task rf:full` — full image rebuild (use when `pom.xml` / `package.json` / Dockerfile changed)
 - `task logs -- backend` — tail logs for a single service
 
+Each restart re-applies the answers saved in `.local/dev-choices.env` (it never prompts), so a recreated backend keeps its agent launcher wiring. It reuses the agent-sandbox image `task dev` built; restart with `task dev` to rebuild that image from the checkout.
+
 After the npm→pnpm migration, if a leftover `frontend-node-modules` volume still has npm's
 flat tree, `task rf` alone will not clear it (the Dockerfile.dev CMD does self-heal on boot,
 but a stuck volume can also be wiped with `docker volume rm <project>_frontend-node-modules`
