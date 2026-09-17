@@ -35,6 +35,12 @@ vars:
   # covers that case too.
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
+  # For anything that creates or recreates dev containers (`up`, `--force-recreate`). DC_DEV alone
+  # exports none of the choices `task dev` resolved (launcher URL, MCP base URL, AGENT_IMAGE,
+  # COMPOSE_PROFILES, sign-in), so compose would recreate the container from the file's empty
+  # defaults. This re-resolves the saved choices without prompting, then runs DC_DEV's command.
+  # Read-only calls (logs, exec, ps) stay on DC_DEV.
+  DC_DEV_UP: 'bash scripts/lib/dev-choices.sh compose'
   # The prod stack. A file-exists probe, never an env var and never a flag someone has to
   # remember: the open tree has to be coherent with ZERO configuration, and with no
   # tessary-paid/docker-compose.yml on disk this always resolves to the base compose file alone.
@@ -119,7 +125,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:backend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate backend"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate backend"
       - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
 
   rf:
@@ -128,7 +134,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:frontend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate frontend"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate frontend"
       - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
 
   rc:
@@ -137,7 +143,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:caddy C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --no-deps --force-recreate caddy"
+      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate caddy"
       - tmux send-keys -t {{.SESSION}}:caddy "{{.DC_DEV}} logs -f --no-log-prefix caddy" Enter
 
   rb:full:
@@ -145,7 +151,7 @@ tasks:
     cmds:
       - tmux send-keys -t {{.SESSION}}:backend C-c
       - sleep 1
-      - "{{.DC_DEV}} up -d --build --force-recreate --no-deps backend"
+      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps backend"
       - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
 
   rf:full:
@@ -154,7 +160,7 @@ tasks:
       - tmux send-keys -t {{.SESSION}}:frontend C-c
       - sleep 1
       - docker volume rm -f tessary_frontend-node-modules 2>/dev/null || true
-      - "{{.DC_DEV}} up -d --build --force-recreate --no-deps frontend"
+      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps frontend"
       - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
 
   logs:
@@ -722,7 +728,7 @@ tasks:
   classifiers:up:
     desc: Start the dev-only classifier tooling (Argilla on :16900, MLflow on :15000) alongside the dev stack.
     cmds:
-      - "{{.DC_DEV}} --profile classifiers up -d"
+      - "{{.DC_DEV_UP}} --profile classifiers up -d"
 
   classifiers:down:
     desc: Stop just the classifier tooling containers (core dev stack keeps running; volumes kept).
