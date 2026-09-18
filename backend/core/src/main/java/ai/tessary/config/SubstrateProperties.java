@@ -86,6 +86,13 @@ public class SubstrateProperties {
      */
     private boolean resolversEnabled = true;
 
+    /**
+     * Upper bound on one resolver statement, in seconds. A healthy pass takes milliseconds; the bound is
+     * for the one that does not, which otherwise holds its row locks and the resolver's scheduler thread
+     * for as long as it runs. A cancelled pass changes nothing and the next tick retries.
+     */
+    private int resolverStatementTimeoutSeconds = 30;
+
     public long getQueueMaxBytes() {
         return queueMaxBytes;
     }
@@ -140,6 +147,14 @@ public class SubstrateProperties {
 
     public void setResolversEnabled(boolean v) {
         this.resolversEnabled = v;
+    }
+
+    public int getResolverStatementTimeoutSeconds() {
+        return resolverStatementTimeoutSeconds;
+    }
+
+    public void setResolverStatementTimeoutSeconds(int v) {
+        this.resolverStatementTimeoutSeconds = v;
     }
 
     /**
