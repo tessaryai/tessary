@@ -109,6 +109,12 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
      * waiting on the JVM rather than on Postgres closes a cycle no deadlock detector spans. On CI every
      * thread went silent for the full 30s timeout and resumed the moment the TRUNCATE gave up. A short
      * timeout gives up early, which releases the workers, and the next attempt finds the tables free.
+     *
+     * <p>Retrying alone cannot outlast a statement that never finishes: a {@code markOrphanPaths} pass
+     * once ran for over 16 minutes and failed every later class in the context. So a lost race also
+     * ends every session whose transaction is older than the lock wait. The test class is over and the
+     * database is throwaway, so whatever still holds a transaction here is a background worker, and its
+     * next tick reconnects.
      */
     private static void truncateWithRetry(DataSource dataSource, String sql, Class<?> testClass) {
         for (int attempt = 1; ; attempt++) {
@@ -126,11 +132,12 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
                             e);
                 }
                 log.warn(
-                        "schema clean after {} lost a lock race on attempt {} ({}); other sessions: {}",
+                        "schema clean after {} lost a lock race on attempt {} ({}); other sessions: {}; terminated: {}",
                         testClass.getSimpleName(),
                         attempt,
                         e.getSQLState(),
-                        describeOtherSessions(dataSource));
+                        describeOtherSessions(dataSource),
+                        terminateLongTransactions(dataSource));
                 sleep(RETRY_BACKOFF_MS * attempt);
             }
         }
@@ -153,6 +160,25 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
             return "unavailable (" + e.getMessage() + ")";
         }
         return sessions.isEmpty() ? "none in a transaction" : String.join(" ", sessions);
+    }
+
+    private static String terminateLongTransactions(DataSource dataSource) {
+        List<Integer> terminated = new ArrayList<>();
+        try (Connection connection = dataSource.getConnection();
+                Statement statement = connection.createStatement()) {
+            requireThrowawayContainer(connection);
+            try (ResultSet rows = statement.executeQuery("SELECT pid FROM pg_stat_activity"
+                    + " WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                    + " AND xact_start < now() - interval '" + LOCK_TIMEOUT_MS + " milliseconds'"
+                    + " AND pg_terminate_backend(pid)")) {
+                while (rows.next()) {
+                    terminated.add(rows.getInt(1));
+                }
+            }
+        } catch (SQLException e) {
+            return "unavailable (" + e.getMessage() + ")";
+        }
+        return terminated.isEmpty() ? "none" : terminated.toString();
     }
 
     private static void sleep(long millis) {

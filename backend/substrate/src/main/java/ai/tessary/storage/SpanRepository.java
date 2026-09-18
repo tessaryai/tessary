@@ -6,6 +6,7 @@ import static ai.tessary.storage.TraceV2Repository.intOrNull;
 import static ai.tessary.storage.TraceV2Repository.longOrNull;
 import static ai.tessary.storage.TraceV2Repository.numericOrNull;
 
+import ai.tessary.config.SubstrateProperties;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -13,6 +14,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
@@ -45,9 +47,16 @@ public class SpanRepository {
 
     private final NamedParameterJdbcTemplate named;
 
-    public SpanRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    /** The resolver passes' client, carrying {@code resolver-statement-timeout-seconds}. */
+    private final JdbcClient resolverJdbc;
+
+    public SpanRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named, SubstrateProperties props) {
         this.jdbc = jdbc;
         this.named = named;
+        JdbcTemplate timed = new JdbcTemplate();
+        timed.setDataSource(named.getJdbcTemplate().getDataSource());
+        timed.setQueryTimeout(props.getResolverStatementTimeoutSeconds());
+        this.resolverJdbc = JdbcClient.create(timed);
     }
 
     private static final String UPSERT_SQL = """
@@ -214,7 +223,8 @@ public class SpanRepository {
      * @return the number of spans resolved.
      */
     public int resolveRootPaths(int limit) {
-        return jdbc.sql("WITH due AS ("
+        return resolverJdbc
+                .sql("WITH due AS ("
                         + "  SELECT project_id, trace_id, id FROM span"
                         + "   WHERE path IS NULL AND path_state = 'pending' AND parent_span_id IS NULL"
                         + "   LIMIT :limit)"
@@ -244,7 +254,8 @@ public class SpanRepository {
      * @return the number of spans resolved this pass; zero means the fixpoint has converged.
      */
     public int resolveChildPaths(int limit) {
-        return jdbc.sql("WITH due AS ("
+        return resolverJdbc
+                .sql("WITH due AS ("
                         + "  SELECT s.project_id, s.trace_id, s.id FROM span s"
                         + "   WHERE s.path IS NULL AND s.path_state = 'pending' AND s.parent_span_id IS NOT NULL"
                         + "     AND EXISTS (SELECT 1 FROM span p"
@@ -277,7 +288,7 @@ public class SpanRepository {
      * @return the number of spans marked orphan.
      */
     public int markOrphanPaths(int limit) {
-        return jdbc.sql("""
+        return resolverJdbc.sql("""
                         WITH due AS (
                             SELECT s.project_id, s.trace_id, s.id
                               FROM span s
@@ -307,7 +318,7 @@ public class SpanRepository {
      * @return the number of spans correlated.
      */
     public int backfillCorrelation(int limit) {
-        return jdbc.sql("""
+        return resolverJdbc.sql("""
                         WITH due AS (
                             SELECT project_id, trace_id, id
                               FROM span
@@ -338,7 +349,7 @@ public class SpanRepository {
      * @return the number of spans marked as having no correlation to inherit.
      */
     public int markCorrelationNone(int limit) {
-        return jdbc.sql("""
+        return resolverJdbc.sql("""
                         WITH due AS (
                             SELECT project_id, trace_id, id
                               FROM span
