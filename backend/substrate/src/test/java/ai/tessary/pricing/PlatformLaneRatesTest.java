@@ -72,8 +72,8 @@ class PlatformLaneRatesTest {
         m.put("zai/glm-5.3", new String[] {"1.4", "4.4", "0.26", "0"});
         m.put("zai/glm-5.3-flash", new String[] {"0.15", "0.5", "0.03", "0"});
         m.put("moonshot/kimi-k2.6", new String[] {"0.95", "4", "0.16", "-"});
-        m.put("openrouter/openai/gpt-5.6-terra", new String[] {"2", "12", "0.2", "-"});
-        m.put("openrouter/openai/gpt-5.6-luna", new String[] {"0.2", "1.2", "0.02", "-"});
+        m.put("openrouter/openai/gpt-5.6-terra", new String[] {"2", "12", "0.2", "2.5"});
+        m.put("openrouter/openai/gpt-5.6-luna", new String[] {"0.2", "1.2", "0.02", "0.25"});
         return Map.copyOf(m);
     }
 
