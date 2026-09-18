@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.TestContext;
 import org.springframework.test.context.TestExecutionListener;
@@ -47,6 +49,15 @@ import org.springframework.test.context.TestExecutionListener;
  * listener declared there is added to the framework defaults rather than replacing them.
  */
 public class SchemaCleaningTestExecutionListener implements TestExecutionListener {
+
+    private static final Logger log = LoggerFactory.getLogger(SchemaCleaningTestExecutionListener.class);
+
+    /** deadlock_detected and lock_not_available: both mean a worker got there first, not that the SQL is wrong. */
+    private static final Set<String> RETRYABLE_SQL_STATES = Set.of("40P01", "55P03");
+
+    private static final int MAX_ATTEMPTS = 10;
+    private static final long LOCK_TIMEOUT_MS = 2_000;
+    private static final long RETRY_BACKOFF_MS = 250;
 
     private static final Set<String> LIQUIBASE_TABLES = Set.of("databasechangelog", "databasechangeloglock");
 
@@ -84,16 +95,72 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
         String sql = toClear.stream()
                 .map(table -> "\"public\".\"" + table + "\"")
                 .collect(Collectors.joining(", ", "TRUNCATE TABLE ", " RESTART IDENTITY CASCADE"));
+        truncateWithRetry(dataSource, sql, testContext.getTestClass());
+    }
+
+    /**
+     * Retries the TRUNCATE rather than waiting it out, because a shared context keeps its
+     * {@code @Scheduled} workers ticking between classes and two kinds of collision are routine.
+     *
+     * <p>A deadlock: a worker's insert holds its child table and asks for the FK's ROW SHARE lock on
+     * a parent the TRUNCATE already holds ACCESS EXCLUSIVE, while the TRUNCATE waits for that child.
+     * Postgres breaks it in a second. The other kind it cannot see: while the TRUNCATE waits it keeps
+     * the locks it already has, so every worker queues behind it, and a lock holder that is itself
+     * waiting on the JVM rather than on Postgres closes a cycle no deadlock detector spans. On CI every
+     * thread went silent for the full 30s timeout and resumed the moment the TRUNCATE gave up. A short
+     * timeout gives up early, which releases the workers, and the next attempt finds the tables free.
+     */
+    private static void truncateWithRetry(DataSource dataSource, String sql, Class<?> testClass) {
+        for (int attempt = 1; ; attempt++) {
+            try (Connection connection = dataSource.getConnection();
+                    Statement statement = connection.createStatement()) {
+                requireThrowawayContainer(connection);
+                statement.execute("SET lock_timeout = '" + LOCK_TIMEOUT_MS + "ms'");
+                statement.execute(sql);
+                return;
+            } catch (SQLException e) {
+                if (!RETRYABLE_SQL_STATES.contains(e.getSQLState()) || attempt == MAX_ATTEMPTS) {
+                    throw new IllegalStateException(
+                            "failed to clean the test schema after " + testClass + " in " + attempt
+                                    + " attempt(s); other sessions: " + describeOtherSessions(dataSource),
+                            e);
+                }
+                log.warn(
+                        "schema clean after {} lost a lock race on attempt {} ({}); other sessions: {}",
+                        testClass.getSimpleName(),
+                        attempt,
+                        e.getSQLState(),
+                        describeOtherSessions(dataSource));
+                sleep(RETRY_BACKOFF_MS * attempt);
+            }
+        }
+    }
+
+    private static String describeOtherSessions(DataSource dataSource) {
+        List<String> sessions = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
-                Statement statement = connection.createStatement()) {
-            requireThrowawayContainer(connection);
-            // A shared context keeps its @Scheduled workers ticking between classes, so the ACCESS
-            // EXCLUSIVE locks TRUNCATE takes can collide with one mid-statement. Bound the wait
-            // rather than hang the suite.
-            statement.execute("SET lock_timeout = '30s'");
-            statement.execute(sql);
+                Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("""
+                        SELECT pid, state, now() - xact_start, wait_event_type, left(query, 200)
+                        FROM pg_stat_activity
+                        WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start IS NOT NULL
+                        ORDER BY xact_start""")) {
+            while (rows.next()) {
+                sessions.add("[pid=" + rows.getInt(1) + " state=" + rows.getString(2) + " xact_age=" + rows.getString(3)
+                        + " wait=" + rows.getString(4) + " query=" + rows.getString(5) + "]");
+            }
         } catch (SQLException e) {
-            throw new IllegalStateException("failed to clean the test schema after " + testContext.getTestClass(), e);
+            return "unavailable (" + e.getMessage() + ")";
+        }
+        return sessions.isEmpty() ? "none in a transaction" : String.join(" ", sessions);
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while retrying the schema clean", e);
         }
     }
 
