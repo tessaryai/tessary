@@ -131,3 +131,52 @@ test("resolveConfig prefers explicit flags over env vars and errors when neither
   assert.throws(() => resolveConfig([], {}), /missing origin/);
   assert.throws(() => resolveConfig(["--origin", "http://localhost:8000"], {}), /missing token/);
 });
+
+test("drains in-flight responses when stdin closes before the server answers", async () => {
+  const server = await startMockMcpServer((req, res, raw) => {
+    const { id } = JSON.parse(raw);
+    setTimeout(() => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
+    }, 200);
+  });
+  const { port } = server.address();
+
+  const child = spawn(process.execPath, [BIN_PATH], {
+    env: {
+      ...process.env,
+      TESSARY_ORIGIN: `http://127.0.0.1:${port}`,
+      TESSARY_TOKEN: "tsy_a_test_token",
+    },
+  });
+
+  try {
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    const exited = new Promise((resolve) => child.on("close", resolve));
+
+    // Two requests, then stdin closes while both are still outstanding.
+    child.stdin.end(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) +
+        "\n" +
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }) +
+        "\n",
+    );
+
+    const code = await exited;
+
+    assert.equal(code, 0);
+    const ids = stdout
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l).id)
+      .sort();
+    assert.deepEqual(ids, [1, 2]);
+  } finally {
+    child.kill();
+    server.close();
+  }
+});

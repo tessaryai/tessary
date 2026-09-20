@@ -75,20 +75,30 @@ function main() {
   }
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  const inFlight = new Set();
 
   rl.on("line", (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    forward(config.origin, config.token, trimmed)
+    const request = forward(config.origin, config.token, trimmed)
       .then((responseText) => {
         if (responseText !== null) process.stdout.write(responseText + "\n");
       })
       .catch((err) => {
         process.stdout.write(errorResponseFor(trimmed, config.origin, err) + "\n");
-      });
+      })
+      .finally(() => inFlight.delete(request));
+    inFlight.add(request);
   });
 
-  rl.on("close", () => process.exit(0));
+  // stdin closing is the client's shutdown signal, not a reason to drop responses
+  // still on the wire. Wait for them, then let the event loop end on its own so
+  // stdout flushes (process.exit() can cut off buffered writes).
+  rl.on("close", () => {
+    Promise.allSettled([...inFlight]).then(() => {
+      process.exitCode = 0;
+    });
+  });
 }
 
 if (require.main === module) {
