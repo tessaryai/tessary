@@ -80,12 +80,13 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# EMPTY, and that is the finding, not an oversight: all six pinned Python originals are
-# not present in this checkout, so there is no open-side pin left to run. What stayed public — framework/,
-# tool_error/, metric_drift/, data_gen/ — has no second implementation anywhere, so there is
-# nothing for a port-parity gate to pin. If a public module ever grows a Java or JS twin, its
-# pin goes here and this comment shrinks.
-OPEN_TESTS=""
+# ONE open pin, and it is the case this slot was left open for: groundedness/sweep_corpus.py is a
+# Python copy of classify.js's premise tiling and window reduction, and BOTH sides are open code, so
+# the pin belongs here rather than in the overlay list below. It runs in EVERY edition — see the
+# unconditional block after the probe. The rest of what stayed public (framework/, tool_error/,
+# metric_drift/, data_gen/) still has no second implementation anywhere, so there is nothing more
+# here for a port-parity gate to pin.
+OPEN_TESTS="tests/test_groundedness_sweep_corpus.py tests/test_groundedness_token_head.py"
 # All six pins. Basenames only: the directory they live in is resolved at run time from
 # classifiers/pyproject.toml's pythonpath entries (see PAID_TESTS_DIR below) because rule 5 forbids
 # this file from spelling the overlay path.
@@ -136,6 +137,22 @@ print(tests)
   esac
 fi
 
+# The open pins run in BOTH editions, and unconditionally. They pin open Python against open JS, so
+# a checkout that ALSO has the paid half must not skip them — putting this inside the else below
+# would mean the pin never runs in the edition that ships to customers.
+if [ -n "$OPEN_TESTS" ]; then
+  # A pin that SKIPS is not a pin that ran: -rs prints every skip with its reason, and one skip
+  # fails this gate, so "RAN N OPEN PINS" below is never printed over a test that asserted nothing.
+  # shellcheck disable=SC2086
+  open_out="$(uv run --quiet pytest -q -rs -c pyproject.toml $OPEN_TESTS 2>&1)" || { printf '%s\n' "$open_out"; exit 1; }
+  printf '%s\n' "$open_out"
+  if printf '%s' "$open_out" | grep -qE '^SKIPPED '; then
+    echo "check-classifier-parity: an OPEN pin skipped (reasons above). The pin must run: install" >&2
+    echo "  node + classify-service/node_modules, and let the pinned tokenizer download once." >&2
+    exit 1
+  fi
+fi
+
 if [ "$run_paid" = 1 ]; then
   PAID_TESTS=""
   for _t in $PAID_TEST_NAMES; do
@@ -155,26 +172,25 @@ if [ "$run_paid" = 1 ]; then
   # shellcheck disable=SC2086
   uv run --quiet pytest -q -c pyproject.toml $PAID_TESTS
 else
-  if [ -n "$OPEN_TESTS" ]; then
-    # shellcheck disable=SC2086
-    uv run --quiet pytest -q $OPEN_TESTS
-  fi
   if [ "$EDITION" = open ]; then
     why="--edition open never carries them"
   else
     why="sop_compiler is not importable in this checkout"
   fi
-  echo "classifier:parity — RAN 0 OF 6 PINS ($why)."
+  echo "classifier:parity — RAN 2 OPEN PINS; 6 OVERLAY PINS SKIPPED ($why)."
+  echo "  ran:     $OPEN_TESTS  (groundedness/sweep_corpus.py <-> classify.js; token_eval encoding <-> groundedness.js)"
   echo "  skipped: $PAID_TEST_NAMES"
-  echo "  Every pinned Python original is not in this checkout: verifiable_claims.py and"
-  echo "  sweep_corpus.py (groundedness/), slice/build.py (frustration/), sop_compiler.{metrics,"
-  echo "  artifacts,schema} and experiments.shared.metrics. The open half of classifiers/ that"
-  echo "  remains — framework/, tool_error/, metric_drift/, data_gen/ — has no second implementation"
-  echo "  in Java or JS, so there is nothing here for a PORT-parity gate to pin."
-  echo "  READ THAT AS ZERO COVERAGE, NOT AS A PASS. This gate is green in this checkout because"
-  echo "  it asserted nothing, and it prints this rather than a bare OK so that is impossible to"
-  echo "  miss. The Java/JS ports it guards are still open code; what moved is the Python originals"
-  echo "  they are pinned to, which is why the pins moved with them."
+  echo "  Those overlay pins' Python originals are not in this checkout: verifiable_claims.py"
+  echo "  (groundedness/), slice/build.py (frustration/), sop_compiler.{metrics,artifacts,schema}"
+  echo "  and experiments.shared.metrics."
+  echo "  test_premise_windowing_parity.py OVERLAPS the open pin above — both pin the same premise"
+  echo "  tiling — because sweep_corpus.py is now open while the overlay may still carry its own"
+  echo "  copy. Groundedness moved into the open tree on 2026-09-21 (detector, table, weights); the"
+  echo "  overlay name stays listed until the overlay's copy is deleted, rather than dropping silently."
+  echo "  READ THAT AS ONE PIN OF COVERAGE, NOT SEVEN. The premise tiling is pinned to the JS that"
+  echo "  serves it; claim extraction, the frustration serving contract and the SOP compiler's"
+  echo "  metrics are not pinned to anything in this checkout. This gate prints the count rather"
+  echo "  than a bare OK so that is impossible to miss."
 fi
 
 echo "classifier parity check OK"

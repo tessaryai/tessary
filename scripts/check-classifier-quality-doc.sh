@@ -80,15 +80,19 @@ def number_in(block, key):
     return m.group(1) if m else None
 
 
-groundedness_cfg = config_block(r'"\{\\"threshold_high.*?\}",', 'threshold_low\\":0.6}')
+# groundedness v5 (token head): the band is 0.975/0.5, see BuiltInClassifierCatalog.
+groundedness_cfg = config_block(r'"\{\\"threshold_high.*?\}",', 'threshold_low\\":0.5')
 frustration_cfg = config_block(r'"\{\\"threshold\\".*?\}",', 'min_baseline_conversations')
 
-expected = {
-    'groundedness_revision': models['groundedness']['revision'],
-    'groundedness_high': number_in(groundedness_cfg, 'threshold_high'),
-    'groundedness_low': number_in(groundedness_cfg, 'threshold_low'),
-    'frustration_threshold': number_in(frustration_cfg, 'threshold'),
-}
+# Groundedness is pinned when the manifest binds it (its revision is the served checkpoint);
+# frustration's Jev threshold lives in the catalog alone, so it is pinned whatever the manifest says.
+expected = {'frustration_threshold': number_in(frustration_cfg, 'threshold')}
+if 'groundedness' in models:
+    expected.update({
+        'groundedness_revision': models['groundedness']['revision'],
+        'groundedness_high': number_in(groundedness_cfg, 'threshold_high'),
+        'groundedness_low': number_in(groundedness_cfg, 'threshold_low'),
+    })
 
 problems = []
 for key, actual in expected.items():

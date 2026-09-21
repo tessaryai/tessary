@@ -13,11 +13,10 @@
  * fixed: these heads are the product's built-in semantic classifiers, best-in-class
  * off-the-shelf ONNX checkpoints.
  *
- * `groundedness` is a PAIR head (score a claim against a premise/context) — see "Pair-input
- * heads" below. The single-text path (`texts`) stays for any single-text head; none is registered
- * today.
+ * `groundedness` is a TOKEN head (whole-response scoring, see groundedness.js). The pair and
+ * single-text paths stay for any future head of those shapes; none is registered today.
  *
- * Licenses: groundedness (bart-large-mnli) MIT.
+ * Licenses: groundedness (tessaryai/groundedness-token-v1) MIT.
  * (2026-07-16: refusal/jailbreak/unsafe_text were retired from the default catalog and
  * decommissioned here — their non-permissive licenses are moot now that nothing serves them.
  * The frustration and attribution heads went the same way when frustration moved to a
@@ -115,18 +114,30 @@ const SCORERS = {
   groundedness: (labels) => 1 - (labels.get('contradiction') ?? 0),
 };
 
+// How a head's per-window scores collapse to one score per input: MAX, "this behaviour is
+// present if ANY window shows it", which is right for every support- or presence-shaped score.
+// A head whose score means something else registers its own reducer here; none does today
+// (the groundedness pair head that needed MIN-over-contradiction was replaced by the token head).
+const REDUCERS = {};
+const DEFAULT_REDUCER = (scores) => Math.max(...scores);
+const reducerFor = (head) => REDUCERS[head] ?? DEFAULT_REDUCER;
+
 // Heads that score a (premise, claim) RELATIONSHIP rather than one string in isolation. A pair
 // head's /classify request carries `pairs: [{premise, claim}]` instead of `texts: [".."]` — the
 // two shapes are mutually exclusive per head so a caller can't accidentally submit the wrong one.
-const PAIR_HEADS = new Set(['groundedness']);
+// `groundedness` moved from the pair path to a long-context TOKEN head (groundedness.js) on
+// 2026-09-18: one 8,192-token pass per response, contract "anything unsupported". PAIR_HEADS is
+// kept (empty) so a future pair head has its path; nothing in this file assumes it is non-empty.
+const PAIR_HEADS = new Set([]);
+const TOKEN_HEADS = new Set(['groundedness']);
 
 // Pair-input budgeting. The encoder still sees only ~512 tokens total, and the input is built as
 // `premiseChunk + eos_token + claim` — so unlike single-text scoring, the CLAIM must never be the
 // part that gets silently truncated (that's the exact content being judged). The premise is what
-// gets chunked instead, mirroring MiniCheck's own chunk-and-max-aggregate approach: split the
-// premise into overlapping windows sized to leave room for the (bounded) claim, score the claim
-// against every window, and take the MAX support score across windows — "supported if ANY window
-// supports it". Claim length itself is clamped defensively (a claim longer than the clamp loses
+// gets chunked instead: split the premise into overlapping windows sized to leave room for the
+// (bounded) claim, score the claim against every window, and reduce across windows with the head's
+// own reducer (see REDUCERS above — `groundedness` reduces by MIN support, i.e. "contradicted if
+// ANY window contradicts"). Claim length itself is clamped defensively (a claim longer than the clamp loses
 // its tail to the shared tokenizer truncation the same way every other head's input already does
 // — an accepted, pre-existing bound in this file, not a new one).
 const PAIR_TOTAL_CHARS = 1800; // ~<=512 tokens of dense prose, same budget as WINDOW_CHARS
@@ -143,10 +154,10 @@ const HEADS = Object.fromEntries(
     return [head, { ...MODELS[head], score: SCORERS[head] }];
   }),
 );
-// The OTHER direction is not a build mistake any more. The scoring code above is
-// open source; the manifest that binds each head to a pinned checkpoint is not, and the open
-// edition ships models.json as `{}` — the populated manifest lives elsewhere. So a
-// scorer with no manifest entry is a head this build knows BY NAME but cannot serve, and it
+// The OTHER direction is not a build mistake any more. The scoring code above is open source,
+// and the open edition's models.json binds only the heads whose weights are public
+// (groundedness, since 2026-09-21); any private head's pin lives in an overlay's manifest. So a scorer with no manifest entry is a head this build knows BY NAME but
+// cannot serve, and it
 // is registered here as UNBACKED rather than thrown on: throwing at module load would take
 // down the whole service (and warmup.js, which does nothing but `require` this file) for a
 // condition that is the open edition's normal, expected shape.
@@ -281,7 +292,7 @@ async function warmAll() {
       console.log(`warmAll: skipping '${head}' (gated head, weights not baked)`);
       continue;
     }
-    await pipelineFor(head);
+    await (TOKEN_HEADS.has(head) ? tokenModelFor(head) : pipelineFor(head));
   }
 }
 
@@ -339,11 +350,24 @@ function premiseChunksFor(premise, claimLen, opts = {}) {
 }
 
 /**
- * Run `windows` through `pipe` in {@link INFER_BATCH} micro-batches, map each result through
- * `spec.score`, then reduce back to one score per group via MAX — "behavior/support present if
- * ANY window shows it". Shared tail for both single-text and pair-head scoring.
+ * Reduce per-window scores back to one score per group, using `reduce`. Pure and exported so the
+ * reduction can be pinned without loading weights — the reason `windowsFor`/`premiseChunksFor` are
+ * exported too. `groupOf[w]` names the group window `w` belongs to.
  */
-async function scoreWindowedBatch(pipe, spec, windows, groupOf, numGroups) {
+function reduceWindows(winScores, groupOf, numGroups, reduce) {
+  const buckets = Array.from({ length: numGroups }, () => []);
+  winScores.forEach((sc, w) => buckets[groupOf[w]].push(sc));
+  // A group with no windows cannot happen (every input contributes at least one window), but a 0
+  // is a safer answer than reducing an empty array to -Infinity if that ever changes.
+  return buckets.map((b) => (b.length ? reduce(b) : 0));
+}
+
+/**
+ * Run `windows` through `pipe` in {@link INFER_BATCH} micro-batches, map each result through
+ * `spec.score`, then reduce back to one score per group with the head's own reducer (see
+ * {@link REDUCERS}). Shared tail for both single-text and pair-head scoring.
+ */
+async function scoreWindowedBatch(pipe, spec, windows, groupOf, numGroups, head) {
   const winScores = [];
   for (let i = 0; i < windows.length; i += INFER_BATCH) {
     // top_k null = every label's score; the tokenizer truncates to the model window itself
@@ -355,14 +379,7 @@ async function scoreWindowedBatch(pipe, spec, windows, groupOf, numGroups) {
     winScores.push(...perText.map((entries) => spec.score(new Map(entries.map((e) => [e.label, e.score])))));
   }
 
-  const scores = new Array(numGroups).fill(0);
-  const seen = new Array(numGroups).fill(false);
-  winScores.forEach((sc, w) => {
-    const gi = groupOf[w];
-    scores[gi] = seen[gi] ? Math.max(scores[gi], sc) : sc;
-    seen[gi] = true;
-  });
-  return scores;
+  return reduceWindows(winScores, groupOf, numGroups, reducerFor(head));
 }
 
 /**
@@ -378,7 +395,49 @@ async function classify(payload) {
   const spec = Object.hasOwn(HEADS, head) ? HEADS[head] : undefined;
   if (!spec) throw new Error(`unknown classify head: ${head}`);
 
+  if (TOKEN_HEADS.has(head)) return classifyTokens(head, spec, payload);
   return PAIR_HEADS.has(head) ? classifyPairs(head, spec, payload) : classifyTexts(head, spec, payload);
+}
+
+// Token heads: whole-response scoring, see groundedness.js for the contract and the encoding.
+const tokenHead = require('./groundedness');
+const tokenModels = new Map();
+async function tokenModelFor(head) {
+  let p = tokenModels.get(head);
+  if (!p) {
+    const load = async () => {
+      const tf = await import('@huggingface/transformers');
+      tf.env.localModelPath = process.env.HF_CACHE_DIR || '/models';
+      tf.env.allowRemoteModels = false;
+      const spec = HEADS[head];
+      const opts = { dtype: spec.dtype, session_options: { enableCpuMemArena: false } };
+      if (spec.subfolder !== undefined) opts.subfolder = spec.subfolder;
+      console.log(`classify: loading token head '${head}' (${spec.model}@${spec.revision})`);
+      const started = Date.now();
+      const tokenizer = await tf.AutoTokenizer.from_pretrained(spec.model);
+      const model = await tf.AutoModelForTokenClassification.from_pretrained(spec.model, opts);
+      // The bake must carry the model's real window (8192 for ModernBERT); groundedness.js sizes
+      // its own truncation to MAX_LENGTH, and a smaller baked window would silently cut answers.
+      const window = Number(tokenizer.model_max_length);
+      if (!Number.isFinite(window) || window < tokenHead.MAX_LENGTH) {
+        throw new Error(`token head '${head}' tokenizer window ${window} < ${tokenHead.MAX_LENGTH} — bake must not clamp it`);
+      }
+      console.log(`classify: token head '${head}' ready in ${Date.now() - started}ms (window ${window})`);
+      return { tokenizer, model, tf };
+    };
+    p = loadChain.then(load);
+    loadChain = p.catch(() => {});
+    p.catch(() => tokenModels.delete(head));
+    tokenModels.set(head, p);
+  }
+  return p;
+}
+
+async function classifyTokens(head, spec, payload) {
+  const responses = tokenHead.validate(payload);
+  requireResident(head, spec);
+  const loaded = await tokenModelFor(head);
+  return tokenHead.scoreResponses(loaded, responses);
 }
 
 // A gated head (`"gated": true` in models.json) with no baked weights (keyless
@@ -418,7 +477,7 @@ function requireResident(head, spec) {
     throw Object.assign(
       new Error(
         `UNAVAILABLE_IN_OPEN_EDITION: head '${head}' has no entry in models.json — ` +
-          'the open edition ships an empty manifest, so no checkpoint is bound to it',
+          'the open manifest binds only the public heads, so no checkpoint is bound to it',
       ),
       { statusCode: 400 },
     );
@@ -464,7 +523,7 @@ async function classifyTexts(head, spec, payload) {
     }
   });
 
-  const scores = await scoreWindowedBatch(pipe, spec, windows, textOf, prepared.length);
+  const scores = await scoreWindowedBatch(pipe, spec, windows, textOf, prepared.length, head);
   return { scores };
 }
 
@@ -499,8 +558,11 @@ async function classifyPairs(head, spec, payload) {
     }
   });
 
-  const scores = await scoreWindowedBatch(pipe, spec, windows, pairOf, pairs.length);
+  const scores = await scoreWindowedBatch(pipe, spec, windows, pairOf, pairs.length, head);
   return { scores };
 }
 
-module.exports = { classify, warmAll, HEADS, windowsFor, premiseChunksFor, deBlob, PAIR_HEADS, headResidency };
+module.exports = {
+  classify, warmAll, HEADS, windowsFor, premiseChunksFor, deBlob, PAIR_HEADS, TOKEN_HEADS, headResidency,
+  reduceWindows, reducerFor,
+};
