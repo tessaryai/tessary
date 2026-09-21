@@ -91,3 +91,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0021-rca-frustration-report.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0022-frustration-off.sql
+      relativeToChangelogFile: false

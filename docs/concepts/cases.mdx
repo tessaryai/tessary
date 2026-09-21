@@ -64,6 +64,19 @@ Both close every finding the case still holds open, in the same action.
 
 **Absorb as legitimate** is the one that ends the argument rather than this instance of it. Use **Resolve** when you have shipped a fix and the window has not caught up yet; use **Absorb as legitimate** when the new level is correct and you want it to become normal.
 
+### Resolving a frustration case
+
+A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated conversations rises above the rate it learned, because the numbers on the finding are the claim.
+
+Resolving one asks what it was, and both answers restart that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the conversations after the resolve.
+
+| Disposition | What it does |
+| --- | --- |
+| **Fixed** | Restarts the test. The conversations the case cites still count as frustrated. |
+| **False alarm** | Restarts the test, and every conversation cited by any finding in the case stops counting as frustrated. Their later user messages can be scored again. |
+
+The rate is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live. Resolved before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
+
 Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA (root-cause analysis) requests and completions, resolution, muting and unmuting, and absorption.
 
 ## Running RCA locks the case

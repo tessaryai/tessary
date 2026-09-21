@@ -4,10 +4,8 @@
 interface stays open, we charge for the classifiers we build, and anyone can write and run their own
 on the open interface. This page is that interface written down: the ports a classifier attaches
 through, how one is packaged and discovered, what happens when it is absent, and how the three paid
-classifiers with an actual Java extraction map onto it. (A fourth paid classifier, frustration, has
-no extraction to map — it rides the always-open, generic `EncoderDetector` and is paid only in that
-its trained weights are withheld; see `CapabilityService` for the full four-classifier capability
-picture, and §8 below for why this count is three, not four.)
+classifiers with an actual Java extraction map onto it. (Frustration, once a fourth, is open: its
+detector, table and rate test all ship in this tree; see §8.)
 
 This is implemented far enough to sever the engine's compile-time dependency on the
 paid classifiers, and is used end to end. The seam was later extended a second
@@ -272,14 +270,13 @@ implementation, `BehaviorTriageSource`, never left the open package. `AbsentAdap
 
 ## 8. The paper port of the three paid classifiers
 
-Frustration is deliberately near-absent from this section: it is a paid CAPABILITY
-(`Capability.FRUSTRATION` joined `CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`) whose paid
-CODE is exactly ONE bean — the frustration module's own
-`FrustrationAutoConfiguration`, registering `frustration_detection` with `DetectionTableRegistry` (§2)
-and nothing else. It rides the always-open, generic `EncoderDetector`, the same detector class other
-encoder-tier signals share, and what is withheld without that one bean is the write path (the
-`writesDetections` gate), not the trained artifact or the detector class. This section is about
-classifiers with an actual Java DETECTOR extraction, and there are three of those.
+Frustration is not in this section: it is an open classifier. Its detector
+(`classifier/frustration/JevFrustrationDetector`, supplied to the catalog through a `DetectorSupplier`
+in the same package), its `frustration_detection` table (registered in `OpenDetectionTables`) and
+its rate test all ship in the open tree, and `Capability.FRUSTRATION` is not in
+`CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`. It seeds disabled, because enabling it spends the
+org's own provider credit. This section is about classifiers with an actual Java DETECTOR extraction
+into the paid tree, and there are three of those.
 
 **Behaviour drift** (package `ai.tessary.paid.classifier.behavior`):
 
@@ -371,8 +368,7 @@ factory objects rather than scanned stereotypes. What each still drags is
    so it runs strictly after the open one, applying a changelog that creates your table — then
    register a `@Bean DetectionTable(yourKind, yourTable, Grain.SPAN|TRACE)` (§2) so
    `DetectionTableRegistry` includes it in the stitched union the writer, the retention sweep and
-   every reader use. `PaidDbAutoConfiguration` and `FrustrationAutoConfiguration`
-   are the in-tree worked examples of both halves.
+   every reader use. `PaidDbAutoConfiguration` is the in-tree worked example of both halves.
 
 **Where it runs.** On the classpath of **your own** backend — see §1. Build the platform, then launch
 it with your jar alongside:
@@ -413,10 +409,10 @@ existing observation/turn-grain kind whose in-tree manifest entry has `detectorF
 open classpath, so nothing claims it, and a self-hoster's own `@Component DetectorSupplier` for
 `Kind.GROUNDEDNESS` is discovered and dispatched exactly like our own paid implementation would be.
 This is real, working substitution, not a read-side adapter. It does not generalise past that one
-kind, though: every OTHER observation/turn-grain kind (`frustration`, `secret_leak`,
-`malformed_output`) already has an in-tree `detectorFactory`, and a `DetectorSupplier` claiming one of
-those collides with it — the same fail-loud `IllegalStateException` the sweep story hits, not a silent
-override. And on a build that DOES carry the paid groundedness module, a self-hoster's own
+kind, though: every OTHER observation/turn-grain kind already has an in-tree detector
+(`secret_leak` and `malformed_output` through their `detectorFactory`, `frustration` through its own
+in-tree `DetectorSupplier`), and a `DetectorSupplier` claiming one of those collides with it — the same
+fail-loud `IllegalStateException` the sweep story hits, not a silent override. And on a build that DOES carry the paid groundedness module, a self-hoster's own
 `DetectorSupplier` for `groundedness` collides with OUR implementation the same way. So the honest
 statement is: one kind, one edition, until a future manifest entry ships with `detectorFactory: null`
 on purpose for extensibility rather than as a byproduct of one detector's own extraction.

@@ -12,6 +12,8 @@ import org.springframework.context.annotation.Configuration;
  * <p>{@code REGEX} claims {@code user_classifier_detection}: "this text matched a user-authored
  * rule," parameterized by a classifier row. {@code DetectionTableRegistry} keys on
  * {@code detectorKind}, not {@code table}, so more than one kind can share a table.
+ *
+ * <p>{@code FRUSTRATION} is trace grain: its subject is a user turn, and a turn is a trace.
  */
 @Configuration
 public class OpenDetectionTables {
@@ -24,6 +26,11 @@ public class OpenDetectionTables {
     @Bean
     public DetectionTable malformedOutputDetectionTable() {
         return new DetectionTable(BuiltInDetector.Kind.MALFORMED_OUTPUT, "malformed_output_detection", Grain.SPAN);
+    }
+
+    @Bean
+    public DetectionTable frustrationDetectionTable() {
+        return new DetectionTable(BuiltInDetector.Kind.FRUSTRATION, "frustration_detection", Grain.TRACE);
     }
 
     @Bean

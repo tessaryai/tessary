@@ -11,12 +11,12 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
+import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +43,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * bug, so the assertion is joined by one on the stored cursor itself.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubDecisionClientConfig.class)
 class ClassifierCursorKeysetIntegrationTest {
 
     private static final int BATCH = 2;
@@ -93,40 +93,39 @@ class ClassifierCursorKeysetIntegrationTest {
 
     @Test
     void keysetCursorVisitsEverySpanSharingOneTimestamp() {
-        // Frustration needs its capability granted explicitly: it is off by default and is the
-        // only turn-grain built-in, which is exactly the shape this cursor regression needs (see
-        // seedAndFindFrustration below), so there is no substitute with the same grain.
+        // Frustration is the only turn-grain built-in, which is exactly the shape this cursor regression
+        // needs (see seedAndFindFrustration below), so there is no substitute with the same grain. It
+        // seeds disabled, so the test turns it on; the decision model and the provider key are
+        // StubDecisionClientConfig's.
         String pid = TenantFixture.bootstrap(
                         tenants, "signal-keyset", org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
                 .id();
         Instant now = Instant.now();
 
-        // SAME_TS_COUNT user-facing turns, each its own trace with a root llm span, each carrying a
-        // frustration keyword so the built-in Frustration detector fires exactly once per turn.
+        // SAME_TS_COUNT user-facing turns, each its own trace with a root llm span, each carrying the
+        // stub's frustrated phrase so the Frustration detector fires exactly once per turn.
         // Frustration is turn-grain, so the units that must survive the batch boundary are turns:
         // several root spans under one turn would (correctly) collapse to a single detection and
         // would not exercise the cursor at all.
         //
         // Each turn gets its own conversation: the turn-grain sweep skips a turn whose conversation
-        // is already flagged at high (a conversation is one event, not one per turn; see
-        // ClassifierWorker#suppressAlreadyFlaggedConversations), so five frustrated turns in one
-        // conversation would correctly produce one detection, which makes detection count useless as
-        // a proxy for cursor coverage within a conversation. Separate conversations restore the
-        // proxy: each turn is independently flaggable, so a missing detection again means a dropped
+        // is already flagged (a conversation is one event, not one per turn), so five frustrated turns
+        // in one conversation would correctly produce one detection, which makes detection count
+        // useless as a proxy for cursor coverage within a conversation. Separate conversations restore
+        // the proxy: each turn is independently flaggable, so a missing detection again means a dropped
         // span rather than a suppressed duplicate.
         //
-        // Each conversation gets its own warm-up turn first, at an earlier timestamp: frustration
-        // skips a conversation's opener (context_min_prior_user_turns=1, the agent has not acted
-        // yet), so without a preceding turn the frustrated turn would be gated out and this test
-        // would read a dropped span as a cursor bug. The warm-ups sit outside the group's timestamp
-        // on purpose.
-        Instant earlier = now.minusSeconds(60);
+        // Each conversation gets two warm-up exchanges first, at earlier timestamps: frustration sends a
+        // turn only when a user, assistant, user, assistant prefix precedes it, so without them the
+        // frustrated turn would be ineligible and this test would read a dropped span as a cursor bug.
+        // The warm-ups sit outside the group's timestamp on purpose.
         List<SpanRef> group = new ArrayList<>();
         for (int i = 0; i < SAME_TS_COUNT; i++) {
             String sessionId = SubstrateV2Fixtures.sessionId();
-            SpanRef warmup = seedTurn(pid, sessionId, "hello, i have a question", earlier);
-            stampCreatedAt(pid, List.of(warmup), earlier);
+            List<SpanRef> warmups = ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
+            stampCreatedAt(pid, warmups.subList(0, 1), now.minusSeconds(120));
+            stampCreatedAt(pid, warmups.subList(1, 2), now.minusSeconds(60));
             group.add(seedTurn(pid, sessionId, "this is frustrating, you're not listening", now));
         }
         // One created_at across the whole group: the boundary case. Written explicitly rather than
@@ -136,9 +135,10 @@ class ClassifierCursorKeysetIntegrationTest {
         stampCreatedAt(pid, group, now);
 
         // Several ticks: each tick advances the cursor by at most one BATCH per sweep, so the group spans
-        // multiple sweeps and exercises the batch boundary inside the identical-timestamp run.
+        // multiple sweeps and exercises the batch boundary inside the identical-timestamp run. Every
+        // conversation holds three turns, so the sweep has three times the group to page through.
         ClassifierRow frustration = seedAndFindFrustration(pid);
-        for (int tick = 0; tick < SAME_TS_COUNT + 2; tick++) {
+        for (int tick = 0; tick < 3 * SAME_TS_COUNT + 2; tick++) {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
             worker.tick();
             if (service.eventsForClassifier(pid, frustration.id(), 100).size() >= SAME_TS_COUNT) break;
@@ -189,13 +189,12 @@ class ClassifierCursorKeysetIntegrationTest {
         }
     }
 
-    /** Run a tick so the catalog seeds, then resolve the Frustration definition. */
+    /** Seed the catalog, then resolve the Frustration definition and turn it on. */
     private ClassifierRow seedAndFindFrustration(String pid) {
         for (int i = 0; i < 50; i++) {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
-            worker.tick();
             var maybe = signals.findByKey(pid, "frustration");
-            if (maybe.isPresent()) return maybe.get();
+            if (maybe.isPresent()) return service.setEnabled(pid, maybe.get().id(), true);
             sleep(100);
         }
         throw new IllegalStateException("frustration built-in was not seeded");

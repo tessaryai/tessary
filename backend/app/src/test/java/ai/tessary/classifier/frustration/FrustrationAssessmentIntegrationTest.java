@@ -41,7 +41,6 @@ import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -73,7 +72,7 @@ import org.springframework.transaction.support.TransactionOperations;
  * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubEncoderScorerConfig.class)
 class FrustrationAssessmentIntegrationTest {
 
     private static final String RESPONDED = "typesafe/jev-1.13-20260917";
@@ -179,7 +178,7 @@ class FrustrationAssessmentIntegrationTest {
         assertEquals("sess-2", calmRow.conversationId(), "no thread, so the session");
 
         Map<String, Object> detection = jdbc.sql("SELECT subject_session_id, subject_trace_id, severity, confidence,"
-                        + " cleared_at, evidence::text AS evidence FROM " + TurnGrainTestDetectionConfig.TABLE
+                        + " cleared_at, evidence::text AS evidence FROM " + "frustration_detection"
                         + " WHERE project_id = :pid")
                 .param("pid", pid)
                 .query()
@@ -209,7 +208,7 @@ class FrustrationAssessmentIntegrationTest {
 
         assertTrue(again.isEmpty(), "the re-sent turn is not a new detection");
         assertEquals(1, count("frustration_assessment", pid));
-        assertEquals(1, count(TurnGrainTestDetectionConfig.TABLE, pid));
+        assertEquals(1, count("frustration_detection", pid));
     }
 
     @Test
@@ -228,7 +227,7 @@ class FrustrationAssessmentIntegrationTest {
                 BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-a2", "tr-b1", "tr-none"));
         assertEquals(Set.of("tr-a2"), suppressed, "only the flagged conversation's later turn is dropped");
 
-        jdbc.sql("UPDATE " + TurnGrainTestDetectionConfig.TABLE + " SET cleared_at = :now WHERE project_id = :pid")
+        jdbc.sql("UPDATE " + "frustration_detection" + " SET cleared_at = :now WHERE project_id = :pid")
                 .param("now", Instant.now().toString())
                 .param("pid", pid)
                 .update();

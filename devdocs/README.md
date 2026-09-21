@@ -48,6 +48,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 |---|---|
 | [concepts/substrate-model.md](./concepts/substrate-model.md) | Why the substrate is shaped span/trace/session — producer ids, span identity, lock ordering, the settle protocol. Implemented and live since 2026-08-14. |
 | [concepts/deviation-math.md](./concepts/deviation-math.md) | The arithmetic behind the three launch classifiers: W1 on log sketches, the derived false-alarm bar, the Bernoulli CUSUM, and which numbers are measured versus assumed. |
+| [concepts/frustration.md](./concepts/frustration.md) | The Frustration classifier: which turns it sends to the decision model, the one-flag-per-conversation rule, the conversation as the rate test's trial, the learned rate and what a resolve does to it. |
 | [concepts/alerting.md](./concepts/alerting.md) | How a case reaches a human: the `case_opened` rule, why quiet hours defer rather than drop, and what the message carries. |
 | [concepts/pii-redaction.md](./concepts/pii-redaction.md) | Layered PII redaction: write-path guard, client-side option, rules playground. |
 

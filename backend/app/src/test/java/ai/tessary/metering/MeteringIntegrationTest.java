@@ -14,7 +14,6 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import ai.tessary.usage.MetricRollupJobRepository;
 import ai.tessary.usage.MetricRollupRepository;
 import ai.tessary.usage.MetricRollupRepository.UsageBucket;
@@ -28,7 +27,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -52,7 +50,6 @@ import org.springframework.test.context.DynamicPropertySource;
  * Live LLM spend is read from the {@code llm_call} ledger, never covered here.
  */
 @SpringBootTest
-@Import(TurnGrainTestDetectionConfig.class)
 class MeteringIntegrationTest {
 
     @DynamicPropertySource
@@ -351,12 +348,9 @@ class MeteringIntegrationTest {
 
     private void insertDetection(
             String pid, String classifierKey, String sessionId, String traceId, @Nullable String spanId, String at) {
-        // Route by DetectionTableRegistry's actual registration, not a hard-coded guess: "frustration"
-        // is only registered in this test JVM by TurnGrainTestDetectionConfig, so a trace-grain
-        // (spanId == null) row belongs in its table. Writing straight to the baseline frustration
-        // table would insert rows MetricRollupRepository's registry-built union never reads, silently
-        // undercounting.
-        String table = spanId == null ? TurnGrainTestDetectionConfig.TABLE : "secret_leak_detection";
+        // A trace-grain (spanId == null) row is a frustration detection; a span-grain one goes to
+        // secret leak's table. Both are registered, so MetricRollupRepository's union reads them.
+        String table = spanId == null ? "frustration_detection" : "secret_leak_detection";
         jdbc.sql("INSERT INTO " + table + " (id, project_id, classifier_id, classifier_key, subject_session_id,"
                         + " subject_trace_id, subject_span_id, severity, confidence, created_at)"
                         + " VALUES (:id, :pid, :sid, :key, :ses, :trace, :span, :sev, :conf, :at::timestamptz)")

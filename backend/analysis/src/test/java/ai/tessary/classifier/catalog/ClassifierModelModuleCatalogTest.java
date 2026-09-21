@@ -33,10 +33,11 @@ import org.mockito.Mockito;
 class ClassifierModelModuleCatalogTest {
 
     /**
-     * The catalog every other test in this file builds against, with one discovered {@link
-     * DetectorSupplier} stubbed in for {@code groundedness}, standing in for the auto-configuration
-     * that supplies the real detector in a running backend. Stubbed rather than real: the actual
-     * detector class lives outside this module's test classpath, and this file's job is to pin the
+     * The catalog every other test in this file builds against, with discovered {@link
+     * DetectorSupplier}s stubbed in for {@code groundedness} and {@code frustration}, standing in for the
+     * beans that supply the real detectors in a running backend. Stubbed rather than real: groundedness's
+     * detector lives outside this module's test classpath, frustration's is a Spring bean with its own
+     * collaborators, and this file's job is to pin the
      * catalog's wiring, not re-prove the detector's own behavior. The stub answers {@code
      * callSiteFactsRead()} with the real detector's declared set so {@link
      * #callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem} still exercises a true fact.
@@ -45,7 +46,10 @@ class ClassifierModelModuleCatalogTest {
         BuiltInDetector groundednessStub = Mockito.mock(BuiltInDetector.class);
         Mockito.when(groundednessStub.kind()).thenReturn(BuiltInDetector.Kind.GROUNDEDNESS);
         Mockito.when(groundednessStub.callSiteFactsRead()).thenReturn(Set.of(CallSiteFact.SHAPE));
-        return catalogWithDiscovered(deps -> groundednessStub);
+        BuiltInDetector frustrationStub = Mockito.mock(BuiltInDetector.class);
+        Mockito.when(frustrationStub.kind()).thenReturn(BuiltInDetector.Kind.FRUSTRATION);
+        Mockito.when(frustrationStub.callSiteFactsRead()).thenReturn(Set.of());
+        return catalogWithDiscovered(deps -> groundednessStub, deps -> frustrationStub);
     }
 
     /**
@@ -242,9 +246,9 @@ class ClassifierModelModuleCatalogTest {
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
         // key -> version, exactly as declared (bumped keys re-sync onto seeded projects).
         assertEquals("frustration", builtIns.get(0).classifierKey());
-        // 8: the attribution gate switched on, and the user-facing description changed with it,
-        // because "high" now means emotion and agent-attribution rather than emotion alone.
-        assertEquals(8, versionOf(builtIns, "frustration"));
+        // 9: the scorer became a hosted decision model and the config became its threshold plus the
+        // rate test's dials; the bump replaces the encoder config wholesale on seeded projects.
+        assertEquals(9, versionOf(builtIns, "frustration"));
         // 3: shipped armed. One high-band leak in a day files a finding per call site and pattern, and
         // only a version bump carries that arming block onto projects seeded before it.
         assertEquals(3, versionOf(builtIns, "secret_leak"));
@@ -358,38 +362,56 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void frustrationShipsTheAttributionGateAndABumpedVersionToCarryIt() {
+    void frustrationShipsItsDecisionConfigAndABumpedVersionToCarryIt() {
         // The config-key-binding regression: a new key in defaultConfigJson is a silent no-op unless
         // two things hold, the key is actually in the default config, and the catalog version was
         // bumped. ClassifierService re-syncs a built-in onto an already-seeded project only when the
         // catalog version exceeds the stored one, so an un-bumped change reaches fresh installs only.
-        // This repo has shipped that bug before; assert both halves rather than either.
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
         String config = configOf(builtIns, "frustration");
         assertNotNull(config, "frustration ships a default config");
+        for (String key : List.of(
+                "threshold",
+                "arl_target",
+                "min_decision_interval",
+                "shift_multiple",
+                "shift_floor",
+                "min_baseline_conversations")) {
+            assertTrue(config.contains("\"" + key + "\":"), "the config carries " + key + ": " + config);
+        }
+        for (String gone :
+                List.of("threshold_high", "attribution_head", "cold_start_turn_fpr", "window_sessions", "alpha")) {
+            assertFalse(config.contains("\"" + gone + "\""), "the encoder-era key " + gone + " is gone: " + config);
+        }
         assertTrue(
-                config.contains("\"attribution_head\":\"attribution\""),
-                "the gate names the head it scores with: " + config);
-        assertTrue(config.contains("\"attribution_threshold\":0.64"), "and its operating point: " + config);
-        assertTrue(
-                versionOf(builtIns, "frustration") >= 8,
-                "the version must advance or the gate never reaches an existing project");
+                versionOf(builtIns, "frustration") >= 9,
+                "the version must advance or the new config never reaches an existing project");
     }
 
     @Test
-    void frustrationsUserFacingDescriptionDescribesTheGate() {
+    void frustrationsUserFacingDescriptionNamesTheScorerAndThatItIsOff() {
         // The description is re-synced onto every seeded project by the same version bump, so it is
-        // written into production rows as fact. "High" now means emotion and agent-attribution; a
-        // description still claiming plain emotion would be actively wrong, not merely stale.
+        // written into production rows as fact.
         String description = catalog().builtIns().stream()
                 .filter(b -> b.classifierKey().equals("frustration"))
                 .findFirst()
                 .orElseThrow()
                 .description();
-        assertTrue(description.contains("AGENT"), "it says whose frustration this is: " + description);
-        assertTrue(
-                description.toLowerCase(java.util.Locale.ROOT).contains("demoted"),
-                "and that a non-agent-caused turn is demoted rather than dropped: " + description);
+        assertTrue(description.contains("Jev"), "it names the scorer: " + description);
+        assertTrue(description.contains("Off by default"), "and that it starts off: " + description);
+        assertFalse(description.contains("ModernBERT"), "no encoder-era text survives: " + description);
+    }
+
+    @Test
+    void frustrationSeedsDisabledAndNoOtherBuiltInDoes() {
+        // Enabling frustration spends the org's own provider credit, so a person turns it on. Every
+        // other built-in costs nothing per observation and seeds enabled.
+        for (BuiltInClassifierCatalog.BuiltIn b : catalog().builtIns()) {
+            assertEquals(
+                    !"frustration".equals(b.classifierKey()),
+                    b.defaultEnabled(),
+                    b.classifierKey() + " seeds with the wrong switch");
+        }
     }
 
     private static int versionOf(List<BuiltInClassifierCatalog.BuiltIn> builtIns, String key) {
@@ -442,5 +464,6 @@ class ClassifierModelModuleCatalogTest {
 
         assertEquals(ClassifierRow.Mode.DISCOVERY, wide.defaultMode());
         assertEquals(ClassifierRow.Mode.DISCOVERY, wide.toBuiltIn().defaultMode());
+        assertTrue(wide.toBuiltIn().defaultEnabled(), "a module seeds enabled unless it says otherwise");
     }
 }

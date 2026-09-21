@@ -17,7 +17,6 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +26,6 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 
 /**
  * The chicken-and-egg this feature exists to break, end to end against the real pgvector Postgres.
@@ -48,7 +46,6 @@ import org.springframework.context.annotation.Import;
  * change rewinds nothing here: nothing on this classpath reads it.
  */
 @SpringBootTest
-@Import(TurnGrainTestDetectionConfig.class)
 class CallSiteFactRewindIntegrationTest {
 
     private static final String SCHEMA =

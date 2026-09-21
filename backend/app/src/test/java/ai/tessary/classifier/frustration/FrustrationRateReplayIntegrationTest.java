@@ -24,7 +24,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,7 +45,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubEncoderScorerConfig.class)
 class FrustrationRateReplayIntegrationTest {
 
     private static final String VERSION =
@@ -279,7 +278,7 @@ class FrustrationRateReplayIntegrationTest {
     }
 
     private void flag(String pid, ClassifierRow signal, String traceId, String conversation, boolean cleared) {
-        jdbc.sql("INSERT INTO " + TurnGrainTestDetectionConfig.TABLE
+        jdbc.sql("INSERT INTO " + "frustration_detection"
                         + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
                         + " severity, confidence, cleared_at)"
                         + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high', :cleared)")

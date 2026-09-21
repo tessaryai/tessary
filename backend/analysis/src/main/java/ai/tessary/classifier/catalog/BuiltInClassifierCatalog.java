@@ -8,7 +8,6 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Deps;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.DeterministicNlPhraseCompiler;
-import ai.tessary.classifier.detector.EncoderDetector;
 import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
@@ -32,22 +31,24 @@ import org.springframework.stereotype.Component;
  * detector-dispatch map from {@link #MODULES}, so adding or changing a classifier is a single
  * declaration here, not edits scattered across the catalog, the detector list, and seeding.
  *
- * <p>Nine built-ins ship in three tiers. The <b>deterministic</b> tier costs nothing per observation
+ * <p>Nine built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
  * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
  * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
- * ({@link MalformedOutputDetector}). The <b>encoder</b> tier scores observation text against a shared
- * ONNX head served by the standalone classify-service {@code /classify}: Frustration ({@link
- * EncoderDetector}) and Groundedness, the one PAIR head, a claim against a premise rather than one
- * string in isolation, and the one detector with a deterministic filter in front of it. Groundedness's
- * detector is not named here by class: it is supplied through the {@link DetectorSupplier} seam
- * rather than built in this file's {@link #MODULES} list, see that module's {@code detectorFactory}
- * comment below. The <b>fitting</b> tier holds five modules that ship as per-project procedures
- * rather than models, and so carry no {@link BuiltInDetector} at all: trace-grain Behaviour Drift
- * ({@code BehaviorDriftDetector}), the two window-grain metric classifiers (Duration Drift and Cost
- * Drift), Tool Errors, and SOP Conformance, scored against an authored rulebook plus a fitted
- * per-project reference bundle. All ship project-local state rather than a model, because "atypical
- * for this agent", "slow for this call site", "expensive for this call site" and "compliant with this
- * SOP" are definitionally project-relative and none has a transferable model to ship.
+ * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, the one PAIR head, a
+ * claim against a premise rather than one string in isolation, scored by the standalone
+ * classify-service {@code /classify} with a deterministic filter in front of it. The <b>decision</b>
+ * tier is Frustration: each eligible user turn is one question to a hosted decision model on the org's
+ * own key, and a call site's rate of frustrated conversations is watched with Tool Error's sequential
+ * test. Neither detector is named here by class: both are supplied through the {@link
+ * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see those modules'
+ * {@code detectorFactory} comments below. The <b>fitting</b> tier holds five modules that ship as
+ * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all:
+ * trace-grain Behaviour Drift ({@code BehaviorDriftDetector}), the two window-grain metric classifiers
+ * (Duration Drift and Cost Drift), Tool Errors, and SOP Conformance, scored against an authored
+ * rulebook plus a fitted per-project reference bundle. All ship project-local state rather than a
+ * model, because "atypical for this agent", "slow for this call site", "expensive for this call site"
+ * and "compliant with this SOP" are definitionally project-relative and none has a transferable model
+ * to ship.
  *
  * <p>Duration and cost are <b>two switches rather than one or seven</b>. A classifier is one decision
  * a human makes: "do I want to hear about latency here" is a different decision from "do I want to
@@ -55,15 +56,15 @@ import org.springframework.stereotype.Component;
  * its {@code defaultConfigJson} rather than as modules of their own. That is what lets one switch span
  * two candidate grains, which a single catalog {@link Grain} cannot express.
  *
- * <p>What every tier has in common is the L1 cost model: <b>no built-in makes a per-observation API
+ * <p>What every tier has in common is the L1 cost model: <b>no built-in makes a per-observation LLM
  * call.</b> A detector that needs one belongs behind Layer-2 triage, on the findings that already
  * fired, not in front of the whole stream.
  *
  * <p>A classifier withdrawn from the catalog is disabled on every project that has it, never deleted:
  * {@link ClassifierService#resyncBuiltIns}'s retirement path handles that, so history stays listable.
  *
- * <p>Seeding is per-project and idempotent: a project missing a built-in gets it inserted with
- * {@code enabled=true}; an existing built-in whose catalog {@code version} advanced has its
+ * <p>Seeding is per-project and idempotent: a project missing a built-in gets it inserted with its
+ * module's {@code defaultEnabled}; an existing built-in whose catalog {@code version} advanced has its
  * definition re-synced. User enable/disable state is never clobbered.
  *
  * <p><b>Catalog membership is not availability.</b> Every module here is defined for every org,
@@ -87,8 +88,9 @@ public class BuiltInClassifierCatalog {
      * on. {@code capability} rides along because seeding reads it, to decide whether the classifier
      * reaches the org at all.
      *
-     * <p>Every built-in seeds enabled; trust in an unmeasured classifier is expressed only by who its
-     * capability flag is on for, resolved per org without a deploy, rather than by a second switch here.
+     * <p>Every built-in seeds enabled except Frustration, which seeds disabled because enabling it
+     * spends the org's own provider credit. Trust in an unmeasured classifier is expressed only by who
+     * its capability flag is on for, resolved per org without a deploy, rather than by this switch.
      */
     public record BuiltIn(
             String classifierKey,
@@ -103,7 +105,9 @@ public class BuiltInClassifierCatalog {
              * project: {@code ClassifierService} preserves the tenant's stored mode across a
              * re-seed, so moving an existing estate is a migration, deliberately and once.
              */
-            String defaultMode) {}
+            String defaultMode,
+            /** Whether a freshly seeded row starts enabled; an existing row's switch is never touched. */
+            boolean defaultEnabled) {}
 
     /**
      * The classifier manifests, the single source of truth for the built-in catalog. Each entry
@@ -118,74 +122,46 @@ public class BuiltInClassifierCatalog {
                     // User-facing, and re-synced onto every seeded project by the version bump below, so
                     // it has to track the scorer: a stale description here gets written into production
                     // rows as fact.
-                    "Frustration the AGENT caused. Two heads: cirimus ModernBERT-GoEmotions scores the "
-                            + "last exchange for emotion (calibrated max(annoyance, anger)), and a second "
-                            + "head reads the full thread and judges whether the agent's own conduct caused "
-                            + "it. A turn is HIGH only if BOTH agree; real frustration aimed at the "
-                            + "restaurant, the courier, a promo code or a billing bug is demoted to LOW "
-                            + "rather than dropped, so discovery mode still shows it. A conversation's "
-                            + "opening turn is not scored (nothing the agent did could have caused it). "
-                            + "Behavioral/task-failure frustration is a separate signal.",
+                    "Frustration the agent caused, judged by TypeSafe's Jev decision model on your "
+                            + "OpenRouter or TypeSafe key. Off by default. Scores a user message only when "
+                            + "four text messages precede it, and a conversation only until its first "
+                            + "detection. Each call site learns its own normal rate of frustrated "
+                            + "conversations over its first 200 and is watched from then on with the same "
+                            + "sequential test Tool Error uses; a case opens when the rate has risen above "
+                            + "that normal. A call site that is bad from day one learns that as normal and "
+                            + "is flagged only if it gets worse.",
                     Kind.FRUSTRATION,
                     // ClassifierService re-syncs a built-in onto an already-seeded project only when the
                     // catalog version exceeds the stored one, so every threshold or config change below
-                    // needs a bump or it reaches fresh installs only. Ship the classify-service scorer
-                    // change before a band change that assumes it: a backend on a tighter band against the
-                    // old scorer under-fires, which is the safe direction, the reverse over-fires.
-                    8,
+                    // needs a bump or it reaches fresh installs only. 9 replaces the encoder config
+                    // wholesale; its keys have no reader left.
+                    9,
                     Capability.FRUSTRATION,
                     // TURN grain: the subject is what the USER said, and the user says it once. A turn
                     // lands as several observations (agent span + its llm child carrying the same delta +
-                    // inner planner/summarizer calls), so scoring per observation would draw the head's
-                    // calibrated per-item false-positive rate several times over ONE user message and
-                    // emit several verdicts for it. The sweep scores that turn's root observation only.
+                    // inner planner/summarizer calls), so scoring per observation would send one user
+                    // message several times. The sweep scores that turn's root observation only.
                     Grain.TURN,
-                    // EMOTION member: cirimus (28-label GoEmotions) emotion proxy, calibrated in classify.js.
-                    // Band 0.66/0.90 is the measured F1 peak against real production traffic
-                    // (annoyance/anger only, with the turn gate below); 0.90 is a genuine confidence tier
-                    // rather than a flat-precision cutoff.
-                    //
-                    // GATE: skip a conversation's opener (context_min_prior_user_turns=1). The agent has
-                    // not acted yet, so any emotion there is what the user arrived with, not something the
-                    // product caused; this costs a few true positives for a real precision gain.
-                    //
-                    // CONTEXT: the last exchange only, assistant prose stubbed to "[reply]". cirimus is a
-                    // pooled single-utterance head with no way to weight the trailing turn, so more context
-                    // dilutes the message being judged; one exchange scores short turns far better than an
-                    // unbounded thread does.
-                    //
-                    // NOTE: this catches EMOTIONAL frustration only; emotion-less task-failure/loops are a
-                    // separate signal, unioned with this at the signal layer.
-                    //
-                    // ATTRIBUTION GATE: a HIGH emotion score is re-scored by the `attribution` head over
-                    // the full thread and demoted to LOW below 0.64. The emotion band alone is
-                    // mis-specified rather than miscalibrated: on a hand-labelled census only a fifth of
-                    // its HIGH fires were frustration the agent actually caused, and no threshold on the
-                    // emotion score alone fixes that.
-                    //
-                    // 0.64, not the head's own 0.81 cutoff, because of a train/serve mismatch: the head
-                    // was trained on a template with a [SEP] separator that the real thread renderer never
-                    // emits, which shifts its scores enough to move the calibrated threshold. Recall is
-                    // deliberately traded for precision here, since this signal over-fires; the knob is
-                    // per-project config, so a project that wants recall can lower or remove it.
-                    "{\"threshold_high\":0.90,\"threshold_low\":0.66,"
-                            + "\"context_user_turns\":1,\"context_stub_assistant\":true,"
-                            + "\"context_min_prior_user_turns\":1,"
-                            + "\"attribution_head\":\"attribution\",\"attribution_threshold\":0.64}",
-                    // INPUT selects the scored user turn; the CONTEXT is the narrowed thread described
-                    // above, so "nevermind" is legible against the assistant reply it reacts to.
-                    d -> new EncoderDetector(
-                            Kind.FRUSTRATION,
-                            "frustration",
-                            ClassifierField.INPUT,
-                            Detection.Severity.WARN,
-                            d.encoderScorer(),
-                            d.mapper(),
-                            d.threadAssembler()),
-                    // TRACKING, not the catalog's discovery default: the high+low union fires too often
-                    // to be a review queue, so every project is seeded at the volume it actually operates
-                    // at rather than gated behind a graduation step nothing ever triggers.
-                    ClassifierRow.Mode.TRACKING),
+                    // Every key here is one FrustrationConfig parses. threshold is the flag cutoff on
+                    // P(unhappy_with_assistant), set on a held-out labelled set; it is hashed into the
+                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
+                    // rate test's dials. arl_target and min_decision_interval are Tool Error's false-alarm
+                    // budget converted from tool calls to conversations, reasoned rather than measured.
+                    // EXPERIMENT(frustration-tuning): threshold, arl_target and min_decision_interval
+                    // are starting values until a null replay on real traffic settles them.
+                    "{\"threshold\":0.40,\"arl_target\":10000,\"min_decision_interval\":4,"
+                            + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
+                            + "\"min_baseline_conversations\":200}",
+                    // null: the detector is JevFrustrationDetector, a Spring bean supplied through the
+                    // DetectorSupplier seam (FrustrationDetectorSupplier), because it needs the decision
+                    // client, the provider resolver and its own repositories, none of which are Deps.
+                    null,
+                    // TRACKING: the one band Jev writes is HIGH, so both modes read the same rows; tracking
+                    // is kept so a project's stored mode does not change under it.
+                    ClassifierRow.Mode.TRACKING,
+                    // Seeds disabled: enabling it spends the org's own provider credit, so a person turns
+                    // it on, through the enable flow that asks for the key.
+                    false),
             new ClassifierModelModule(
                     "secret_leak",
                     "Secret Leak",
@@ -261,9 +237,10 @@ public class BuiltInClassifierCatalog {
                     // ~0.95+, unsupported/contradicted ~0.01-0.10); revisit once the eval harness has
                     // measured this head's actual recall@fixed-fp.
                     "{\"threshold_high\":0.9,\"threshold_low\":0.6}",
-                    // null, not a factory lambda: the one detectorFactory here that is null for a reason
-                    // other than "not observation/turn grain" (see ClassifierModelModule's
-                    // DetectorFactory javadoc). Groundedness is observation-grain, but its detector is
+                    // null, not a factory lambda: one of the two detectorFactory entries here that are null
+                    // for a reason other than "not observation/turn grain" (see ClassifierModelModule's
+                    // DetectorFactory javadoc; frustration is the other). Groundedness is observation-grain, but its
+                    // detector is
                     // supplied externally through the DetectorSupplier seam folded into this class's
                     // constructor below, rather than closed over here by class reference, so this file
                     // never has to name that implementation directly. The manifest entry still owns every
@@ -554,7 +531,8 @@ public class BuiltInClassifierCatalog {
         // fail-loud invariant kept via the collector framework rather than an explicit constructor
         // throw, which SpotBugs forbids (CT_CONSTRUCTOR_THROW). A module with no factory is one of
         // the five fitting-tier classifiers, dispatched by the ClassifierSweep registered for their
-        // kind, or groundedness, whose detector is instead supplied through `discovered` below.
+        // kind, or groundedness or frustration, whose detectors are instead supplied through
+        // `discovered` below.
         //
         // `discovered` is the generic source: any DetectorSupplier bean on the classpath is folded in
         // for the kind it claims, with no check against MODULES membership; see DetectorSupplier's

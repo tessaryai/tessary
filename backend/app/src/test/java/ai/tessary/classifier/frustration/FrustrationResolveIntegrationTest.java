@@ -34,7 +34,6 @@ import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -58,7 +57,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubEncoderScorerConfig.class)
 class FrustrationResolveIntegrationTest {
 
     private static final String VERSION =
@@ -223,7 +222,7 @@ class FrustrationResolveIntegrationTest {
     }
 
     private long clearedRows(String pid) {
-        return jdbc.sql("SELECT COUNT(*) FROM " + TurnGrainTestDetectionConfig.TABLE
+        return jdbc.sql("SELECT COUNT(*) FROM " + "frustration_detection"
                         + " WHERE project_id = :pid AND cleared_at IS NOT NULL")
                 .param("pid", pid)
                 .query(Long.class)
@@ -231,7 +230,7 @@ class FrustrationResolveIntegrationTest {
     }
 
     private long flaggedRows(String pid) {
-        return jdbc.sql("SELECT COUNT(*) FROM " + TurnGrainTestDetectionConfig.TABLE + " WHERE project_id = :pid")
+        return jdbc.sql("SELECT COUNT(*) FROM " + "frustration_detection" + " WHERE project_id = :pid")
                 .param("pid", pid)
                 .query(Long.class)
                 .single();
@@ -306,7 +305,7 @@ class FrustrationResolveIntegrationTest {
 
     private void flag(
             String pid, ClassifierRow signal, String traceId, String conversation, String callSite, Instant at) {
-        jdbc.sql("INSERT INTO " + TurnGrainTestDetectionConfig.TABLE
+        jdbc.sql("INSERT INTO " + "frustration_detection"
                         + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
                         + " severity, confidence, evidence, subject_started_at)"
                         + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high',"

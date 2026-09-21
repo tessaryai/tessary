@@ -655,7 +655,9 @@ agent**" is project- and time-relative, so it ships as a fitting procedure and t
 > `(project_id, classifier_id, subject_session_id, subject_started_at) WHERE cleared_at IS NULL`: the
 > sweep stops sending a conversation's turns while it has an uncleared row. The only writer of
 > `cleared_at` is a `false_alarm` resolve of a frustration case (`FrustrationSessionClearer`), which
-> clears every conversation cited by a session witness on any of the case's findings. **Migration `0012` adds
+> clears every conversation cited by a session witness on any of the case's findings. The open
+> `OpenDetectionTables` registers it, and `0022` emptied it of the encoder scorer's rows and turned off
+> every existing built-in `frustration` row in `classifier` (it seeds disabled). **Migration `0012` adds
 > `subject_started_at` (nullable `timestamptz`)** alongside `created_at`: the latter is when the
 > classifier CHECKED the span (run time — metering, alert digests and retention keep reading it, since
 > event time would let a backfill dodge billing, miss the digest window it ran through, or get deleted

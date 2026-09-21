@@ -97,8 +97,9 @@ public class ClassifierService {
 
     /**
      * Seed the built-in catalog into a project, idempotently: a missing built-in is inserted
-     * enabled; an existing one whose catalog version advanced has its definition re-synced
-     * (enable/disable state preserved). Returns the number newly inserted.
+     * enabled, or disabled when its module says so (Frustration); an existing one whose catalog
+     * version advanced has its definition re-synced (enable/disable state preserved). Returns the
+     * number newly inserted.
      *
      * <p>Two triggers: {@link ClassifierSeedListener} on project creation, and {@link
      * #resyncBuiltIns} from {@code ClassifierCatalogWorker} for every active project, which
@@ -144,10 +145,10 @@ public class ClassifierService {
                         b.defaultConfigJson(),
                         true,
                         b.version(),
-                        // Every built-in seeds ON. A classifier whose numbers we do not trust is
-                        // held back by its capability flag, not by a second switch in the
-                        // catalog; see BuiltIn.
-                        true,
+                        // Every built-in seeds ON except one that spends the org's own provider
+                        // credit; a classifier whose numbers we do not trust is held back by its
+                        // capability flag instead. See BuiltIn.
+                        b.defaultEnabled(),
                         // The operating point the catalog declares for this built-in: DISCOVERY
                         // (high recall) is right for a classifier nobody has characterised yet;
                         // frustration declares TRACKING once it has been. See

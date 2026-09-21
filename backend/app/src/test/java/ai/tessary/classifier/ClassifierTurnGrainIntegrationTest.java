@@ -17,11 +17,10 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
+import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -35,8 +34,8 @@ import org.springframework.context.annotation.Import;
  * Frustration is {@link ClassifierModelModule.Grain#TURN}: its subject is what the user said, and the
  * user says it once per turn. A single user-facing turn lands in the substrate as many spans (the
  * agent span, its llm child carrying the same delta, inner planner/summarizer calls, tool spans, plus
- * any sub-agent trace), and scoring each of them would draw the head's calibrated per-item
- * false-positive rate several times over one user message, and emit several verdicts for it.
+ * any sub-agent trace), and scoring each of them would send one user message to the decision model
+ * several times, and emit several verdicts for it.
  *
  * <p>Pins the structural rule (root trace + root span + dialogue kind) against the real Postgres, both
  * ways round: the fan-out under a turn collapses to exactly one detection on the root, and a product
@@ -44,7 +43,7 @@ import org.springframework.context.annotation.Import;
  * {@code kind='agent'} filter would have silenced.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubDecisionClientConfig.class)
 class ClassifierTurnGrainIntegrationTest {
 
     private static final String FRUSTRATED = "this is frustrating, you're not listening";
@@ -84,14 +83,19 @@ class ClassifierTurnGrainIntegrationTest {
     }
 
     /**
-     * Frustration is off by default; every test in this file is about frustration's own behaviour,
-     * so every one grants it explicitly, before its project is created, the same way
-     * {@code ClassifierDefinitionIntegrationTest} grants behaviour drift and SOP conformance.
+     * Frustration seeds disabled, because enabling it spends the org's provider credit; every test in
+     * this file is about frustration's own behaviour, so every one grants it and turns it on. The
+     * decision model and the provider key are {@link StubDecisionClientConfig}'s.
      */
     private String bootstrapGranted(String testName) {
-        return TenantFixture.bootstrap(tenants, testName, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
+        String pid = TenantFixture.bootstrap(
+                        tenants, testName, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
                 .id();
+        service.seedBuiltIns(pid);
+        service.setEnabled(
+                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), true);
+        return pid;
     }
 
     @Test
@@ -100,8 +104,8 @@ class ClassifierTurnGrainIntegrationTest {
         Instant now = Instant.now();
 
         String sessionId = SubstrateV2Fixtures.sessionId();
-        // Frustration skips a conversation opener; seed the preamble so the turn under test is scoreable.
-        ClassifierConversations.seedPriorTurn(fx, pid, sessionId, now.toString());
+        // Frustration sends a turn only after two earlier exchanges; seed them so the turn under test is sent.
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
 
         String rootTraceId = SubstrateV2Fixtures.traceId();
         // The turn root, the only user-facing unit here. Every other span below carries the same
@@ -140,7 +144,7 @@ class ClassifierTurnGrainIntegrationTest {
         Instant now = Instant.now();
 
         String sessionId = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPriorTurn(fx, pid, sessionId, now.toString());
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
 
         String firstTurn = SubstrateV2Fixtures.traceId();
         seedSpan(pid, firstTurn, sessionId, null, "agent", "agent", now);
@@ -174,12 +178,12 @@ class ClassifierTurnGrainIntegrationTest {
         Instant now = Instant.now();
 
         String flaggedSession = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPriorTurn(fx, pid, flaggedSession, now.toString());
+        ClassifierConversations.seedPreamble(fx, pid, flaggedSession, now.toString());
         seedSpan(pid, SubstrateV2Fixtures.traceId(), flaggedSession, null, "agent", "agent", now);
         assertEquals(1, sweepUntilDetected(pid).size());
 
         String otherSession = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPriorTurn(
+        ClassifierConversations.seedPreamble(
                 fx, pid, otherSession, now.plusSeconds(60).toString());
         String otherTurn = SubstrateV2Fixtures.traceId();
         seedSpan(pid, otherTurn, otherSession, null, "agent", "agent", now.plusSeconds(90));
@@ -202,7 +206,7 @@ class ClassifierTurnGrainIntegrationTest {
         // is the user-facing turn, which is why the filter tests structure (root trace + root span) and
         // only requires kind to be dialogue-bearing, rather than requiring kind='agent'.
         String sessionId = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPriorTurn(fx, pid, sessionId, now.toString());
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
         SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, "llm", "chat", now);
 
         List<ClassifierEventView> events = sweepUntilDetected(pid);

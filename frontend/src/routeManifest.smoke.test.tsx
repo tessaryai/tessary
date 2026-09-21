@@ -46,12 +46,11 @@ import manifest from "./routeManifest.generated.json";
 
 // Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT
 // (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java): every wire key is true
-// except these five, which this deployment reports unavailable/off.
+// except these four, which this deployment reports unavailable/off.
 const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
   "triage_automatic_enabled",
   "behavior_drift_enabled",
   "sop_conformance_enabled",
-  "frustration_enabled",
   "groundedness_enabled",
 ];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [

@@ -16,8 +16,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierObservations;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.ThrowingEncoderScorerConfig;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
+import ai.tessary.testsupport.ThrowingDecisionProviderConfig;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -41,10 +40,10 @@ import org.springframework.test.context.TestPropertySource;
  * crossing the cap logs ERROR once, and below-cap failures stay WARN and dedup to one stacktrace
  * per streak. Once the backend recovers, the next heartbeat past the cooldown floor gives the
  * signal a fresh job instead of leaving it wedged. Runs against real pgvector Postgres
- * (Testcontainers); only the encoder scorer is faked.
+ * (Testcontainers); only the Frustration detector's provider key lookup is faked.
  */
 @SpringBootTest
-@Import({ThrowingEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(ThrowingDecisionProviderConfig.class)
 // Own context on purpose: the zero dead-letter cooldown it needs would make every other class's failed job revive
 // instantly.
 @TestPropertySource(properties = "test.context-group=classifier-dead-letter")
@@ -80,7 +79,7 @@ class ClassifierWorkerDeadLetterTest {
     TenantService tenants;
 
     @Autowired
-    ThrowingEncoderScorerConfig.Toggle scorerToggle;
+    ThrowingDecisionProviderConfig.Toggle providerToggle;
 
     @Autowired
     JdbcClient jdbc;
@@ -162,8 +161,8 @@ class ClassifierWorkerDeadLetterTest {
                     "the below-cap failures stay WARN and dedup to one stacktrace per streak, "
                             + "not one per heartbeat");
 
-            // /classify recovers: the next heartbeat (cooldown=0) revives the dead job and this sweep succeeds.
-            scorerToggle.setThrowing(false);
+            // The key lookup recovers: the next heartbeat (cooldown=0) revives the dead job and this sweep succeeds.
+            providerToggle.setThrowing(false);
             worker.tick();
             JobSnapshot revived = awaitJobStatus(classifierId, ClassifierJobRow.DONE);
             assertEquals(

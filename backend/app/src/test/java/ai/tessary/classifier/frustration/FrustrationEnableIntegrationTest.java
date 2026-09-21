@@ -27,7 +27,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,7 +41,7 @@ import org.springframework.context.annotation.Import;
  * <p>Shares the turn-grain fingerprint with the other frustration integration tests.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubEncoderScorerConfig.class)
 class FrustrationEnableIntegrationTest {
 
     @Autowired
@@ -70,10 +69,10 @@ class FrustrationEnableIntegrationTest {
     ApplicationEventPublisher events;
 
     @Test
-    void enablingWithoutAProviderKeyIsRefused() {
+    void aFreshProjectSeedsFrustrationOffAndEnablingWithoutAProviderKeyIsRefused() {
         TenantFixture.Setup t = tenant("fr-enable-refused");
         ClassifierRow signal = frustration(t);
-        classifierService.setEnabled(t.project().id(), signal.id(), false);
+        assertFalse(signal.enabled(), "frustration seeds disabled: enabling it spends the org's provider credit");
 
         TessaryException e = assertThrows(
                 TessaryException.class,
@@ -91,7 +90,6 @@ class FrustrationEnableIntegrationTest {
         TenantFixture.Setup t = tenant("fr-enable-ok");
         String pid = t.project().id();
         ClassifierRow signal = frustration(t);
-        classifierService.setEnabled(pid, signal.id(), false);
         storeKey(t, ModelProvider.TYPESAFE);
         modelSettings.set(pid, t.org().id(), ModelLane.FRUSTRATION, "TYPESAFE:jev-latest", ServiceTier.STANDARD, null);
         classifiers.pause(pid, signal.id(), ClassifierPause.PROVIDER_REJECTED, Instant.now());
@@ -108,6 +106,7 @@ class FrustrationEnableIntegrationTest {
         TenantFixture.Setup t = tenant("fr-readiness");
         String pid = t.project().id();
         ClassifierRow signal = frustration(t);
+        classifiers.setEnabled(pid, signal.id(), true);
         classifiers.pause(pid, signal.id(), ClassifierPause.NO_PROVIDER, Instant.now());
 
         ClassifierRow row = classifiers.findByKey(pid, "frustration").orElseThrow();
