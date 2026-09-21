@@ -97,3 +97,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0023-trace-conversation-index.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0024-groundedness-detection.sql
+      relativeToChangelogFile: false

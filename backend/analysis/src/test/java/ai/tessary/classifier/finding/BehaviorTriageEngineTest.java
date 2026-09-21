@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.open.errors.ClassifierError;
@@ -117,7 +118,8 @@ class BehaviorTriageEngineTest {
                 apiKeys(),
                 projects(),
                 memberships(),
-                mapper);
+                mapper,
+                mock(ClassifierDetectionWriteRepository.class));
 
         BehaviorTriageVerdict verdict =
                 engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this");
@@ -139,7 +141,8 @@ class BehaviorTriageEngineTest {
                 apiKeys(),
                 projects(),
                 memberships(),
-                mapper);
+                mapper,
+                mock(ClassifierDetectionWriteRepository.class));
 
         TessaryException e = assertThrows(
                 TessaryException.class,

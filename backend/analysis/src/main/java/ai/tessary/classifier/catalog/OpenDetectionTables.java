@@ -34,6 +34,11 @@ public class OpenDetectionTables {
     }
 
     @Bean
+    public DetectionTable groundednessDetectionTable() {
+        return new DetectionTable(BuiltInDetector.Kind.GROUNDEDNESS, "groundedness_detection", Grain.SPAN);
+    }
+
+    @Bean
     public DetectionTable regexDetectionTable() {
         return new DetectionTable(BuiltInDetector.Kind.REGEX, "user_classifier_detection", Grain.SPAN);
     }

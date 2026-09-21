@@ -33,23 +33,18 @@ import org.mockito.Mockito;
 class ClassifierModelModuleCatalogTest {
 
     /**
-     * The catalog every other test in this file builds against, with discovered {@link
-     * DetectorSupplier}s stubbed in for {@code groundedness} and {@code frustration}, standing in for the
-     * beans that supply the real detectors in a running backend. Stubbed rather than real: groundedness's
-     * detector lives outside this module's test classpath, frustration's is a Spring bean with its own
-     * collaborators, and this file's job is to pin the
-     * catalog's wiring, not re-prove the detector's own behavior. The stub answers {@code
-     * callSiteFactsRead()} with the real detector's declared set so {@link
-     * #callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem} still exercises a true fact.
+     * The catalog every other test in this file builds against, with a discovered {@link
+     * DetectorSupplier} stubbed in for {@code frustration}, standing in for the bean that supplies the
+     * real detector in a running backend. Stubbed rather than real: frustration's detector is a Spring
+     * bean with its own collaborators, and this file's job is to pin the catalog's wiring, not re-prove
+     * the detector's own behavior. Every other observation-grain detector, groundedness included, is
+     * closed over in {@code MODULES}.
      */
     private BuiltInClassifierCatalog catalog() {
-        BuiltInDetector groundednessStub = Mockito.mock(BuiltInDetector.class);
-        Mockito.when(groundednessStub.kind()).thenReturn(BuiltInDetector.Kind.GROUNDEDNESS);
-        Mockito.when(groundednessStub.callSiteFactsRead()).thenReturn(Set.of(CallSiteFact.SHAPE));
         BuiltInDetector frustrationStub = Mockito.mock(BuiltInDetector.class);
         Mockito.when(frustrationStub.kind()).thenReturn(BuiltInDetector.Kind.FRUSTRATION);
         Mockito.when(frustrationStub.callSiteFactsRead()).thenReturn(Set.of());
-        return catalogWithDiscovered(deps -> groundednessStub, deps -> frustrationStub);
+        return catalogWithDiscovered(deps -> frustrationStub);
     }
 
     /**
@@ -258,8 +253,12 @@ class ClassifierModelModuleCatalogTest {
         // "supported yes/no" model to a three-way one, so a finding now means contradicted rather
         // than "not supported", and a claim the source is silent on is exempt instead of flagged.
         // That is a change in what the classifier asserts, not a threshold move, which is exactly
-        // when the user-facing description has to re-sync onto already-seeded projects.
-        assertEquals(4, versionOf(builtIns, "groundedness"));
+        // when the user-facing description has to re-sync onto already-seeded projects. 5: the pair
+        // head gave way to the long-context token head and the contract widened from "contradicted"
+        // to "unsupported" (contradicted or baseless); the band is the new model's own. 6: the entry
+        // gained a default arming block (3 detections / 24 h), so already-seeded projects start
+        // filing findings — a config-blob change, which is exactly what the version gate re-syncs.
+        assertEquals(6, versionOf(builtIns, "groundedness"));
         // 2: tool_duration joined the measure list. The bump is not cosmetic: resyncBuiltIns rewrites
         // an already-seeded project's definition only when the catalog version exceeds the stored
         // one, so without it the second grain would reach fresh installs and nothing else. 3: the

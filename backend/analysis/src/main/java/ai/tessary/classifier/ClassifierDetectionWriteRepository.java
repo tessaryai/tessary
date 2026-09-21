@@ -133,6 +133,51 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
+     * /**
+     * One row per detection this classifier recorded in the event-time window {@code [start, end)} —
+     * the span's own clock, the same one {@link #countWindows} armed on — newest first, capped: the
+     * flagged spans of an armed-window finding with what the detector said about each, for the
+     * triage dossier. Both bands, like the arming count that opened the finding, so the agent sees the
+     * review-band rows it exists to rule on and not only the ones already past the high bar.
+     */
+    public List<DetectionInWindow> listInWindow(
+            String detectorKind, String projectId, String classifierId, String start, String end, int limit) {
+        String table = tableFor(detectorKind);
+        if (table == null) return List.of();
+        return jdbc.sql("SELECT subject_trace_id, subject_span_id, subject_session_id, severity, confidence,"
+                        + " evidence::text AS evidence, subject_started_at FROM " + table
+                        + " WHERE project_id = :pid AND classifier_id = :sid"
+                        + " AND subject_started_at >= :start::timestamptz AND subject_started_at < :end::timestamptz"
+                        + " ORDER BY subject_started_at DESC LIMIT :limit")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("start", start)
+                .param("end", end)
+                .param("limit", limit)
+                .query((rs, n) -> new DetectionInWindow(
+                        rs.getString("subject_trace_id"),
+                        rs.getString("subject_span_id"),
+                        rs.getString("subject_session_id"),
+                        rs.getString("severity"),
+                        rs.getString("confidence"),
+                        rs.getString("evidence"),
+                        rs.getObject("subject_started_at", OffsetDateTime.class)
+                                .toInstant()
+                                .toString()))
+                .list();
+    }
+
+    /** A detection as the dossier lists it: where it fired, when the span ran, and what the detector wrote. */
+    public record DetectionInWindow(
+            String traceId,
+            String spanId,
+            @Nullable String sessionId,
+            @Nullable String severity,
+            @Nullable String confidence,
+            @Nullable String evidenceJson,
+            String subjectStartedAt) {}
+
+    /**
      * Of {@code sessionIds}, the ones this classifier has ALREADY flagged at the HIGH band.
      *
      * <p>The turn-grain sweep reads this to stop re-scoring a conversation that is already flagged. A

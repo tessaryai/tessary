@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
+import ai.tessary.classifier.worker.ArmedWindowEvidence;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
@@ -95,15 +96,20 @@ public final class FindingTitle {
     }
 
     /**
-     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet; the
-     * classifier's own key for one filed against the whole classifier, which is what it read before.
+     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet;
+     * {@code "groundedness fired on 3 detections in 1 d, bar 3"} for one filed against the whole
+     * classifier, so the Classifiers page and the case it opens carry the same sentence; the
+     * classifier's own key when the payload cannot be read.
      *
      * <p>Built from the payload and the call-site column, not the cause key: the key leads with a classifier
      * id, which means nothing to someone reading a title.
      */
     private static String armed(FindingRow finding) {
         String facet = FindingPayload.text(finding.payloadJson(), "facet");
-        if (facet == null) return finding.nativeCauseKey();
+        if (facet == null) {
+            ArmedWindowEvidence.ArmedWindowDetail bar = ArmedWindowEvidence.detail(finding.payloadJson());
+            return bar == null ? finding.nativeCauseKey() : ArmedWindowEvidence.title(finding.nativeCauseKey(), bar);
+        }
         String callSite = finding.callSiteId();
         return facet + " in " + (callSite == null ? "agent" : callSite) + " output";
     }

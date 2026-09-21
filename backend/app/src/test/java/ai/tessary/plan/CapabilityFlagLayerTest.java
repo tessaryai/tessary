@@ -33,10 +33,7 @@ class CapabilityFlagLayerTest {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's two private sets. */
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(
-            Capability.BEHAVIOR_DRIFT,
-            Capability.SOP_CONFORMANCE,
-            Capability.GROUNDEDNESS,
-            Capability.TRIAGE_AUTOMATIC);
+            Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.TRIAGE_AUTOMATIC);
 
     @Autowired
     TenantService tenants;
@@ -63,11 +60,11 @@ class CapabilityFlagLayerTest {
                     resolved.isEnabled(capability),
                     capability.wire() + " should default " + (expected ? "on" : "off") + " in an open build");
         }
-        // The four that are off are off for two different reasons, and the payload has to say which.
+        // The three that are off are off for two different reasons, and the payload has to say which.
         assertEquals(
-                Set.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.GROUNDEDNESS),
+                Set.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE),
                 Set.copyOf(capabilities.unavailable()),
-                "only the three paid classifiers are UNAVAILABLE; triage_automatic is merely off");
+                "only the two paid classifiers are UNAVAILABLE; triage_automatic is merely off");
     }
 
     @Test

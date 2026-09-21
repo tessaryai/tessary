@@ -83,12 +83,20 @@ public class BehaviorTriageSource implements TriageSource {
 
     /**
      * The classifiers this source escalates for. Naming them explicitly keeps a conformance finding,
-     * which has its own source and its own dossier, out of this lane's queue.
+     * which has its own source and its own dossier, out of this lane's queue. Groundedness joined on
+     * 2026-09-21: its armed-window finding is the same shape this lane already rules on (one cause,
+     * a population of spans as evidence, a two-file dossier, the substrate over MCP), so it rides the
+     * lane rather than growing a fourth source; the per-span classifiers with no arming block
+     * (secret_leak, malformed_output) still never file a finding and so never reach here.
      */
     private static final List<String> BEHAVIOR_CLASSIFIERS = List.of(
-            BuiltInDetector.Kind.BEHAVIOR_DRIFT, BuiltInDetector.Kind.DURATION_DRIFT,
-            BuiltInDetector.Kind.COST_DRIFT, BuiltInDetector.Kind.TOOL_ERROR,
-            BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT);
+            BuiltInDetector.Kind.BEHAVIOR_DRIFT,
+            BuiltInDetector.Kind.DURATION_DRIFT,
+            BuiltInDetector.Kind.COST_DRIFT,
+            BuiltInDetector.Kind.TOOL_ERROR,
+            BuiltInDetector.Kind.SECRET_LEAK,
+            BuiltInDetector.Kind.MALFORMED_OUTPUT,
+            BuiltInDetector.Kind.GROUNDEDNESS);
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;

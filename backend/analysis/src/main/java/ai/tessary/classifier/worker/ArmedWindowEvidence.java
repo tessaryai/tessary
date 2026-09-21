@@ -5,6 +5,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -56,6 +57,35 @@ public final class ArmedWindowEvidence {
         } catch (JsonProcessingException e) {
             return null;
         }
+    }
+
+    /**
+     * The one sentence the Classifiers page and the case both carry for a classifier-wide arming:
+     * {@code "groundedness fired on 3 detections in 1 d, bar 3"}. Facet-level armings (secret leak)
+     * have their own title, built from the facet and call site instead.
+     */
+    public static String title(String classifierKey, ArmedWindowDetail bar) {
+        return String.format(
+                Locale.ROOT,
+                "%s fired on %d %s in %s, bar %d",
+                classifierKey,
+                bar.observed(),
+                unit(bar.basis()),
+                windowText(bar.windowSeconds()),
+                bar.threshold());
+    }
+
+    /** "detections" or "users": the noun the basis counts. */
+    public static String unit(String basis) {
+        return "distinct_users".equals(basis) ? "users" : "detections";
+    }
+
+    /** {@code 86400} → {@code 1 d}; {@code 3600} → {@code 1 h}; {@code 900} → {@code 15 min}; else seconds. */
+    public static String windowText(long windowSeconds) {
+        if (windowSeconds > 0 && windowSeconds % 86_400 == 0) return (windowSeconds / 86_400) + " d";
+        if (windowSeconds > 0 && windowSeconds % 3_600 == 0) return (windowSeconds / 3_600) + " h";
+        if (windowSeconds > 0 && windowSeconds % 60 == 0) return (windowSeconds / 60) + " min";
+        return windowSeconds + " s";
     }
 
     private static @Nullable String text(JsonNode node) {

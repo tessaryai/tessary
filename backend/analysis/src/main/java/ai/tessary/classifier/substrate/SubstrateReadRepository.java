@@ -376,7 +376,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .map(GroundingEvidenceReads.SpanRef::spanId)
                 .distinct()
                 .toList();
-        java.util.Map<String, StringBuilder> acc = new java.util.HashMap<>();
+        java.util.Map<String, List<String>> acc = new java.util.HashMap<>();
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
@@ -465,9 +465,10 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .query((rs, n) -> {
                     String txt = rs.getString("txt");
                     if (txt != null && !txt.isBlank()) {
-                        acc.computeIfAbsent(rs.getString("span_id"), k -> new StringBuilder())
-                                .append(txt)
-                                .append('\n');
+                        // One list entry per retrieved row, in rank order: the document boundary is
+                        // part of what the groundedness head reads (see Evidence#documents).
+                        acc.computeIfAbsent(rs.getString("span_id"), k -> new java.util.ArrayList<>())
+                                .add(txt.strip());
                     }
                     return Boolean.TRUE; // the row mapper's value is unused; the accumulator is the result
                 })
@@ -475,10 +476,9 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Map<String, GroundingEvidenceReads.Evidence> out = new java.util.HashMap<>();
         for (GroundingEvidenceReads.SpanRef ref : spans) {
             String id = ref.spanId();
-            StringBuilder sb = acc.get(id);
-            String text = sb == null ? "" : sb.toString().strip();
+            List<String> docs = acc.getOrDefault(id, List.of());
             boolean outside = reachedOutside.contains(id);
-            if (!text.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(text, outside));
+            if (!docs.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(docs, outside));
         }
         return java.util.Map.copyOf(out);
     }

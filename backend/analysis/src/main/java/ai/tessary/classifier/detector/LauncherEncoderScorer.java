@@ -189,6 +189,95 @@ public class LauncherEncoderScorer implements EncoderScorer {
         return bytes;
     }
 
+    /** Max responses per token-head request: classify-service's GROUNDEDNESS_MAX_RESPONSES default. */
+    static final int MAX_RESPONSES_PER_REQUEST = 16;
+
+    @Override
+    public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
+        String baseUrl = requireBaseUrl();
+        List<List<Response>> chunks = chunkResponses(responses, MAX_RESPONSES_PER_REQUEST, MAX_TEXT_BYTES_PER_REQUEST);
+        List<ResponseScore> out = new ArrayList<>(responses.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            out.addAll(scoreResponsesChunk(baseUrl, head, chunks.get(i), i + 1, chunks.size()));
+        }
+        if (out.size() != responses.size()) {
+            throw new IllegalStateException(
+                    "launcher /classify returned " + out.size() + " scores for " + responses.size() + " responses");
+        }
+        return out;
+    }
+
+    static List<List<Response>> chunkResponses(List<Response> responses, int maxCount, long maxBytes) {
+        List<List<Response>> chunks = new ArrayList<>();
+        List<Response> current = new ArrayList<>();
+        long currentBytes = 0;
+        for (Response r : responses) {
+            long bytes = responseBytes(r);
+            if (!current.isEmpty() && (current.size() >= maxCount || currentBytes + bytes > maxBytes)) {
+                chunks.add(List.copyOf(current));
+                current.clear();
+                currentBytes = 0;
+            }
+            current.add(r);
+            currentBytes += bytes;
+        }
+        if (!current.isEmpty()) chunks.add(List.copyOf(current));
+        return List.copyOf(chunks);
+    }
+
+    private static long responseBytes(Response r) {
+        long bytes = utf8Bytes(r.answer());
+        String question = r.question();
+        if (question != null) bytes += utf8Bytes(question);
+        for (String p : r.passages()) bytes += utf8Bytes(p);
+        return bytes;
+    }
+
+    /**
+     * One {@code POST /classify} for one response chunk. The body is {@code {head, responses:[...]}} and
+     * the reply {@code {scores:[{unsupported, conflict, spans:[{start,end,unsupported,conflict}]}]}}; a
+     * missing or non-numeric score is a failure, never a silent "clean", for the same reason as
+     * {@link #postAndParseScores}.
+     */
+    private List<ResponseScore> scoreResponsesChunk(
+            String baseUrl, String head, List<Response> responses, int chunk, int chunks) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("head", head);
+        ArrayNode arr = body.putArray("responses");
+        long bytes = 0;
+        for (Response r : responses) {
+            ObjectNode o = arr.addObject();
+            ArrayNode ps = o.putArray("passages");
+            r.passages().forEach(ps::add);
+            if (r.question() != null) o.put("question", r.question());
+            o.put("answer", r.answer());
+            bytes += responseBytes(r);
+        }
+        JsonNode scores = postAndParse(baseUrl, head, "responses", responses.size(), bytes, chunk, chunks, body);
+        List<ResponseScore> out = new ArrayList<>(scores.size());
+        for (JsonNode s : scores) {
+            JsonNode u = s.get("unsupported");
+            JsonNode c = s.get("conflict");
+            if (u == null || !u.isNumber() || c == null || !c.isNumber()) {
+                throw new IllegalStateException(
+                        "launcher /classify returned a non-numeric response score for head " + head);
+            }
+            List<Span> spans = new ArrayList<>();
+            JsonNode sp = s.get("spans");
+            if (sp != null && sp.isArray()) {
+                for (JsonNode x : sp) {
+                    spans.add(new Span(
+                            x.path("start").asInt(),
+                            x.path("end").asInt(),
+                            x.path("unsupported").asDouble(),
+                            x.path("conflict").asDouble()));
+                }
+            }
+            out.add(new ResponseScore(u.asDouble(), c.asDouble(), List.copyOf(spans)));
+        }
+        return out;
+    }
+
     /** One {@code POST /classify} for one chunk; throws on any transport/serving/shape failure. */
     private List<Double> scoreChunk(String baseUrl, String head, List<String> texts, int chunk, int chunks) {
         ObjectNode body = mapper.createObjectNode();
@@ -219,6 +308,106 @@ public class LauncherEncoderScorer implements EncoderScorer {
             return host == null || host.isBlank() ? baseUrl : host;
         } catch (IllegalArgumentException e) {
             return "invalid";
+        }
+    }
+
+    /**
+     * The transport and the array-shape check shared by every request mode: POST, non-2xx and
+     * count-mismatch are failures with the same structured log; the caller reads the entries.
+     */
+    private JsonNode postAndParse(
+            String baseUrl, String head, String mode, int count, long bytes, int chunk, int chunks, ObjectNode body) {
+        Instant start = Instant.now();
+        String host = hostOf(baseUrl);
+        try {
+            String payload = mapper.writeValueAsString(body);
+            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/classify"))
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .header("Authorization", "Bearer " + props.getEncoder().getApiKey())
+                    .header("Content-Type", "application/json")
+                    .timeout(REQUEST_TIMEOUT)
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            int status = resp.statusCode();
+            JsonNode scores = status / 100 == 2 ? mapper.readTree(resp.body()).get("scores") : null;
+            if (status / 100 != 2 || scores == null || !scores.isArray() || scores.size() != count) {
+                StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+                        .field("head", head)
+                        .field("mode", mode)
+                        .field("count", count)
+                        .field("bytes", bytes)
+                        .field("chunk", chunk)
+                        .field("chunks", chunks)
+                        .field("host", host)
+                        .field("httpStatus", status)
+                        .field("scoreCount", scores == null ? 0 : scores.size())
+                        .durationMs(start)
+                        .log();
+                throw new IllegalStateException(
+                        status / 100 != 2
+                                ? "launcher /classify returned HTTP " + status
+                                : "launcher /classify returned " + (scores == null ? 0 : scores.size()) + " scores for "
+                                        + count + " requested");
+            }
+            // Size and duration on the success path too: this mode sends whole retrieved documents,
+            // so its cost is the one an operator most needs in Loki (backend/AGENTS.md § Logging).
+            StructuredLog.info(log, Markers.OPS, "encoder.classify.complete")
+                    .field("head", head)
+                    .field("mode", mode)
+                    .field("count", count)
+                    .field("bytes", bytes)
+                    .field("chunk", chunk)
+                    .field("chunks", chunks)
+                    .field("host", host)
+                    .field("httpStatus", status)
+                    .field("scoreCount", scores.size())
+                    .durationMs(start)
+                    .log();
+            return scores;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+                    .field("head", head)
+                    .field("mode", mode)
+                    .field("count", count)
+                    .field("bytes", bytes)
+                    .field("chunk", chunk)
+                    .field("chunks", chunks)
+                    .field("host", host)
+                    .field("reason", "interrupted")
+                    .durationMs(start)
+                    .log();
+            throw new IllegalStateException("encoder scoring interrupted", e);
+        } catch (JsonProcessingException e) {
+            // Jackson echoes body snippets in its message; OPS stays categorical and the throw is
+            // unchained so ClassifierWorker's .cause(e) cannot re-egress it. Detail at DEBUG.
+            StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+                    .field("head", head)
+                    .field("mode", mode)
+                    .field("count", count)
+                    .field("bytes", bytes)
+                    .field("chunk", chunk)
+                    .field("chunks", chunks)
+                    .field("host", host)
+                    .field("reason", "parse")
+                    .durationMs(start)
+                    .log();
+            log.debug("encoder.classify parse failure detail head={} host={}", head, host, e);
+            throw new IllegalStateException("launcher /classify parse failure"); // NOPMD PreserveStackTrace
+        } catch (IOException e) {
+            StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+                    .field("head", head)
+                    .field("mode", mode)
+                    .field("count", count)
+                    .field("bytes", bytes)
+                    .field("chunk", chunk)
+                    .field("chunks", chunks)
+                    .field("host", host)
+                    .field("reason", "transport")
+                    .durationMs(start)
+                    .cause(e)
+                    .log();
+            throw new IllegalStateException("launcher /classify transport failure", e);
         }
     }
 

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
+import ai.tessary.classifier.worker.ArmedWindowEvidence;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.open.errors.ClassifierError;
@@ -81,6 +83,7 @@ public class BehaviorTriageEngine {
     private final ProjectRepository projects;
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
+    private final ClassifierDetectionWriteRepository detections;
 
     public BehaviorTriageEngine(
             List<TriageSandbox> sandboxList,
@@ -89,7 +92,8 @@ public class BehaviorTriageEngine {
             ApiKeyService apiKeys,
             ProjectRepository projects,
             OrgMembershipRepository memberships,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            ClassifierDetectionWriteRepository detections) {
         Map<String, TriageSandbox> byKey = new HashMap<>();
         for (TriageSandbox s : sandboxList) byKey.put(s.key(), s);
         this.sandboxes = Map.copyOf(byKey);
@@ -99,6 +103,7 @@ public class BehaviorTriageEngine {
         this.projects = projects;
         this.memberships = memberships;
         this.mapper = mapper;
+        this.detections = detections;
     }
 
     /**
@@ -241,7 +246,68 @@ public class BehaviorTriageEngine {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("finding.md", findingFile(finding));
         methodCard(finding.classifierKey()).ifPresent(card -> files.put("method.md", card));
+        detectionsFile(finding).ifPresent(text -> files.put(DETECTIONS_FILE, text));
         return files;
+    }
+
+    /** The dossier file listing an armed-window finding's detections, one per flagged span. */
+    static final String DETECTIONS_FILE = "detections.md";
+
+    /** Rows listed before the file says "and N more": enough to read the pattern, bounded for the budget. */
+    static final int DETECTIONS_CAP = 50;
+
+    /**
+     * For an armed-window finding, what the classifier wrote about each span it fired on — the
+     * flagged claim, its score, the band — read back from the detection table over the finding's own
+     * window. The evidence enumeration says WHICH spans; this says WHY each one, which is the material
+     * a ruling on a groundedness finding is made of, and handing it over saves the agent a page of
+     * MCP reads per span. Empty for every other cause kind, and for a faceted arming.
+     */
+    private Optional<String> detectionsFile(FindingRow finding) {
+        ArmedWindowEvidence.ArmedWindowDetail read = ArmedWindowEvidence.detail(finding.payloadJson());
+        if (read == null || read.windowStart() == null || read.windowEnd() == null) return Optional.empty();
+        // A faceted finding (secret leak) is one facet at one call site; the classifier's whole window
+        // would list every other facet's rows beside it. Its detail surface reads those rows itself.
+        if (FindingPayload.text(finding.payloadJson(), "facet") != null) return Optional.empty();
+        List<ClassifierDetectionWriteRepository.DetectionInWindow> rows = detections.listInWindow(
+                finding.classifierKey(),
+                finding.projectId(),
+                finding.causeKey(),
+                read.windowStart(),
+                read.windowEnd(),
+                DETECTIONS_CAP + 1);
+        StringBuilder sb = new StringBuilder("# Detections in the window\n\n")
+                .append("One line per span the classifier fired on, newest first: trace and span ids (the")
+                .append(" `get_trace` / `get_span` arguments), the band the score fell in, and the")
+                .append(" detector's own evidence for that span, verbatim. `high` is past the classifier's")
+                .append(" upper threshold; `low` is the band between its two thresholds, which is a")
+                .append(" candidate, not a miss.\n\n");
+        int shown = Math.min(rows.size(), DETECTIONS_CAP);
+        for (int i = 0; i < shown; i++) {
+            ClassifierDetectionWriteRepository.DetectionInWindow d = rows.get(i);
+            sb.append("- trace `")
+                    .append(d.traceId())
+                    .append("` span `")
+                    .append(d.spanId())
+                    .append("` at ")
+                    .append(d.subjectStartedAt())
+                    .append(" [")
+                    .append(d.confidence() == null ? "high" : d.confidence())
+                    .append(d.severity() == null ? "" : ", " + d.severity())
+                    .append("]: ")
+                    .append(d.evidenceJson() == null ? "(no evidence recorded)" : d.evidenceJson())
+                    .append('\n');
+        }
+        if (rows.size() > DETECTIONS_CAP) {
+            sb.append("\n")
+                    .append(DETECTIONS_CAP)
+                    .append(" of at least ")
+                    .append(read.observed())
+                    .append(" shown; page the rest through `get_finding_evidence`.\n");
+        } else {
+            sb.append("\n").append(shown).append(" detection(s), the complete window.\n");
+        }
+        return Optional.of(sb.toString());
     }
 
     /**

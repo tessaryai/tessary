@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
@@ -62,7 +63,8 @@ class BehaviorTriagePromptTest {
                 mock(ApiKeyService.class),
                 mock(ProjectRepository.class),
                 mock(OrgMembershipRepository.class),
-                new ObjectMapper());
+                new ObjectMapper(),
+                mock(ClassifierDetectionWriteRepository.class));
     }
 
     private static FindingRow finding(
