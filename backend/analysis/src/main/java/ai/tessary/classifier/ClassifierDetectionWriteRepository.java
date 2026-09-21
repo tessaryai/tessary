@@ -160,6 +160,29 @@ public class ClassifierDetectionWriteRepository {
                 .list());
     }
 
+    /**
+     * Of {@code traceIds}, the ones whose conversation this classifier has a detection for that nobody
+     * has cleared. The conversation is {@code COALESCE(trace.thread_id, trace.session_id)}, the key such a
+     * classifier writes into {@code subject_session_id}; a trace with neither is in no conversation and
+     * is never returned. Reads the detection table's partial index on uncleared rows.
+     */
+    public Set<String> tracesInUnclearedFlaggedConversations(
+            String detectorKind, String projectId, String classifierId, Collection<String> traceIds) {
+        String table = tableFor(detectorKind);
+        if (table == null || traceIds.isEmpty()) return Set.of();
+        return new HashSet<>(jdbc.sql("SELECT t.id FROM trace t"
+                        + " WHERE t.project_id = :pid AND t.id IN (:traces)"
+                        + " AND EXISTS (SELECT 1 FROM " + table + " d"
+                        + "   WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + "     AND d.subject_session_id = COALESCE(t.thread_id, t.session_id)"
+                        + "     AND d.cleared_at IS NULL)")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("traces", traceIds)
+                .query(String.class)
+                .list());
+    }
+
     /** A span, by both halves of its composite key. */
     public record SpanKey(String traceId, String spanId) {}
 

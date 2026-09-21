@@ -70,3 +70,12 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0014-frustration-lane.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0015-frustration-paused.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0016-frustration-detection-open.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0017-frustration-assessment.sql
+      relativeToChangelogFile: false

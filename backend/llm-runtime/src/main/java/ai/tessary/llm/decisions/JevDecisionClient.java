@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm.decisions;
 
+import ai.tessary.config.FrustrationProperties;
 import ai.tessary.llm.ModelCatalog;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
@@ -78,7 +79,8 @@ public class JevDecisionClient implements DecisionClient {
             ObjectMapper mapper,
             OpenTelemetry openTelemetry,
             @Nullable PlatformCallPricer pricer,
-            @Nullable LlmUsageAccountant accountant) {
+            @Nullable LlmUsageAccountant accountant,
+            @Nullable FrustrationProperties props) {
         this(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
                 mapper,
@@ -86,8 +88,8 @@ public class JevDecisionClient implements DecisionClient {
                 pricer,
                 accountant,
                 Thread::sleep,
-                DEFAULT_TIMEOUT,
-                DEFAULT_MAX_ATTEMPTS);
+                props == null ? DEFAULT_TIMEOUT : Duration.ofMillis(Math.max(1, props.getTimeoutMs())),
+                props == null ? DEFAULT_MAX_ATTEMPTS : props.getMaxAttempts());
     }
 
     JevDecisionClient(

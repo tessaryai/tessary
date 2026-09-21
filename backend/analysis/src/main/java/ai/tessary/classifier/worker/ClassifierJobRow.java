@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
  *     advances them. Monotonic + resumable; {@code null} sweeps from the beginning.
  * @param cursorId the {@code observation.id} tiebreaker of the keyset cursor, making it gap-free across a
  *     batch boundary that falls inside a group of observations sharing one {@code created_at}.
+ * @param pageRetries consecutive holds of the page past the cursor; see {@code ClassifierJobRepository#holdPage}
  */
 public record ClassifierJobRow(
         String id,
@@ -26,7 +27,8 @@ public record ClassifierJobRow(
         int attempts,
         @Nullable String lastError,
         String createdAt,
-        String updatedAt) {
+        String updatedAt,
+        int pageRetries) {
     public static final String PENDING = JobStatus.PENDING;
     public static final String CLAIMED = JobStatus.CLAIMED;
     public static final String DONE = JobStatus.DONE;

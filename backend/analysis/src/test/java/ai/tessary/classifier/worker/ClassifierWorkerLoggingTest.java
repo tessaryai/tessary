@@ -149,7 +149,7 @@ class ClassifierWorkerLoggingTest {
                 new SyncTaskExecutor());
 
         ClassifierJobRow job = new ClassifierJobRow(
-                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now");
+                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
         when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
         when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(true); // budget exhausted
 
@@ -181,7 +181,7 @@ class ClassifierWorkerLoggingTest {
                 new SyncTaskExecutor());
 
         ClassifierJobRow job = new ClassifierJobRow(
-                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now");
+                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
         when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
         when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(false); // still inside the budget
 
@@ -253,7 +253,19 @@ class ClassifierWorkerLoggingTest {
                 new SyncTaskExecutor());
 
         ClassifierJobRow job = new ClassifierJobRow(
-                "job-te", "proj-1", "sig-te", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now");
+                "job-te",
+                "proj-1",
+                "sig-te",
+                ClassifierJobRow.PENDING,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                "now",
+                "now",
+                0);
         ClassifierRow signal = new ClassifierRow(
                 "sig-te",
                 "proj-1",
@@ -320,7 +332,8 @@ class ClassifierWorkerLoggingTest {
                 0,
                 null,
                 "now",
-                "now");
+                "now",
+                0);
         ClassifierRow signal = new ClassifierRow(
                 "sig-sop",
                 "proj-1",
@@ -377,7 +390,19 @@ class ClassifierWorkerLoggingTest {
                 new SyncTaskExecutor());
 
         ClassifierJobRow job = new ClassifierJobRow(
-                "job-fr", "proj-1", "sig-fr", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now");
+                "job-fr",
+                "proj-1",
+                "sig-fr",
+                ClassifierJobRow.PENDING,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                "now",
+                "now",
+                0);
         ClassifierRow signal = new ClassifierRow(
                 "sig-fr",
                 "proj-1",

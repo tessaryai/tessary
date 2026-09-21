@@ -226,7 +226,19 @@ class ClassifierWorkerDrainTest {
 
     private static ClassifierJobRow job() {
         return new ClassifierJobRow(
-                "job-1", PROJECT, CLASSIFIER, ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now");
+                "job-1",
+                PROJECT,
+                CLASSIFIER,
+                ClassifierJobRow.PENDING,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                "now",
+                "now",
+                0);
     }
 
     /** {@code size} observations numbered from {@code from}, in cursor order. */

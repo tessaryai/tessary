@@ -56,6 +56,26 @@ public interface BuiltInDetector {
         return Set.of();
     }
 
+    /**
+     * Which of a turn-grain classifier's conversations its sweep stops scoring. The default,
+     * {@link ConversationSuppression#FLAGGED_HIGH}, suits a banded detector; a detector with one band
+     * and a human clear declares {@link ConversationSuppression#FLAGGED_UNCLEARED}.
+     */
+    default ConversationSuppression conversationSuppression() {
+        return ConversationSuppression.FLAGGED_HIGH;
+    }
+
+    /** The conversations a turn-grain sweep drops before scoring; see {@link #conversationSuppression}. */
+    enum ConversationSuppression {
+        /** Conversations flagged at the HIGH band, keyed by the trace's session id. */
+        FLAGGED_HIGH,
+        /**
+         * Conversations with any detection whose {@code cleared_at} is null, keyed by
+         * {@code COALESCE(trace.thread_id, trace.session_id)}.
+         */
+        FLAGGED_UNCLEARED
+    }
+
     /** The canonical {@code signal.detector} values: the dispatch keys for the built-in catalog. */
     final class Kind {
         private Kind() {}

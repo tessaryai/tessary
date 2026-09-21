@@ -104,7 +104,8 @@ class ClassifierHealthTest {
                 3,
                 "classify: connection refused",
                 "2026-01-01T00:00:00Z",
-                "2026-01-05T12:00:00Z");
+                "2026-01-05T12:00:00Z",
+                0);
         when(jobs.listByProject(PID)).thenReturn(List.of(failing));
 
         ClassifierHealthView v = service.health(PID).get(0);
@@ -131,7 +132,8 @@ class ClassifierHealthTest {
                 0,
                 null,
                 "2026-01-01T00:00:00Z",
-                "2026-01-05T00:00:00Z");
+                "2026-01-05T00:00:00Z",
+                0);
         when(jobs.listByProject(PID)).thenReturn(List.of(done));
 
         ClassifierHealthView v = service.health(PID).get(0);

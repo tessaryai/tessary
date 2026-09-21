@@ -12,13 +12,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Gives the six turn-grain {@code @SpringBootTest}s that grant {@code Capability.FRUSTRATION} a
- * table to write into, without any changelog in this tree ever creating one.
+ * table to write into while {@code frustration_detection} is not yet registered for the events feed.
  *
- * <p>Every detection table shipped here has {@code subject_span_id NOT NULL}, so nothing here can
- * hold a TRACE-grain row, and the tests exercising {@code EncoderDetector} through
- * {@link StubEncoderScorerConfig} at TURN grain would have nowhere to write. Rather than relax a
- * shipped table's constraint, this test-only config registers its own {@link DetectionTable}
- * pointed at a scratch table it creates itself, proving the same off-classpath
+ * <p>This test-only config registers its own {@link DetectionTable} pointed at a scratch table it
+ * creates itself, shaped exactly like the shipped {@code frustration_detection} (trace grain,
+ * nullable {@code subject_span_id}, {@code cleared_at}), proving the same off-classpath
  * {@code DetectionTable} registration path a real classifier module uses: a bean outside
  * {@code OpenDetectionTables}, written through the normal write repository, read back through
  * {@code DetectionTableRegistry#unionSql()}.
@@ -28,9 +26,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * rather than a second Liquibase changelog because this table is disposable test fixture, not
  * shipped schema.
  *
- * <p>{@code LIKE secret_leak_detection INCLUDING DEFAULTS INCLUDING CONSTRAINTS} copies every
- * column and constraint verbatim, including {@code subject_span_id NOT NULL}, which the next
- * statement drops since a TRACE-grain row never populates it. The unique index on
+ * <p>{@code LIKE frustration_detection INCLUDING DEFAULTS INCLUDING CONSTRAINTS} copies every
+ * column and CHECK constraint verbatim (not the foreign keys, which {@code LIKE} never copies). The
+ * unique index on
  * {@code (project_id, classifier_id, subject_trace_id)} is this table's own idempotency key: a
  * turn-grain detection is unique per trace, not per span.
  */
@@ -48,9 +46,7 @@ public class TurnGrainTestDetectionConfig {
     @DependsOn(LiquibaseConfig.BEAN_NAME)
     public Object createTurnDetectionTable(JdbcClient jdbc) {
         jdbc.sql("CREATE TABLE IF NOT EXISTS " + TABLE
-                        + " (LIKE secret_leak_detection INCLUDING DEFAULTS INCLUDING CONSTRAINTS)")
-                .update();
-        jdbc.sql("ALTER TABLE " + TABLE + " ALTER COLUMN subject_span_id DROP NOT NULL")
+                        + " (LIKE frustration_detection INCLUDING DEFAULTS INCLUDING CONSTRAINTS)")
                 .update();
         jdbc.sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_" + TABLE + "_subject ON " + TABLE
                         + " (project_id, classifier_id, subject_trace_id)")

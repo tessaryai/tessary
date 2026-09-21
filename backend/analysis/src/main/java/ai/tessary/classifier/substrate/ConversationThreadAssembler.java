@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -344,7 +345,7 @@ public class ConversationThreadAssembler {
 
     /** Walks one message's content in order, collecting its text and whether it ended on a tool call. */
     private static final class PartWalk {
-        private final StringBuilder text = new StringBuilder();
+        private final StringJoiner text = new StringJoiner(" ");
         private boolean hasText;
         private boolean endsInToolCall;
 
@@ -372,8 +373,7 @@ public class ConversationThreadAssembler {
 
         private void append(String rendered, boolean isText) {
             if (rendered.isEmpty()) return;
-            if (text.length() > 0) text.append(' ');
-            text.append(rendered);
+            text.add(rendered);
             hasText |= isText;
             endsInToolCall = false;
         }
@@ -443,7 +443,7 @@ public class ConversationThreadAssembler {
     }
 
     /** The scored observation's text for one side (system-excluded, multimodal), newline-joined. */
-    private static String sideText(@org.jspecify.annotations.Nullable String column, Set<String> roles, String fb) {
+    private static String sideText(@Nullable String column, Set<String> roles, String fb) {
         StringBuilder sb = new StringBuilder();
         for (RoleMessage msg : ContentExtractor.columnMessages(column, roles, fb)) {
             if (sb.length() > 0) sb.append('\n');

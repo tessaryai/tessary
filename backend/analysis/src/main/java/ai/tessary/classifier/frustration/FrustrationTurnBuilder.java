@@ -56,6 +56,13 @@ public final class FrustrationTurnBuilder {
         }
     }
 
+    /**
+     * An eligible turn: the state to send and which user turn of its conversation it is.
+     *
+     * @param userTurn the scored message's 1-based position among the conversation's user messages
+     */
+    public record EligibleTurn(TurnState state, int userTurn) {}
+
     private final ConversationThreadAssembler assembler;
     private final Caps caps;
 
@@ -70,7 +77,22 @@ public final class FrustrationTurnBuilder {
 
     /** The state to send for {@code scored}, or empty when the turn is not eligible. */
     public Optional<TurnState> build(SubstrateObservation scored) {
-        return assembler.assembleStructured(scored).flatMap(thread -> format(thread, caps));
+        return buildTurn(scored).map(EligibleTurn::state);
+    }
+
+    /** {@link #build}, with the scored message's position among the conversation's user messages. */
+    public Optional<EligibleTurn> buildTurn(SubstrateObservation scored) {
+        return assembler
+                .assembleStructured(scored)
+                .flatMap(thread -> format(thread, caps).map(state -> new EligibleTurn(state, userTurn(thread))));
+    }
+
+    private static int userTurn(StructuredThread thread) {
+        int users = 1;
+        for (StructuredThread.Message m : thread.earlier()) {
+            if ("user".equals(m.role())) users++;
+        }
+        return users;
     }
 
     /** {@link #build}'s pure half: eligibility, pastes, caps and budget over an assembled thread. */

@@ -173,11 +173,14 @@ public class RetentionSweeper {
             // ordering here is what makes it a one-line change when that number is chosen. Until then the
             // payload delete is a no-op after the first pass, since it removes rows the trace delete in
             // the same sweep would have cascaded anyway.
+            // The Frustration classifier's copies of turn text (frustration_assessment.request) age with
+            // the payloads they were built from, so they are nulled in the same tier.
             // Evidence last, and only ever after the substrate deletes above: a row is collectable
             // exactly when its claim is closed AND the thing it pointed at is already gone, so running
             // it in the same pass releases the previous pass's remainder rather than its own work.
             case TRACES ->
-                repo.deleteSpanPayloads(projectId, cutoff, limit)
+                repo.nullAssessmentRequests(projectId, cutoff, limit)
+                        + repo.deleteSpanPayloads(projectId, cutoff, limit)
                         + repo.deleteTraces(projectId, cutoff, limit)
                         + repo.deleteOrphanedEvidence(projectId, limit);
             case DETECTIONS -> repo.deleteDetections(projectId, cutoff, limit);

@@ -263,6 +263,39 @@ class RetentionPinIntegrationTest {
         assertEquals(0, retention.countPinnedTraces(p.id()), "and the count follows the claim's lifecycle");
     }
 
+    /**
+     * The Frustration classifier's copy of a turn's text ages with the payload it was built from: the
+     * aged turn's {@code request} is nulled and the rest of its assessment stays, while a pinned turn's
+     * copy is kept, as its payload is.
+     */
+    @Test
+    @DisplayName("an aged frustration assessment loses its request text and keeps its verdict; a pinned one keeps both")
+    void frustrationAssessmentRequestsAgeWithTheirPayloads() {
+        Project p = project("pin-frustration-request");
+        trace(p, "trace-assessed", null);
+        trace(p, "trace-assessed-pinned", null);
+        String classifier = classifier(p);
+        assessment(p, classifier, "trace-assessed");
+        assessment(p, classifier, "trace-assessed-pinned");
+        String finding = finding(p, "cause-frustration", "open");
+        evidence(p, finding, null, "trace-assessed-pinned", null);
+
+        sweep();
+
+        assertFalse(traceExists(p, "trace-assessed"), "the aged turn itself is gone");
+        assertTrue(requestNulled(p, "trace-assessed"), "so is the copy of its text");
+        assertEquals(
+                "v1|true|{\"model\": \"jev\"}",
+                jdbc.sql("SELECT scorer_version || '|' || frustrated || '|' || response::text"
+                                + " FROM frustration_assessment WHERE project_id = :pid AND trace_id = :tid")
+                        .param("pid", p.id())
+                        .param("tid", "trace-assessed")
+                        .query(String.class)
+                        .single(),
+                "the verdict, the version and the answer stay");
+        assertFalse(requestNulled(p, "trace-assessed-pinned"), "a pinned turn keeps its text, as its payload does");
+    }
+
     // ---- fixtures ---------------------------------------------------------------------------------
 
     /**
@@ -327,6 +360,42 @@ class RetentionPinIntegrationTest {
                 .param("sid", "span-" + traceId)
                 .param("at", at)
                 .update();
+    }
+
+    private String classifier(Project p) {
+        String id = Ids.ulid();
+        String now = Instant.now().toString();
+        jdbc.sql("""
+                        INSERT INTO classifier (id, project_id, classifier_key, name, detector, created_at, updated_at)
+                        VALUES (:id, :pid, 'frustration', 'Frustration', 'frustration', :now, :now)
+                        """).param("id", id).param("pid", p.id()).param("now", now).update();
+        return id;
+    }
+
+    private void assessment(Project p, String classifierId, String traceId) {
+        jdbc.sql("""
+                        INSERT INTO frustration_assessment (id, project_id, classifier_id, trace_id, span_id,
+                            conversation_id, turn_started_at, frustrated, scorer_version, provider, model,
+                            request, response)
+                        VALUES (:id, :pid, :cid, :tid, :sid, 'conv-1', :at::timestamptz, true, 'v1', 'TYPESAFE',
+                            'jev', CAST('{"state": "text"}' AS jsonb), CAST('{"model": "jev"}' AS jsonb))
+                        """)
+                .param("id", Ids.ulid())
+                .param("pid", p.id())
+                .param("cid", classifierId)
+                .param("tid", traceId)
+                .param("sid", "span-" + traceId)
+                .param("at", AGED)
+                .update();
+    }
+
+    private boolean requestNulled(Project p, String traceId) {
+        return jdbc.sql(
+                        "SELECT request IS NULL FROM frustration_assessment WHERE project_id = :pid AND trace_id = :tid")
+                .param("pid", p.id())
+                .param("tid", traceId)
+                .query(Boolean.class)
+                .single();
     }
 
     private String finding(Project p, String causeKey, String status) {
