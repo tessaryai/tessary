@@ -2,6 +2,7 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -106,6 +107,8 @@ class ProjectModelSettingControllerTest {
                         "GEMINI",
                         "GLM",
                         "GROK",
+                        "TYPESAFE",
+                        "OPENROUTER",
                         "CUSTOM"),
                 view.catalogModels().stream().map(e -> e.provider().name()).toList());
 
@@ -155,14 +158,42 @@ class ProjectModelSettingControllerTest {
     }
 
     @Test
-    void getDoesNotOfferNonAgenticCatalogEntriesAnywhere() {
+    void getOffersOnlyAgenticAndDecisionCatalogEntries() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
         assertTrue(
-                view.catalogModels().stream().allMatch(ModelCatalog.CatalogEntry::agentic),
-                "catalog_models must never carry a non-agentic entry (the older OpenAI-direct models, "
-                        + "Anthropic-direct, OpenRouter, Moonshot, Bedrock) — none of them are offered on any lane: "
+                view.catalogModels().stream().allMatch(e -> e.agentic() || e.decision()),
+                "catalog_models must never carry a chat entry no lane offers (the older OpenAI-direct models, "
+                        + "Anthropic-direct, OpenRouter, Moonshot, Bedrock): "
                         + view.catalogModels());
+    }
+
+    @Test
+    void theFrustrationLaneIsADecisionSectionOfferingOnlyJevTypeSafeFirst() {
+        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
+
+        var group = view.groups().stream()
+                .filter(g -> g.id() == LaneGroup.DECISION_CALLS)
+                .findFirst()
+                .orElseThrow();
+        assertFalse(group.tiered());
+        assertFalse(group.effortTunable());
+        assertFalse(group.modelSelectable(), "one model per provider, so the row is a provider select only");
+        var lane = view.lanes().stream()
+                .filter(l -> l.id() == ModelLane.FRUSTRATION)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(LaneGroup.DECISION_CALLS, lane.group());
+        assertEquals(
+                List.of(ModelProvider.TYPESAFE, ModelProvider.OPENROUTER),
+                lane.providerOptions().stream()
+                        .map(ProjectModelSettingController.ProviderOptionView::provider)
+                        .toList());
+        assertEquals(
+                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"),
+                lane.providerOptions().stream()
+                        .flatMap(o -> o.modelKeys().stream())
+                        .toList());
     }
 
     @Test

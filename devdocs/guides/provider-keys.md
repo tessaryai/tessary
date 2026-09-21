@@ -83,8 +83,13 @@ The Frustration classifier uses TypeSafe's Jev this way. Two keys can carry that
   `https://openrouter.ai/api/alpha/decisions`. The same key keeps serving chat models on the RCA
   and Triage lanes.
 
-When the org holds both, TypeSafe is used. A base URL override on either credential replaces the
-host; a trailing `/v1` is dropped, since neither decision path sits under it.
+Which one runs is the **Frustration** lane on the Models page, in its own "Decision models"
+section. The lane offers a provider select and nothing else: each provider serves one decision model,
+and there is no tier or effort to set. Left on Automatic it takes TypeSafe when the org holds both
+keys; pinning OpenRouter keeps it there. Only decision models can be saved on the lane, and a decision
+model cannot be saved on RCA or Triage (`ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE`). A base URL
+override on either credential replaces the host; a trailing `/v1` is dropped, since neither decision
+path sits under it.
 
 Each call is booked in the usage ledger on the org's own key, and priced from the price book under
 `typesafe/jev-latest` on both routes: the book has no OpenRouter-specific Jev rate, so an OpenRouter

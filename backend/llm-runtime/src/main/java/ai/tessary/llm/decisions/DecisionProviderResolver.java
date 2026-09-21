@@ -2,66 +2,57 @@
 package ai.tessary.llm.decisions;
 
 import ai.tessary.crypto.SecretBox;
-import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llm.ProjectOrgResolver;
 import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
-import java.util.List;
+import ai.tessary.llmspi.ModelLane;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
- * Project to decision target: the org's decision-model key, decrypted, and the one decision model the
- * catalog offers on that gateway.
+ * Project to decision target: the decision lane's provider and model for this project, then the org's
+ * key for that provider, decrypted.
  *
- * <p>TypeSafe is preferred over OpenRouter when the org holds both, since it is the model's own
- * endpoint. Empty when the org holds a key for neither, which a caller treats as "no provider".
+ * <p>The provider comes from {@link ProjectModelSettings}, so a project that pinned OpenRouter on the
+ * lane runs there even when the org also holds a TypeSafe key, and an unpinned lane follows
+ * {@code LanePriority} (TypeSafe first). Empty when the org holds a key for no provider the lane
+ * offers, which a caller treats as "no provider".
  */
 @Component
 public class DecisionProviderResolver {
 
-    /** Gateways that can carry a decision call, most preferred first. */
-    static final List<ModelProvider> GATEWAYS = List.of(ModelProvider.TYPESAFE, ModelProvider.OPENROUTER);
-
+    private final ProjectModelSettings settings;
     private final ProviderCredentialRepository credentials;
     private final SecretBox secretBox;
     private final ProjectOrgResolver orgResolver;
 
     public DecisionProviderResolver(
-            ProviderCredentialRepository credentials, SecretBox secretBox, ProjectOrgResolver orgResolver) {
+            ProjectModelSettings settings,
+            ProviderCredentialRepository credentials,
+            SecretBox secretBox,
+            ProjectOrgResolver orgResolver) {
+        this.settings = settings;
         this.credentials = credentials;
         this.secretBox = secretBox;
         this.orgResolver = orgResolver;
     }
 
-    public Optional<DecisionTarget> resolve(String projectId) {
+    public Optional<DecisionTarget> resolve(String projectId, ModelLane lane) {
         String orgId = orgResolver.orgIdFor(projectId);
         if (orgId == null) return Optional.empty();
-        return GATEWAYS.stream()
-                .map(provider -> target(orgId, provider))
-                .flatMap(Optional::stream)
-                .findFirst();
-    }
-
-    private Optional<DecisionTarget> target(String orgId, ModelProvider provider) {
+        Optional<ProjectModelSettings.ResolvedDecisionModel> model = settings.resolveDecisionModel(projectId, lane);
+        if (model.isEmpty()) return Optional.empty();
+        ModelProvider provider = model.get().provider();
         Optional<ProviderCredential> cred = credentials.findByOrgAndProvider(orgId, provider);
-        Optional<String> model = decisionModel(provider);
-        if (cred.isEmpty() || model.isEmpty()) return Optional.empty();
+        if (cred.isEmpty()) return Optional.empty();
         String sealed = cred.get().apiKeySealed();
         if (sealed == null || sealed.isBlank()) return Optional.empty();
         return Optional.of(new DecisionTarget(
                 provider,
-                model.get(),
+                model.get().modelId(),
                 DecisionTarget.endpointFor(provider, cred.get().baseUrlOverride()),
                 secretBox.open(sealed)));
-    }
-
-    /** The catalog's decision model on {@code provider}; one per provider by construction. */
-    static Optional<String> decisionModel(ModelProvider provider) {
-        return ModelCatalog.entries().stream()
-                .filter(e -> e.provider() == provider && e.decision())
-                .map(ModelCatalog.CatalogEntry::modelName)
-                .findFirst();
     }
 }

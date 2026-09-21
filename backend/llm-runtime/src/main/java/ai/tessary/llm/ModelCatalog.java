@@ -487,11 +487,17 @@ public final class ModelCatalog {
         }
     }
 
-    /** Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries. */
+    /**
+     * Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries for
+     * {@link LaneGroup#AGENT_VM} or the decision entries for {@link LaneGroup#DECISION_CALLS}.
+     */
     private static Set<String> offeredFor(LaneGroup group) {
         Set<String> offered = new LinkedHashSet<>(BedrockModelProfile.offeredFor(group));
         if (group == LaneGroup.AGENT_VM) {
             ENTRIES.stream().filter(CatalogEntry::agentic).forEach(e -> offered.add(key(e)));
+        }
+        if (group == LaneGroup.DECISION_CALLS) {
+            ENTRIES.stream().filter(CatalogEntry::decision).forEach(e -> offered.add(key(e)));
         }
         return offered;
     }
@@ -543,6 +549,15 @@ public final class ModelCatalog {
             case TYPESAFE -> DECISION_PRICING_PREFIX + modelName;
             default -> modelName;
         };
+    }
+
+    /**
+     * The id a decision model is priced under: {@code typesafe/<bare id>} on both gateways. OpenRouter's
+     * name is already {@code typesafe/jev-latest}, so it passes through unchanged rather than via
+     * {@link #pricingId}'s {@code openrouter/} case, which names no book key.
+     */
+    public static String decisionPricingId(ModelProvider provider, String modelName) {
+        return provider == ModelProvider.TYPESAFE ? pricingId(provider, modelName) : modelName;
     }
 
     public static Optional<CatalogEntry> find(ModelProvider provider, String modelName) {

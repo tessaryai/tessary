@@ -4,8 +4,9 @@ package ai.tessary.llmspi;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * How the platform reaches the model for a {@link ModelLane}: it either builds the Bedrock request
- * itself, or hands a model id to an agent running in a microVM and never sees the request at all.
+ * How the platform reaches the model for a {@link ModelLane}: it builds the Bedrock request itself,
+ * hands a model id to an agent running in a microVM and never sees the request at all, or asks a
+ * hosted decision model one typed question per observation.
  *
  * <p>That one fact decides everything the settings surface needs to know per lane — whether a service
  * tier is a meaningful control, whether the model has to be able to sustain a long tool-use loop, and
@@ -35,7 +36,19 @@ public enum LaneGroup {
             "Agent in a VM",
             "A model id handed to an agent running in a sandbox, which drives it from the inside. The"
                     + " agent composes every request, so there is no tier and no effort for us to set — only"
-                    + " which model it gets.");
+                    + " which model it gets."),
+
+    /**
+     * The platform asks a hosted decision model (TypeSafe's Jev) a typed question and reads back
+     * probabilities. Not a chat completion: the call goes through {@code llm/decisions/}, never
+     * {@code ChatModel}, and each provider serves exactly one decision model, so the provider is the
+     * whole choice.
+     */
+    DECISION_CALLS(
+            "decision_calls",
+            "Decision models",
+            "One question per turn, answered by a decision model on your key. No tier, no effort, one"
+                    + " model per provider.");
 
     private final String wire;
     private final String label;
@@ -84,5 +97,14 @@ public enum LaneGroup {
      */
     public boolean effortTunable() {
         return this == LLM_CALLS;
+    }
+
+    /**
+     * Whether a lane in this group offers a choice of model within a provider. False for
+     * {@link #DECISION_CALLS}: each provider serves one decision model, so the settings page shows a
+     * provider select and nothing else.
+     */
+    public boolean modelSelectable() {
+        return this != DECISION_CALLS;
     }
 }

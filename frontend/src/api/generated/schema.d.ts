@@ -3066,8 +3066,9 @@ export interface components {
             description: string;
             effort_tunable: boolean;
             /** @enum {string} */
-            id: "llm_calls" | "agent_vm";
+            id: "llm_calls" | "agent_vm" | "decision_calls";
             label: string;
+            model_selectable: boolean;
             tiered: boolean;
         };
         /** @enum {unknown} */
@@ -3150,9 +3151,9 @@ export interface components {
             description: string;
             effective_model_key: string | null;
             /** @enum {string} */
-            group: "llm_calls" | "agent_vm";
+            group: "llm_calls" | "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage";
+            id: "rca" | "triage" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
         };
@@ -3481,7 +3482,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage";
+            lane: "rca" | "triage" | "frustration";
             model_key: string;
             project_id: string;
             reasoning_effort: string | null;

@@ -22,6 +22,8 @@ import java.util.Locale;
  * <p>That boundary is also a cost/latency boundary: an {@link LaneGroup#LLM_CALLS} lane runs per
  * trace or per keystroke and is the natural home for a cheap fast model, while an
  * {@link LaneGroup#AGENT_VM} lane runs once per mover or per cause and is worth a frontier one.
+ * {@link LaneGroup#DECISION_CALLS} lanes ask a hosted decision model one typed question per
+ * observation; the provider is the whole choice there, since each serves one decision model.
  *
  * <p>These lanes always run on the org's own credential; there is no platform-funded path. Every
  * RCA/TRIAGE run resolves an org {@code ProviderCredential} for its provider (Bedrock/mantle by
@@ -59,7 +61,18 @@ public enum ModelLane {
             "triage",
             "Triage",
             "Rules whether a finding is a real deviation. Runs an agent per cause, in a sandbox.",
-            LaneGroup.AGENT_VM);
+            LaneGroup.AGENT_VM),
+
+    /**
+     * The Frustration classifier's per-turn question to TypeSafe's Jev, direct or over OpenRouter.
+     * Runs once per eligible user turn, so the price per thousand turns is what matters.
+     */
+    FRUSTRATION(
+            "frustration",
+            "Frustration",
+            "Scores each eligible user turn with a decision model on your key. Runs per turn, so price per"
+                    + " 1k turns is what matters.",
+            LaneGroup.DECISION_CALLS);
 
     private final String wire;
     private final String label;
@@ -112,6 +125,15 @@ public enum ModelLane {
      */
     public boolean agentic() {
         return group == LaneGroup.AGENT_VM;
+    }
+
+    /**
+     * Whether this lane runs a hosted decision model rather than a chat model, true exactly for
+     * {@link LaneGroup#DECISION_CALLS}. A decision lane takes only decision models and no other lane
+     * takes one; the settings validator enforces both directions.
+     */
+    public boolean decision() {
+        return group == LaneGroup.DECISION_CALLS;
     }
 
     /**

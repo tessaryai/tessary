@@ -5124,12 +5124,16 @@
           "id" : {
             "enum" : [
               "llm_calls",
-              "agent_vm"
+              "agent_vm",
+              "decision_calls"
             ],
             "type" : "string"
           },
           "label" : {
             "type" : "string"
+          },
+          "model_selectable" : {
+            "type" : "boolean"
           },
           "tiered" : {
             "type" : "boolean"
@@ -5140,6 +5144,7 @@
           "effort_tunable",
           "id",
           "label",
+          "model_selectable",
           "tiered"
         ],
         "type" : "object"
@@ -5524,14 +5529,16 @@
           "group" : {
             "enum" : [
               "llm_calls",
-              "agent_vm"
+              "agent_vm",
+              "decision_calls"
             ],
             "type" : "string"
           },
           "id" : {
             "enum" : [
               "rca",
-              "triage"
+              "triage",
+              "frustration"
             ],
             "type" : "string"
           },
@@ -7008,7 +7015,8 @@
           "lane" : {
             "enum" : [
               "rca",
-              "triage"
+              "triage",
+              "frustration"
             ],
             "type" : "string"
           },

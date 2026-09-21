@@ -42,10 +42,11 @@ import org.springframework.stereotype.Service;
  * <h2>The {@code model_key} union</h2>
  *
  * <p>{@code project_model_setting.model_key} started as a plain-text {@link BedrockModelProfile}
- * key ({@code amazon.nova-2-lite}); those never carry a colon. An {@link LaneGroup#AGENT_VM} lane can
- * also reach a non-Bedrock {@link ModelCatalog} entry (GEMINI, GLM, GROK, CUSTOM), encoded as
- * {@code "<PROVIDER>:<model_name>"} ({@link #CATALOG_KEY}), a shape no Bedrock key has ever taken so
- * both forms are unambiguous from the string alone. {@link #parseCatalogKey} and
+ * key ({@code amazon.nova-2-lite}); those never carry a colon. An {@link LaneGroup#AGENT_VM} lane
+ * can also reach a non-Bedrock {@link ModelCatalog} entry (GEMINI, GLM, GROK, CUSTOM), and a
+ * {@link LaneGroup#DECISION_CALLS} lane reaches only decision entries (TYPESAFE, OPENROUTER's Jev),
+ * both encoded as {@code "<PROVIDER>:<model_name>"} ({@link #CATALOG_KEY}), a shape no Bedrock key
+ * has ever taken so both forms are unambiguous from the string alone. {@link #parseCatalogKey} and
  * {@link #catalogEntryFor} are the only two places that decode it; every other reader calls
  * {@link BedrockModelProfile#find} first and only falls through to the catalog on a miss.
  */
@@ -152,8 +153,9 @@ public class ProjectModelSettings {
             return Optional.empty();
         }
         // A catalog (non-Bedrock) row carries no tier concept at all: set() always clamps a
-        // non-tiered lane's tier to STANDARD, and every AGENT_VM lane (the only place a catalog key
-        // can land, see #validate) is non-tiered, so there is nothing further to check here.
+        // non-tiered lane's tier to STANDARD, and every lane a catalog key can land on (AGENT_VM or
+        // DECISION_CALLS, see #validate) is non-tiered, so there is nothing further to check here.
+        // A decision row on a chat lane, or a chat row on a decision lane, fails isOfferedOn below.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
                 .orElseGet(() -> catalog.map(ModelCatalog.CatalogEntry::agentic).orElse(false));
         if (lane.agentic() && !agentic) {
@@ -173,8 +175,9 @@ public class ProjectModelSettings {
      * Provider first, model second: the first provider in this lane's {@link LanePriority} order that
      * the org holds a credential for, running that provider's default model for the lane.
      *
-     * <p>Standard tier and no reasoning effort, always: both lanes that exist are
-     * {@link LaneGroup#AGENT_VM}, which has neither control, and an automatic choice is not the place
+     * <p>Standard tier and no reasoning effort, always: every lane that exists is
+     * {@link LaneGroup#AGENT_VM} or {@link LaneGroup#DECISION_CALLS}, neither of which has either
+     * control, and an automatic choice is not the place
      * to invent a preference the project never expressed. A project that wants either sets the lane
      * explicitly, which is exactly what {@link #set} writes.
      */
@@ -267,6 +270,23 @@ public class ProjectModelSettings {
             ModelProvider provider,
             @JsonProperty("model_id") String modelId,
             @JsonProperty("pricing_id") String pricingId) {}
+
+    /**
+     * The {@code (provider, modelId)} a {@link LaneGroup#DECISION_CALLS} lane runs for this project,
+     * or empty when the org holds a key for no provider the lane offers. {@code modelId} is the
+     * catalog's model name on that gateway, which is what the decision request carries.
+     */
+    public Optional<ResolvedDecisionModel> resolveDecisionModel(String projectId, ModelLane lane) {
+        if (!lane.decision()) {
+            throw new IllegalArgumentException("lane " + lane + " does not run a decision model");
+        }
+        return resolve(projectId, lane)
+                .flatMap(selection -> parseCatalogKey(selection.modelKey()))
+                .map(key -> new ResolvedDecisionModel(key.provider(), key.modelName()));
+    }
+
+    /** See {@link #resolveDecisionModel}. */
+    public record ResolvedDecisionModel(ModelProvider provider, String modelId) {}
 
     /**
      * Parsed form of a non-Bedrock {@code "<PROVIDER>:<model_name>"} {@code model_key}, see the
@@ -475,9 +495,11 @@ public class ProjectModelSettings {
     }
 
     /**
-     * The catalog (non-Bedrock) half of {@link #validate}. Only reachable for an
-     * {@link LaneGroup#AGENT_VM} lane today; a catalog key on any other lane shape is rejected with
-     * {@code MODEL_NOT_OFFERED_FOR_LANE} rather than accepted and silently unreachable.
+     * The catalog (non-Bedrock) half of {@link #validate}. Reachable for an {@link LaneGroup#AGENT_VM}
+     * lane, which takes agentic chat entries, and a {@link LaneGroup#DECISION_CALLS} lane, which takes
+     * decision entries only. A decision entry on any other lane, a chat entry on a decision lane, and a
+     * catalog key on any other lane shape are rejected with {@code MODEL_NOT_OFFERED_FOR_LANE} rather
+     * than accepted and silently unreachable.
      */
     private static void validateCatalog(
             ModelLane lane,
@@ -488,11 +510,11 @@ public class ProjectModelSettings {
         if (tier == null || !tier.isOnline()) {
             throw new TessaryException(ModelConfigError.TIER_NOT_ONLINE, tier == null ? "null" : tier.wireName());
         }
-        if (lane == null || lane.group() != LaneGroup.AGENT_VM) {
+        if (lane == null || lane.decision() != entry.decision() || (!lane.decision() && !lane.agentic())) {
             throw new TessaryException(
                     ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane == null ? "null" : lane.label());
         }
-        if (!entry.agentic()) {
+        if (lane.agentic() && !entry.agentic()) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
         if (!isOfferedOn(lane, modelKey)) {

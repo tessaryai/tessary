@@ -252,8 +252,9 @@ export type ModelLaneView = S["LaneView"];
 // what an org has or does not have: so this is the shape the two dropdowns read.
 export type LaneProviderOption = S["ProviderOptionView"];
 // One section of the Models page. The lanes split by how the platform reaches the model: a request
-// we compose, or a model id handed to an agent in a sandbox, and that split decides the heading, the
-// copy under it and whether a tier or an effort is a real choice, so the server sends all four.
+// we compose, a model id handed to an agent in a sandbox, or one typed question to a decision model.
+// That split decides the heading, the copy under it, whether a tier or an effort is a real choice and
+// whether there is a model to pick at all, so the server sends all of them.
 export type ModelLaneGroupView = S["GroupView"];
 // The Bedrock capability matrix row: which tiers, cache TTLs and reasoning-effort levels a platform
 // model actually supports, and which endpoint serves it.

@@ -86,13 +86,17 @@ public class ProjectModelSettingController {
      * neither control has anything to attach to. They are two fields rather than one because they are
      * two controls; today they agree, and {@link LaneGroup} is where that stops being true if it ever
      * does.
+     *
+     * <p>{@code modelSelectable} is false for {@link LaneGroup#DECISION_CALLS}: each provider serves
+     * one decision model there, so the row is a provider select and nothing else.
      */
     public record GroupView(
             LaneGroup id,
             String label,
             String description,
             boolean tiered,
-            @JsonProperty("effort_tunable") boolean effortTunable) {}
+            @JsonProperty("effort_tunable") boolean effortTunable,
+            @JsonProperty("model_selectable") boolean modelSelectable) {}
 
     /**
      * One selectable lane, so the UI renders its row without hardcoding labels, copy, options or
@@ -172,7 +176,8 @@ public class ProjectModelSettingController {
      *
      * <p>{@code catalogModels} is the non-Bedrock half of the {@code model_key} union (see
      * {@link ProjectModelSettings}'s class javadoc): the agentic {@link ModelCatalog} entries
-     * (GEMINI/GLM/GROK/CUSTOM) an {@link LaneGroup#AGENT_VM} lane may also be pointed at, keyed the
+     * (GEMINI/GLM/GROK/CUSTOM) an {@link LaneGroup#AGENT_VM} lane may also be pointed at, and the
+     * decision entries a {@link LaneGroup#DECISION_CALLS} lane runs, keyed the
      * same {@code "<PROVIDER>:<model_name>"} way {@link ProjectModelSettings#set} accepts. Kept as
      * its own list rather than folded into {@code models} because the two are genuinely different
      * shapes (a catalog entry carries no Bedrock capability fields: tiers, cache TTLs, endpoint), and
@@ -213,15 +218,15 @@ public class ProjectModelSettingController {
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         List<GroupView> groups = Arrays.stream(LaneGroup.values())
-                .map(g -> new GroupView(g, g.label(), g.description(), g.tiered(), g.effortTunable()))
+                .map(g -> new GroupView(
+                        g, g.label(), g.description(), g.tiered(), g.effortTunable(), g.modelSelectable()))
                 .toList();
         // The agentic ModelCatalog entries (GEMINI/GLM/GROK/CUSTOM) an AGENT_VM lane may also be
-        // pointed at; see ModelSettingsView#catalogModels's javadoc. Non-agentic entries (OpenAI,
-        // Anthropic direct, OpenRouter, Ollama, Moonshot, the Bedrock entries already covered by
-        // BedrockModelProfile) are never offered on any lane today, so they are filtered out here
-        // rather than left for the client to skip.
-        List<ModelCatalog.CatalogEntry> agenticCatalog = ModelCatalog.entries().stream()
-                .filter(ModelCatalog.CatalogEntry::agentic)
+        // pointed at, and the decision entries a DECISION_CALLS lane runs; see
+        // ModelSettingsView#catalogModels's javadoc. Every other entry is offered on no lane, so it
+        // is filtered out here rather than left for the client to skip.
+        List<ModelCatalog.CatalogEntry> offeredCatalog = ModelCatalog.entries().stream()
+                .filter(e -> e.agentic() || e.decision())
                 .toList();
         List<LaneView> lanes = Arrays.stream(ModelLane.values())
                 .map(l -> {
@@ -258,10 +263,10 @@ public class ProjectModelSettingController {
                 groups,
                 lanes,
                 models,
-                agenticCatalog,
+                offeredCatalog,
                 Stream.concat(
                                 models.stream().map(this::rateView),
-                                agenticCatalog.stream().map(this::rateView))
+                                offeredCatalog.stream().map(this::rateView))
                         .toList(),
                 settings.list(r.project().id()),
                 configured));
@@ -281,7 +286,11 @@ public class ProjectModelSettingController {
     /** A catalog entry's rate, looked up by {@link ModelCatalog#pricingId}, not the bare model name a
      *  sandbox run reports under (see {@code ResolvedAgenticModel}'s javadoc for why they differ). */
     private ModelRateView rateView(ModelCatalog.CatalogEntry entry) {
-        return rateView(ModelCatalog.key(entry), ModelCatalog.pricingId(entry.provider(), entry.modelName()));
+        return rateView(
+                ModelCatalog.key(entry),
+                entry.decision()
+                        ? ModelCatalog.decisionPricingId(entry.provider(), entry.modelName())
+                        : ModelCatalog.pricingId(entry.provider(), entry.modelName()));
     }
 
     private ModelRateView rateView(String modelKey, String pricedName) {

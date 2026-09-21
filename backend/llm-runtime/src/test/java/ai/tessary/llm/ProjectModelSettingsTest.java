@@ -194,12 +194,79 @@ class ProjectModelSettingsTest {
         // is the mistake the three exclusions above were.
         // TYPESAFE is the one exclusion: it serves decision models only, never a sandbox agent.
         Set<ModelProvider> reachable = EnumSet.complementOf(EnumSet.of(ModelProvider.TYPESAFE));
-        for (ModelLane lane : ModelLane.values()) {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             Set<ModelProvider> covered = LanePriority.of(lane).stream()
                     .map(LanePriority.ProviderOption::provider)
                     .collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(ModelProvider.class)));
             assertEquals(reachable, covered, "lane " + lane);
         }
+    }
+
+    @Test
+    void theFrustrationLaneOffersOnlyJevAndTypeSafeLeadsIt() {
+        assertEquals(
+                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"),
+                LanePriority.modelKeys(ModelLane.FRUSTRATION));
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+            assertTrue(
+                    LanePriority.forProvider(lane, ModelProvider.TYPESAFE).isEmpty(),
+                    "TypeSafe serves no chat model, so " + lane + " never offers it");
+        }
+
+        configured(ModelProvider.OPENROUTER, ModelProvider.TYPESAFE);
+        var both = settings.resolve(PID, ModelLane.FRUSTRATION).orElseThrow();
+        assertEquals("TYPESAFE:jev-latest", both.modelKey());
+        assertTrue(both.automatic());
+        assertEquals(ServiceTier.STANDARD, both.serviceTier());
+
+        configured(ModelProvider.OPENROUTER);
+        assertEquals(
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
+
+        configured(ModelProvider.BEDROCK);
+        assertTrue(
+                settings.resolve(PID, ModelLane.FRUSTRATION).isEmpty(),
+                "a chat-only key runs no decision lane, whatever else it serves");
+    }
+
+    @Test
+    void aPinnedOpenRouterBeatsTypeSafeOnTheFrustrationLane() {
+        when(repo.findByProject(PID))
+                .thenReturn(List.of(
+                        row(ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD)));
+
+        assertEquals(
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
+    }
+
+    @Test
+    void aDecisionModelIsRefusedOnTheAgentLanes() {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+            for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest")) {
+                TessaryException ex = assertThrows(
+                        TessaryException.class,
+                        () -> settings.set(PID, ORG, lane, jev, ServiceTier.STANDARD, null));
+                assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), lane + " " + jev);
+            }
+        }
+    }
+
+    @Test
+    void aChatModelIsRefusedOnTheFrustrationLane() {
+        for (String chat : List.of(SONNET_5, "OPENROUTER:openai/gpt-5.6-terra", "GROK:grok-4.6")) {
+            TessaryException ex = assertThrows(
+                    TessaryException.class,
+                    () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat, ServiceTier.STANDARD, null));
+            assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), chat);
+        }
+    }
+
+    @Test
+    void aDecisionModelSavesOnTheFrustrationLaneWithNoTierOrEffort() {
+        settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.FLEX, "high");
+        verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD, null);
     }
 
     @Test

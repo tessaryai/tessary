@@ -40,12 +40,12 @@ import java.util.Optional;
  * fixed threshold, since a project running triage unattended, once per cause, is the one that pays
  * for that choice on every finding rather than once.
  *
- * <p><b>Every provider appears on both lanes. All ten of them.</b> That is the coverage rule, and it
- * is now literal rather than qualified: whichever single key an org happens to hold, both lanes
- * resolve to something rather than to nothing. Most providers also carry a smaller current-generation
- * model alongside their flagship — not because either lane defaults to it, but because it stays
- * selectable for a project that wants to point either lane, and especially unattended TRIAGE, at
- * something cheaper than the default on purpose.
+ * <p><b>Every chat provider appears on both agent lanes. All ten of them.</b> That is the coverage
+ * rule, and it is literal rather than qualified: whichever single chat key an org happens to hold,
+ * both lanes resolve to something rather than to nothing. Most providers also carry a smaller
+ * current-generation model alongside their flagship — not because either lane defaults to it, but
+ * because it stays selectable for a project that wants to point either lane, and especially
+ * unattended TRIAGE, at something cheaper than the default on purpose.
  *
  * <p>{@link ModelProvider#ANTHROPIC}, {@link ModelProvider#OPENROUTER} and
  * {@link ModelProvider#MOONSHOT} were absent from both lanes until this change, for a reason that
@@ -55,6 +55,10 @@ import java.util.Optional;
  * those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
  * on its own wire, the other two as OpenAI-compat — so the coverage rule reaches every provider the
  * Providers page will sell you. Adding an eleventh still means adding it to the launcher first.
+ *
+ * <p><b>FRUSTRATION is a {@link LaneGroup#DECISION_CALLS} lane</b> and stands outside the coverage rule:
+ * only TypeSafe and OpenRouter serve TypeSafe's Jev, one model each. TypeSafe leads because it is the
+ * model's own endpoint; OpenRouter is the same model one hop further away.
  *
  * <p>Model keys are the two spellings {@link ProjectModelSettings} decodes: a dotted
  * {@link BedrockModelProfile} key, or {@code "<PROVIDER>:<model_name>"} for a {@link ModelCatalog}
@@ -100,6 +104,9 @@ public final class LanePriority {
     private static final String GROK_CODE_FAST = "GROK:grok-code-fast-1";
     private static final String GLM_5_3 = "GLM:glm-5.3";
     private static final String GLM_5_3_FLASH = "GLM:glm-5.3-flash";
+    // TypeSafe's Jev decision model, direct and over OpenRouter.
+    private static final String JEV = "TYPESAFE:jev-latest";
+    private static final String OR_JEV = "OPENROUTER:typesafe/jev-latest";
 
     /**
      * Last on every lane, because the entry stands for "whatever model this endpoint serves" rather
@@ -138,6 +145,11 @@ public final class LanePriority {
                 new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL));
         m.put(ModelLane.RCA, agentVmOrder);
         m.put(ModelLane.TRIAGE, agentVmOrder);
+        m.put(
+                ModelLane.FRUSTRATION,
+                List.of(
+                        new ProviderOption(ModelProvider.TYPESAFE, List.of(JEV), JEV),
+                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV)));
         for (ModelLane lane : ModelLane.values()) {
             List<ProviderOption> options = m.get(lane);
             if (options == null || options.isEmpty()) {

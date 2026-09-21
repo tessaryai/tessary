@@ -2,7 +2,6 @@
 package ai.tessary.llm.decisions;
 
 import ai.tessary.llm.ModelCatalog;
-import ai.tessary.llm.ModelProvider;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pricing.PlatformCallPricer;
@@ -155,15 +154,9 @@ public class JevDecisionClient implements DecisionClient {
         }
     }
 
-    /**
-     * The id this call is priced under: {@code typesafe/<bare id>} on both gateways. OpenRouter's id is
-     * already {@code typesafe/jev-latest}, so it passes through unchanged rather than via
-     * {@link ModelCatalog#pricingId}'s {@code openrouter/} case.
-     */
+    /** The id this call is priced under, see {@link ModelCatalog#decisionPricingId}. */
     static String pricingId(DecisionTarget target) {
-        return target.provider() == ModelProvider.TYPESAFE
-                ? ModelCatalog.pricingId(ModelProvider.TYPESAFE, target.modelId())
-                : target.modelId();
+        return ModelCatalog.decisionPricingId(target.provider(), target.modelId());
     }
 
     ObjectNode requestBody(DecisionTarget target, DecisionRequest request) {

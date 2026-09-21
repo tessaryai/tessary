@@ -185,10 +185,13 @@ class ProjectModelSettingViewTest {
         assertEquals("agent_vm", json.at("/groups/1/id").asText());
         assertTrue(json.at("/groups/0/effort_tunable").asBoolean());
         assertFalse(json.at("/groups/1/effort_tunable").asBoolean());
+        assertEquals("decision_calls", json.at("/groups/2/id").asText());
+        assertFalse(json.at("/groups/2/model_selectable").asBoolean());
+        assertTrue(json.at("/groups/1/model_selectable").asBoolean());
 
         // Every surviving lane, on the wire name it ships under — "grading", "synthesis" and
         // "assistant" are gone; this set is what a client may now PUT.
         Set<String> laneIds = json.at("/lanes").findValuesAsText("id").stream().collect(Collectors.toSet());
-        assertEquals(Set.of("rca", "triage"), laneIds);
+        assertEquals(Set.of("rca", "triage", "frustration"), laneIds);
     }
 }
