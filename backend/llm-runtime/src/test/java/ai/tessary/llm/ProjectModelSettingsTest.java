@@ -233,8 +233,8 @@ class ProjectModelSettingsTest {
     @Test
     void aPinnedOpenRouterBeatsTypeSafeOnTheFrustrationLane() {
         when(repo.findByProject(PID))
-                .thenReturn(List.of(
-                        row(ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD)));
+                .thenReturn(
+                        List.of(row(ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD)));
 
         assertEquals(
                 new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
@@ -246,8 +246,7 @@ class ProjectModelSettingsTest {
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest")) {
                 TessaryException ex = assertThrows(
-                        TessaryException.class,
-                        () -> settings.set(PID, ORG, lane, jev, ServiceTier.STANDARD, null));
+                        TessaryException.class, () -> settings.set(PID, ORG, lane, jev, ServiceTier.STANDARD, null));
                 assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), lane + " " + jev);
             }
         }
