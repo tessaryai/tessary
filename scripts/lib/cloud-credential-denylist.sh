@@ -17,11 +17,11 @@
 #     profile stays off — see check-open-boot.sh's scope-boundary comment) and live in the self-host
 #     leg (check-open-boot-selfhost.sh starts sandbox-runner), where this entry is what catches an
 #     ambient key quietly reaching the launcher container.
-#   HF_TOKEN — classify-service/Dockerfile's BuildKit --secret mount for the private
-#     tessaryai/MiniCheck-RoBERTa-Large-onnx repo backing the groundedness head. Deliberately unset
-#     for this check's build (see check-open-boot.sh's boot-recipe comment) — a keyless build falls
-#     back to reporting the capability unavailable, and this entry is what catches an ambient
-#     HF_TOKEN in the CI runner's own env quietly reintroducing it.
+#   HF_TOKEN — classify-service/Dockerfile's BuildKit --secret mount for the private tessaryai/
+#     frustration repos an overlay manifest names. Deliberately unset for this check's build (see
+#     check-open-boot.sh's boot-recipe comment) — a keyless build bakes the public groundedness
+#     head and reports the private ones unavailable, and this entry is what catches an ambient
+#     HF_TOKEN in the CI runner's own env quietly reintroducing them.
 #   AWS_BEARER_TOKEN_BEDROCK — Tessary's Bedrock bearer-token scheme; ChatModelFactory forces SigV4
 #     over it specifically because AWS SDK v2 prefers a bearer token when this is present (the
 #     "Bedrock bearer token hijacks SigV4" trap). A self-hoster's own Bedrock key would arrive as the

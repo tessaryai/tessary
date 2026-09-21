@@ -41,6 +41,8 @@ The subject is the population, not the finding. A tool's failure rate rising in 
 
 A case opens the moment a finding's ruling qualifies it — a triage positive, a person's **Real deviation**, or the ruling a high-confidence secret leak or a frustration finding carries when it is filed — never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
 
+For a classifier that judges single spans, such as `groundedness`, the subject is the classifier itself. Its detections do not reach triage one at a time: a project-level bar, three detections in a day by default, collapses a window's worth of them onto one finding whose evidence is every span that fired, triage rules on that finding in one run, and a sound ruling opens one case named for the classifier. Raise the bar under the classifier's settings when a project's traffic makes three a day routine.
+
 A case closes only when a person resolves or absorbs it — nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
 
 ## The states a case moves through

@@ -4,8 +4,9 @@
 #   - frontend  Caddy serving the built static + reverse-proxying /api → backend,
 #               TLS on :443 when SITE_DOMAIN is set, plain HTTP on :8000 always
 #
-# EVERY SERVICE HERE STARTS ON A DEFAULT `up`, with ONE named exception: `redpanda`, the opt-in
-# durable ingest buffer under `--profile kafka`. It is image-only, so a registry reference
+# EVERY SERVICE HERE STARTS ON A DEFAULT `up`, with TWO named exceptions: `redpanda`, the opt-in
+# durable ingest buffer under `--profile kafka`, and `classify`, the opt-in encoder service under
+# `--profile classify` (see its own comment: clone-only until a classify image is published). It is image-only, so a registry reference
 # resolves it like every other service, and it is off unless an operator asks for it by name; what
 # a reader sees is what boots, plus one block that says when it does not.
 #
@@ -62,8 +63,11 @@
 #   4. A PROFILE-GATED SERVICE MUST BE REMOTE-RESOLVABLE: image, volumes and env only, no host
 #      bind. The old `observability` profile broke this (alloy bound
 #      ./observability/alloy/config.alloy, which a registry reference cannot resolve) and moved to
-#      the paid overlay. `redpanda` under `--profile kafka` is the one profile-gated service now,
-#      and it keeps this rule: a named volume, flags, an image.
+#      the paid overlay. `redpanda` under `--profile kafka` keeps this rule: a named volume, flags,
+#      an image. `classify` under `--profile classify` is the stated exception: it carries a
+#      `build:` because no classify image is published yet, so it works only from a clone, and a
+#      registry install that enables the profile fails on pull rather than resolving a host path.
+#      When a classify image ships, the `build:` goes and the rule holds for it too.
 
 # Pin the Compose project name so the stack is identical from any directory
 # (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
@@ -246,9 +250,12 @@ services:
       # PublicOriginGuard rejects the value if they set it to something an outside caller can't reach.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
-      # Encoder classification endpoint — the standalone classify-service on ECS Fargate
-      # (both values delivered via SSM -> .env). Required: signal sweeps fail loudly
-      # without it; there is no fallback endpoint.
+      # Encoder classification endpoint: the `classify` service below (under `--profile
+      # classify`), or a standalone deployment of classify-service. Blank by default because the
+      # profile is off by default; set both to run the groundedness classifier
+      # (URL http://classify:8080, key = the same TESSARY_OBSERVER_ENCODER_API_KEY the service
+      # reads). With it blank the groundedness sweep fails loudly on every tick; there is no
+      # fallback endpoint. docs/self-hosting/configuration.mdx, "Classifier encoder service".
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
       # The ingest spool: `memory` (default, no broker) or `kafka`, the opt-in durable buffer
@@ -379,6 +386,46 @@ services:
   # phone-home reporter (`enable_metrics_reporter`, which posts to Redpanda's endpoint) is off at
   # boot, so the zero-egress posture holds with the profile on as well as off; `enable_usage` is
   # the local usage-stats collector, off too. `--set` is two tokens: rpk parses it that way only.
+  # The encoder service behind the groundedness classifier.
+  # Opt-in under `--profile classify`: the image bakes the public groundedness model
+  # (tessaryai/groundedness-token-v1, MIT, ~1.6 GB) at build time and holds ~4-5 GB resident, which
+  # is more than the smaller of the two host sizes the default stack is sized for. `build:` from
+  # a clone, keyless — every head the open manifest binds is public, so no HF_TOKEN is needed;
+  # a registry install (oci://) has no source tree and needs the clone for this one service until
+  # a published classify image exists. Reached only over the service network: nothing is
+  # published to the host, and the backend authenticates with TESSARY_OBSERVER_ENCODER_API_KEY,
+  # which is the same variable this service reads as CLASSIFY_API_KEY, so one .env line pairs them.
+  classify:
+    profiles: ["classify"]
+    build:
+      context: ./classify-service
+      args:
+        PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
+    # A local tag, deliberately not a `tessaryai/tessary:classify-<version>` reference: no such
+    # image is published, so a versioned default would be a pull instruction the artifact hands a
+    # remote install that can never succeed (and a fifth floating site the release stamp refuses).
+    # The day a classify image is published, this becomes the versioned default and joins
+    # pin-compose-version.py's count.
+    image: ${CLASSIFY_IMAGE:-tessary-classify:local}
+    expose:
+      - "8080"
+    environment:
+      PORT: "8080"
+      CLASSIFY_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
+    # The service's own GET /healthz (classify-service/server.js), unauthenticated. node:slim
+    # carries neither wget nor curl, so node's own fetch is the probe. The boot pre-warm loads
+    # the head before the port answers, so the start period is generous.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
+    mem_limit: 6g
+    restart: unless-stopped
+    networks:
+      - tessary
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v25.2.1
     profiles: ["kafka"]

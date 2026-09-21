@@ -127,9 +127,9 @@ Rules that keep this working:
 - **Same-PR co-update.** A code change that invalidates any of these docs updates the doc in
   the same PR (schema changes update `devdocs/reference/data-model.md`; package-set changes
   update the architecture inventory; controller/DTO changes regenerate the OpenAPI spec). The
-  classifier-quality reference page lives outside this tree; its gate
-  `scripts/check-classifier-quality-doc.sh` stays here and skips with a named reason wherever the
-  page is absent.
+  classifier-quality reference page is `devdocs/reference/classifier-quality.md`; its gate
+  `scripts/check-classifier-quality-doc.sh` pins the page's numbers to the manifest and the
+  catalog for every head the manifest binds.
 - **Size budgets.** This file stays ≤ ~150 lines; a scoped `AGENTS.md` ≤ ~250. When a budget
   is blown, extract reference material to `devdocs/reference/` instead of growing the guide.
 - **New top-level code directory** → gets a `README.md`; add an `AGENTS.md` only once it

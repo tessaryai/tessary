@@ -35,4 +35,4 @@ UP_SERVICES="$(dev_up_services "$COMPOSE")"
 
 # Intentionally unquoted: empty ⇒ all services; otherwise word-splits into the service list.
 # shellcheck disable=SC2086
-$COMPOSE up -d --build $UP_SERVICES
+HF_TOKEN="$(dev_hf_token)" $COMPOSE up -d --build $UP_SERVICES

@@ -60,13 +60,23 @@ services:
     # JVM) — no double-bind on 5005. suspend=n: boot normally so the healthcheck
     # still passes; switch to suspend=y to debug startup itself. The agent survives
     # devtools in-process restarts (task dev:reload-backend).
-    # Two steps (see Dockerfile.dev): install app's whole dependency chain into the cached
-    # local repo, then run ONLY the app module (spring-boot:run can't run reactor-wide — it dies on
-    # the non-executable parent pom — and app-only can't resolve its siblings unless installed).
+    # Three steps (see Dockerfile.dev). First install the reactor root POM alone (-N): a module that
+    # lives OUTSIDE the root's directory — the paid overlay, mounted at /tessary-paid with
+    # <relativePath>../backend/pom.xml</relativePath> — has its parent resolved from the local
+    # repository, not from that path, because inside the container the path is not the file the
+    # reactor was started from (/app/pom.xml). On a cold maven-cache volume the parent is absent and
+    # the reactor cannot even be read ("Non-resolvable parent POM for ai.tessary.paid:tessary-paid").
+    # The host never shows this because ~/.m2 already holds the root POM from an earlier install.
+    # Harmless with no overlay: one POM, no compilation. Then install app's whole dependency chain
+    # into the cached local repo, then run ONLY the app module (spring-boot:run can't run
+    # reactor-wide — it dies on the non-executable parent pom — and app-only can't resolve its
+    # siblings unless installed).
     command:
       - sh
       - -c
       - >-
+        mvn -B -q -N install
+        -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -q -pl app -am install -DskipTests
         -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -pl app spring-boot:run
@@ -472,13 +482,14 @@ services:
   classify:
     build:
       context: ./classify-service
-      # The groundedness head's weights are a private HF repo — the build needs read access.
-      # `export HF_TOKEN=...` in the SAME shell before building (or any build.secrets/no-cache
-      # rebuild); the token never lands in the image (BuildKit secret mount, not a build ARG).
-      # Putting it in .env is NOT enough on its own: Compose only auto-loads .env for ${...}
-      # substitution in this file's text, not as a real process env var — and the `environment:`
-      # secret source below needs a genuine exported shell variable. `task dev` does not
-      # export it for you.
+      # The frustration heads' weights are private HF repos — that build needs read access
+      # (groundedness is public and bakes keyless).
+      # The token reaches the build as a process env var (the `environment:` secret source below);
+      # the token never lands in the image (BuildKit secret mount, not a build ARG). `task dev` and
+      # `task dev:up` supply it for that one invocation from HF_TOKEN or ~/.cache/huggingface/token
+      # (scripts/lib/dev-services.sh, `dev_hf_token`); a bare `docker compose build` needs
+      # `export HF_TOKEN=...` in the same shell. Putting it in .env is NOT enough on its own:
+      # Compose only auto-loads .env for ${...} substitution in this file's text.
       # PNPM_VERSION single source — see the frontend service.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
@@ -666,13 +677,12 @@ volumes:
   mlflow-data:
 
 secrets:
-  # Sourced from the HF_TOKEN env var at BUILD time — read access to the private
-  # tessaryai/MiniCheck-RoBERTa-Large-onnx repo backing classify-service's groundedness head.
+  # Sourced from the HF_TOKEN env var at BUILD time — read access to the private tessaryai/
+  # frustration repos the overlay manifest names (the open groundedness head is public).
   # Only needed for a classify image build/rebuild, not for `docker compose up` on an
-  # already-built image. MUST be a real exported shell variable (`export HF_TOKEN=...`) in the
-  # same shell running `docker compose build`/`up --build` — Compose's `environment:` secret
-  # source reads the invoking process's actual env, NOT .env-file interpolation, so having it
-  # only in .env silently resolves to an empty secret (confirmed: this is exactly what broke a
-  # `task dev` run on 2026-07-15 — "Unauthorized access" pulling the private repo).
+  # already-built image. The `task dev*` entry points pass it for that one invocation
+  # (scripts/lib/dev-services.sh); a bare `docker compose build`/`up --build` needs a real
+  # exported shell variable, because this source reads the invoking process's actual env, NOT
+  # .env-file interpolation, so having it only in .env silently resolves to an empty secret.
   hf_token:
     environment: HF_TOKEN

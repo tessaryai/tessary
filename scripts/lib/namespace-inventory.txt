@@ -44,6 +44,7 @@ huggingface|tessaryai/frustration-detector|NOTHING in the tree any more: the fru
 huggingface|tessaryai/frustration-attribution|NOTHING in the tree any more: the attribution head left classify-service with the frustration head. Kept because the namespace is still ours|tessaryai|hf-model|
 huggingface|tessaryai/MiniCheck-RoBERTa-Large-onnx|the private .env.example (the open .env.example was cut to the required set and no longer names it), docker-compose.dev.yml, scripts/lib/cloud-credential-denylist.sh (a private ONNX export the groundedness head used before it moved to bart-large-mnli)|tessaryai|hf-model|
 huggingface|tessaryai/frustration-v1|NOTHING in the tree any more: the classify-service README stopped citing it when the frustration head was removed. Kept because the namespace is still ours|tessaryai|hf-dataset|
+huggingface|tessaryai/groundedness-token-v1|classify-service/models.json (the open manifest's one bound head: the public groundedness TOKEN head, MIT, pinned by revision), classify-service/README.md, devdocs/reference/classifier-quality.md, classifiers/groundedness/README.md, BuiltInClassifierCatalog's groundedness entry|tessaryai|hf-model|
 
 # Recheck log (item 8 of the clause: one row per completed recheck, distinct from the launch enumeration)
 #   date|verifier|result
