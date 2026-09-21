@@ -60,7 +60,9 @@ public final class PlatformCatalog {
             // Mantle authenticates with the same AWS credentials as Bedrock (SigV4), just against the
             // bedrock-mantle service name, so it reuses AUTH_AWS and the Providers form renders it
             // unchanged. No base-URL override: the host is derived from the region.
-            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null));
+            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null),
+            // A decision-model provider, not a chat one: its key reaches llm/decisions/ only.
+            new PlatformDescriptor(ModelProvider.TYPESAFE, "TypeSafe", AUTH_API_KEY, true, "https://api.typesafe.ai"));
 
     private PlatformCatalog() {}
 

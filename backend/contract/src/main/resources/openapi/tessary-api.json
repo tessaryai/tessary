@@ -3401,6 +3401,9 @@
           "agentic" : {
             "type" : "boolean"
           },
+          "decision" : {
+            "type" : "boolean"
+          },
           "default_base_url" : {
             "type" : "string"
           },
@@ -3428,7 +3431,8 @@
               "GLM",
               "GROK",
               "CUSTOM",
-              "BEDROCK_MANTLE"
+              "BEDROCK_MANTLE",
+              "TYPESAFE"
             ],
             "type" : "string"
           },
@@ -3441,6 +3445,7 @@
         },
         "required" : [
           "agentic",
+          "decision",
           "default_base_url",
           "display_name",
           "effort_levels",
@@ -6084,7 +6089,8 @@
                 "GLM",
                 "GROK",
                 "CUSTOM",
-                "BEDROCK_MANTLE"
+                "BEDROCK_MANTLE",
+                "TYPESAFE"
               ],
               "type" : "string"
             },
@@ -6669,7 +6675,8 @@
               "GLM",
               "GROK",
               "CUSTOM",
-              "BEDROCK_MANTLE"
+              "BEDROCK_MANTLE",
+              "TYPESAFE"
             ],
             "type" : "string"
           },
@@ -7109,7 +7116,8 @@
               "GLM",
               "GROK",
               "CUSTOM",
-              "BEDROCK_MANTLE"
+              "BEDROCK_MANTLE",
+              "TYPESAFE"
             ],
             "type" : "string"
           }
@@ -10552,7 +10560,8 @@
               "GLM",
               "GROK",
               "CUSTOM",
-              "BEDROCK_MANTLE"
+              "BEDROCK_MANTLE",
+              "TYPESAFE"
             ],
             "type" : "string"
           },
@@ -17069,7 +17078,8 @@
                 "GLM",
                 "GROK",
                 "CUSTOM",
-                "BEDROCK_MANTLE"
+                "BEDROCK_MANTLE",
+                "TYPESAFE"
               ],
               "type" : "string"
             }
@@ -17125,7 +17135,8 @@
                 "GLM",
                 "GROK",
                 "CUSTOM",
-                "BEDROCK_MANTLE"
+                "BEDROCK_MANTLE",
+                "TYPESAFE"
               ],
               "type" : "string"
             }

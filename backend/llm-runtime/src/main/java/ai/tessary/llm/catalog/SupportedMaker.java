@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The six-maker allowlist — the ONLY makers a live-fetched model is offered under. Everything
+ * The maker allowlist — the ONLY makers a live-fetched model is offered under. Everything
  * else (Amazon/Nova, Meta/Llama, Mistral, Cohere, DeepSeek, and every other maker a hosting platform
  * might add) is filtered out, so a newly released model from a supported maker appears with no code
  * change while an unsupported one never does. {@link ai.tessary.llm.ModelProvider#CUSTOM} is
@@ -24,14 +24,17 @@ public enum SupportedMaker {
     GOOGLE,
     MOONSHOT,
     ZHIPU,
-    XAI;
+    XAI,
+    /** Decision models only (Jev); offered on decision lanes, never on a chat or agent lane. */
+    TYPESAFE;
 
     /**
      * OpenRouter's own id-namespace prefix (the segment before the first {@code /}) for each maker,
      * confirmed against a live, unauthenticated {@code GET https://openrouter.ai/api/v1/models} read
      * on 2026-09-04 — the id shapes seen there:
      * {@code openai/gpt-5.5}, {@code anthropic/claude-...}, {@code google/gemini-...},
-     * {@code moonshotai/kimi-...}, {@code z-ai/glm-...}, {@code x-ai/grok-...}. OpenRouter also
+     * {@code moonshotai/kimi-...}, {@code z-ai/glm-...}, {@code x-ai/grok-...}, and TypeSafe's
+     * decision models as {@code typesafe/jev-...}. OpenRouter also
      * prefixes some "latest"-pointer ids with {@code ~} (e.g. {@code ~anthropic/claude-haiku-latest})
      * — {@link #fromOpenRouterPrefix} strips it before matching, so those resolve the same as their
      * un-prefixed sibling instead of being silently dropped as an unrecognised namespace.
@@ -42,7 +45,8 @@ public enum SupportedMaker {
             "google", GOOGLE,
             "moonshotai", MOONSHOT,
             "z-ai", ZHIPU,
-            "x-ai", XAI);
+            "x-ai", XAI,
+            "typesafe", TYPESAFE);
 
     /**
      * Bedrock's {@code FoundationModelSummary.providerName()} string for each maker.

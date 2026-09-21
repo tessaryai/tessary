@@ -22,9 +22,9 @@ import java.util.Optional;
  * name} carries a human-readable label (e.g. {@code "Meta: Muse Spark 1.3"}).
  *
  * <p>Unlike the single-maker listers, OpenRouter hosts dozens of makers — Meta, Mistral, DeepSeek,
- * Cohere and more, none of them one of the six supported makers — so every entry is run through
+ * Cohere and more, none of them a supported maker — so every entry is run through
  * {@link SupportedMaker#fromOpenRouterPrefix} and dropped on a miss. This is the intersection step
- * the corrective brief specifies for OpenRouter: "its reported catalog INTERSECT the six makers."
+ * the corrective brief specifies for OpenRouter: its reported catalog intersected with the supported makers.
  */
 public final class OpenRouterModelLister implements ProviderModelLister {
 
@@ -119,6 +119,7 @@ public final class OpenRouterModelLister implements ProviderModelLister {
             case MOONSHOT -> "Moonshot";
             case ZHIPU -> "Zhipu";
             case XAI -> "xAI";
+            case TYPESAFE -> "TypeSafe";
         };
     }
 }

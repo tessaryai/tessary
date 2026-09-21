@@ -46,7 +46,14 @@ public enum ModelProvider {
      * and {@link PlatformCatalog} already dispatch on, so the alternative was a boolean threaded
      * through all of them.
      */
-    BEDROCK_MANTLE;
+    BEDROCK_MANTLE,
+
+    /**
+     * TypeSafe's hosted decision models (Jev). Never a chat model: it answers typed questions about a
+     * state in one POST, so it has no {@code ChatModelFactory} build path and is reached only through
+     * {@code llm/decisions/}.
+     */
+    TYPESAFE;
 
     /**
      * Platforms built via {@code OpenAiChatModel} — i.e. the OpenAI <i>Chat Completions</i> path.
@@ -57,6 +64,6 @@ public enum ModelProvider {
      * being the same question when mantle arrived.
      */
     public boolean isOpenAiCompat() {
-        return this != BEDROCK && this != ANTHROPIC && this != BEDROCK_MANTLE;
+        return this != BEDROCK && this != ANTHROPIC && this != BEDROCK_MANTLE && this != TYPESAFE;
     }
 }

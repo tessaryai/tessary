@@ -119,6 +119,8 @@ class ProjectModelSettingControllerTest {
             // coverage rule rather than the model names, since which model is each lane's own business.
             assertEquals(
                     java.util.Arrays.stream(ModelProvider.values())
+                            // Decision models only; never a sandbox agent.
+                            .filter(p -> p != ModelProvider.TYPESAFE)
                             .map(ModelProvider::name)
                             .collect(java.util.stream.Collectors.toSet()),
                     laneView.providerOptions().stream()

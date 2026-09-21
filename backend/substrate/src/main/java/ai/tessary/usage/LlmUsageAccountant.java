@@ -148,6 +148,39 @@ public class LlmUsageAccountant {
                 subject);
     }
 
+    /**
+     * Record one hosted decision-model call ({@code llm/decisions/}): one typed question set answered on
+     * the org's own key, so always customer-funded. The caller has already priced it, under the book id
+     * its gateway maps to, and passes the book that did.
+     *
+     * @param lane the lane's wire value
+     * @param model the model id as requested, e.g. {@code jev-latest}
+     */
+    public void recordDecisionCall(
+            @Nullable String projectId,
+            String lane,
+            String model,
+            @Nullable Integer inputTokens,
+            @Nullable Integer outputTokens,
+            @Nullable BigDecimal costUsd,
+            @Nullable String priceBookVersion,
+            int latencyMs) {
+        record(
+                projectId,
+                lane,
+                model,
+                null,
+                false,
+                inputTokens,
+                outputTokens,
+                null,
+                null,
+                costUsd,
+                priceBookVersion,
+                latencyMs,
+                null);
+    }
+
     private void record(
             @Nullable String projectId,
             String lane,

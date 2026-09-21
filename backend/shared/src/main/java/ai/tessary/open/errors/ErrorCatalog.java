@@ -41,7 +41,8 @@ public class ErrorCatalog {
             RcaError.class,
             SlackError.class,
             CaseError.class,
-            AuthError.class);
+            AuthError.class,
+            DecisionError.class);
 
     /**
      * The registered enums, for a caller outside this module that needs to check codes against them.

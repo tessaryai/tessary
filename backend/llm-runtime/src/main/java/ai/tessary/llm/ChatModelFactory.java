@@ -383,7 +383,7 @@ public class ChatModelFactory {
         return switch (provider) {
             // GEMINI/GLM/GROK/CUSTOM join the rate-limit-unknown third-party tier: each is a
             // single-key endpoint we have no throughput contract with, same reasoning as OpenRouter.
-            case OPENROUTER, MOONSHOT, GEMINI, GLM, GROK, CUSTOM -> true;
+            case OPENROUTER, MOONSHOT, GEMINI, GLM, GROK, CUSTOM, TYPESAFE -> true;
             // Mantle schedules and queues rather than hard-rejecting (a brief server-side wait is its
             // documented behaviour under load), so a per-call min-interval would only add latency to a
             // path that already pays a cross-region round trip.
@@ -414,6 +414,7 @@ public class ChatModelFactory {
             case ANTHROPIC -> buildAnthropic(cred, entry);
             case BEDROCK -> buildBedrock(cred, entry);
             case BEDROCK_MANTLE -> buildMantle(cred, entry, effort);
+            case TYPESAFE -> throw new TessaryException(ModelConfigError.NOT_A_CHAT_PROVIDER, entry.provider());
         };
     }
 

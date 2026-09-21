@@ -198,7 +198,9 @@ export type ModelProvider =
   | "GROK"
   | "CUSTOM"
   // AWS's second Bedrock endpoint: OpenAI-wire, and the only place the GPT-5.6 line lives.
-  | "BEDROCK_MANTLE";
+  | "BEDROCK_MANTLE"
+  // Decision models only (TypeSafe's Jev), never a chat or agent model.
+  | "TYPESAFE";
 
 // Every provider authenticates with an org-supplied key.
 export type PlatformAuth = "api_key" | "aws";

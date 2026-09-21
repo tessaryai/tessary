@@ -123,6 +123,7 @@ public class ModelCatalogFetchService {
         m.put(ModelProvider.OPENROUTER, new OpenRouterModelLister(http, mapper, fetchTimeout));
         m.put(ModelProvider.BEDROCK, new BedrockModelLister(fetchTimeout));
         m.put(ModelProvider.BEDROCK_MANTLE, new BedrockMantleModelLister());
+        m.put(ModelProvider.TYPESAFE, new TypeSafeModelLister());
         return Collections.unmodifiableMap(m);
     }
 
@@ -154,7 +155,7 @@ public class ModelCatalogFetchService {
         ProviderModelLister lister = listers.get(provider);
         if (lister == null) {
             // No lister wired for this provider (should not happen for a real ModelProvider value —
-            // defaultListers() covers all ten — but a test-injected map may be intentionally partial).
+            // defaultListers() covers every one — but a test-injected map may be intentionally partial).
             // Contribute nothing rather than throw, matching the no-credential case above.
             return List.of();
         }

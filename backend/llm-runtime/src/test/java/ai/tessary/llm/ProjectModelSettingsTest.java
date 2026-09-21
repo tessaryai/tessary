@@ -192,7 +192,8 @@ class ProjectModelSettingsTest {
         // Asserted as allOf rather than a hand-listed set on purpose: a new ModelProvider constant
         // must fail this test until it is given both a launcher mode and a place on both lanes, which
         // is the mistake the three exclusions above were.
-        Set<ModelProvider> reachable = EnumSet.allOf(ModelProvider.class);
+        // TYPESAFE is the one exclusion: it serves decision models only, never a sandbox agent.
+        Set<ModelProvider> reachable = EnumSet.complementOf(EnumSet.of(ModelProvider.TYPESAFE));
         for (ModelLane lane : ModelLane.values()) {
             Set<ModelProvider> covered = LanePriority.of(lane).stream()
                     .map(LanePriority.ProviderOption::provider)
