@@ -169,7 +169,8 @@ final class RcaSynthesisOutput {
         ReportBody body = body(mapper, text, projectId);
         List<Cause> causes = new ArrayList<>();
         int dropped = 0;
-        for (CauseBody c : body.causes() == null ? List.<CauseBody>of() : body.causes()) {
+        List<CauseBody> bodies = body.causes();
+        for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
             String title = c.title();
             if (title == null || title.isBlank()) continue;
             Cause cause = validated(c, title, flaggedTraceIds, sessionIds);

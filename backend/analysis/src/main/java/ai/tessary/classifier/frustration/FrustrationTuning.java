@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
@@ -63,7 +64,7 @@ public class FrustrationTuning {
         Map<String, CarriedState> states = rates.states().byTool(projectId);
         Map<String, FrustrationRateRepository.Reset> resets = rates.resets(projectId);
 
-        TreeSet<String> callSites = new TreeSet<>(byCallSite.keySet());
+        Set<String> callSites = new TreeSet<>(byCallSite.keySet());
         callSites.addAll(states.keySet());
         List<FrustrationCallSiteView> views = new ArrayList<>();
         for (String callSite : callSites) {

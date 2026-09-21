@@ -362,14 +362,12 @@ class RetentionPinIntegrationTest {
                 .update();
     }
 
+    /** The Frustration classifier the project was seeded with, as every built-in is at bootstrap. */
     private String classifier(Project p) {
-        String id = Ids.ulid();
-        String now = Instant.now().toString();
-        jdbc.sql("""
-                        INSERT INTO classifier (id, project_id, classifier_key, name, detector, created_at, updated_at)
-                        VALUES (:id, :pid, 'frustration', 'Frustration', 'frustration', :now, :now)
-                        """).param("id", id).param("pid", p.id()).param("now", now).update();
-        return id;
+        return jdbc.sql("SELECT id FROM classifier WHERE project_id = :pid AND classifier_key = 'frustration'")
+                .param("pid", p.id())
+                .query(String.class)
+                .single();
     }
 
     private void assessment(Project p, String classifierId, String traceId) {
