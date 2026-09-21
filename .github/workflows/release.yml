@@ -300,7 +300,7 @@ jobs:
       # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
       # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./backend
           file: backend/Dockerfile
@@ -358,7 +358,7 @@ jobs:
       # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
       # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: frontend/Dockerfile
@@ -414,7 +414,7 @@ jobs:
       # No build-once optimization here: re2@1.26.1 is a native addon compiled by node-gyp in
       # the image, so this pnpm install genuinely happens twice, once per native arch runner.
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
@@ -472,7 +472,7 @@ jobs:
       # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above (re2 again).
       # Repo-root context: this Dockerfile's own header requires it (reaches contract/).
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: sandbox-runner/agent-sandbox/Dockerfile
