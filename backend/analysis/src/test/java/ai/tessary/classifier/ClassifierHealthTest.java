@@ -51,7 +51,8 @@ class ClassifierHealthTest {
                 props,
                 mock(CapabilityService.class),
                 mock(ProjectRepository.class),
-                mock(ai.tessary.classifier.metric.MetricBaselineRepository.class));
+                mock(ai.tessary.classifier.metric.MetricBaselineRepository.class),
+                mock(ai.tessary.llm.decisions.DecisionProviderResolver.class));
     }
 
     private static ClassifierRow signal(String id) {

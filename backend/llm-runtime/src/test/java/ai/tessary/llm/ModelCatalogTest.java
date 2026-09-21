@@ -43,6 +43,14 @@ class ModelCatalogTest {
     }
 
     @Test
+    void onlyTypeSafeNamesTheLaneItIsFor() {
+        for (PlatformCatalog.PlatformDescriptor p : PlatformCatalog.platforms()) {
+            List<String> expected = p.id() == ModelProvider.TYPESAFE ? List.of("frustration") : List.of();
+            assertEquals(expected, p.usedBy(), p.id().name());
+        }
+    }
+
+    @Test
     void mergeLiveWithNoLiveListing_passesTheStaticTableThroughUnchanged() {
         // A cold cache (no credential, or a fetch that failed with nothing to fall back to) must
         // degrade to today's static list, not to nothing, at this seam.

@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * First test coverage for {@link ProviderCredentialController} (confirmed absent
@@ -69,14 +70,17 @@ class ProviderCredentialControllerTest {
     @Mock
     private ModelCatalogFetchService catalogFetchService;
 
+    @Mock
+    private ApplicationEventPublisher events;
+
     private ProviderCredentialController controller;
     private TenantContext ctx;
     private TenantPathResolver.OrgResolved resolved;
 
     @BeforeEach
     void setUp() {
-        controller =
-                new ProviderCredentialController(repo, factory, secretBox, resolver, capabilities, catalogFetchService);
+        controller = new ProviderCredentialController(
+                repo, factory, secretBox, resolver, capabilities, catalogFetchService, events);
         ctx = new TenantContext("user_1", "user@example.com", ORG_ID, null, "owner", null);
         Organization org = new Organization(ORG_ID, null, ORG_SLUG, "Acme", "2026-01-01T00:00:00Z", null, null);
         resolved = new TenantPathResolver.OrgResolved(org, "owner");
@@ -115,6 +119,18 @@ class ProviderCredentialControllerTest {
                 .require(ORG_ID, Capability.BYO_PROVIDER_KEYS);
 
         assertThrows(TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.OPENAI));
+    }
+
+    @Test
+    void upsertAnnouncesTheSavedCredentialSoAPausedClassifierCanRetry() {
+        when(secretBox.isConfigured()).thenReturn(true);
+        when(secretBox.seal("ts-key")).thenReturn("sealed");
+        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.TYPESAFE)).thenReturn(Optional.empty());
+        var req = new ProviderCredentialController.UpsertRequest(null, "ts-key", null, null, null, null, null, null);
+
+        controller.upsert(ctx, ORG_SLUG, ModelProvider.TYPESAFE, req);
+
+        verify(events).publishEvent(new ProviderCredentialSavedEvent(ORG_ID, ModelProvider.TYPESAFE));
     }
 
     // ---- "never echoed back in full", pinned here ----

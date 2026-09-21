@@ -55,6 +55,7 @@ const OPENAI: PlatformDescriptor = {
   auth: "api_key",
   default_base_url: "https://api.openai.com/v1",
   supports_base_url: true,
+  used_by: [],
 };
 
 const ANTHROPIC: PlatformDescriptor = {
@@ -63,6 +64,16 @@ const ANTHROPIC: PlatformDescriptor = {
   auth: "api_key",
   default_base_url: "https://api.anthropic.com/v1",
   supports_base_url: true,
+  used_by: [],
+};
+
+const TYPESAFE: PlatformDescriptor = {
+  id: "TYPESAFE",
+  label: "TypeSafe",
+  auth: "api_key",
+  default_base_url: "https://api.typesafe.ai",
+  supports_base_url: true,
+  used_by: ["frustration"],
 };
 
 function renderProviders() {
@@ -87,6 +98,17 @@ afterEach(() => {
 });
 
 describe("Providers", () => {
+  it("names what a single-purpose provider is for, and says nothing on a chat provider", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI, TYPESAFE], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+
+    renderProviders();
+
+    await waitFor(() => screen.getByText("TypeSafe"));
+    expect(screen.getAllByText(/^Used by /)).toHaveLength(1);
+    screen.getByText("Used by Frustration");
+  });
+
   it("renders Not configured for a healthy catalog with zero stored credentials", async () => {
     listProviderCatalog.mockResolvedValue({ platforms: [OPENAI, ANTHROPIC], models: [] });
     listProviderCredentials.mockResolvedValue({ credentials: [] });

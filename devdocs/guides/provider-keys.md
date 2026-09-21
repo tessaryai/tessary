@@ -100,6 +100,15 @@ answered each call is recorded with it.
 A decision key is refused anywhere a chat model is built (`ModelConfigError.NOT_A_CHAT_PROVIDER`).
 A rejected key (HTTP 401 or 403) fails with `DECISION.PROVIDER_REJECTED` and is not retried.
 
+The Providers page marks TypeSafe "Used by Frustration" (the catalog's `used_by` on that platform),
+since that is the only thing its key does. Enabling Frustration without a key its lane can run on is
+refused with `CLASSIFIER.PROVIDER_REQUIRED`; the Catalog's enable dialog picks the provider, takes the
+key when the org has none, and sets the lane before it enables. When the provider later refuses the
+key, or the key is deleted, the classifier pauses (`readiness` reads `provider_rejected` or
+`no_provider`, shown on the Catalog row and rail) and sends nothing until the key works again. Saving
+the key the lane runs on lifts the pause at once, as does the rail's Retry or any re-enable; otherwise
+the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
+
 ## The `auth_mode=iam_role` opt-in — what it does and does not cover
 
 A Bedrock or Bedrock-mantle credential can opt into `auth_mode=iam_role`: the backend's own direct

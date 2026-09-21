@@ -32,6 +32,8 @@ public final class ClassifierDtos {
              * Why an enabled classifier cannot judge anything yet, or null when it can. {@link
              * #WAITING_ON_SCHEMAS} on Malformed Output while no call site declares a schema: without one there is
              * nothing to validate against, and a classifier reporting no detections would otherwise read as clean.
+             * {@link ClassifierPause#PROVIDER_REJECTED} or {@link ClassifierPause#NO_PROVIDER} on an enabled
+             * Frustration that has paused because its provider refused the org's key, or no key is left.
              */
             @Nullable String readiness) {
 

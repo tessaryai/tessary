@@ -20,6 +20,7 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { AlertCircle } from "lucide-react";
 import type {
   BehaviorFinding,
   Classifier,
@@ -28,7 +29,8 @@ import type {
   ClassifierHealth,
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { ErrorNote, LoadingRow, PageHeader, Rail, Toggle, cn } from "../../ui";
+import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Toggle, cn } from "../../ui";
+import { FrustrationEnableModal } from "./FrustrationEnableModal";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
   BEHAVIOR_DETECTOR,
@@ -52,6 +54,26 @@ const WAITING_ON_SCHEMAS = "waiting_on_schemas";
 const SCHEMAS_EXPLAINED =
   "Waiting on schemas. No call site declares an output schema yet, so there is nothing to check outputs against. " +
   "Schemas arrive when your repository is connected and assessed.";
+
+/** Frustration's detector key: enabling it spends the org's own provider credit, so it opens a modal. */
+const FRUSTRATION_DETECTOR = "frustration";
+
+/**
+ * `ClassifierView.readiness` while a classifier that calls a provider on the org's key is paused: the
+ * row's short label and the rail's sentence. A paused sweep sends nothing until the key works again.
+ */
+const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
+  provider_rejected: {
+    label: "Provider rejected the key",
+    explained:
+      "The provider rejected the stored key, so no messages are being scored. Fix the key under Settings, Providers, then retry.",
+  },
+  no_provider: {
+    label: "No provider key",
+    explained:
+      "There is no key for the provider this classifier runs on, so no messages are being scored. Add one under Settings, Providers, then retry.",
+  },
+};
 
 // A separate lazy chunk, not a static import: nobody opening the Classifiers page pays for the
 // debug section's code until they actually expand its disclosure. See `views/classifiers/debug/`.
@@ -87,6 +109,9 @@ export function DetectorsPage() {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.setClassifierEnabled(id, enabled),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["classifiers", api.base] }),
   });
+
+  const [enabling, setEnabling] = useState<Classifier | null>(null);
+  const providersPath = `/orgs/${orgSlug}/projects/${projectSlug}/settings/providers`;
 
   const classifiers = classifiersQ.data ?? [];
   const selected = classifiers.find((c) => c.id === selectedId) ?? null;
@@ -138,12 +163,18 @@ export function DetectorsPage() {
                   count={counts.get(c.id) ?? 0}
                   volumeKnown={volumeQ.data != null}
                   health={(healthQ.data ?? []).find((h) => h.classifier_id === c.id)}
+                  providersPath={providersPath}
                   onOpen={() => openRail(c.id)}
-                  onToggle={(enabled) => toggleM.mutate({ id: c.id, enabled })}
+                  onToggle={(enabled) =>
+                    enabled && c.detector === FRUSTRATION_DETECTOR
+                      ? setEnabling(c)
+                      : toggleM.mutate({ id: c.id, enabled })
+                  }
                 />
               ))}
             </div>
           </div>
+          {toggleM.isError && <ErrorNote className="mt-3" error={toggleM.error} />}
           <p className="text-subtle mt-3 text-small" style={{ maxWidth: 560 }}>
             The complete set for this organization, not a filtered view. Nothing is watching that isn't listed
             here.
@@ -154,8 +185,17 @@ export function DetectorsPage() {
       <ClassifierRail
         classifier={selected}
         health={(healthQ.data ?? []).find((h) => h.classifier_id === selected?.id)}
+        providersPath={providersPath}
         onClose={closeRail}
       />
+
+      {enabling && (
+        <FrustrationEnableModal
+          classifierId={enabling.id}
+          onClose={() => setEnabling(null)}
+          onEnabled={() => setEnabling(null)}
+        />
+      )}
     </div>
   );
 }
@@ -174,6 +214,7 @@ function DetectorRow({
   count,
   volumeKnown,
   health,
+  providersPath,
   onOpen,
   onToggle,
 }: {
@@ -181,6 +222,7 @@ function DetectorRow({
   count: number;
   volumeKnown: boolean;
   health: ClassifierHealth | undefined;
+  providersPath: string;
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
@@ -189,6 +231,7 @@ function DetectorRow({
   const quiet = count === 0;
   // A classifier that has nothing to judge yet is not quiet: "quiet 7d" would read as clean.
   const waiting = classifier.readiness === WAITING_ON_SCHEMAS;
+  const paused = classifier.readiness ? PROVIDER_PAUSES[classifier.readiness] : undefined;
   const status = waiting
     ? "waiting on schemas"
     : !volumeKnown
@@ -214,12 +257,23 @@ function DetectorRow({
         </span>
       )}
 
-      <span
-        className={cn("shrink-0 font-mono text-small", quiet || waiting ? "text-subtle" : "text-muted")}
-        title={waiting ? SCHEMAS_EXPLAINED : undefined}
-      >
-        {status}
-      </span>
+      {paused ? (
+        <Link
+          to={providersPath}
+          className="shrink-0 flex items-center gap-1.5 text-muted hover:text-fg transition-colors text-small"
+          title={paused.explained}
+        >
+          <AlertCircle size={13} strokeWidth={1.75} className="text-error" aria-hidden="true" />
+          {paused.label}
+        </Link>
+      ) : (
+        <span
+          className={cn("shrink-0 font-mono text-small", quiet || waiting ? "text-subtle" : "text-muted")}
+          title={waiting ? SCHEMAS_EXPLAINED : undefined}
+        >
+          {status}
+        </span>
+      )}
 
       <Toggle
         checked={classifier.enabled}
@@ -454,13 +508,54 @@ export function DetectionRow({ event }: { event: ClassifierEvent }) {
   );
 }
 
+/**
+ * A paused provider-backed classifier: why it stopped, where to fix it, and a Retry that re-enables it,
+ * which lifts the pause (or says why it cannot) instead of waiting out the sweep's own re-check.
+ */
+function ProviderPauseCallout({
+  classifier,
+  explained,
+  providersPath,
+}: {
+  classifier: Classifier;
+  explained: string;
+  providersPath: string;
+}) {
+  const { api } = useTenant();
+  const qc = useQueryClient();
+  const retryM = useMutation({
+    mutationFn: () => api.setClassifierEnabled(classifier.id, true),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["classifiers", api.base] }),
+  });
+
+  return (
+    <div className="border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small">
+      <div className="flex items-start gap-2">
+        <AlertCircle size={14} strokeWidth={1.75} className="text-error mt-0.5 shrink-0" aria-hidden="true" />
+        <p className="text-muted m-0">{explained}</p>
+      </div>
+      <div className="flex items-center gap-2 mt-2.25">
+        <Button size="sm" variant="secondary" loading={retryM.isPending} onClick={() => retryM.mutate()}>
+          Retry
+        </Button>
+        <Link to={providersPath} className="text-muted hover:text-fg transition-colors text-small">
+          Settings, Providers
+        </Link>
+      </div>
+      {retryM.isError && <ErrorNote className="mt-2" error={retryM.error} />}
+    </div>
+  );
+}
+
 function ClassifierRail({
   classifier,
   health,
+  providersPath,
   onClose,
 }: {
   classifier: Classifier | null;
   health: ClassifierHealth | undefined;
+  providersPath: string;
   onClose: () => void;
 }) {
   const { api } = useTenant();
@@ -512,6 +607,13 @@ function ClassifierRail({
         )}
         {classifier.readiness === WAITING_ON_SCHEMAS && (
           <p className="text-muted m-0 mb-3 text-small">{SCHEMAS_EXPLAINED}</p>
+        )}
+        {classifier.readiness && PROVIDER_PAUSES[classifier.readiness] && (
+          <ProviderPauseCallout
+            classifier={classifier}
+            explained={PROVIDER_PAUSES[classifier.readiness].explained}
+            providersPath={providersPath}
+          />
         )}
         <dl
       className="gap-y-1.75 gap-x-3.5 m-0"

@@ -21,6 +21,10 @@ public enum ClassifierError implements ErrorCode {
     NOT_FRUSTRATION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
+    /** Enabling a classifier that calls a provider on the org's own key, while no such key is configured. */
+    PROVIDER_REQUIRED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
     DETECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "No detection '%s' on this classifier"),
     /** The two ways a detection has nothing a grader run could evaluate — see ClassifierService#analyze. */
     DETECTION_NOT_GRADABLE(

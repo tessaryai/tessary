@@ -7033,6 +7033,12 @@
           },
           "supports_base_url" : {
             "type" : "boolean"
+          },
+          "used_by" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         },
         "required" : [
@@ -7040,7 +7046,8 @@
           "default_base_url",
           "id",
           "label",
-          "supports_base_url"
+          "supports_base_url",
+          "used_by"
         ],
         "type" : "object"
       },

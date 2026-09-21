@@ -3509,6 +3509,7 @@ export interface components {
             id: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
             label: string;
             supports_base_url: boolean;
+            used_by: string[];
         };
         PolicyView: {
             /** Format: int64 */
