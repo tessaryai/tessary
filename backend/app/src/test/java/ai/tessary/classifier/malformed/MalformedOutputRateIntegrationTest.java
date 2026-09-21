@@ -24,7 +24,6 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -33,7 +32,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -44,7 +42,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * one otherwise.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class MalformedOutputRateIntegrationTest {
 
     private static final String SCHEMA = "{\"type\":\"object\",\"required\":[\"answer\"]}";

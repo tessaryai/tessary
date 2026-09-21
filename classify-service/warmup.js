@@ -11,8 +11,8 @@ const { classify, HEADS, PAIR_HEADS, headResidency } = require('./classify');
 const { embed, checkpointResidency } = require('./embed');
 
 (async () => {
-  // Only smoke-score heads whose weights actually got baked. A gated head (frustration,
-  // attribution) with no HF_TOKEN at build time never downloaded — there's nothing
+  // Only smoke-score heads whose weights actually got baked. A gated head (`"gated": true`
+  // in models.json) with no HF_TOKEN at build time never downloaded — there's nothing
   // to score offline, and that's expected, not a build failure: unlike BAKE_EMBEDDERS
   // (a flag that can lie — "asked for it, didn't get it"), a gated head's presence or
   // absence IS the download outcome itself. download.js already throws loudly per-head if

@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
  * reproduce every {@code contract_v2} and {@code reduction} case in {@code
  * classifiers/framework/fixtures/context_contract.json} byte-for-byte — the same shared golden fixture
  * the Python side ({@code framework/context.py}) is pinned to. If this test fails, serving would render
- * the frustration head an input format it never trained on. Do not "fix" it by editing the rendered
+ * a text head an input format it never trained on. Do not "fix" it by editing the rendered
  * strings; the fixture is the contract.
  */
 class ConversationThreadContractParityTest {

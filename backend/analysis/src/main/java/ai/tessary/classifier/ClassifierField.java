@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier;
 
-import ai.tessary.classifier.detector.EncoderDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateObservation;
@@ -10,10 +9,9 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
  * Which side of the conversation a text-scoring detector focuses on: the user-side {@code input}, the
  * agent-side {@code output}, or both.
  *
- * <p>For the <b>encoder classifier</b> ({@link EncoderDetector}) this selects the trailing scored
- * message of the assembled conversation thread ({@link ConversationThreadAssembler}) — by DEFAULT the
- * full user↔assistant thread (system excluded), so a head sees the whole interaction it is meant to
- * judge (the frustration in "nevermind" is only legible against the assistant turns it reacts to).
+ * <p>For a head that scores the rendered conversation thread ({@link ConversationThreadAssembler}) this
+ * selects the trailing scored message, by DEFAULT against the full user↔assistant thread (system
+ * excluded), so a head sees the whole interaction it is meant to judge.
  * {@code INPUT} ends the thread at the scored user turn; {@code OUTPUT}/{@code BOTH} carry that user
  * turn as context and end at the scored assistant turn.
  *

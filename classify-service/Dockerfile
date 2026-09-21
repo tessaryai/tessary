@@ -1,4 +1,4 @@
-# Encoder classification service — multi-stage so the ~1.9 GB model bake (3 classify heads;
+# Encoder classification service — multi-stage so the model bake (the classify heads;
 # ~3.6 GB with BAKE_EMBEDDERS=1, which adds the conformance encoder /embed serves) is
 # rebuilt ONLY when its actual inputs change.
 #
@@ -11,17 +11,16 @@
 #
 # Build for the deployment platform explicitly; production runs on ARM64 Fargate (Graviton).
 #
-# Of the 3 heads (models.json), frustration + attribution live in PRIVATE HF repos under
-# tessaryai/ ("gated": true there) and need an HF_TOKEN with read access; groundedness
-# (Xenova/bart-large-mnli) is public and always bakes. A build that supplies the token
-# gets all 3 heads, exactly as before:
+# A head marked "gated": true in models.json lives in a PRIVATE HF repo and needs an HF_TOKEN
+# with read access; groundedness (Xenova/bart-large-mnli) is public and always bakes. A build
+# that supplies the token gets every head:
 #   HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
 #     --platform linux/arm64 -t <ecr>/tessary-classify:<sha> .
 #
 # Omitting --secret id=hf_token entirely is a SUPPORTED keyless build, so this image can
 # be built with no token at all: the mount below has no `required=true`, so it already tolerates a
-# missing secret and yields HF_TOKEN="". download.js then skips the two gated heads
-# instead of failing, and classify.js reports them as a clean 400 "unavailable" at
+# missing secret and yields HF_TOKEN="". download.js then skips any gated head
+# instead of failing, and classify.js reports it as a clean 400 "unavailable" at
 # /classify rather than crash-looping the container's boot-time pre-warm — no Dockerfile
 # change was needed for this, only the gating logic in download.js/classify.js/warmup.js.
 # An explicit token that is present but invalid/expired is NOT tolerated the same way:
@@ -56,8 +55,7 @@ ENV HF_CACHE_DIR=/models
 # "Enabling the conformance encoder in production".
 ARG BAKE_EMBEDDERS=0
 COPY models.json embedders.json download.js ./
-# The frustration + groundedness heads' weights live in PRIVATE HF repos under tessaryai/
-# — download.js needs HF_TOKEN to pull them. A BuildKit secret mount (not ARG/ENV) so the token
+# A gated head's weights live in a PRIVATE HF repo — download.js needs HF_TOKEN to pull them. A BuildKit secret mount (not ARG/ENV) so the token
 # never lands in an image layer or `docker history`. transformers.js reads HF_TOKEN from the
 # process env on its own (see the @huggingface/transformers dist source; under pnpm it resolves via
 # node_modules/.pnpm rather than a flat path) — no download.js

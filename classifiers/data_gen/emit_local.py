@@ -339,9 +339,8 @@ def load_groundedness_canary() -> Iterator[Conversation]:
 def load_frustration_canary() -> Iterator[Conversation]:
     """Two user turns, the second unmistakably angry at the agent.
 
-    The frustration built-in demotes a fire to LOW unless the attribution head agrees the agent
-    caused it, so the anger here names the assistant's own failures, not a courier or a third
-    party. Deterministic and fixture-free, like `canary`.
+    The frustration built-in fires only on frustration the agent caused, so the anger here
+    names the assistant's own failures, not a courier or a third party. Deterministic and fixture-free, like `canary`.
     """
     yield Conversation(
         conversation_id="canary-frustration-0001",

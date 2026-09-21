@@ -27,7 +27,6 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.TenantFixture;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -38,7 +37,6 @@ import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -46,11 +44,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * filing, with the frustrated conversations as session and trace witness pairs; the case opens under detector
  * {@code frustration}; a second pass refreshes rather than re-files; and once someone runs RCA on the case, the
  * next spell opens a new one.
- *
- * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class FrustrationRateIntegrationTest {
 
     private static final String VERSION =

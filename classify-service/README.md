@@ -1,10 +1,8 @@
 # classify-service
 
-Standalone serving for the platform's built-in encoder heads: one single-text head
-(`frustration` — purpose-built ModernBERT ONNX, [`tessaryai/frustration-detector`](https://huggingface.co/tessaryai/frustration-detector),
-trained on [`tessaryai/frustration-v1`](https://huggingface.co/datasets/tessaryai/frustration-v1))
-plus one pair head, `groundedness` (claim-vs-premise support scoring — MiniCheck-RoBERTa-Large).
-Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
+Standalone serving for the platform's built-in encoder heads: one pair head, `groundedness`
+(claim-vs-premise contradiction scoring with `Xenova/bart-large-mnli`), plus the `/embed` sentence
+encoder SOP conformance uses. Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
 burst OOM-looped the shared production host: CPU inference with model weights now runs in its
 own resource envelope (ECS Fargate, ARM64, **2 vCPU / 6 GB** — `classify_cpu` / `classify_memory`
 in the infrastructure repo; see the 2026-08-11 note, which raises the memory) and can only ever
@@ -14,10 +12,10 @@ kill its own task.
 default classifier catalog and decommissioned here (see `BuiltInSignalCatalog`'s catalog-
 reduction note) — down from 5 resident heads to 2.
 
-**2026-07-23 frustration rebuild:** replaced the GoEmotions `max(annoyance,anger,disappointment)`
-proxy (q8) with a context-aware ModernBERT binary head (fp32, ~600 MB ONNX). Both resident
-heads are private `tessaryai/*` pins; bake needs `HF_TOKEN`. `models.json` may carry optional
-`dataset_repo` / `dataset_revision` provenance (ignored by the bake — prod is weights-only).
+**Frustration moved off this service:** the `frustration` and `attribution` heads were
+removed when the frustration classifier moved to a decision model the backend calls directly on
+the org's own provider key. `models.json` may carry optional `dataset_repo` / `dataset_revision`
+provenance (ignored by the bake — prod is weights-only).
 
 **2026-08-11 conformance encoder registered, bake opt-in.** `embedders.json` now names
 `Alibaba-NLP/gte-large-en-v1.5` so `/embed` has a checkpoint to serve (see "Embedding"
@@ -32,7 +30,7 @@ ordering, which matters if it is ever reverted.
 Same wire contract the launcher exposed, minus everything E2B, with two mutually-exclusive
 request shapes depending on the head:
 
-- `POST /classify {head, texts[]} -> {scores[]}` — single-text heads. Bearer auth with
+- `POST /classify {head, texts[]} -> {scores[]}` — single-text heads (none registered today). Bearer auth with
   `CLASSIFY_API_KEY`. Batches cap at 512 texts / 8 MB body. `MAX_INFLIGHT` requests run at once
   (default 2, the memory ceiling); extras wait in a bounded FIFO queue (`MAX_QUEUE`, default 8)
   rather than failing outright. It returns 429 only when the queue is full or a waiter exceeds
@@ -55,9 +53,8 @@ request shapes depending on the head:
 
 `groundedness` scores whether a `claim` (the thing being checked — typically a model's output)
 is supported by a `premise` (the source content it should be grounded in — input/context/tool
-results). Unlike `frustration`, the model needs BOTH strings, joined internally as
-`premiseChunk + tokenizer.eos_token + claim` (MiniCheck's own input format — no separate
-pair-tokenizer path). The premise, not the claim, is what gets chunked when the input is too
+results). The model needs BOTH strings, joined internally as
+`premiseChunk + tokenizer.eos_token + claim` (no separate pair-tokenizer path). The premise, not the claim, is what gets chunked when the input is too
 big for the ~512-token window: the claim is the exact content being judged, so it must never be
 the part silently dropped by truncation. See `premiseChunksFor`/`classifyPairs` in `classify.js`.
 
@@ -142,7 +139,7 @@ Measured on ARM64 with `docker run --memory=N --memory-swap=N`:
 | 6 GB (the task before the resize) | warms and serves, ~4.5 GiB resident |
 | 8 GB (today's task) | warms and serves, with the arena headroom the sizing assumes |
 
-The two heads alone sit at ~3.2 GiB, so the encoder adds ~1.2 GiB. That is why 4 GB is fatal and
+The two heads the service carried then sat at ~3.2 GiB, so the encoder adds ~1.2 GiB. That is why 4 GB is fatal and
 why 6 GB — which boots — was still not enough: the sizing exists to leave the onnxruntime arena
 ~4 GB of high-water under worst-case fp32 long-text serving, and a resident encoder leaves it
 ~1.5 GiB.
@@ -165,9 +162,9 @@ and only then shrink the task, or the running image will not fit the smaller one
 ## Build & run
 
 ```bash
-# production image (Fargate runs ARM64/Graviton). The groundedness head's weights are a
-# private HF repo (tessaryai/MiniCheck-RoBERTa-Large-onnx) — HF_TOKEN must be passed as a
-# BuildKit secret, never a build ARG (that would land in image history).
+# production image (Fargate runs ARM64/Graviton). A gated head's weights are a private HF
+# repo — HF_TOKEN must be passed as a BuildKit secret, never a build ARG (that would land in
+# image history).
 HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
   --platform linux/arm64 -t tessary-classify:dev .
 
@@ -178,8 +175,6 @@ HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
 
 # local
 CLASSIFY_API_KEY=dev pnpm start
-curl -s localhost:8080/classify -H 'Authorization: Bearer dev' -H 'Content-Type: application/json' \
-  -d '{"head":"frustration","texts":["This is absolutely infuriating, you never listen!"]}'
 curl -s localhost:8080/classify -H 'Authorization: Bearer dev' -H 'Content-Type: application/json' \
   -d '{"head":"groundedness","pairs":[{"premise":"The candidate has 5 years of Python experience.","claim":"The candidate knows Python."}]}'
 ```

@@ -38,7 +38,6 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -59,7 +58,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -68,11 +66,8 @@ import org.springframework.transaction.support.TransactionOperations;
  * flagged turn, idempotent when a page is written twice; the conversation flag that stops a
  * conversation being sent again until a human clears it; and the pause and held-page counters the sweep
  * keeps. The decision call and the conversation read are stubbed; everything else is the real schema.
- *
- * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class FrustrationAssessmentIntegrationTest {
 
     private static final String RESPONDED = "typesafe/jev-1.13-20260917";

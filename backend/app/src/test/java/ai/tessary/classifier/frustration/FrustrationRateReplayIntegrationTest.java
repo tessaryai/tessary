@@ -22,7 +22,6 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -34,18 +33,14 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The rate test against Postgres: the replay aggregate over {@code frustration_assessment} and the uncleared
  * flags, the state row it leaves in {@code frustration_state}, a tuning change resetting it, and the Tuning view
  * reading it back.
- *
- * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class FrustrationRateReplayIntegrationTest {
 
     private static final String VERSION =

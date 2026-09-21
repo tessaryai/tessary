@@ -74,8 +74,8 @@ class CallSiteFactRewindIntegrationTest {
      * real project reaches before any repo assessment is possible.
      *
      * <p>Frustration is granted before the project exists, the moment seeding reads capabilities, so
-     * its always-on {@code EncoderDetector} is a live control here for "a call-site fact does not
-     * disturb a signal that reads only the trace."
+     * its sweep job is a live control here for "a call-site fact does not disturb a signal that reads
+     * only the trace."
      */
     private String projectWithSweptHistory(String name) {
         String pid = TenantFixture.bootstrap(tenants, name, org -> {

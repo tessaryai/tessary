@@ -6,6 +6,7 @@ import { useTenant } from "../../../tenant/TenantContext";
 import { Collapsible, ErrorNote, LoadingRow } from "../../../ui";
 import { PayloadViewer } from "../../components/PayloadViewer";
 import { CommonStatus } from "./sections/CommonStatus";
+import { DecisionDebug } from "./sections/DecisionDebug";
 import { DeterministicDebug } from "./sections/DeterministicDebug";
 import { EncoderDebug } from "./sections/EncoderDebug";
 import { MetricDriftDebug } from "./sections/MetricDriftDebug";
@@ -56,7 +57,7 @@ export default function DebugSection({ classifier }: { classifier: Classifier })
   );
 }
 
-/** Dispatches on the same three execution tiers the backend catalog itself dispatches on. */
+/** Dispatches on the same execution tiers the backend catalog itself dispatches on. */
 function FamilySection({ debug }: { debug: ClassifierDebug }) {
   switch (debug.family) {
     case "metric_drift":
@@ -69,6 +70,8 @@ function FamilySection({ debug }: { debug: ClassifierDebug }) {
       return paid.debugSection(debug);
     case "encoder":
       return <EncoderDebug />;
+    case "decision":
+      return <DecisionDebug />;
     default:
       return <DeterministicDebug />;
   }

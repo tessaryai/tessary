@@ -3,7 +3,6 @@ package ai.tessary.classifier.catalog;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.detector.Detection;
-import ai.tessary.classifier.detector.EncoderDetector;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.substrate.SubstrateObservation;
@@ -17,9 +16,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * A built-in signal detector: the per-classifier evaluation seam the {@link ClassifierWorker}
  * dispatches on. Deterministic detectors (pattern + tool-error + structural) evaluate per
- * observation with no model call; the encoder tier ({@link EncoderDetector}) scores text against
- * a shared ONNX head and overrides {@link #detectBatch} to amortize one serving call per sweep
- * batch. Classifier- and regex-backed user signals plug in behind the same seam.
+ * observation with no model call; a detector that calls a model per item (the decision-model
+ * frustration detector, the encoder-backed groundedness head) overrides {@link #detectBatch} to
+ * amortize its serving calls over a sweep batch. Classifier- and regex-backed user signals plug in behind the same seam.
  */
 public interface BuiltInDetector {
 
@@ -35,8 +34,8 @@ public interface BuiltInDetector {
 
     /**
      * Evaluate a sweep batch, one {@link Detection} per observation, index-aligned. The default
-     * loops {@link #detect}; a detector whose evaluation has per-call overhead (the encoder tier's
-     * HTTP scoring call) overrides this to batch it.
+     * loops {@link #detect}; a detector whose evaluation has per-call overhead (an HTTP scoring call)
+     * overrides this to batch it.
      */
     default List<Detection> detectBatch(List<SubstrateObservation> batch, @Nullable String config) {
         List<Detection> out = new ArrayList<>(batch.size());
@@ -187,6 +186,6 @@ public interface BuiltInDetector {
          * only when an enabled project has a head-carrying bundle deployed, and its capability flag
          * is off for everyone. Revisit this membership when that flag first turns on.
          */
-        public static final Set<String> ENCODER_BACKED = Set.of(FRUSTRATION, GROUNDEDNESS);
+        public static final Set<String> ENCODER_BACKED = Set.of(GROUNDEDNESS);
     }
 }

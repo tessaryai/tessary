@@ -25,23 +25,18 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.annotation.Import;
 
 /**
  * Enabling Frustration spends the org's own provider credit, so it needs a key first; a pause names why
  * the classifier stopped, and either an enable or saving the key it was waiting on lifts it.
- *
- * <p>Shares the turn-grain fingerprint with the other frustration integration tests.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class FrustrationEnableIntegrationTest {
 
     @Autowired

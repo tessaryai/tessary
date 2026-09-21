@@ -2,7 +2,6 @@
 package ai.tessary.classifier.substrate;
 
 import ai.tessary.classifier.ClassifierField;
-import ai.tessary.classifier.detector.EncoderDetector;
 import ai.tessary.classifier.substrate.ConversationThreadRenderer.Turn;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.model.ContentExtractor;
@@ -22,7 +21,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Assembles the input the encoder classifier ({@link EncoderDetector}) scores: the conversation
+ * Assembles the conversation a text-scoring head reads: the conversation
  * thread at the scored observation's CONVERSATION grain — the turns sharing the scored turn's parent
  * context node (the conversation tier, or the session when a turn hangs directly off the session) — in
  * chronological ({@code context.seq}) order up to and including the scored turn, reduced per the context

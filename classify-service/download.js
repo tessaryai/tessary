@@ -62,13 +62,13 @@ function mergeDir(src, dst, overwrite) {
   tf.env.cacheDir = STAGING;
   tf.env.allowRemoteModels = true;
 
-  // frustration + attribution live in private tessaryai/ HF repos and need a token with
-  // read access; groundedness (Xenova/bart-large-mnli) is public and always bakes. A
+  // A head marked `"gated": true` in models.json lives in a private HF repo and needs a token
+  // with read access; groundedness (Xenova/bart-large-mnli) is public and always bakes. A
   // gated head is skipped ONLY on a missing token — an explicit-but-bad token still fails
   // loud below (the fetch itself errors), so this never silently masks a real credential
   // problem, only a genuinely absent one. This is what makes it possible to build the image
-  // without an HF_TOKEN at all: the two private heads report themselves
-  // "unavailable" at runtime (classify.js) instead of the build needing their weights.
+  // without an HF_TOKEN at all: a private head reports itself
+  // "unavailable" at runtime (classify.js) instead of the build needing its weights.
   const hasToken = !!process.env.HF_TOKEN;
   const baked = [];
 

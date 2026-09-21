@@ -14,8 +14,8 @@
 #                              model/revision/dtype, and asking to serve one returns the literal
 #                              token UNAVAILABLE_IN_OPEN_EDITION rather than `unknown classify head`.
 #   --edition all   (default)  whichever manifest is present is asserted exactly, and the result is
-#                              printed. Populated: exactly frustration/groundedness/attribution,
-#                              each with model + 40-hex revision + dtype + score. Empty: the same
+#                              printed. Populated: exactly groundedness, with model + 40-hex
+#                              revision + dtype + score. Empty: the same
 #                              assertions as --edition open, plus a printed line naming the
 #                              assertion that did not run and why.
 #
@@ -26,7 +26,7 @@
 #
 # Branching rather than widening the exact-set list below: that list is exact by design (see its
 # own comment, a head appearing without anyone updating the line is what it exists to catch), and
-# a list widened to "three heads, or none, or some" would catch nothing. Two exact assertions, one
+# a list widened to "one head, or none, or some" would catch nothing. Two exact assertions, one
 # per manifest shape, keeps that property in both.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -61,12 +61,9 @@ done
 node --test queue.test.js windowing.test.js embed.test.js embed.smoke.test.js
 
 # Loading classify.js enforces the models.json <-> scorer consistency contract and
-# validates the manifest shape; HEADS must expose exactly the built-in heads.
-#
-# `attribution` is the second head of the frustration signal, not a signal of its own: the backend
-# scores it only for turns the emotion head already put in the high band, and demotes them when it
-# disagrees. It is listed here because this gate is an exact-set assertion by design, and a head
-# appearing in the service without anyone updating this line is precisely what it exists to catch.
+# validates the manifest shape; HEADS must expose exactly the built-in heads. The set is exact by
+# design: a head appearing in the service without anyone updating this line is precisely what it
+# exists to catch.
 MANIFEST_HEADS="$(node -e "process.stdout.write(String(Object.keys(require('./models.json')).length))")"
 
 if [ "$EDITION" = open ] && [ "$MANIFEST_HEADS" != 0 ]; then
@@ -79,9 +76,9 @@ fi
 if [ "$MANIFEST_HEADS" = 0 ]; then
   # The open manifest's three assertions, in the order a reader would ask them.
   #
-  # (1) The manifest is empty, read as JSON, not grepped. `{}` and `{"frustration": {...}}` differ
-  #     by more than a byte count, and a half-emptied manifest is exactly the state that would
-  #     otherwise publish one checkpoint pin and hide the other two.
+  # (1) The manifest is empty, read as JSON, not grepped. `{}` and `{"groundedness": {...}}` differ
+  #     by more than a byte count, and a manifest that kept any entry would publish that
+  #     checkpoint's pin.
   # (2) Every head is unbacked and carries no weight fields. `unbacked: true` alone is not enough:
   #     a spec that kept `model`/`revision` and merely gained a flag would still publish the pin.
   # (3) Asking to serve one produces the literal token. This is the half that actually matters to
@@ -132,7 +129,7 @@ for (const [head, spec] of Object.entries(HEADS)) {
 "
   if [ "$EDITION" != open ]; then
     echo "classify-service: NOTE — models.json is empty in this build context, so the exact-set head"
-    echo "  assertion (exactly frustration/groundedness/attribution, each with a 40-hex revision) did"
+    echo "  assertion (exactly groundedness, with a 40-hex revision) did"
     echo "  NOT run. That is expected in an open checkout and in a full checkout before the overlay's"
     echo "  manifest is copied in at image-build time; it is NOT expected in a paid image build, where"
     echo "  the copy happens first and this gate then takes the populated arm."
@@ -140,7 +137,7 @@ for (const [head, spec] of Object.entries(HEADS)) {
 else
   node -e "
 const { HEADS } = require('./classify');
-const expected = ['frustration', 'groundedness', 'attribution'];
+const expected = ['groundedness'];
 const actual = Object.keys(HEADS).sort();
 if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
   throw new Error('HEADS mismatch: ' + actual.join(','));

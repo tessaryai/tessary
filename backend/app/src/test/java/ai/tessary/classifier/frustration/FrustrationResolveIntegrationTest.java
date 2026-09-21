@@ -31,7 +31,6 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.sql.Timestamp;
@@ -45,7 +44,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -53,11 +51,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * from the traffic after the resolve, so the next catch-up files nothing off the hours it closed. {@code
  * false_alarm} does the same and clears the flag on every conversation the case cites, so a later turn of one of
  * them is scored again, while a flagged conversation the case does not cite stays flagged.
- *
- * <p>Shares the turn-grain fingerprint, whose test table stands in for {@code frustration_detection}.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class FrustrationResolveIntegrationTest {
 
     private static final String VERSION =

@@ -36,7 +36,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><b>Narrowing for pooled heads.</b> {@link #windowByUserTurns} and {@link #stubAssistants} are the
  * two narrowing transforms a head may apply to its prior turns BEFORE reduction. They exist because a
- * single-utterance encoder (the GoEmotions family the frustration head uses) emits ONE score for the
+ * single-utterance encoder (the GoEmotions family the retired frustration head used) emits ONE score for the
  * whole string with no way to weight the trailing turn: every prepended block dilutes the message
  * actually being judged. Measured on 300 labelled production turns, AUC falls monotonically as context
  * grows — 0.838 bare, 0.830 at one exchange, 0.801 at three, 0.718 unbounded. A head that consumes

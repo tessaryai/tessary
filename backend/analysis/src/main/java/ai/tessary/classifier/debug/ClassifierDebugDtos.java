@@ -31,12 +31,13 @@ public final class ClassifierDebugDtos {
             @JsonProperty("metric_baselines") @Nullable List<MetricBaselineView> metricBaselines,
             @JsonProperty("behavior_profiles") @Nullable List<BehaviorProfileDebugView> behaviorProfiles) {
 
-        /** The three families the backend actually dispatches on — {@code BuiltInClassifierCatalog}'s tiers. */
+        /** The families the backend actually dispatches on — {@code BuiltInClassifierCatalog}'s tiers. */
         public static final class Family {
             private Family() {}
 
             public static final String DETERMINISTIC = "deterministic";
             public static final String ENCODER = "encoder";
+            public static final String DECISION = "decision";
             public static final String BEHAVIOR_DRIFT = "behavior_drift";
             public static final String METRIC_DRIFT = "metric_drift";
         }
