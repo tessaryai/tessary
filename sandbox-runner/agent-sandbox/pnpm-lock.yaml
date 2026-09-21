@@ -28,8 +28,8 @@ importers:
         version: 6.28.1
     devDependencies:
       '@types/node':
-        specifier: ^26.5.1
-        version: 26.5.1
+        specifier: ^26.6.1
+        version: 26.6.1
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -219,8 +219,8 @@ packages:
   '@opencode-ai/sdk@1.18.30':
     resolution: {integrity: sha512-uviJ+PZLc/D1szt33WGzzt/rqJ+IaNmRGBb+UcOXrcQANl8XXKJrp4CNQQ2UAnUJ3Ek+VqcamIwjtKHUW/OjOQ==}
 
-  '@types/node@26.5.1':
-    resolution: {integrity: sha512-CzNm2FezW4VR/LjG6yUdiEgLE/rAQ9Slj5gCu/C2VrdcW7I0ahNZ8DRbHT7zOZ6r3ONgd/bsQIeSaoDGrd1C6g==}
+  '@types/node@26.6.1':
+    resolution: {integrity: sha512-VqGJBMCtdhqkBUCcBLvywI0NJ+KLuVzgNnlBUNFOQjqVxzo2lxLUNg1DSey8+u2u6ktswSAxg+s68QLzWHNOuA==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -661,7 +661,7 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
 
-  '@types/node@26.5.1':
+  '@types/node@26.6.1':
     dependencies:
       undici-types: 8.9.0
 
