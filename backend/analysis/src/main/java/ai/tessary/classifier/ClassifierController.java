@@ -8,11 +8,13 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierMetricsView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
+import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
 import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
 import ai.tessary.classifier.ClassifierDtos.ToolErrorRateView;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
+import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.tenant.rbac.Permission;
@@ -40,10 +42,13 @@ public class ClassifierController {
     private static final int DEFAULT_EVENT_LIMIT = 200;
 
     private final ClassifierService service;
+    private final FrustrationTuning frustrationTuning;
     private final TenantPathResolver resolver;
 
-    public ClassifierController(ClassifierService service, TenantPathResolver resolver) {
+    public ClassifierController(
+            ClassifierService service, FrustrationTuning frustrationTuning, TenantPathResolver resolver) {
         this.service = service;
+        this.frustrationTuning = frustrationTuning;
         this.resolver = resolver;
     }
 
@@ -146,6 +151,22 @@ public class ClassifierController {
         r.require(Permission.ORG_MANAGE, "tune a classifier's window/threshold operating point");
         return ApiResponse.ok(service.setTuning(
                 r.project().id(), id, req.windowTargetCount(), req.windowMaxHours(), req.minSample(), req.w1Floor()));
+    }
+
+    /**
+     * The Frustration classifier's rate-test operating point and, per call site, the learned rate of frustrated
+     * conversations, the alarm threshold it implies, the accumulator and the last reset. Read-only. 422s for any
+     * other classifier.
+     */
+    @GetMapping("/{id}/frustration-tuning")
+    public ApiResponse<FrustrationTuningView> getFrustrationTuning(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        String projectId = r.project().id();
+        return ApiResponse.ok(frustrationTuning.view(projectId, service.get(projectId, id)));
     }
 
     @GetMapping("/events")

@@ -362,10 +362,16 @@ traffic after the reset only.
 ### The same engine on other trials
 
 Malformed Output runs this engine per call site, a trial being one output checked against its schema.
-Frustration will run it per call site with a **conversation** as the trial: a conversation belongs to
-the call site of its first scored turn, and it is a failure when it holds an uncleared frustration
-detection. Its budget is in conversations, so its dials differ: `arl_target = 10,000`,
-`shift_floor = 0.02` and a clamp floor of 4 on `h` instead of 6, giving
+Frustration runs it per call site with a **conversation** as the trial (`FrustrationRateService`): a
+conversation belongs to the call site of its first scored turn, and it is a failure when it holds an
+uncleared frustration detection. Like Malformed Output it rebuilds every pass, because a later turn can
+flag a conversation first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
+it in its original hour either way. The reference is its first `min_baseline_conversations = 200`. A
+state row built under another scorer version or other dials is reset with the note `tuning changed`
+and re-learns, because a reference learned under other weights is not comparable. Its budget is in
+conversations, so its dials differ (`FrustrationConfig`, whose engine config carries the floor as
+`ToolErrorConfig.minDecisionInterval`; tool_error's stays 6 and no tool-error blob can lower it):
+`arl_target = 10,000`, `shift_floor = 0.02` and a clamp floor of 4 on `h` instead of 6, giving
 
 ```
 h(p0) = clamp(11.42 + 1.088·ln(p0) + ln(10000 / 250000), 4, 12)

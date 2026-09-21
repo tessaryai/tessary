@@ -35,6 +35,8 @@ import org.jspecify.annotations.Nullable;
  *     is persisted classifier config and dropping it from the schema would fail to parse every deployed
  *     bundle that carries it.
  * @param maxPatterns failure signatures a finding's breakdown carries before the tail folds
+ * @param minDecisionInterval the lower clamp on the derived threshold. {@link #MIN_DECISION_INTERVAL} for
+ *     tool_error, which never reads it from a blob; see the constant for who may lower it
  */
 public record ToolErrorConfig(
         long arlTarget,
@@ -44,7 +46,8 @@ public record ToolErrorConfig(
         int minBaselineCalls,
         double downArmMinRate,
         int settleSeconds,
-        int maxPatterns) {
+        int maxPatterns,
+        double minDecisionInterval) {
 
     /**
      * EXPERIMENT(tool-error-tuning): calls a healthy tool should run between false alarms, the ARL₀.
@@ -83,8 +86,14 @@ public record ToolErrorConfig(
      * Bounds on the derived threshold. Below 6 the alarm fires on ordinary sampling noise whatever the
      * rate; above 12 the run length exceeds any corpus anyone will replay, so the detector cannot be shown
      * to work at all. Both ends are also outside the range the fit was measured over.
+     *
+     * <p>A classifier whose trial is a conversation rather than a tool call may set a lower floor, because its
+     * budget is counted in conversations; frustration's is 4 (see {@code FrustrationConfig}).
      */
     public static final double MIN_DECISION_INTERVAL = 6.0;
+
+    /** The lowest floor any classifier may set with {@link #minDecisionInterval}. */
+    public static final double LOWEST_DECISION_INTERVAL = 2.0;
 
     /** See {@link #MIN_DECISION_INTERVAL}. */
     public static final double MAX_DECISION_INTERVAL = 12.0;
@@ -179,6 +188,30 @@ public record ToolErrorConfig(
         downArmMinRate = clamp(downArmMinRate, 0.0001, 0.5, DEFAULT_DOWN_ARM_MIN_RATE);
         settleSeconds = clampInt(settleSeconds, 0, 86_400, DEFAULT_SETTLE_SECONDS);
         maxPatterns = clampInt(maxPatterns, 1, ToolErrorRate.MAX_PATTERNS, DEFAULT_MAX_PATTERNS);
+        minDecisionInterval =
+                clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
+    }
+
+    /** tool_error's shape: the threshold floor is always {@link #MIN_DECISION_INTERVAL}. */
+    public ToolErrorConfig(
+            long arlTarget,
+            double shiftMultiple,
+            double shiftFloor,
+            double minEffectSize,
+            int minBaselineCalls,
+            double downArmMinRate,
+            int settleSeconds,
+            int maxPatterns) {
+        this(
+                arlTarget,
+                shiftMultiple,
+                shiftFloor,
+                minEffectSize,
+                minBaselineCalls,
+                downArmMinRate,
+                settleSeconds,
+                maxPatterns,
+                MIN_DECISION_INTERVAL);
     }
 
     /**
@@ -197,9 +230,9 @@ public record ToolErrorConfig(
      * its log.
      */
     public double decisionIntervalFor(double p0) {
-        if (!Double.isFinite(p0) || p0 <= 0) return MIN_DECISION_INTERVAL;
+        if (!Double.isFinite(p0) || p0 <= 0) return minDecisionInterval;
         double h = ARL_FIT_INTERCEPT + ARL_FIT_SLOPE * Math.log(p0) + Math.log((double) arlTarget / DEFAULT_ARL_TARGET);
-        return Math.max(MIN_DECISION_INTERVAL, Math.min(MAX_DECISION_INTERVAL, h));
+        return Math.max(minDecisionInterval, Math.min(MAX_DECISION_INTERVAL, h));
     }
 
     /** Every default, for a signal whose blob is absent or unreadable. */

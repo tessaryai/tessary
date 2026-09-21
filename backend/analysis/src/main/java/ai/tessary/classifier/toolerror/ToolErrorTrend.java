@@ -100,6 +100,21 @@ public final class ToolErrorTrend {
             ToolErrorConfig config,
             Map<String, AcceptedReference> accepted,
             Map<String, CarriedState> carried) {
+        return sweep(tallies, config, accepted, carried, STATE_SCHEMA_VERSION);
+    }
+
+    /**
+     * {@link #sweep(List, ToolErrorConfig, Map, Map)} under a caller's own schema version, for a classifier whose
+     * accumulator also depends on something this engine does not know about (frustration's scorer version and
+     * threshold floor). The version is baked into every carried row's epoch, so the caller can tell a row built
+     * under other tuning by comparing {@link CarriedState#epochOf} against it.
+     */
+    public static Sweep sweep(
+            List<HourlyToolTally> tallies,
+            ToolErrorConfig config,
+            Map<String, AcceptedReference> accepted,
+            Map<String, CarriedState> carried,
+            String schemaVersion) {
         Map<String, List<HourlyToolTally>> byTool = new LinkedHashMap<>();
         for (HourlyToolTally t : tallies) {
             byTool.computeIfAbsent(t.toolKey(), k -> new ArrayList<>()).add(t);
@@ -107,7 +122,8 @@ public final class ToolErrorTrend {
         List<Spell> spells = new ArrayList<>();
         List<CarriedState> advanced = new ArrayList<>();
         for (Map.Entry<String, List<HourlyToolTally>> e : byTool.entrySet()) {
-            Replayed r = replay(e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()));
+            Replayed r = replay(
+                    e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()), schemaVersion);
             if (r == null) continue; // still learning a reference; nothing to judge and nothing to carry
             if (r.spell() != null) spells.add(r.spell());
             advanced.add(r.carried());
@@ -125,6 +141,16 @@ public final class ToolErrorTrend {
             ToolErrorConfig config,
             @Nullable AcceptedReference accepted,
             @Nullable CarriedState carried) {
+        return replay(toolKey, buckets, config, accepted, carried, STATE_SCHEMA_VERSION);
+    }
+
+    private static @Nullable Replayed replay(
+            String toolKey,
+            List<HourlyToolTally> buckets,
+            ToolErrorConfig config,
+            @Nullable AcceptedReference accepted,
+            @Nullable CarriedState carried,
+            String schemaVersion) {
         // The reference is built from the leading buckets until it is thick enough to judge against, then
         // frozen. Frozen, not sliding: a reference that moved with the traffic would drift along with a
         // slow degradation and never notice it — the failure CusumDetector's comment names as the reason
@@ -173,7 +199,7 @@ public final class ToolErrorTrend {
 
         // Resume or rebuild. Resuming is the fast path and the fragile one, so it is taken only when the
         // state was built under this exact tuning against this exact reference — see resumableUnder.
-        String epoch = CarriedState.epochOf(config, STATE_SCHEMA_VERSION);
+        String epoch = CarriedState.epochOf(config, schemaVersion);
         State state = State.EMPTY;
         String watermark = null;
         boolean resumed = false;

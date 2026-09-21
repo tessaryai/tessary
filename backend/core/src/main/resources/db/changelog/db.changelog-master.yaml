@@ -79,3 +79,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0017-frustration-assessment.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0018-frustration-state.sql
+      relativeToChangelogFile: false

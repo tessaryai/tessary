@@ -692,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-tuning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getFrustrationTuning"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics": {
         parameters: {
             query?: never;
@@ -2100,6 +2116,10 @@ export interface components {
             data?: components["schemas"]["FindingEvidenceSpanPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFrustrationTuningView: {
+            data?: components["schemas"]["FrustrationTuningView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseGitIntegrationView: {
             data?: components["schemas"]["GitIntegrationView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -3043,6 +3063,43 @@ export interface components {
                 [key: string]: number;
             };
             rows: components["schemas"]["EvidenceSpanView"][];
+        };
+        FrustrationCallSiteView: {
+            /** Format: int64 */
+            baseline_conversations: number | null;
+            /** Format: int64 */
+            baseline_frustrated: number | null;
+            /** Format: double */
+            baseline_rate: number | null;
+            call_site_id: string;
+            /** Format: double */
+            decision_interval: number | null;
+            /** Format: int64 */
+            learned_conversations: number;
+            onset_at: string | null;
+            reset_at: string | null;
+            reset_note: string | null;
+            state: string;
+            /** Format: double */
+            statistic: number;
+        };
+        FrustrationTuningView: {
+            /** Format: int64 */
+            arl_target: number;
+            call_sites: components["schemas"]["FrustrationCallSiteView"][];
+            /** Format: int32 */
+            min_baseline_conversations: number;
+            /** Format: double */
+            min_decision_interval: number;
+            scorer_version: string;
+            /** Format: double */
+            shift_floor: number;
+            /** Format: double */
+            shift_multiple: number;
+            /** Format: double */
+            threshold: number;
+            /** Format: int64 */
+            unassigned_conversations: number;
         };
         GitIntegrationView: {
             defaultBranch: string;
@@ -5840,6 +5897,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListClassifierEventView"];
+                };
+            };
+        };
+    };
+    ClassifierController_getFrustrationTuning: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationTuningView"];
                 };
             };
         };

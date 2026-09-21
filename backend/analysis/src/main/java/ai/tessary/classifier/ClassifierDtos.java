@@ -212,6 +212,56 @@ public final class ClassifierDtos {
     }
 
     /**
+     * The Frustration classifier's operating point and, per call site, what its rate test has learned and where
+     * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
+     * is derived by the replay.
+     *
+     * @param unassignedConversations conversations in the replay window whose first scored turn had no call
+     *     site; they are never judged, and are counted so the gap is visible
+     */
+    public record FrustrationTuningView(
+            double threshold,
+            @JsonProperty("arl_target") long arlTarget,
+            @JsonProperty("min_decision_interval") double minDecisionInterval,
+            @JsonProperty("shift_multiple") double shiftMultiple,
+            @JsonProperty("shift_floor") double shiftFloor,
+            @JsonProperty("min_baseline_conversations") int minBaselineConversations,
+            @JsonProperty("scorer_version") String scorerVersion,
+            @JsonProperty("unassigned_conversations") long unassignedConversations,
+            @JsonProperty("call_sites") List<FrustrationCallSiteView> callSites) {}
+
+    /**
+     * One call site under the Frustration rate test.
+     *
+     * @param state {@code learning} until the reference holds {@code min_baseline_conversations}, then
+     *     {@code in_control} or {@code alarming}
+     * @param learnedConversations conversations the reference holds so far: {@code n} of {@code learning n/200}
+     * @param baselineRate the learned rate, Jeffreys-smoothed; null while learning
+     * @param decisionInterval {@code h(p0)}; null while learning
+     * @param statistic the up accumulator {@code S} at the end of the last replay
+     */
+    public record FrustrationCallSiteView(
+            @JsonProperty("call_site_id") String callSiteId,
+            String state,
+            @JsonProperty("learned_conversations") long learnedConversations,
+
+            @JsonProperty("baseline_conversations") @Nullable
+            Long baselineConversations,
+
+            @JsonProperty("baseline_frustrated") @Nullable Long baselineFrustrated,
+            @JsonProperty("baseline_rate") @Nullable Double baselineRate,
+            @JsonProperty("decision_interval") @Nullable Double decisionInterval,
+            double statistic,
+            @JsonProperty("onset_at") @Nullable String onsetAt,
+            @JsonProperty("reset_at") @Nullable String resetAt,
+            @JsonProperty("reset_note") @Nullable String resetNote) {
+
+        public static final String LEARNING = "learning";
+        public static final String IN_CONTROL = "in_control";
+        public static final String ALARMING = "alarming";
+    }
+
+    /**
      * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.
      *
      * <p>{@code w1_floor} is the dial: the smallest move worth reporting, at a full window. A thin window

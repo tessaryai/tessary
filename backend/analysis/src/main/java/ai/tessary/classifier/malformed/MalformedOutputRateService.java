@@ -10,7 +10,6 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorConfig;
-import ai.tessary.classifier.toolerror.ToolErrorDetector;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
@@ -53,6 +52,12 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>Only the rise is a finding.</b> The engine watches both directions. A call site failing its schema less
  * often than it used to is a fix, and nothing a person needs to hear about.
+ *
+ * <p><b>Rebuilt every pass, where tool_error resumes</b> ({@link CarriedState#rebuilding}). A resume folds each
+ * hour once and never reads it again, which is sound only if an hour's tally is final when first read. Here it
+ * is not: a backfill lands one hour's spans across several uploads, and a schema arriving rewinds the sweep to
+ * check hours already tallied as clean. What survives a rebuild is the frozen reference and the human
+ * decisions; the reset fence ({@link CarriedState#resetAt}) is what keeps a resolve from being re-folded.
  *
  * <p>Recomputed when the sweep catches up, never mid-backlog; see {@link ClassifierCatchUp}.
  */
@@ -119,7 +124,7 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
 
         ToolErrorStateRepository states = rates.states();
         Map<String, CarriedState> carried = new HashMap<>();
-        for (CarriedState state : states.list(projectId)) carried.put(state.toolKey(), rebuildingFrom(state));
+        for (CarriedState state : states.list(projectId)) carried.put(state.toolKey(), state.rebuilding());
         ToolErrorTrend.Sweep sweep = ToolErrorTrend.sweep(tallies, config, Map.of(), carried);
         String now = at.toString();
         for (CarriedState advanced : sweep.advanced()) states.save(projectId, advanced, now);
@@ -143,35 +148,6 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 .durationMs(started)
                 .log();
         return filed;
-    }
-
-    /**
-     * The carried state with its accumulator and watermark cleared, so the replay rebuilds the whole window
-     * against the frozen reference instead of resuming after the last hour it folded.
-     *
-     * <p><b>Why this classifier rebuilds where tool_error resumes.</b> A resume folds each hour once and then
-     * never reads it again, which is sound only if an hour's tally is final when it is first read. Here it is
-     * not: a backfill lands one hour's spans across several uploads, and a schema arriving rewinds the sweep to
-     * check hours that were already tallied as clean. A resumed accumulator would keep the first, partial count
-     * of each such hour for good. Rebuilding every pass reads each hour as it stands, which is tool_error's
-     * original no-watermark design (PROGRAM.md §5).
-     *
-     * <p>What is kept is the reference, learned once and frozen, so a slow degradation cannot drag it along; and
-     * the pending-pin and reset columns, which record human decisions. The reset is what keeps a resolve durable
-     * here: {@code CaseService.resolve} clears the accumulator, and without a watermark to resume from, the
-     * rebuild would re-fold the hours before it and bring the closed spell straight back. The replay skips every
-     * bucket before {@link CarriedState#resetAt} instead.
-     */
-    private static CarriedState rebuildingFrom(CarriedState state) {
-        return new CarriedState(
-                state.toolKey(),
-                ToolErrorDetector.State.EMPTY,
-                state.baseline(),
-                null,
-                state.stateEpoch(),
-                state.pendingPinBy(),
-                state.pendingPinAt(),
-                state.resetAt());
     }
 
     private void persist(String projectId, ClassifierRow signal, Spell spell, Instant at) {

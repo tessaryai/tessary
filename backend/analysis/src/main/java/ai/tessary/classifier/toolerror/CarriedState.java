@@ -51,6 +51,19 @@ public record CarriedState(
         return resetAt != null && Instant.parse(bucket).isBefore(Instant.parse(resetAt));
     }
 
+    /**
+     * This state with its accumulator and watermark cleared, so a replay rebuilds the whole window against the
+     * frozen reference instead of resuming after the last hour it folded. The reference, the pending pin and the
+     * reset fence are kept: the first is learned once and frozen, the other two record human decisions.
+     *
+     * <p>For a classifier whose hourly tallies are not final when first read (a backfill lands one hour across
+     * several uploads; a late flag turns an old conversation into a failure), which a resume would keep at its
+     * first, partial count for good.
+     */
+    public CarriedState rebuilding() {
+        return new CarriedState(toolKey, State.EMPTY, baseline, null, stateEpoch, pendingPinBy, pendingPinAt, resetAt);
+    }
+
     /** Whether an absorb is waiting for the run to grow thick enough to pin from. */
     public boolean hasPendingPin() {
         return pendingPinAt != null;

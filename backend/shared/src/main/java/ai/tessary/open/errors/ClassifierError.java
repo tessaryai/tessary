@@ -18,6 +18,9 @@ public enum ClassifierError implements ErrorCode {
     NOT_METRIC_DRIFT(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no window/threshold tuning — only cost_drift and duration_drift do"),
+    NOT_FRUSTRATION(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
     DETECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "No detection '%s' on this classifier"),
     /** The two ways a detection has nothing a grader run could evaluate — see ClassifierService#analyze. */
     DETECTION_NOT_GRADABLE(
