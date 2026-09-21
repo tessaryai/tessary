@@ -155,6 +155,14 @@ public final class ToolErrorTrend {
         } else {
             baseline = new ToolErrorRate();
             i = 0;
+            // Learned only from traffic after a human reset (see CarriedState#resetAt). A reset that also
+            // dropped the reference means "the old normal was wrong"; re-learning it from the hours before
+            // the reset would put it straight back.
+            while (i < buckets.size()
+                    && carried != null
+                    && carried.fencedOff(buckets.get(i).bucket())) {
+                i++;
+            }
             while (i < buckets.size() && baseline.calls() < config.minBaselineCalls()) {
                 HourlyToolTally b = buckets.get(i);
                 fold(baseline, b.calls(), b.failures());
@@ -168,10 +176,16 @@ public final class ToolErrorTrend {
         String epoch = CarriedState.epochOf(config, STATE_SCHEMA_VERSION);
         State state = State.EMPTY;
         String watermark = null;
+        boolean resumed = false;
         if (carried != null && carried.resumableUnder(epoch, baseline)) {
+            resumed = true;
             state = carried.state();
             watermark = carried.watermarkBucket();
         }
+        // A rebuild starts from zero and would otherwise re-read the hours a human reset just ruled on,
+        // re-accumulating the very spell they closed. A resume is fenced by its watermark instead, and
+        // is left exactly as it was.
+        @Nullable CarriedState fence = resumed ? null : carried;
 
         ToolErrorRate observed = new ToolErrorRate();
         for (int j = i; j < buckets.size(); j++) {
@@ -179,13 +193,15 @@ public final class ToolErrorTrend {
             // Strictly after the watermark. A bucket at or before it has already been folded in, and
             // folding it again is how a retried sweep invents a case out of evidence it already counted.
             if (watermark != null && b.bucket().compareTo(watermark) <= 0) continue;
+            if (fence != null && fence.fencedOff(b.bucket())) continue;
             state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
             fold(observed, b.calls(), b.failures());
             watermark = b.bucket();
         }
 
-        // The pending absorb rides through untouched: it is a human decision, and a sweep passing over it
-        // must neither honour nor forget it. ToolErrorService installs it once the run is thick enough.
+        // The pending absorb and the reset fence ride through untouched: both are human decisions, and a
+        // sweep passing over them must neither honour nor forget them. ToolErrorService installs a pending
+        // absorb once the run is thick enough.
         CarriedState next = new CarriedState(
                 toolKey,
                 state,
@@ -193,7 +209,8 @@ public final class ToolErrorTrend {
                 watermark,
                 epoch,
                 carried == null ? null : carried.pendingPinBy(),
-                carried == null ? null : carried.pendingPinAt());
+                carried == null ? null : carried.pendingPinAt(),
+                carried == null ? null : carried.resetAt());
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
                 next,

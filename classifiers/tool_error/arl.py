@@ -86,40 +86,90 @@ def fit(points):
     return my - slope * mx, slope
 
 
-TARGET = 250_000
-RATES = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10, 0.20, 0.30)
+def p1_up(p0, shift_floor):
+    """The alternative the up arm scores against, as ToolErrorConfig builds it."""
+    return min(max(2 * p0, p0 + shift_floor), 0.99)
 
-# The threshold that hits the budget at each base rate, and what a FLAT 6.0 delivers instead. The
-# second column is why ToolErrorConfig stopped shipping a constant: it is not flat, it is a slope.
-hdr = (f"{'p0':>7} {'p1':>7} {'exact h':>8} {'ARL0':>10} {'lag @p1':>9} "
-       f"{'ARL0 @ flat 6':>14}")
-print(hdr)
-print("-" * len(hdr))
-exact = []
-for p0 in RATES:
-    p1 = min(max(2 * p0, p0 + 0.005), 0.99)
-    r, down, unit, hh = solve_hh(p0, p1, TARGET)
-    h = hh * unit
-    exact.append((p0, h))
-    print(f"{p0:>7.3f} {p1:>7.3f} {h:>8.2f} {arl(p0, r, down, hh):>10,.0f} "
-          f"{arl(p1, r, down, hh):>9,.0f} {arl(p0, r, down, round(6.0 / unit)):>14,.0f}")
 
-# Fitted over the multiplicative regime only. Below ~0.5% the shift FLOOR rather than the multiple
-# sets p1, so the relationship changes shape and the exact thresholds flatten out at 5.8-6.1 —
-# which is what ToolErrorConfig.MIN_DECISION_INTERVAL clamps to rather than extrapolating a line
-# into a regime that does not have one.
-intercept, slope = fit([(p, h) for p, h in exact if p >= 0.005])
-print(f"\nToolErrorConfig fit: h = {intercept:.2f} + {slope:.3f} * ln(p0), clamped to [6, 12]")
-print(f"{'p0':>7} {'exact':>7} {'fitted':>7} {'error':>7}")
-for p0, h in exact:
-    fitted = max(6.0, min(12.0, intercept + slope * math.log(p0)))
-    print(f"{p0:>7.3f} {h:>7.2f} {fitted:>7.2f} {fitted - h:>+7.2f}")
+# ToolErrorConfig's shipped line, before the arl_target term and the clamp.
+SHIPPED_INTERCEPT, SHIPPED_SLOPE = 11.42, 1.088
 
-# The exchange rate behind the arl_target dial: how far the threshold has to move to buy a factor
-# on the budget. Flat enough at ~1.0 that the dial needs no correction term.
-print("\nd(ln ARL0)/dh:")
-for p0 in (0.005, 0.01, 0.05, 0.20):
-    p1 = min(max(2 * p0, p0 + 0.005), 0.99)
-    r, down, unit = lattice(p0, p1)
-    lo, hi = (arl(p0, r, down, round(h / unit)) for h in (7.0, 9.0))
-    print(f"  p0={p0:>6.1%}  {math.log(hi / lo) / 2:.3f} per unit h")
+
+def shipped_h(p0, target, clamp_floor):
+    """What ToolErrorConfig.decisionIntervalFor returns for this target and clamp floor."""
+    h = SHIPPED_INTERCEPT + SHIPPED_SLOPE * math.log(p0) + math.log(target / 250_000)
+    return max(clamp_floor, min(12.0, h))
+
+
+def tool_error_report(target=250_000, shift_floor=0.005, clamp_floor=6.0,
+                      rates=(0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10, 0.20, 0.30)):
+    """The calibration ToolErrorConfig ships: exact thresholds, the fit through them, the dial."""
+    # The threshold that hits the budget at each base rate, and what a FLAT 6.0 delivers instead. The
+    # second column is why ToolErrorConfig stopped shipping a constant: it is not flat, it is a slope.
+    hdr = (f"{'p0':>7} {'p1':>7} {'exact h':>8} {'ARL0':>10} {'lag @p1':>9} "
+           f"{'ARL0 @ flat 6':>14}")
+    print(hdr)
+    print("-" * len(hdr))
+    exact = []
+    for p0 in rates:
+        p1 = p1_up(p0, shift_floor)
+        r, down, unit, hh = solve_hh(p0, p1, target)
+        h = hh * unit
+        exact.append((p0, h))
+        print(f"{p0:>7.3f} {p1:>7.3f} {h:>8.2f} {arl(p0, r, down, hh):>10,.0f} "
+              f"{arl(p1, r, down, hh):>9,.0f} {arl(p0, r, down, round(6.0 / unit)):>14,.0f}")
+
+    # Fitted over the multiplicative regime only. Below ~0.5% the shift FLOOR rather than the multiple
+    # sets p1, so the relationship changes shape and the exact thresholds flatten out at 5.8-6.1 —
+    # which is what ToolErrorConfig.MIN_DECISION_INTERVAL clamps to rather than extrapolating a line
+    # into a regime that does not have one.
+    intercept, slope = fit([(p, h) for p, h in exact if p >= 0.005])
+    print(f"\nToolErrorConfig fit: h = {intercept:.2f} + {slope:.3f} * ln(p0), "
+          f"clamped to [{clamp_floor:g}, 12]")
+    print(f"{'p0':>7} {'exact':>7} {'fitted':>7} {'error':>7}")
+    for p0, h in exact:
+        fitted = max(clamp_floor, min(12.0, intercept + slope * math.log(p0)))
+        print(f"{p0:>7.3f} {h:>7.2f} {fitted:>7.2f} {fitted - h:>+7.2f}")
+
+    # The exchange rate behind the arl_target dial: how far the threshold has to move to buy a factor
+    # on the budget. Flat enough at ~1.0 that the dial needs no correction term.
+    print("\nd(ln ARL0)/dh:")
+    for p0 in (0.005, 0.01, 0.05, 0.20):
+        p1 = p1_up(p0, shift_floor)
+        r, down, unit = lattice(p0, p1)
+        lo, hi = (arl(p0, r, down, round(h / unit)) for h in (7.0, 9.0))
+        print(f"  p0={p0:>6.1%}  {math.log(hi / lo) / 2:.3f} per unit h")
+
+
+def shipped_line_report(title, target, shift_floor, clamp_floor, rates):
+    """Another classifier on the same engine: the shipped line under its own target and floors.
+
+    Nothing is refitted. The classifier reuses ToolErrorConfig's line, moved by ln(target / 250,000)
+    and clamped to its own floor, and this checks that line against the exact solve, in its own trials.
+    """
+    print(f"\n{title}: arl_target {target:,}, shift floor {shift_floor:g}, "
+          f"h clamped to [{clamp_floor:g}, 12]")
+    hdr = (f"{'p0':>7} {'p1':>7} {'exact h':>8} {'fitted h':>9} {'ARL0 exact':>11} "
+           f"{'ARL0 fitted':>12} {'lag exact':>10} {'lag fitted':>11}")
+    print(hdr)
+    print("-" * len(hdr))
+    for p0 in rates:
+        p1 = p1_up(p0, shift_floor)
+        r, down, unit, hh = solve_hh(p0, p1, target)
+        fitted = shipped_h(p0, target, clamp_floor)
+        hf = round(fitted / unit)
+        print(f"{p0:>7.3f} {p1:>7.3f} {hh * unit:>8.2f} {fitted:>9.2f} {arl(p0, r, down, hh):>11,.0f} "
+              f"{arl(p0, r, down, hf):>12,.0f} {arl(p1, r, down, hh):>10,.0f} {arl(p1, r, down, hf):>11,.0f}")
+
+
+if __name__ == "__main__":
+    tool_error_report()
+    # Frustration: a trial is a conversation, not a tool call. Starting values, owed a null replay
+    # on real traffic (devdocs/concepts/deviation-math.md §2).
+    shipped_line_report(
+        "Frustration (trial = one conversation)",
+        target=10_000,
+        shift_floor=0.02,
+        clamp_floor=4.0,
+        rates=(0.005, 0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20),
+    )

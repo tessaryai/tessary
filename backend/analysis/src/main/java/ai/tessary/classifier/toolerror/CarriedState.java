@@ -2,6 +2,7 @@
 package ai.tessary.classifier.toolerror;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
+import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -25,6 +26,11 @@ import org.jspecify.annotations.Nullable;
  *     reference installs on the first sweep where {@link State#callsSinceOnsetUp()} reaches the minimum.
  *     <b>Read-only to the sweep</b> — it records a human decision, and
  *     {@link ToolErrorStateRepository#save} deliberately does not write this column
+ * @param resetAt when a human last cleared this row's accumulator, or null if nobody has. <b>A fence,
+ *     read-only to the sweep.</b> A replay that rebuilds rather than resumes skips every bucket before it,
+ *     while learning a reference and while folding, so the spell a human just closed cannot be
+ *     re-accumulated from the hours they ruled on. A resumed replay needs no fence: its watermark already
+ *     sits past those hours
  */
 public record CarriedState(
         String toolKey,
@@ -33,7 +39,17 @@ public record CarriedState(
         @Nullable String watermarkBucket,
         String stateEpoch,
         @Nullable String pendingPinBy,
-        @Nullable String pendingPinAt) {
+        @Nullable String pendingPinAt,
+        @Nullable String resetAt) {
+
+    /**
+     * Whether {@code bucket} falls before the reset fence. Compared as instants, not strings: a bucket is a
+     * whole hour and a reset carries fractional seconds, and {@code Instant.toString} drops a zero fraction,
+     * so the two do not order lexically.
+     */
+    public boolean fencedOff(String bucket) {
+        return resetAt != null && Instant.parse(bucket).isBefore(Instant.parse(resetAt));
+    }
 
     /** Whether an absorb is waiting for the run to grow thick enough to pin from. */
     public boolean hasPendingPin() {

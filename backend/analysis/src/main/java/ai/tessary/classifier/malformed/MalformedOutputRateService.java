@@ -157,9 +157,10 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
      * original no-watermark design (PROGRAM.md §5).
      *
      * <p>What is kept is the reference, learned once and frozen, so a slow degradation cannot drag it along; and
-     * the pending-pin and reset columns, which record human decisions. tool_error needed to resume once a human
-     * closing a case had to reset the accumulator; when a ruling on a Malformed Output finding can do the same,
-     * this must learn to resume too.
+     * the pending-pin and reset columns, which record human decisions. The reset is what keeps a resolve durable
+     * here: {@code CaseService.resolve} clears the accumulator, and without a watermark to resume from, the
+     * rebuild would re-fold the hours before it and bring the closed spell straight back. The replay skips every
+     * bucket before {@link CarriedState#resetAt} instead.
      */
     private static CarriedState rebuildingFrom(CarriedState state) {
         return new CarriedState(
@@ -169,7 +170,8 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 null,
                 state.stateEpoch(),
                 state.pendingPinBy(),
-                state.pendingPinAt());
+                state.pendingPinAt(),
+                state.resetAt());
     }
 
     private void persist(String projectId, ClassifierRow signal, Spell spell, Instant at) {

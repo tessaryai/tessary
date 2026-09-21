@@ -2,6 +2,7 @@
 package ai.tessary.classifier.malformed;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
@@ -14,6 +15,7 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
+import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -49,6 +51,9 @@ class MalformedOutputRateIntegrationTest {
 
     @Autowired
     MalformedOutputRateService rates;
+
+    @Autowired
+    MalformedOutputRateRepository rateRows;
 
     @Autowired
     ClassifierService classifiers;
@@ -125,6 +130,60 @@ class MalformedOutputRateIntegrationTest {
                         .query(Long.class)
                         .single(),
                 "and never writes into tool_error's accumulators");
+    }
+
+    /**
+     * The reset {@code CaseService.resolve} performs must survive the next pass. This classifier rebuilds every
+     * pass rather than resuming after a watermark, so without the reset fence the rebuild re-folded the hours
+     * before the reset and the spell a human had just closed came straight back.
+     */
+    @Test
+    void aResetSurvivesTheNextRebuild() {
+        String pid = project("malformed-reset");
+        ClassifierRow signal = malformedOutput(pid);
+        callSite(pid, "cs-a", SCHEMA);
+        Instant start = hoursAgo(10);
+        clean(pid, "cs-a", start, 60);
+        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12);
+        assertEquals(1, rates.refresh(pid, signal, later(), Instant.now()));
+
+        rateRows.states()
+                .reset(pid, "cs-a", null, "resolved in a test", Instant.now().toString());
+
+        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()), "the closed spell stays closed");
+        CarriedState after = carried(pid, "cs-a");
+        assertEquals(0.0, after.state().sUp(), "the rebuild did not re-accumulate the hours before the reset");
+        assertNotNull(after.baseline(), "a plain reset keeps the learned reference");
+        assertNotNull(after.resetAt(), "and the fence is read back onto the carried state");
+    }
+
+    /** The variant that also drops the reference: nothing before the reset may teach the new one. */
+    @Test
+    void aResetAndRelearnDropsTheReferenceAndLearnsNothingFromBeforeIt() {
+        String pid = project("malformed-relearn");
+        ClassifierRow signal = malformedOutput(pid);
+        callSite(pid, "cs-a", SCHEMA);
+        Instant start = hoursAgo(10);
+        clean(pid, "cs-a", start, 60);
+        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12);
+        assertEquals(1, rates.refresh(pid, signal, later(), Instant.now()));
+
+        rateRows.states()
+                .resetAndRelearn(
+                        pid,
+                        "cs-a",
+                        "someone",
+                        "relearn in a test",
+                        Instant.now().toString());
+        CarriedState cleared = carried(pid, "cs-a");
+        assertNull(cleared.baseline(), "the reference is gone");
+        assertNull(cleared.watermarkBucket());
+        assertEquals(0.0, cleared.state().sUp());
+
+        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()));
+        assertNull(
+                carried(pid, "cs-a").baseline(),
+                "every hour before the reset is fenced off, so there is nothing to learn from yet");
     }
 
     @Test
@@ -246,6 +305,12 @@ class MalformedOutputRateIntegrationTest {
                     "high",
                     "{\"reason\":\"not_json\",\"violations\":[]}");
         }
+    }
+
+    private CarriedState carried(String pid, String callSite) {
+        CarriedState state = rateRows.states().byTool(pid).get(callSite);
+        assertNotNull(state, "the call site has a state row");
+        return state;
     }
 
     private FindingRow finding(String pid, ClassifierRow signal, String callSite) {
