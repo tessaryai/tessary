@@ -23,6 +23,18 @@ class Scorer(Protocol):
     def __call__(self, texts: list[str]) -> list[float]: ...
 
 
+class PairScorer(Protocol):
+    """A PAIR head scores a (premise, claim) RELATIONSHIP, not one string in isolation.
+
+    Separate from ``Scorer`` rather than an overload of it because the two request shapes are
+    mutually exclusive per head on the wire — ``/classify`` rejects a pair head sent ``texts`` and
+    a single-text head sent ``pairs`` — so a caller that can confuse them is a caller that gets a
+    400 rather than a wrong number.
+    """
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]: ...
+
+
 class ClassifyServiceScorer:
     """POST /classify on the standalone classify-service. ``head`` is a name in its ``models.json``
     (e.g. 'refusal'). Config mirrors the backend's ``tessary.observer.encoder.*``:
@@ -42,7 +54,14 @@ class ClassifyServiceScorer:
         self.batch = batch
 
     def _post(self, chunk: list[str], attempts: int = 6) -> list[float]:
-        body = json.dumps({"head": self.head, "texts": chunk}).encode()
+        return self._post_body({"head": self.head, "texts": chunk}, attempts)
+
+    def _post_pairs(self, chunk: list[tuple[str, str]], attempts: int = 6) -> list[float]:
+        payload = {"head": self.head, "pairs": [{"premise": p, "claim": c} for p, c in chunk]}
+        return self._post_body(payload, attempts)
+
+    def _post_body(self, payload: dict, attempts: int = 6) -> list[float]:
+        body = json.dumps(payload).encode()
         for attempt in range(attempts):
             req = urllib.request.Request(
                 f"{self.base_url}/classify",
@@ -67,6 +86,18 @@ class ClassifyServiceScorer:
             got = self._post(chunk)
             if len(got) != len(chunk):
                 raise RuntimeError(f"/classify returned {len(got)} scores for {len(chunk)} texts")
+            scores.extend(float(s) for s in got)
+        return scores
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """One score per (premise, claim), index-aligned. The service does its own premise
+        windowing and per-head reduction, so this is the scored population production sees."""
+        scores: list[float] = []
+        for start in range(0, len(pairs), self.batch):
+            chunk = pairs[start : start + self.batch]
+            got = self._post_pairs(chunk)
+            if len(got) != len(chunk):
+                raise RuntimeError(f"/classify returned {len(got)} scores for {len(chunk)} pairs")
             scores.extend(float(s) for s in got)
         return scores
 

@@ -217,17 +217,26 @@ class ClaudeCliJudge:
 
     def complete(self, system: str, user: str) -> str:
         import subprocess
+        import tempfile
         import time
 
         last = None
         for attempt in range(3):  # transient CLI failures (rate blips, session refresh) self-heal
-            proc = subprocess.run(  # noqa: S603 — fixed argv, prompt via stdin
-                [self.binary, "-p", "--model", self.model, "--output-format", "text", "--system-prompt", system],
-                input=user,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-            )
+            # cwd is a throwaway directory, not the repo. The CLI is an AGENT: asked for JSON it may
+            # decide to write the content to a file as well as return it, and in print mode nothing
+            # stops it. A corpus-generation run did exactly that, leaving two untracked .json files
+            # in classifiers/. The returned text is the only output this class consumes, so anything
+            # written goes somewhere harmless and is discarded.
+            with tempfile.TemporaryDirectory(prefix="judge-cli-") as sandbox:
+                proc = subprocess.run(  # noqa: S603 — fixed argv, prompt via stdin
+                    [self.binary, "-p", "--model", self.model, "--output-format", "text",
+                     "--system-prompt", system],
+                    input=user,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_s,
+                    cwd=sandbox,
+                )
             if proc.returncode == 0:
                 return proc.stdout.strip()
             last = f"exit {proc.returncode}: stderr={proc.stderr.strip()[:300]!r} stdout={proc.stdout.strip()[:200]!r}"
