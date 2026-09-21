@@ -202,7 +202,8 @@ class McpFindingToolsTest {
                 base.baseline(),
                 base.malformedOutput(),
                 base.secretLeak(),
-                base.armedWindow());
+                base.armedWindow(),
+                base.frustration());
     }
 
     // ---- registration --------------------------------------------------------------------------

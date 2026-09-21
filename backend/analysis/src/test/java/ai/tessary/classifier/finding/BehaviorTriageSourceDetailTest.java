@@ -10,6 +10,7 @@ import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import java.util.List;
@@ -84,7 +85,8 @@ class BehaviorTriageSourceDetailTest {
                 TestObjectProvider.of(List.of()),
                 null,
                 mock(MalformedOutputDetailService.class),
-                mock(SecretLeakDetailService.class));
+                mock(SecretLeakDetailService.class),
+                mock(FrustrationDetailService.class));
     }
 
     private static FindingRow escalatedRow(String id) {

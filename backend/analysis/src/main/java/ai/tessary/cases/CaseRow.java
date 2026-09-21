@@ -112,6 +112,13 @@ public record CaseRow(
          * {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
          */
         public static final String MALFORMED_OUTPUT = "malformed_output";
+
+        /**
+         * A call site whose share of conversations frustrated with the agent rose above the rate it learned.
+         * No triage gate: each spell's finding is ruled positive when it is filed, and opens or joins this case
+         * in the same transaction. See {@link FrustrationCaseSource}.
+         */
+        public static final String FRUSTRATION = "frustration";
     }
 
     /** {@code subject_kind} values: what the case is about. */

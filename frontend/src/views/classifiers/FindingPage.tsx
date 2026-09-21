@@ -34,6 +34,7 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
+import { FrustratedConversations, FrustrationHeader, FrustrationRate } from "./frustrationStory";
 import { EvidenceTable } from "./EvidenceTable";
 // This build's baseline renderer returns null by default.
 import { paid } from "@paid";
@@ -94,10 +95,11 @@ export function FindingPage() {
   const rate = detail.toolError;
   const secretLeak = detail.secretLeak;
   const malformedOutput = detail.malformedOutput;
-  /* All four tell a before-and-after story with a figure, pins and a ruling, and all four put their
-     verbs behind triage. The rest of the detectors keep the older layout until they get a story of
-     their own. */
-  const story = shift ?? rate ?? secretLeak ?? malformedOutput;
+  const frustration = detail.frustration;
+  /* All five tell a before-and-after story with a figure, pins and a ruling. Four put their verbs
+     behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
+     layout until they get a story of their own. */
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration;
 
   return (
     <div style={CONTAINER}>
@@ -113,6 +115,8 @@ export function FindingPage() {
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
+      ) : frustration ? (
+        <FrustrationHeader detail={frustration} finding={finding} basePath={basePath} />
       ) : malformedOutput ? (
         <MalformedHeader
           rate={malformedOutput.rate}
@@ -263,6 +267,32 @@ export function FindingPage() {
               </span>
             </div>
             <HowOutputsBroke findingId={findingId} detail={malformedOutput} linkToTrace={traceLink} />
+          </section>
+        </>
+      )}
+
+      {frustration && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
+              <span className="text-subtle text-small">share of conversations frustrated with the agent</span>
+            </div>
+            <FrustrationRate detail={frustration} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-1.5">
+              <h2 className="font-mono text-label uppercase text-muted">Frustrated conversations</h2>
+              <span className="text-subtle text-small">each beside the user message that was flagged</span>
+            </div>
+            <FrustratedConversations
+              detail={frustration}
+              callSiteId={finding.callSiteId ?? null}
+              basePath={basePath}
+            />
           </section>
         </>
       )}

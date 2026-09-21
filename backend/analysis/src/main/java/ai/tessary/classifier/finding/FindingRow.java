@@ -222,6 +222,13 @@ public record FindingRow(
         public static final String MALFORMED_RATE = "malformed_rate";
 
         /**
+         * A call site's share of conversations frustrated with the agent rose above the rate it learned as its
+         * normal. Recomputed through tool_error's engine with a conversation as the trial, and ruled positive
+         * when filed: it never goes through triage, so no correction verb ever reads it as a tool's rate.
+         */
+        public static final String FRUSTRATION_RATE = "frustration_rate";
+
+        /**
          * A tool's failure rate moved against its own in-control level: the {@code tool_error}
          * classifier's only cause. Deliberately not filed under {@link #DISTRIBUTION_SHIFT}, since
          * a tool-error finding under that kind would open a case labelled metric_drift and name the

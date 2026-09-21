@@ -2489,6 +2489,7 @@ export interface components {
             armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
             baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
+            frustration: components["schemas"]["FrustrationDetail"] | null;
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             secretLeak: components["schemas"]["SecretLeakDetail"] | null;
@@ -3064,6 +3065,15 @@ export interface components {
             };
             rows: components["schemas"]["EvidenceSpanView"][];
         };
+        FrustratedConversationView: {
+            callSiteId: string | null;
+            cleared: boolean;
+            conversationId: string;
+            flaggedAt: string | null;
+            /** Format: double */
+            score: number | null;
+            traceId: string;
+        };
         FrustrationCallSiteView: {
             /** Format: int64 */
             baseline_conversations: number | null;
@@ -3082,6 +3092,19 @@ export interface components {
             state: string;
             /** Format: double */
             statistic: number;
+        };
+        FrustrationDetail: {
+            /** Format: int64 */
+            arlTarget: number;
+            /** Format: int64 */
+            baselineFrustrated: number;
+            conversations: components["schemas"]["FrustratedConversationView"][];
+            /** Format: double */
+            jevThreshold: number;
+            /** Format: double */
+            minDecisionInterval: number;
+            rate: components["schemas"]["RateDetail"];
+            scorerVersion: string | null;
         };
         FrustrationTuningView: {
             /** Format: int64 */

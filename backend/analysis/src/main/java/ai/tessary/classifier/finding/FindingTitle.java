@@ -49,6 +49,7 @@ public final class FindingTitle {
             case FindingRow.Cause.RATE_SHIFT -> toolError(finding);
             case FindingRow.Cause.ARMED_WINDOW -> armed(finding);
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
+            case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
             // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
             // much" to put in a sentence, and the cause key already reads as the action sequence.
             default -> finding.nativeCauseKey();
@@ -114,6 +115,15 @@ public final class FindingTitle {
     private static String malformedRate(FindingRow finding) {
         String callSite = finding.callSiteId();
         return (callSite == null ? finding.nativeCauseKey() : callSite) + " outputs failing their schema";
+    }
+
+    /**
+     * {@code "Users are frustrated with checkout-agent"}. No rate in the headline, for the reason {@link #toolError}
+     * gives.
+     */
+    private static String frustrationRate(FindingRow finding) {
+        String callSite = finding.callSiteId();
+        return "Users are frustrated with " + (callSite == null ? finding.nativeCauseKey() : callSite);
     }
 
     /**

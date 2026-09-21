@@ -66,6 +66,53 @@ public class FrustrationRateRepository {
              ORDER BY 1, 2
             """;
 
+    /**
+     * The frustrated conversations a finding cites: the tally's own grouping, so a conversation is listed on the
+     * call site and in the hour it was a trial in, joined to its newest uncleared flag for the turn that fired.
+     * {@code :windowFrom} is the replay window's start, so the first scored turn is found over the same rows the
+     * tally read; {@code :onset} then keeps the conversations since the spell began. Reads neither {@code request}
+     * nor {@code response}.
+     */
+    static final String FRUSTRATED_SINCE = """
+            WITH conv AS (
+              SELECT a.conversation_id,
+                     MIN(a.turn_started_at) AS first_scored_at,
+                     (ARRAY_AGG(COALESCE(a.call_site_id, '') ORDER BY a.turn_started_at, a.id))[1] AS call_site_id
+                FROM frustration_assessment a
+               WHERE a.project_id = :pid AND a.classifier_id = :cid
+                 AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :windowFrom
+               GROUP BY a.conversation_id
+              HAVING BOOL_OR(a.frustrated))
+            SELECT c.conversation_id, d.subject_trace_id
+              FROM conv c
+              JOIN LATERAL (
+                SELECT d.subject_trace_id
+                  FROM {detections} d
+                 WHERE d.project_id = :pid AND d.classifier_id = :cid
+                   AND d.subject_session_id = c.conversation_id AND d.cleared_at IS NULL
+                 ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
+                 LIMIT 1) d ON true
+             WHERE c.call_site_id = :callSite AND c.first_scored_at >= :onset
+             ORDER BY c.first_scored_at DESC, c.conversation_id DESC
+             LIMIT :limit
+            """;
+
+    /** One frustrated conversation a finding cites, and the flagged turn inside it. */
+    public record FrustratedConversation(String conversationId, String flaggedTraceId) {}
+
+    /**
+     * One flagged turn as its detection row recorded it: the conversation it belongs to, the score, the turn's
+     * own call site and when it happened. {@code cleared} once a {@code false_alarm} resolve cleared the
+     * conversation.
+     */
+    public record FlaggedTurn(
+            String traceId,
+            @Nullable String conversationId,
+            @Nullable Double score,
+            @Nullable String callSiteId,
+            @Nullable String startedAt,
+            boolean cleared) {}
+
     /** A human reset on one call site's state row, for the Tuning view. */
     public record Reset(String resetAt, @Nullable String note) {}
 
@@ -124,6 +171,73 @@ public class FrustrationRateRepository {
                         rs.getLong("conversations"),
                         rs.getLong("frustrated")))
                 .list();
+    }
+
+    /**
+     * The frustrated conversations of one call site's stream since {@code onset}, newest first, at most
+     * {@code limit}. Empty while no frustration detection table is registered.
+     */
+    public List<FrustratedConversation> frustratedSince(
+            String projectId,
+            String classifierId,
+            String scorerVersion,
+            String callSiteId,
+            Instant windowFrom,
+            Instant onset,
+            int limit) {
+        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
+        if (table == null || limit <= 0) return List.of();
+        return jdbc.sql(FRUSTRATED_SINCE.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("scorerVersion", scorerVersion)
+                .param("windowFrom", Timestamp.from(windowFrom))
+                .param("callSite", callSiteId)
+                .param("onset", Timestamp.from(onset))
+                .param("limit", limit)
+                .query((rs, n) ->
+                        new FrustratedConversation(rs.getString("conversation_id"), rs.getString("subject_trace_id")))
+                .list();
+    }
+
+    /**
+     * The detection rows behind {@code traceIds}, by trace: what a finding's page shows beside each witness. Rows
+     * of any clear state, so a conversation a resolve cleared still reads as what it was when the finding cited
+     * it.
+     */
+    public Map<String, FlaggedTurn> flaggedTurns(String projectId, String classifierId, List<String> traceIds) {
+        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
+        Map<String, FlaggedTurn> out = new HashMap<>();
+        if (table == null || traceIds.isEmpty()) return out;
+        jdbc.sql("SELECT subject_trace_id, subject_session_id, evidence ->> 'score' AS score,"
+                        + " evidence ->> 'call_site_id' AS call_site_id, subject_started_at, cleared_at"
+                        + " FROM " + table
+                        + " WHERE project_id = :pid AND classifier_id = :cid AND subject_trace_id IN (:traces)")
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("traces", traceIds)
+                .query((rs, n) -> {
+                    String score = rs.getString("score");
+                    OffsetDateTime started = rs.getObject("subject_started_at", OffsetDateTime.class);
+                    return new FlaggedTurn(
+                            rs.getString("subject_trace_id"),
+                            rs.getString("subject_session_id"),
+                            score == null ? null : parseScore(score),
+                            rs.getString("call_site_id"),
+                            started == null ? null : started.toInstant().toString(),
+                            rs.getString("cleared_at") != null);
+                })
+                .list()
+                .forEach(t -> out.put(t.traceId(), t));
+        return out;
+    }
+
+    private static @Nullable Double parseScore(String score) {
+        try {
+            return Double.valueOf(score);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** Each call site's last human reset, by call site. */

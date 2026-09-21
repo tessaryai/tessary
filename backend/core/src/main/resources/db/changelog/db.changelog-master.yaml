@@ -82,3 +82,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0018-frustration-state.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0019-case-detector-frustration.sql
+      relativeToChangelogFile: false

@@ -2423,6 +2423,16 @@
           "finding" : {
             "$ref" : "#/components/schemas/BehaviorFindingView"
           },
+          "frustration" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FrustrationDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "malformedOutput" : {
             "anyOf" : [
               {
@@ -2468,6 +2478,7 @@
           "armedWindow",
           "baseline",
           "finding",
+          "frustration",
           "malformedOutput",
           "metric",
           "secretLeak",
@@ -5056,6 +5067,47 @@
         ],
         "type" : "object"
       },
+      "FrustratedConversationView" : {
+        "properties" : {
+          "callSiteId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "cleared" : {
+            "type" : "boolean"
+          },
+          "conversationId" : {
+            "type" : "string"
+          },
+          "flaggedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "score" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "traceId" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "callSiteId",
+          "cleared",
+          "conversationId",
+          "flaggedAt",
+          "score",
+          "traceId"
+        ],
+        "type" : "object"
+      },
       "FrustrationCallSiteView" : {
         "properties" : {
           "baseline_conversations" : {
@@ -5131,6 +5183,51 @@
           "reset_note",
           "state",
           "statistic"
+        ],
+        "type" : "object"
+      },
+      "FrustrationDetail" : {
+        "properties" : {
+          "arlTarget" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "baselineFrustrated" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "conversations" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FrustratedConversationView"
+            },
+            "type" : "array"
+          },
+          "jevThreshold" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "minDecisionInterval" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "rate" : {
+            "$ref" : "#/components/schemas/RateDetail"
+          },
+          "scorerVersion" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "arlTarget",
+          "baselineFrustrated",
+          "conversations",
+          "jevThreshold",
+          "minDecisionInterval",
+          "rate",
+          "scorerVersion"
         ],
         "type" : "object"
       },

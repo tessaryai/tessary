@@ -80,6 +80,8 @@ export function detectorLabel(detector: string): string {
       return "Secret leak";
     case "malformed_output":
       return "Malformed output";
+    case "frustration":
+      return "Frustration";
     default:
       return detector;
   }

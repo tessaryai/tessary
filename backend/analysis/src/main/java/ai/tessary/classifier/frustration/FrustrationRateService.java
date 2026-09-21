@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.frustration;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.CauseKey;
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
+import ai.tessary.classifier.finding.FindingEvidenceRow;
+import ai.tessary.classifier.finding.FindingRepository;
+import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.FrustratedConversation;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorDetector;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
@@ -14,9 +21,12 @@ import ai.tessary.classifier.worker.ClassifierCatchUp;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
+import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +36,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * Frustration's rate test: per call site, whether the share of conversations frustrated with the agent has risen
@@ -43,6 +54,13 @@ import org.springframework.stereotype.Service;
  * reset fence keeps a resolve durable; a change to the scorer or the tuning is handled as a reset too, with the
  * note {@value #TUNING_CHANGED}, because a reference learned under other weights is not comparable.
  *
+ * <p><b>A spell opens a finding and a case without triage.</b> Each rising call site files one finding per spell,
+ * ruled positive at filing with {@link FrustrationEvidence#SUMMARY}, and opens or joins its case in the same
+ * transaction, the path a high-confidence secret leak takes. A later pass over the same spell (same onset)
+ * refreshes that finding's numbers and tops up its evidence instead of filing again. The evidence is the
+ * frustrated conversations since onset, newest first, each as a session witness followed by a trace witness
+ * for the turn that fired.
+ *
  * <p>Only a rise is reported. Runs when the TURN sweep reaches the head of the stream, never mid-page, so the
  * assessment table is complete up to the cursor whenever this reads it. It reads tables, not the provider, so a
  * paused classifier still replays.
@@ -58,11 +76,34 @@ public class FrustrationRateService implements ClassifierCatchUp {
     /** The reset note written when the scorer or the tuning changed under a call site's state. */
     static final String TUNING_CHANGED = "tuning changed";
 
+    /** How long a spell may go unrefreshed before the next firing is a new one: tool_error's window. */
+    static final Duration QUIET_WINDOW = Duration.ofHours(6);
+
+    /**
+     * Frustrated conversations kept on a finding for a reader to open, the cap secret_leak and Malformed Output
+     * use. Each is two witness rows, the conversation and its flagged turn, so the role holds twice this.
+     */
+    static final int MAX_WITNESSES = 50;
+
     private final FrustrationRateRepository rates;
+    private final FindingRepository findings;
+    private final FindingEvidenceRepository evidence;
+    private final CaseOpener caseOpener;
+    private final TransactionOperations tx;
     private final ObjectMapper mapper;
 
-    public FrustrationRateService(FrustrationRateRepository rates, ObjectMapper mapper) {
+    public FrustrationRateService(
+            FrustrationRateRepository rates,
+            FindingRepository findings,
+            FindingEvidenceRepository evidence,
+            CaseOpener caseOpener,
+            TransactionOperations tx,
+            ObjectMapper mapper) {
         this.rates = rates;
+        this.findings = findings;
+        this.evidence = evidence;
+        this.caseOpener = caseOpener;
+        this.tx = tx;
         this.mapper = mapper;
     }
 
@@ -77,8 +118,11 @@ public class FrustrationRateService implements ClassifierCatchUp {
     }
 
     /**
-     * Replay every call site's tallies over the window, save each call site's state, and return the call sites
-     * whose frustrated-conversation rate has risen and is alarming now.
+     * Replay every call site's tallies over the window, save each call site's state, file or refresh a finding
+     * for each call site whose frustrated-conversation rate has risen and is alarming now, and return those.
+     *
+     * <p>State first, findings second, as tool_error orders it: if this dies between the two, the next pass
+     * re-derives the same findings from the same state.
      */
     List<Spell> refresh(String projectId, ClassifierRow signal, Instant at) {
         Instant started = Instant.now();
@@ -87,8 +131,8 @@ public class FrustrationRateService implements ClassifierCatchUp {
         Optional<Instant> newest = rates.newestTurnAt(projectId, signal.id(), scorerVersion);
         if (newest.isEmpty()) return List.of();
 
-        List<HourlyToolTally> all = rates.hourlyTallies(
-                projectId, signal.id(), scorerVersion, newest.get().minus(REPLAY_WINDOW));
+        Instant windowFrom = newest.get().minus(REPLAY_WINDOW);
+        List<HourlyToolTally> all = rates.hourlyTallies(projectId, signal.id(), scorerVersion, windowFrom);
         List<HourlyToolTally> tallies = all.stream()
                 .filter(t -> !FrustrationRateRepository.UNASSIGNED.equals(t.toolKey()))
                 .toList();
@@ -114,7 +158,9 @@ public class FrustrationRateService implements ClassifierCatchUp {
         List<Spell> rising = sweep.spells().stream()
                 .filter(s -> s.decision().direction() == Direction.UP)
                 .toList();
-        for (Spell spell : rising) logSpell(projectId, signal, spell);
+        for (Spell spell : rising) {
+            tx.executeWithoutResult(status -> persist(projectId, signal, config, spell, windowFrom, at));
+        }
 
         StructuredLog.info(log, Markers.OPS, "frustration.refresh")
                 .message(
@@ -151,22 +197,115 @@ public class FrustrationRateService implements ClassifierCatchUp {
         return fresh;
     }
 
-    private void logSpell(String projectId, ClassifierRow signal, Spell spell) {
+    /**
+     * One rising call site: the same spell refreshes the finding it already filed, a new spell files one, rules
+     * it positive and opens or joins its case. Evidence is topped up either way.
+     */
+    private void persist(
+            String projectId,
+            ClassifierRow signal,
+            FrustrationConfig config,
+            Spell spell,
+            Instant windowFrom,
+            Instant at) {
         ToolErrorDetector.Decision d = spell.decision();
+        String callSite = spell.toolKey();
+        String now = at.toString();
+        String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
+        String causeKey = CauseKey.frustration(signal.id(), callSite);
+        String payload = FrustrationEvidence.payload(
+                mapper, callSite, d, spell.baseline().failures(), config);
+
+        Optional<FindingRow> open = findings.findOpenByCause(projectId, signal.classifierKey(), causeKey);
+        String findingId;
+        boolean filed = false;
+        if (open.isPresent() && sameInstant(open.get().onsetAt(), d.onsetAt())) {
+            findingId = open.get().id();
+            findings.refreshRuledObservation(projectId, findingId, d.callsSinceOnset(), payload, eventAt, now);
+        } else {
+            FindingRepository.Recorded recorded = findings.recordRecomputedRate(
+                    Ids.ulid(),
+                    projectId,
+                    signal.classifierKey(),
+                    causeKey,
+                    FindingRow.Cause.FRUSTRATION_RATE,
+                    callSite,
+                    FindingRow.SubjectKind.CLASSIFIER,
+                    signal.id(),
+                    signal.name(),
+                    d.callsSinceOnset(),
+                    callSite,
+                    d.onsetAt(),
+                    payload,
+                    eventAt,
+                    Instant.parse(eventAt).minus(QUIET_WINDOW).toString(),
+                    now);
+            if (recorded == null) {
+                // A ruled finding already covers eventAt: a rebuild moved this spell's onset without new
+                // hours. The finding still open on the cause is this spell; refresh it rather than fork one.
+                if (open.isEmpty()) return;
+                findingId = open.get().id();
+                findings.refreshRuledObservation(projectId, findingId, d.callsSinceOnset(), payload, eventAt, now);
+            } else {
+                findingId = recorded.findingId();
+                filed = findings.recordTriage(
+                                projectId,
+                                findingId,
+                                FindingRow.TriageVerdict.POSITIVE,
+                                FrustrationEvidence.SUMMARY,
+                                null,
+                                now)
+                        == 1;
+                caseOpener.ensureCaseFor(projectId, findingId, null);
+            }
+        }
+
         String onset = d.onsetAt();
+        Instant since = onset != null ? parse(onset, windowFrom) : windowFrom;
+        List<FrustratedConversation> frustrated = rates.frustratedSince(
+                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, MAX_WITNESSES);
+        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>(frustrated.size() * 2);
+        for (FrustratedConversation c : frustrated) {
+            refs.add(FindingEvidenceRepository.Ref.session(c.conversationId()));
+            refs.add(FindingEvidenceRepository.Ref.trace(c.flaggedTraceId()));
+        }
+        int stored = evidence.recordUpTo(
+                projectId, findingId, FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES * 2, now);
+
         StructuredLog.info(log, Markers.OPS, "frustration.spell")
                 .message(
                         "%s: %.1f%% of conversations frustrated since %s, against a learned %.1f%%",
-                        spell.toolKey(),
+                        callSite,
                         d.currentRate() * 100,
                         onset == null ? "the window's start" : onset,
                         d.baselineRate() * 100)
                 .field("project", projectId)
                 .field("classifierId", signal.id())
-                .field("callSiteId", spell.toolKey())
+                .field("callSiteId", callSite)
+                .field("finding", findingId)
+                .field("opened", filed)
                 .field("conversationsSinceOnset", d.callsSinceOnset())
                 .field("frustratedSinceOnset", d.failuresSinceOnset())
                 .field("criticality", d.criticality())
+                .field("witnessesStored", stored)
                 .log();
+    }
+
+    /** Onsets compare as instants: {@code Instant#toString} drops a zero fraction, so strings may differ. */
+    private static boolean sameInstant(@Nullable String a, @Nullable String b) {
+        if (a == null || b == null) return a == null && b == null;
+        try {
+            return Instant.parse(a).equals(Instant.parse(b));
+        } catch (DateTimeParseException e) {
+            return a.equals(b);
+        }
+    }
+
+    private static Instant parse(String instant, Instant fallback) {
+        try {
+            return Instant.parse(instant);
+        } catch (DateTimeParseException e) {
+            return fallback;
+        }
     }
 }

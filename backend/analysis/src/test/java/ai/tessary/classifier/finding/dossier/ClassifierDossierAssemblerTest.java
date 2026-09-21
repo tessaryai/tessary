@@ -72,6 +72,39 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
+    void frustrationShapeStatesTheRateInConversationsAndPairsSessionWithTraceWitnesses() throws Exception {
+        String payload = """
+                {"call_site_id":"support-chat","direction":"up","baseline_conversations":200,
+                 "baseline_frustrated":10,"baseline_rate":0.052,"current_rate":0.25,
+                 "conversations_since_onset":600,"frustrated_since_onset":150,"delta_pp":19.8,
+                 "effect_size":0.6,"statistic":7.2,"threshold":4.94,"criticality":43.6,
+                 "onset_at":"2026-08-01T10:00:00Z","arl_target":10000,"min_decision_interval":4.0,
+                 "scorer_version":"jev-choice3-abc","jev_threshold":0.4,
+                 "cause_kind":"frustration_rate","workflow_key":"","native_cause_key":"support-chat"}
+                """;
+        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
+                .thenReturn(pageOf(
+                        List.of(
+                                new FindingEvidenceRow(
+                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", null, null, "witness", 0, "t0"),
+                                new FindingEvidenceRow(
+                                        "e2", PROJECT_ID, FINDING_ID, null, "trace-1", null, "witness", 1, "t0")),
+                        false));
+
+        String dossier = ClassifierDossierAssembler.assemble(
+                        MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 2, 0), payload)
+                .orElseThrow();
+
+        assertTrue(dossier.startsWith("# Frustration evidence"));
+        assertTrue(dossier.contains("5.20% learned → 25.00% since onset"));
+        assertTrue(dossier.contains("since onset: 600 conversations, 150 frustrated"));
+        assertTrue(dossier.contains("There is no baseline side"));
+        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`-`"));
+        assertTrue(dossier.contains("- `witness` trace=`trace-1`"));
+    }
+
+    @Test
     void metricDriftShapeRanksTheConcentrationTableByCoveredDescending() throws Exception {
         String payload = """
                 {"measure":"metric_duration","bucket":{"kind":"call_site","key":"summarize"},"reference":"pinned",

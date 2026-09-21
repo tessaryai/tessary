@@ -327,12 +327,14 @@ public class CaseService {
      * cause has fitted detector state a re-pin could move — {@code BehaviorTriageSource#repin} is a
      * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
      * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
-     * than left to no-op silently: a case page is not worth a button that does nothing.
+     * than left to no-op silently: a case page is not worth a button that does nothing. A frustration case is
+     * excluded for the same reason: its reference is learned, never re-pinned.
      */
     private static boolean absorbable(CaseRow row) {
         return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
                 && !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
-                && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector());
+                && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())
+                && !CaseRow.Detector.FRUSTRATION.equals(row.detector());
     }
 
     /**

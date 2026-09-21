@@ -11,6 +11,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -829,6 +830,7 @@ public class McpToolRegistry {
         ToolErrorEvidence.RateDetail toolError = detail.toolError();
         MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
         SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
+        FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
@@ -836,7 +838,8 @@ public class McpToolRegistry {
                 detail.baseline(),
                 malformedOutput == null ? null : withoutIds(malformedOutput),
                 secretLeak == null ? null : withoutIds(secretLeak),
-                detail.armedWindow());
+                detail.armedWindow(),
+                frustration == null ? null : frustration.withoutIds());
     }
 
     private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {

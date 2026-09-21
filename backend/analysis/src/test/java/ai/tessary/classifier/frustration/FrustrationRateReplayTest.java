@@ -12,8 +12,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
+import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorDetector;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
@@ -33,6 +36,7 @@ import java.util.Optional;
 import java.util.Random;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * The rate test over frustration-shaped tallies: a conversation is a trial, a frustrated one a failure, and the
@@ -257,7 +261,13 @@ class FrustrationRateReplayTest {
         final ToolErrorStateRepository states = mock(ToolErrorStateRepository.class);
         final Instant at = START.plus(Duration.ofDays(3));
         final String now = at.toString();
-        private final FrustrationRateService service = new FrustrationRateService(rates, new ObjectMapper());
+        private final FrustrationRateService service = new FrustrationRateService(
+                rates,
+                mock(FindingRepository.class),
+                mock(FindingEvidenceRepository.class),
+                mock(CaseOpener.class),
+                TransactionOperations.withoutTransaction(),
+                new ObjectMapper());
 
         Harness(List<HourlyToolTally> tallies, List<CarriedState> carried) {
             @Nullable

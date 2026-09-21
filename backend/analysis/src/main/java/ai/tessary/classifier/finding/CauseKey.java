@@ -81,6 +81,15 @@ public final class CauseKey {
     }
 
     /**
+     * {@code <classifier_id>:<call_site_id>} — Frustration's shape, one cause per call site, for Malformed
+     * Output's reason: a conversation is a trial on one call site's stream, and that call site is what a
+     * reader fixes.
+     */
+    public static String frustration(String classifierId, String callSiteId) {
+        return classifierId + ":" + callSiteId;
+    }
+
+    /**
      * The tool a {@code tool_error} cause key names — its subject. Stripping both fixed affixes rather
      * than splitting on colons, because a bucket key may contain them.
      */

@@ -350,6 +350,56 @@ public class FindingRepository {
     }
 
     /**
+     * The newest open finding of a cause that is already ruled positive, or empty. For a detector that rules its
+     * own findings when it files them (Frustration), this is the spell it filed last: {@code ux_finding_live}
+     * never holds such a row, so the conflict target cannot find it.
+     */
+    public Optional<FindingRow> findOpenByCause(String projectId, String classifierKey, String causeKey) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding"
+                        + " WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey"
+                        + "   AND status = 'open' AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"
+                        + " ORDER BY created_at DESC, id DESC LIMIT 1")
+                .param("pid", projectId)
+                .param("classifier", classifierKey)
+                .param("causeKey", causeKey)
+                .query((rs, n) -> map(rs))
+                .optional();
+    }
+
+    /**
+     * Refresh what a ruled, still-open finding observed: its count, its clock and its payload, and nothing about
+     * the ruling. For a spell that keeps running after its finding was ruled at filing, so a reader sees today's
+     * numbers rather than the ones it was filed with.
+     *
+     * <p>The payload is merged over the stored one, so the native vocabulary {@link #recordRecomputedRate}
+     * wrote survives. {@code last_seen_at} only moves forward, compared as instants for the reason
+     * {@link #armedUpsert} gives.
+     *
+     * @return 1 when the finding was refreshed, 0 when it is closed or was never ruled
+     */
+    public int refreshRuledObservation(
+            String projectId, String findingId, long observedCount, String payloadJson, String eventAt, String now) {
+        return jdbc.sql("""
+                UPDATE finding
+                   SET sample_count = :count,
+                       payload = COALESCE(payload, '{}'::jsonb) || CAST(:payload AS jsonb),
+                       last_seen_at = CASE
+                           WHEN last_seen_at IS NULL
+                                OR CAST(:eventAt AS timestamptz) > CAST(last_seen_at AS timestamptz)
+                           THEN :eventAt ELSE last_seen_at END,
+                       updated_at = :now
+                 WHERE project_id = :pid AND id = :id AND status = 'open' AND triage_verdict IS NOT NULL
+                """)
+                .param("count", observedCount)
+                .param("payload", payloadJson)
+                .param("eventAt", eventAt)
+                .param("now", now)
+                .param("pid", projectId)
+                .param("id", findingId)
+                .update();
+    }
+
+    /**
      * Record a per-span classifier's armed window — {@code observedCount} detections inside an
      * event-time window that crossed the classifier's bar — opening the finding if this is the first
      * such window. {@link #armedUpsert} does the writing; see it for the forward-only and

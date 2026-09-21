@@ -433,6 +433,13 @@ export type MalformedOutputRow = S["FailingOutputView"];
 export type MalformedOutputPage = S["FailingOutputPage"];
 
 /**
+ * A `frustration_rate` finding's block: the frustrated-conversation rate against the call site's learned
+ * rate, and the conversations the finding cites, each with the turn that fired in it.
+ */
+export type FrustrationDetail = S["FrustrationDetail"];
+export type FrustratedConversation = S["FrustratedConversationView"];
+
+/**
  * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
  * two breakdowns the page renders — one masked key at a time, and one leak at a time.
  */
