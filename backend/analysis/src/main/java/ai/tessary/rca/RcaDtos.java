@@ -75,6 +75,43 @@ public final class RcaDtos {
             String rationale,
             @JsonProperty("evidence_trace_ids") List<String> evidenceTraceIds) {}
 
+    /**
+     * One cause a frustration report found: something the agent did that frustrated users, with the
+     * frustrated sessions that show it and the line in the repo behind it when one lines up.
+     *
+     * @param sessionsAffected how many of the frustrated sessions show this behaviour — never fewer than
+     *     it cites, and the order causes are ranked in
+     * @param evidenceSessionIds frustrated sessions from the finding's own evidence refs; at least one
+     * @param evidenceTraceIds the flagged turns from the finding's own evidence refs
+     * @param attribution null when the analysis attributed nothing
+     */
+    public record Cause(
+            String title,
+            @JsonProperty("what_the_agent_did") String whatTheAgentDid,
+            @JsonProperty("sessions_affected") int sessionsAffected,
+            @JsonProperty("evidence_session_ids") List<String> evidenceSessionIds,
+            @JsonProperty("evidence_trace_ids") List<String> evidenceTraceIds,
+            @Nullable Attribution attribution,
+            @JsonProperty("fix_suggestion") String fixSuggestion,
+            String confidence) {}
+
+    /**
+     * Where in the repo a cause comes from.
+     *
+     * @param kind {@code prompt} | {@code code} | {@code tool} | {@code model} | {@code unknown}
+     */
+    public record Attribution(
+            String kind,
+            @Nullable String path,
+            @Nullable String commit,
+            @Nullable String excerpt) {
+
+        /** {@code kind} values. Anything else a model returns reads as {@link #UNKNOWN}. */
+        public static final List<String> KINDS = List.of("prompt", "code", "tool", "model", "unknown");
+
+        public static final String UNKNOWN = "unknown";
+    }
+
     public record RcaReportView(
             String id,
             @JsonProperty("job_id") String jobId,
@@ -83,6 +120,8 @@ public final class RcaDtos {
             @JsonProperty("subject_label") String subjectLabel,
             @JsonProperty("call_site_id") @Nullable String callSiteId,
             String metric,
+            /** {@code metric_movement} or {@code frustration_causes}: which question the report answers. */
+            @JsonProperty("report_kind") String reportKind,
             @JsonProperty("window_from") String windowFrom,
             @JsonProperty("window_split") String windowSplit,
             @JsonProperty("window_to") String windowTo,
@@ -94,6 +133,8 @@ public final class RcaDtos {
             @Nullable String summary,
             @JsonProperty("ruled_out") List<RuledOutCheck> ruledOut,
             List<Hypothesis> hypotheses,
+            /** Ranked by sessions affected; empty on every {@code metric_movement} report. */
+            List<Cause> causes,
             @JsonProperty("detailed_report") @Nullable String detailedReport,
             String engine,
             /** Null on reports written before the column existed: unknown, not "no repository". */
@@ -110,6 +151,7 @@ public final class RcaDtos {
                     r.subjectLabel(),
                     r.callSiteId(),
                     r.metric(),
+                    r.reportKind(),
                     r.windowFrom(),
                     r.windowSplit(),
                     r.windowTo(),
@@ -121,6 +163,7 @@ public final class RcaDtos {
                     r.summary(),
                     readList(mapper, r.ruledOut(), new TypeReference<List<RuledOutCheck>>() {}),
                     readList(mapper, r.hypotheses(), new TypeReference<List<Hypothesis>>() {}),
+                    readList(mapper, r.causes(), new TypeReference<List<Cause>>() {}),
                     r.detailedReport(),
                     r.engine(),
                     r.repoAvailable(),

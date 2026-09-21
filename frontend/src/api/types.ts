@@ -276,6 +276,8 @@ export type ModelRateView = S["ModelRateView"];
 export type RcaReport = S["RcaReportView"];
 export type RcaRuledOutCheck = S["RuledOutCheck"];
 export type RcaHypothesis = S["Hypothesis"];
+/** One cause a frustration report found: what the agent did, and the frustrated sessions that show it. */
+export type RcaCause = S["Cause"];
 
 // ---- PII redaction ----
 export type RedactionRuleView = S["RuleView"];

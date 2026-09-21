@@ -11,7 +11,8 @@
    out and where you looked, and do not manufacture a cause to fill the field.
 3. **Rule out the cheap explanations first.** Before anything expensive: did the grader
    change, did the serving model change, did the traffic mix change, did grading itself
-   start erroring or abstaining. dossier/checklist.md measures all four for you. Each one
+   start erroring or abstaining. dossier/checklist.md measures the serving model; check the
+   other three yourself. Each one
    moves the number with the product untouched, and each is far more common than a genuine
    regression.
 4. **Compare both sides.** A condition that also held BEFORE is not the cause of a change.

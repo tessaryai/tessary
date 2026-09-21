@@ -64,10 +64,21 @@ public class RcaTriggerService {
         Instant from = parse(finding.createdAt(), finding.onsetAt());
         Instant split = parse(finding.onsetAt(), finding.createdAt());
         Instant to = parse(finding.lastSeenAt(), finding.onsetAt());
-        // The severity is what the classifier asserted about the cause; there is no "before" number to
-        // compare it against, and inventing one would put a movement on the page that nobody measured.
-        Double asserted = finding.severity();
-        double severity = asserted == null ? 0.0 : asserted;
+        String reportKind = RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
+        double current;
+        double prior;
+        if (RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(reportKind)) {
+            // A frustration finding measured a rate against a learned one, so the header reads as that
+            // rate: frustrated conversations since onset over the rate the call site learned as normal.
+            current = finding.payloadNumber("current_rate");
+            prior = finding.payloadNumber("baseline_rate");
+        } else {
+            // The severity is what the classifier asserted about the cause; there is no "before" number to
+            // compare it against, and inventing one would put a movement on the page that nobody measured.
+            Double asserted = finding.severity();
+            current = asserted == null ? 0.0 : asserted;
+            prior = 0.0;
+        }
         String label = finding.subjectLabel() == null ? finding.subjectId() : finding.subjectLabel();
 
         String jobId = jobs.createOrGet(
@@ -90,12 +101,13 @@ public class RcaTriggerService {
                 label,
                 finding.callSiteId(),
                 finding.classifierKey(),
+                reportKind,
                 from,
                 split,
                 to,
-                severity,
-                0.0,
-                severity,
+                current,
+                prior,
+                current - prior,
                 RcaReportRow.Engine.AGENTIC);
         return reportReads.getByJobId(projectId, jobId);
     }

@@ -21,16 +21,21 @@ export const RCA_VERDICT_LABEL: Record<string, string> = {
   traffic_shift: "Traffic mix shifted",
   behavior_change: "Agent behavior changed",
   inconclusive: "Inconclusive",
+  causes_identified: "Causes identified",
+  no_cause_found: "No cause found",
 };
 
 /** behavior_change is the "real degradation" verdict (error tone); the structural causes are
- *  warnings — the agent didn't get worse, something around it moved. */
+ *  warnings — the agent didn't get worse, something around it moved. A frustration report that
+ *  identified causes found the agent at fault, so it takes the error tone too. */
 export const RCA_VERDICT_TONE: Record<string, BadgeTone> = {
   definition_change: "warning",
   model_change: "warning",
   traffic_shift: "warning",
   behavior_change: "error",
   inconclusive: "neutral",
+  causes_identified: "error",
+  no_cause_found: "neutral",
 };
 
 /** True while the analysis is still queued or running — the report has no findings to show yet. */

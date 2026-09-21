@@ -323,6 +323,7 @@ class McpCaseToolsTest {
                 "Checkout summariser",
                 "cs-1",
                 "pass_rate",
+                "metric_movement",
                 "2026-08-01T00:00:00Z",
                 "2026-08-08T00:00:00Z",
                 "2026-08-15T00:00:00Z",
@@ -336,6 +337,7 @@ class McpCaseToolsTest {
                         "traffic_mix", RuledOutCheck.Assessment.RULED_OUT, "Mix held flat.", "chi2 = 0.4")),
                 List.of(new Hypothesis(
                         "Model swap on 2026-08-14", "high", "The provider rotated the default.", List.of("tr-1"))),
+                List.of(),
                 "## Why\nThe judge model changed.",
                 "agentic",
                 true,

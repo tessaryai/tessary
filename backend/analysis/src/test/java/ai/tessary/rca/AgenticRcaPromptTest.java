@@ -139,7 +139,64 @@ class AgenticRcaPromptTest {
                 "a well-evidenced finding gets no cap");
     }
 
+    /** The frustration branch asks what the agent did, so it drops the metric-movement burden of proof and
+     *  every baseline-side demand: the finding has no baseline side, only frustrated sessions. */
+    @Test
+    void aFrustrationPromptAsksForCausesWithoutABaselineSide() {
+        String prompt = AgenticRcaEngine.buildFrustrationPrompt(
+                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", true, 12, 12);
+
+        assertFalse(prompt.contains("BURDEN OF PROOF"), "the metric-movement burden of proof does not apply");
+        assertFalse(prompt.contains("baseline-side"), "there is no baseline side to cite");
+        assertFalse(prompt.contains("serving_model"), "serving_model compares two sides and is not measured");
+        assertFalse(prompt.contains("The eight rules"), "the metric-movement rules are replaced, not appended");
+        assertTrue(prompt.contains("failing_cohort_shape"), "the one measured check is named");
+        assertTrue(prompt.contains("evidence_session_ids"), "causes cite sessions");
+        assertTrue(prompt.contains("causes_identified") && prompt.contains("no_cause_found"), "both verdicts named");
+        assertTrue(prompt.contains("Group by what the agent did wrong"), "the frustration rules are in");
+        assertTrue(prompt.contains("list_sessions") && prompt.contains("get_session"), "calm sessions are readable");
+        assertTrue(prompt.contains("fnd-1") && prompt.contains("2026-05-04"), "finding id and onset interpolated");
+        for (String tool : EXPECTED_TOOLS) {
+            assertTrue(prompt.contains(tool), "the frustration prompt never names " + tool);
+        }
+    }
+
+    @Test
+    void aFrustrationPromptKeepsTheFirewall() {
+        for (boolean repoCloned : new boolean[] {true, false}) {
+            String prompt = AgenticRcaEngine.buildFrustrationPrompt(
+                            report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", repoCloned, 12, 12)
+                    .toLowerCase(Locale.ROOT);
+            for (String word : TRIAGE_VOCABULARY) {
+                assertFalse(prompt.contains(word), "the frustration prompt says '" + word + "'");
+            }
+        }
+    }
+
+    @Test
+    void aRepolessFrustrationRunAttributesNothing() {
+        String prompt = AgenticRcaEngine.buildFrustrationPrompt(
+                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", false, 12, 12);
+
+        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
+        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
+        assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
+    }
+
+    @Test
+    void aFewFrustratedSessionsCapConfidence() {
+        RcaReportRow r = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
+        assertTrue(
+                AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 3, 3).contains("cap every cause"));
+        assertFalse(AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 30, 30)
+                .contains("cap every cause"));
+    }
+
     private static RcaReportRow report() {
+        return report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
+    }
+
+    private static RcaReportRow report(String reportKind) {
         return new RcaReportRow(
                 "rpt-1",
                 "proj-1",
@@ -149,6 +206,7 @@ class AgenticRcaPromptTest {
                 "answer_relevance on checkout",
                 "cs-checkout",
                 "pass_rate",
+                reportKind,
                 "2026-05-01T00:00:00Z",
                 "2026-05-04T00:00:00Z",
                 "2026-05-08T00:00:00Z",
@@ -156,6 +214,7 @@ class AgenticRcaPromptTest {
                 0.93,
                 -0.22,
                 "running",
+                null,
                 null,
                 null,
                 null,

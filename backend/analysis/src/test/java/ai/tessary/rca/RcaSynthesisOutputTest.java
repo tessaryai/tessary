@@ -195,4 +195,134 @@ class RcaSynthesisOutputTest {
                 () -> RcaSynthesisOutput.parse(MAPPER, "just prose", NO_PRIOR, Set.of(), CHECKS, "proj"));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
     }
+
+    // ---- frustration reports ------------------------------------------------------------------
+
+    private static final Set<String> SESSIONS = Set.of("s-1", "s-2", "s-3");
+    private static final Set<String> TURNS = Set.of("tr-1", "tr-2", "tr-3");
+    private static final Set<String> COHORT = Set.of("failing_cohort_shape");
+
+    private static String cause(String title, int affected, String sessions, String traces) {
+        return "{\"title\":\"" + title + "\",\"what_the_agent_did\":\"w\",\"sessions_affected\":" + affected
+                + ",\"evidence_session_ids\":[" + sessions + "],\"evidence_trace_ids\":[" + traces + "],"
+                + "\"attribution\":{\"kind\":\"prompt\",\"path\":\"agent/prompt.md\",\"commit\":\"abc123\","
+                + "\"excerpt\":\"Never ask twice.\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}";
+    }
+
+    private static String frustration(String verdict, String... causes) {
+        return "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\","
+                + "\"checklist\":[],\"causes\":[" + String.join(",", causes) + "]}";
+    }
+
+    @Test
+    void frustrationCausesKeepOnlyThisFindingsSessionsAndTurns() {
+        String text = frustration(
+                "causes_identified",
+                cause("Ignores the attachment", 2, "\"s-1\",\"s-9\",\"s-1\"", "\"tr-1\",\"tr-9\""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
+        assertTrue(out.hypotheses().isEmpty(), "a frustration report writes causes, not hypotheses");
+        RcaDtos.Cause c = out.causes().get(0);
+        assertEquals(List.of("s-1"), c.evidenceSessionIds(), "unknown and repeated session ids are dropped");
+        assertEquals(List.of("tr-1"), c.evidenceTraceIds(), "a trace outside the flagged turns is dropped");
+        assertEquals("prompt", c.attribution().kind());
+        assertEquals("agent/prompt.md", c.attribution().path());
+        assertNull(out.verdictNote());
+    }
+
+    @Test
+    void aCauseCitingNoSessionOfThisFindingIsDropped() {
+        String text = frustration(
+                "causes_identified",
+                cause("Invented", 5, "\"s-9\"", "\"tr-1\""),
+                cause("Real", 2, "\"s-2\",\"s-3\"", ""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(1, out.causes().size());
+        assertEquals("Real", out.causes().get(0).title());
+    }
+
+    @Test
+    void causesIdentifiedWithNoSurvivingCauseIsDowngradedToNoCauseFound() {
+        String text = frustration("causes_identified", cause("Invented", 5, "\"s-9\"", ""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict());
+        assertTrue(out.causes().isEmpty());
+        assertNotNull(out.verdictNote());
+        assertTrue(out.verdictNote().contains("causes_identified"), out.verdictNote());
+    }
+
+    @Test
+    void frustrationVerdictsNormaliseToTheirOwnPair() {
+        for (String raw : List.of("behavior_change", "inconclusive", "vibes")) {
+            RcaSynthesisOutput.Parsed out =
+                    RcaSynthesisOutput.parseFrustration(MAPPER, frustration(raw), TURNS, SESSIONS, COHORT, "proj");
+            assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict(), raw);
+            assertNull(out.verdictNote(), "an unknown verdict is normalised, not downgraded: " + raw);
+        }
+        // And the metric-movement lane never accepts the frustration pair.
+        RcaSynthesisOutput.Parsed metric = RcaSynthesisOutput.parse(
+                MAPPER,
+                "{\"summary\":\"s\",\"verdict\":\"causes_identified\",\"hypotheses\":[]}",
+                NO_PRIOR,
+                Set.of(),
+                CHECKS,
+                "proj");
+        assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, metric.verdict());
+    }
+
+    /** No baseline side exists, so nothing is demanded of one: a cause citing only frustrated sessions stands. */
+    @Test
+    void aFrustrationReportCarriesNoBaselineBurden() {
+        String text = frustration("causes_identified", cause("Loops on retries", 3, "\"s-1\"", "\"tr-1\""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
+        assertNull(out.verdictNote());
+    }
+
+    @Test
+    void causesRankBySessionsAffectedAndNeverUnderCountTheirOwnCitations() {
+        String text = frustration(
+                "causes_identified",
+                cause("Small", 1, "\"s-1\"", ""),
+                cause("Undercounted", 0, "\"s-1\",\"s-2\",\"s-3\"", ""),
+                cause("Big", 9, "\"s-2\"", ""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(
+                List.of("Big", "Undercounted", "Small"),
+                out.causes().stream().map(RcaDtos.Cause::title).toList());
+        assertEquals(3, out.causes().get(1).sessionsAffected(), "a cause affects at least the sessions it cites");
+    }
+
+    @Test
+    void anUnknownAttributionKindAndConfidenceAreNormalised() {
+        String text = frustration(
+                "causes_identified",
+                "{\"title\":\"t\",\"what_the_agent_did\":\"w\",\"sessions_affected\":1,"
+                        + "\"evidence_session_ids\":[\"s-1\"],\"evidence_trace_ids\":[],"
+                        + "\"attribution\":{\"kind\":\"vibes\",\"path\":\"\"},\"fix_suggestion\":\"f\","
+                        + "\"confidence\":\"certain\"}");
+
+        RcaDtos.Cause c = RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj")
+                .causes()
+                .get(0);
+
+        assertEquals(RcaDtos.Attribution.UNKNOWN, c.attribution().kind());
+        assertNull(c.attribution().path(), "a blank path is no path");
+        assertEquals("low", c.confidence());
+    }
 }

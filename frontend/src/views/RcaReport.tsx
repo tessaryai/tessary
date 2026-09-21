@@ -9,19 +9,21 @@ import { Markdown } from "./components/PayloadViewer";
 import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning } from "./rcaLabels";
 import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
-import type { RcaHypothesis, RcaRuledOutCheck } from "../api/types";
+import type { RcaCause, RcaHypothesis, RcaRuledOutCheck } from "../api/types";
 
 /**
  * One RCA report — the immutable per-finding drill-in behind the case page's "Run RCA" action.
  * Reads top-to-bottom the way the analysis ran: the movement, the verdict + summary, the checklist
  * of structural causes with the analysis's call on each (shown even when all were ruled out — the
  * eliminated boring causes are what make the hypotheses trustworthy), then ranked hypotheses whose
- * evidence links open the real traces, then the agent's full write-up.
+ * evidence links open the real traces, then the agent's full write-up. A frustration report has no
+ * hypotheses: it ranks causes, what the agent did that frustrated users, with the sessions that show it.
  */
 
 const METRIC_LABEL: Record<string, string> = {
   pass_rate: "Pass rate",
   score: "Score",
+  frustration: "Frustrated conversations",
 };
 
 const SUBJECT_LABEL: Record<string, string> = {
@@ -36,6 +38,8 @@ const CONFIDENCE_TONE: Record<string, BadgeTone> = {
 };
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
+/** Frustration rates sit at a few percent, where a whole-percent round hides the rise. */
+const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 function windowLabel(iso: string): string {
   const d = new Date(iso);
@@ -123,6 +127,95 @@ function HypothesisCard({ hypothesis, rank, exploreBase }: { hypothesis: RcaHypo
   );
 }
 
+const ATTRIBUTION_LABEL: Record<string, string> = {
+  prompt: "Prompt",
+  code: "Code",
+  tool: "Tool",
+  model: "Model",
+};
+
+/** Where a cause comes from in the repo, or nothing when the analysis could not tie it to a line. */
+function AttributionLine({ cause }: { cause: RcaCause }) {
+  const a = cause.attribution;
+  if (!a || !ATTRIBUTION_LABEL[a.kind]) {
+    return <span className="text-small text-subtle">Not tied to a line in the repo</span>;
+  }
+  return (
+    <div className="min-w-0">
+      <span className="text-small text-fg">{ATTRIBUTION_LABEL[a.kind]}</span>
+      {a.path && (
+        <span className="font-mono text-label text-muted ml-1.5 break-all">
+          {a.path}
+          {a.commit ? ` @ ${a.commit.slice(0, 8)}` : ""}
+        </span>
+      )}
+      {a.excerpt && (
+        <pre className="text-label text-subtle font-mono mt-1 whitespace-pre-wrap break-words">{a.excerpt}</pre>
+      )}
+    </div>
+  );
+}
+
+/** The ranked causes of a frustration report: what the agent did, how many sessions show it, where it
+ *  comes from, and the conversations to read. */
+function CausesTable({ causes, base }: { causes: RcaCause[]; base: string }) {
+  return (
+    <div>
+      <div className="text-h3 text-fg mb-2">Causes</div>
+      <div className="flex flex-col gap-2.5">
+        {causes.map((c, i) => (
+          <Card key={`${c.title}-${i}`} className="border border-border">
+            <div className="px-3.5 py-3 flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-label text-subtle tabular-nums">#{i + 1}</span>
+                <span className="text-body font-medium text-fg">{c.title}</span>
+                <Badge tone={CONFIDENCE_TONE[c.confidence] ?? "neutral"}>{c.confidence} confidence</Badge>
+                <span className="text-small text-muted tabular-nums">
+                  {c.sessions_affected} {c.sessions_affected === 1 ? "session" : "sessions"}
+                </span>
+              </div>
+              <p className="text-small text-muted m-0">{c.what_the_agent_did}</p>
+              <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-[120px_1fr]">
+                <span className="text-label uppercase text-subtle">Comes from</span>
+                <AttributionLine cause={c} />
+                {c.fix_suggestion && (
+                  <>
+                    <span className="text-label uppercase text-subtle">Fix</span>
+                    <span className="text-small text-fg">{c.fix_suggestion}</span>
+                  </>
+                )}
+                <span className="text-label uppercase text-subtle">Evidence</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {c.evidence_session_ids.map((id) => (
+                    <Link
+                      key={`s-${id}`}
+                      to={`${base}/sessions/${encodeURIComponent(id)}`}
+                      className="font-mono text-label text-link hover:text-link-hover hover:underline"
+                      title={id}
+                    >
+                      session …{id.slice(-8)}
+                    </Link>
+                  ))}
+                  {c.evidence_trace_ids.map((id) => (
+                    <Link
+                      key={`t-${id}`}
+                      to={`${base}/explore?trace=${encodeURIComponent(id)}`}
+                      className="font-mono text-label text-link hover:text-link-hover hover:underline"
+                      title={id}
+                    >
+                      turn …{id.slice(-8)}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function RcaReport() {
   const { reportId = "" } = useParams<{ reportId: string }>();
   const { orgSlug, projectSlug } = useTenant();
@@ -171,6 +264,14 @@ export function RcaReport() {
 
   const running = rcaRunning(r.status);
   const worse = r.delta < 0;
+  const frustration = r.report_kind === "frustration_causes";
+  const subtitle = frustration
+    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}Frustrated conversations rose to ${pct1(
+        r.current_value,
+      )} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
+    : `${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
+        worse ? "fell" : "moved"
+      } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`;
 
   return (
     <PageBody>
@@ -186,9 +287,7 @@ export function RcaReport() {
             <StatusPill status={RCA_JOB_STATUS[r.status] ?? "pending"} label={r.status} />
           </span>
         }
-        subtitle={`${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
-          worse ? "fell" : "moved"
-        } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`}
+        subtitle={subtitle}
         actions={
           running ? undefined : (
             <span className="flex items-center gap-2">
@@ -279,6 +378,8 @@ export function RcaReport() {
           )}
 
           {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
+
+          {r.causes.length > 0 && <CausesTable causes={r.causes} base={base} />}
 
           {r.hypotheses.length > 0 && (
             <div>

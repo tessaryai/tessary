@@ -10,6 +10,7 @@ import ai.tessary.git.GitProviderFactory;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.prompt.PromptCraft;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import ai.tessary.tenant.ApiKeyService;
@@ -85,6 +86,15 @@ public class AgenticRcaEngine {
     private static final String RULES = PromptCraft.text(RCA, "rules.md");
 
     /**
+     * The rules of a frustration investigation: the eight above without the compare-both-sides rule
+     * (there is no baseline side), rewritten for "what did the agent do" rather than "what changed".
+     */
+    private static final String FRUSTRATION_RULES = PromptCraft.text(RCA, "frustration/rules.md");
+
+    /** A frustration run's output contract: ranked causes with session receipts instead of hypotheses. */
+    static final String FRUSTRATION_JSON_SCHEMA = PromptCraft.text(RCA, "frustration/response_schema.json");
+
+    /**
      * How the agent reaches the substrate. Names the tools it may actually call — a tool named here that
      * the surface does not register costs a turn on {@code unknown tool}, and one the surface has that is
      * not named here is one it will not think to use.
@@ -96,6 +106,8 @@ public class AgenticRcaEngine {
             String verdict,
             String summary,
             List<Hypothesis> hypotheses,
+            /** Ranked causes; empty unless the report is a frustration one. */
+            List<Cause> causes,
             List<ChecklistAssessment> checklist,
             String detailedReport,
             /** Whether this run actually had the repo to read. Recorded per report, because the
@@ -168,7 +180,9 @@ public class AgenticRcaEngine {
             Map<String, String> dossierFiles,
             Set<String> baselineTraceIds,
             Set<String> flaggedTraceIds,
+            Set<String> sessionIds,
             Set<String> measuredChecks) {
+        boolean frustration = RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(report.reportKind());
         Agentic cfg = props.getAgentic();
         String mcpBase = cfg.getMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
@@ -215,26 +229,45 @@ public class AgenticRcaEngine {
                     clone.map(Clone::url).orElse(null),
                     clone.map(Clone::headSha).orElse(null),
                     dossierFiles,
-                    buildPrompt(report, findingId, clone.isPresent(), baselineTraceIds.size(), flaggedTraceIds.size()),
-                    JSON_SCHEMA,
+                    frustration
+                            ? buildFrustrationPrompt(
+                                    report, findingId, clone.isPresent(), sessionIds.size(), flaggedTraceIds.size())
+                            : buildPrompt(
+                                    report,
+                                    findingId,
+                                    clone.isPresent(),
+                                    baselineTraceIds.size(),
+                                    flaggedTraceIds.size()),
+                    frustration ? FRUSTRATION_JSON_SCHEMA : JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
                     issued.plaintext(),
                     report.id()));
 
-            RcaSynthesisOutput.Parsed parsed = RcaSynthesisOutput.parse(
-                    mapper, run.resultText(), baselineTraceIds, flaggedTraceIds, measuredChecks, job.projectId());
+            RcaSynthesisOutput.Parsed parsed = frustration
+                    ? RcaSynthesisOutput.parseFrustration(
+                            mapper, run.resultText(), flaggedTraceIds, sessionIds, measuredChecks, job.projectId())
+                    : RcaSynthesisOutput.parse(
+                            mapper,
+                            run.resultText(),
+                            baselineTraceIds,
+                            flaggedTraceIds,
+                            measuredChecks,
+                            job.projectId());
             if (parsed.detailedReport() == null) {
                 // Schema-required, but a schema-ignoring model must not sink an otherwise-valid
                 // verdict — fall back to the summary so the report page never renders empty.
                 log.warn("rca agentic project={} job={} returned no detailed_report", job.projectId(), job.id());
             }
             log.info(
-                    "rca agentic project={} job={} verdict={} downgraded={} hypotheses={} assessed={}/{} repo={}",
+                    "rca agentic project={} job={} kind={} verdict={} downgraded={} hypotheses={} causes={}"
+                            + " assessed={}/{} repo={}",
                     job.projectId(),
                     job.id(),
+                    report.reportKind(),
                     parsed.verdict(),
                     parsed.verdictNote() != null,
                     parsed.hypotheses().size(),
+                    parsed.causes().size(),
                     parsed.checklist().size(),
                     measuredChecks.size(),
                     clone.isPresent());
@@ -247,6 +280,7 @@ public class AgenticRcaEngine {
                     parsed.verdict(),
                     parsed.summary(),
                     parsed.hypotheses(),
+                    parsed.causes(),
                     parsed.checklist(),
                     detailed,
                     clone.isPresent());
@@ -438,6 +472,84 @@ public class AgenticRcaEngine {
                 .append(" repo path/commit, or query — a claim you cannot put in that table does not belong in")
                 .append(" the report) followed by a \"## What would settle it\" section naming the one")
                 .append(" experiment that would confirm or refute your leading hypothesis.\n\n");
+
+        sb.append("Finish by returning the JSON object required by the schema, and nothing else — the harness")
+                .append(" collects it through the structured-output tool, so do not wrap it in prose.");
+        return sb.toString();
+    }
+
+    /**
+     * The prompt for a frustration finding. It asks what the agent did rather than what changed, so the
+     * metric-movement burden of proof and its baseline-side requirement are left out: this finding has no
+     * baseline side, only the frustrated sessions and the turns that fired in them.
+     */
+    static String buildFrustrationPrompt(
+            RcaReportRow report, String findingId, boolean repoCloned, int sessions, int flaggedTurns) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are a root-cause analyst embedded in an LLM-evaluation platform. A classifier filed a")
+                .append(" FINDING: at one call site, the share of conversations whose user grew frustrated with")
+                .append(" the agent rose above the rate that call site learned as normal. Nobody has looked at")
+                .append(" it yet. Your job is to find out WHAT THE AGENT DID that frustrated these users, group")
+                .append(" it into causes, and PROVE each cause with sessions you can cite. A confident wrong")
+                .append(" cause is worse than an honest \"no cause found\": the engineer who reads it will act")
+                .append(" on it.\n\n");
+
+        sb.append("## What you have\n\n")
+                .append("`dossier/finding.md` — the claim and how many evidence refs it recorded per role.\n")
+                .append("`dossier/evidence.json` — its own numbers and how to read its refs.\n")
+                .append("`dossier/checklist.md` — one structural check, MEASURED BUT NOT JUDGED.\n\n")
+                .append("The finding id is `")
+                .append(findingId)
+                .append("`. The rise began at ")
+                .append(report.windowSplit())
+                .append(" and was last seen at ")
+                .append(report.windowTo())
+                .append(".\n\n");
+
+        sb.append(MCP_DOOR).append('\n');
+
+        sb.append("## The repository\n\n");
+        if (repoCloned) {
+            sb.append("`./repo/` is a clone of the project's repository at its current HEAD (run git as")
+                    .append(" `git -C ./repo ...`). The .tessary/ bundle, when present, describes the call sites")
+                    .append(" (repo/.tessary/pipeline/call_sites/**/*.yaml — intent, prompts, surrounding code).")
+                    .append(" Read the call site's prompt and tool definitions to find the line behind what the")
+                    .append(" agent did, and walk `git log` around ")
+                    .append(report.windowSplit())
+                    .append(". HEAD may postdate the finding.\n\n");
+        } else {
+            sb.append("There is none. This project has no repository connected, so there is no `./repo/`.")
+                    .append(" Establish what the agent did from the sessions themselves, set every attribution")
+                    .append(" kind to `unknown`, and state plainly in the report that the code side is unread.\n\n");
+        }
+
+        sb.append("THE CHECKLIST IS YOURS TO JUDGE. dossier/checklist.md carries failing_cohort_shape: the")
+                .append(" facets the flagged turns' traces share. A concentration is a lead, not a cause. Return")
+                .append(" exactly one `checklist` entry for it: `ruled_out`, `contributing`, `explains` or")
+                .append(" `unknown`.\n\n");
+
+        sb.append(FRUSTRATION_RULES).append('\n');
+
+        sb.append("EVIDENCE: this finding cites ")
+                .append(sessions)
+                .append(" frustrated session(s) and ")
+                .append(flaggedTurns)
+                .append(" flagged turn(s). There is no baseline side: the learned rate is a count, not a set of")
+                .append(" rows.");
+        if (sessions < SMALL_SIDE) {
+            sb.append(" At that size, read and name each session, cap every cause's confidence at \"medium\",")
+                    .append(" and state the sufficiency limit plainly in the report.");
+        }
+        sb.append("\n\n");
+
+        sb.append("OUTPUT: `causes`, most sessions first. Each cites `evidence_session_ids` from this finding's")
+                .append(" witness session refs (unknown ids are dropped, and a cause left with none is dropped)")
+                .append(" and `evidence_trace_ids` from its witness trace refs. `attribution` names the prompt,")
+                .append(" code, tool or model line behind the cause, with path, commit and excerpt, or kind")
+                .append(" `unknown`. Set verdict \"causes_identified\" when a cause stands and \"no_cause_found\"")
+                .append(" otherwise. The `detailed_report` field is your investigation as markdown, ending with an")
+                .append(" \"## Evidence audit\" table (every load-bearing claim to its session id, trace id, repo")
+                .append(" path/commit or query) and a \"## What would settle it\" section.\n\n");
 
         sb.append("Finish by returning the JSON object required by the schema, and nothing else — the harness")
                 .append(" collects it through the structured-output tool, so do not wrap it in prose.");

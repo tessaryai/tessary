@@ -185,5 +185,5 @@ export function causeLine(c: Pick<Case, "cause" | "rca_verdict">): { hedged: boo
       ? { hedged: false, text: label }
       : { hedged: false, text: "No cause located" };
   }
-  return { hedged: c.rca_verdict === "inconclusive", text: c.cause };
+  return { hedged: c.rca_verdict === "inconclusive" || c.rca_verdict === "no_cause_found", text: c.cause };
 }

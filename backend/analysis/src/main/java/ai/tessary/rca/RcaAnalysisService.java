@@ -11,6 +11,7 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaChecklist.Measurement;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
@@ -100,13 +101,21 @@ public class RcaAnalysisService {
 
         // ---- 1. dereference the evidence into the two sides ------------------------------------
         Sides sides = sides(job.projectId(), finding.id());
-        if (sides.flagged().isEmpty() && sides.baseline().isEmpty()) {
+        if (sides.flagged().isEmpty()
+                && sides.baseline().isEmpty()
+                && sides.sessions().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, finding.id());
         }
 
         // ---- 2. measure the structural checklist (no thresholds, no judgment) -------------------
-        List<Measurement> measurements =
-                new ArrayList<>(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
+        // A frustration finding has no baseline side, so serving_model, which compares two, has nothing to
+        // compare and is not measured rather than reported empty. failing_cohort_shape still reads the
+        // turns that fired.
+        boolean frustration = RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(report.reportKind());
+        List<Measurement> measurements = new ArrayList<>();
+        if (!frustration) {
+            measurements.addAll(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
+        }
         measurements.add(checklist.failingCohortShape(job.projectId(), new LinkedHashSet<>(sides.flagged())));
 
         // Citable = every trace the finding cites, per side. The evidence rows ARE the citable set:
@@ -117,13 +126,21 @@ public class RcaAnalysisService {
         // ---- 3. the sandboxed agent investigates -------------------------------------------------
         Map<String, String> files = dossierFiles(report, finding, measurements);
         AgenticRcaEngine.Result result = agenticEngine.run(
-                job, report, finding.id(), files, baselineTraceIds, flaggedTraceIds, measuredChecks(measurements));
+                job,
+                report,
+                finding.id(),
+                files,
+                baselineTraceIds,
+                flaggedTraceIds,
+                new LinkedHashSet<>(sides.sessions()),
+                measuredChecks(measurements));
         complete(
                 job,
                 result.verdict(),
                 result.summary(),
                 merge(measurements, result.checklist()),
                 result.hypotheses(),
+                result.causes(),
                 result.detailedReport(),
                 result.repoAvailable());
     }
@@ -142,8 +159,11 @@ public class RcaAnalysisService {
      * common, was handed the whole population and reported the shape of ordinary traffic. Every
      * classifier that writes no {@code witness} is unaffected: for those, {@code member} IS the flagged
      * population and the behaviour is exactly as before.
+     *
+     * <p>{@code sessions} holds the session-grain refs, which carry no trace id. Only Frustration writes
+     * them: each is a frustrated conversation, cited beside the trace of the turn that fired in it.
      */
-    private record Sides(List<String> baseline, List<String> flagged) {}
+    private record Sides(List<String> baseline, List<String> flagged, List<String> sessions) {}
 
     /**
      * Roles that name the flagged population when a classifier draws no narrower subset. {@code member}
@@ -158,7 +178,12 @@ public class RcaAnalysisService {
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnesses = new LinkedHashSet<>();
         Set<String> population = new LinkedHashSet<>();
+        Set<String> sessions = new LinkedHashSet<>();
         for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
+            if (row.traceId() == null && row.sessionId() != null) {
+                if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) sessions.add(row.sessionId());
+                continue;
+            }
             // Span-grain rows carry their trace id too, so nothing is dropped by keying on it here — but
             // the precision IS lost, because the checklist's reads are all trace-scoped. A trace holding
             // fifty calls of which one failed counts once, which is what "what do the failing traces have
@@ -179,7 +204,7 @@ public class RcaAnalysisService {
         // A trace cited on both sides is flagged: it is what the claim is about, and offering it as a
         // baseline anchor as well would let the agent cite the same trace as both sides of a comparison.
         baseline.removeAll(flagged);
-        return new Sides(List.copyOf(baseline), List.copyOf(flagged));
+        return new Sides(List.copyOf(baseline), List.copyOf(flagged), List.copyOf(sessions));
     }
 
     /** Fold the agent's assessments back onto the measurements they judged, in measurement order —
@@ -208,6 +233,7 @@ public class RcaAnalysisService {
             String summary,
             List<RuledOutCheck> checks,
             List<Hypothesis> hypotheses,
+            List<Cause> causes,
             @Nullable String detailedReport,
             boolean repoAvailable) {
         reports.complete(
@@ -217,16 +243,18 @@ public class RcaAnalysisService {
                 summary,
                 writeJson(checks),
                 writeJson(hypotheses),
+                causes.isEmpty() ? null : writeJson(causes),
                 detailedReport,
                 repoAvailable);
         log.info(
-                "rca done project={} subject={}:{} metric={} verdict={} hypotheses={}",
+                "rca done project={} subject={}:{} metric={} verdict={} hypotheses={} causes={}",
                 job.projectId(),
                 job.subjectKind(),
                 job.subjectId(),
                 job.metric(),
                 verdict,
-                hypotheses.size());
+                hypotheses.size(),
+                causes.size());
     }
 
     // ---- dossier assembly ---------------------------------------------------------------------------

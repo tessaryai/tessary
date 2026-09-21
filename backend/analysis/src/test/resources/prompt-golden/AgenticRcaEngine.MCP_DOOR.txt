@@ -14,7 +14,8 @@ finding is about. The dossier states the claim; you go and read it.
   `model`, `callSiteId`. Compare the two sides on the page itself, and pick the rows you open
   from the numbers. The payloads are NOT on this page; `get_span` is where a body comes from.
   Field names are camelCase on this surface, and the next page's token is `nextCursor`. Role
-  `baseline` is the BEFORE side; every other role is what was flagged. No sampling. Page the
+  `baseline` is the BEFORE side; every other role is what was flagged. A row with a `sessionId`
+  and no `traceId` is a whole conversation: read it with `get_session`. No sampling. Page the
   whole role and compute over all of it.
 - `get_trace(trace_id)` and `get_span(trace_id, span_id)` — the bodies behind a ref. A span
   id is unique only within its trace, which is why get_span takes both.

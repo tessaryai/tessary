@@ -2456,6 +2456,12 @@ export interface components {
             windowSeconds: number;
             windowStart: string | null;
         };
+        Attribution: {
+            commit: string | null;
+            excerpt: string | null;
+            kind: string;
+            path: string | null;
+        };
         AuditLog: {
             action: string;
             attributes: string | null;
@@ -2692,6 +2698,17 @@ export interface components {
         CatalogView: {
             models: components["schemas"]["CatalogEntry"][];
             platforms: components["schemas"]["PlatformDescriptor"][];
+        };
+        Cause: {
+            attribution: components["schemas"]["Attribution"] | null;
+            confidence: string;
+            evidence_session_ids: string[];
+            evidence_trace_ids: string[];
+            fix_suggestion: string;
+            /** Format: int32 */
+            sessions_affected: number;
+            title: string;
+            what_the_agent_did: string;
         };
         Chain: {
             call_site_ids: string[];
@@ -3621,6 +3638,7 @@ export interface components {
         };
         RcaReportView: {
             call_site_id: string | null;
+            causes: components["schemas"]["Cause"][];
             completed_at: string | null;
             created_at: string;
             /** Format: double */
@@ -3636,6 +3654,7 @@ export interface components {
             /** Format: double */
             prior_value: number;
             repo_available: boolean | null;
+            report_kind: string;
             ruled_out: components["schemas"]["RuledOutCheck"][];
             status: string;
             subject_id: string;

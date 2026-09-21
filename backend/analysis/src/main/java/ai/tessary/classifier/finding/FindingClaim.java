@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -39,6 +40,12 @@ public record FindingClaim(
      *  {@link FindingRow#evidenceCount}, which reads the same counter the same way. */
     public long evidenceCount(String role) {
         return FindingPayload.count(evidenceCountsJson, role);
+    }
+
+    /** A top-level number off the classifier's payload, 0 when absent or not a number. */
+    public double payloadNumber(String key) {
+        JsonNode node = FindingPayload.tree(payloadJson).path(key);
+        return node.isNumber() ? node.asDouble() : 0.0;
     }
 
     /** The classifier's own cause key, with the uniqueness scope stripped back off. */

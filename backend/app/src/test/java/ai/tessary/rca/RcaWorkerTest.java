@@ -186,11 +186,12 @@ class RcaWorkerTest {
         String passingTrace = seedTrace(pid, sessionId, FROM.plus(Duration.ofHours(2)));
 
         // behaviour_change is the agent's to assign — it read the call site's prompt in the repo.
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet()))
+        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.BEHAVIOR_CHANGE,
                         "The prompt was rewritten.",
                         List.of(new Hypothesis("stricter prompt", "high", "because", List.of(failingTrace))),
+                        List.of(),
                         List.of(new ChecklistAssessment(
                                 "serving_model", "explains", "commit abc123 moved the call site to a new model")),
                         "## Investigation",
@@ -288,7 +289,7 @@ class RcaWorkerTest {
         // A run that cannot reach the evidence door is a deployment fault, and the worker must stamp
         // `failed` (fail closed) rather than a bogus inconclusive: the agent reads every row it cites
         // through MCP, so there is no degraded mode to fall back to.
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet()))
+        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenThrow(new TessaryException(RcaError.NO_EVIDENCE_DOOR, "mcp base url unset"));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
@@ -310,14 +311,94 @@ class RcaWorkerTest {
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("failed", report.status());
         assertNotNull(report.summary());
-        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet());
+        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
+    }
+
+    /**
+     * A frustration finding cites frustrated conversations as session refs beside the turns that fired. The
+     * run gets those sessions as citable receipts, measures only the cohort shape (there is no baseline side
+     * for serving_model to compare), and its ranked causes persist on a frustration_causes report.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aFrustrationReportPersistsItsCausesAndSkipsTheTwoSidedCheck() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-frustration");
+        String pid = fix.project().id();
+        String sessionA = seedSession(pid);
+        String sessionB = seedSession(pid);
+        String turnA = seedTrace(pid, sessionA, SPLIT.plus(Duration.ofHours(2)));
+        String turnB = seedTrace(pid, sessionB, SPLIT.plus(Duration.ofHours(3)));
+        String findingId = seedFinding(pid, List.of(), List.of());
+        String now = Instant.now().toString();
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(
+                        FindingEvidenceRepository.Ref.session(sessionA),
+                        FindingEvidenceRepository.Ref.session(sessionB)),
+                now);
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(FindingEvidenceRepository.Ref.trace(turnA), FindingEvidenceRepository.Ref.trace(turnB)),
+                now);
+
+        RcaDtos.Cause cause = new RcaDtos.Cause(
+                "Ignores the attached file",
+                "Answers from memory when the user attaches a file.",
+                2,
+                List.of(sessionA, sessionB),
+                List.of(turnA),
+                new RcaDtos.Attribution("prompt", "agent/system.md", "abc123", "Answer briefly."),
+                "Tell the agent to read attachments first.",
+                "medium");
+        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+                .thenReturn(new AgenticRcaEngine.Result(
+                        RcaReportRow.Verdict.CAUSES_IDENTIFIED,
+                        "The agent ignores attachments.",
+                        List.of(),
+                        List.of(cause),
+                        List.of(new ChecklistAssessment("failing_cohort_shape", "ruled_out", "no concentration")),
+                        "## Investigation",
+                        true));
+
+        RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
+        worker.runForTest(job);
+
+        ArgumentCaptor<Set<String>> citableSessions = ArgumentCaptor.forClass(Set.class);
+        ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
+        verify(engine)
+                .run(
+                        any(),
+                        any(),
+                        anyString(),
+                        anyMap(),
+                        anySet(),
+                        flagged.capture(),
+                        citableSessions.capture(),
+                        anySet());
+        assertEquals(Set.of(sessionA, sessionB), citableSessions.getValue());
+        assertEquals(Set.of(turnA, turnB), flagged.getValue());
+
+        RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
+        assertEquals("done", report.status());
+        assertEquals(RcaReportRow.ReportKind.FRUSTRATION_CAUSES, report.reportKind());
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
+        assertEquals(Set.of("failing_cohort_shape"), storedChecks(report).keySet());
+
+        RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
+        assertEquals(List.of(cause), view.causes());
+        assertTrue(view.hypotheses().isEmpty());
     }
 
     // ---- helpers -----------------------------------------------------------------------------
 
     private void stubEngine(String verdict, List<ChecklistAssessment> checklist) {
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet()))
-                .thenReturn(new AgenticRcaEngine.Result(verdict, "summary", List.of(), checklist, "## report", true));
+        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+                .thenReturn(new AgenticRcaEngine.Result(
+                        verdict, "summary", List.of(), List.of(), checklist, "## report", true));
     }
 
     /** The persisted checklist, by check id. */
@@ -337,7 +418,7 @@ class RcaWorkerTest {
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedDossier() {
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
-        verify(engine).run(any(), any(), anyString(), files.capture(), anySet(), anySet(), anySet());
+        verify(engine).run(any(), any(), anyString(), files.capture(), anySet(), anySet(), anySet(), anySet());
         return files.getValue();
     }
 
@@ -380,6 +461,10 @@ class RcaWorkerTest {
     }
 
     private RcaJobRow enqueue(String pid, String findingId) {
+        return enqueue(pid, findingId, RcaReportRow.ReportKind.METRIC_MOVEMENT);
+    }
+
+    private RcaJobRow enqueue(String pid, String findingId, String reportKind) {
         String jobId = jobs.createOrGet(
                 pid, findingId, "behavior_profile", "profile-1", "behavior_drift", FROM, SPLIT, TO, "user-1");
         reports.insertPendingIfAbsent(
@@ -391,6 +476,7 @@ class RcaWorkerTest {
                 "deadline grader",
                 null,
                 "behavior_drift",
+                reportKind,
                 FROM,
                 SPLIT,
                 TO,
