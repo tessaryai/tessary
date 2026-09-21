@@ -3299,6 +3299,12 @@
           "detector" : {
             "type" : "string"
           },
+          "disposition" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "finding_count" : {
             "format" : "int64",
             "type" : "integer"
@@ -3403,6 +3409,7 @@
           "current_value",
           "delta",
           "detector",
+          "disposition",
           "finding_count",
           "id",
           "last_seen_at",
@@ -7747,6 +7754,13 @@
       },
       "ResolveCaseRequest" : {
         "properties" : {
+          "disposition" : {
+            "pattern" : "fixed|false_alarm",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "reason" : {
             "maxLength" : 500,
             "minLength" : 0,

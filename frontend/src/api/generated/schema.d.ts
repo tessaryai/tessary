@@ -2651,6 +2651,7 @@ export interface components {
             /** Format: double */
             delta: number | null;
             detector: string;
+            disposition: string | null;
             /** Format: int64 */
             finding_count: number;
             id: string;
@@ -3685,6 +3686,7 @@ export interface components {
             owner: string;
         };
         ResolveCaseRequest: {
+            disposition?: string | null;
             reason: string;
         };
         ResponseMeta: {

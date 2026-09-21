@@ -16,6 +16,8 @@ import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.frustration.FrustrationRateRepository;
+import ai.tessary.classifier.frustration.FrustrationSessionClearer;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
@@ -86,6 +88,10 @@ public class CaseService {
     /** Same reason as {@link #toolErrorStates}, for a malformed-output case: it shares tool_error's
      *  CUSUM engine and so needs the same accumulator reset when a human closes the case by hand. */
     private final MalformedOutputRateRepository malformedOutputRates;
+    /** A frustration case's call-site state: a resolve restarts it and re-learns its reference; see {@link #resolve}. */
+    private final FrustrationRateRepository frustrationRates;
+    /** Clears the conversations a frustration case cites when it is resolved as a false alarm. */
+    private final FrustrationSessionClearer frustrationSessions;
     /** "How outputs broke" — the same builder the malformed-output finding page reads. */
     private final MalformedOutputDetailService malformedOutputDetail;
     /** "When it leaked" — the same builder the secret-leak finding page reads. */
@@ -106,6 +112,8 @@ public class CaseService {
             ClassifierService classifiers,
             ToolErrorStateRepository toolErrorStates,
             MalformedOutputRateRepository malformedOutputRates,
+            FrustrationRateRepository frustrationRates,
+            FrustrationSessionClearer frustrationSessions,
             MalformedOutputDetailService malformedOutputDetail,
             SecretLeakDetailService secretLeakDetail) {
         this.cases = cases;
@@ -122,6 +130,8 @@ public class CaseService {
         this.classifiers = classifiers;
         this.toolErrorStates = toolErrorStates;
         this.malformedOutputRates = malformedOutputRates;
+        this.frustrationRates = frustrationRates;
+        this.frustrationSessions = frustrationSessions;
         this.malformedOutputDetail = malformedOutputDetail;
         this.secretLeakDetail = secretLeakDetail;
     }
@@ -408,19 +418,51 @@ public class CaseService {
 
     // ---- lifecycle ---------------------------------------------------------------------------
 
+    /** {@link #resolve(String, String, String, String, String)} with no disposition, as every case but frustration's. */
+    @Transactional
+    public CaseView resolve(String projectId, String id, String reason, @Nullable String actor) {
+        return resolve(projectId, id, reason, actor, null);
+    }
+
     /**
      * Close a case with the human's one-line reason. The reason is required by the wire contract and
      * by the table; it is the only thing that makes a closed case worth reading later.
+     *
+     * @param disposition only on a frustration case ({@link CaseRow.Disposition}): {@code fixed} or {@code
+     *     false_alarm}, stored on the case and in the trail line's detail. Null is allowed there too and restarts
+     *     the call site without clearing anything. Any other case refuses one.
      */
     @Transactional
-    public CaseView resolve(String projectId, String id, String reason, @Nullable String actor) {
+    public CaseView resolve(
+            String projectId, String id, String reason, @Nullable String actor, @Nullable String disposition) {
         CaseRow row = require(projectId, id);
         if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
         if (reason.isBlank()) throw new TessaryException(CaseError.REASON_REQUIRED);
+        boolean frustration = CaseRow.Detector.FRUSTRATION.equals(row.detector());
+        if (disposition != null && !frustration) {
+            throw new TessaryException(CaseError.DISPOSITION_NOT_APPLICABLE, row.reference());
+        }
 
         Instant now = Instant.now();
-        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, reason, actor, now);
-        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, null, now);
+        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, reason, actor, disposition, now);
+
+        // A frustration case restarts its call site whichever disposition closed it, and unlike tool_error it
+        // re-learns the reference too: a false alarm means the old normal was learned on noise, and a fix means
+        // the rate after it is the normal worth comparing against. The reset fence keeps the next replay from
+        // re-folding the hours before now. A false alarm also clears the conversations the case cites, so they
+        // stop counting as frustrated and their later turns are scored again. Both land before the findings
+        // close, in this transaction.
+        String detail = null;
+        if (frustration) {
+            frustrationRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
+                    ? frustrationSessions.clear(projectId, row.id(), now.toString())
+                    : 0;
+            detail = disposition == null
+                    ? null
+                    : "{\"disposition\":\"" + disposition + "\",\"conversations_cleared\":" + cleared + "}";
+        }
+        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, detail, now);
 
         // A tool-error case closes on a human saying "dealt with", and the accumulator behind it has to
         // hear that. It is no longer capped, so a serious outage leaves it high enough that draining at

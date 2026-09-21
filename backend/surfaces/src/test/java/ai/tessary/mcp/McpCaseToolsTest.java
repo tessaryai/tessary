@@ -369,6 +369,7 @@ class McpCaseToolsTest {
                 null,
                 null,
                 null,
+                null,
                 1L,
                 "fnd-1",
                 null,

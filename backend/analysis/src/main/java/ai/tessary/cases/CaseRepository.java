@@ -42,7 +42,7 @@ public class CaseRepository {
             + " AS latest_finding_id, "
             + "state, locked_at, title, basis, severity, onset_at, "
             + "current_value, baseline_value, delta, opened_at, last_seen_at, resolved_at, resolution, "
-            + "resolution_reason, resolved_by, muted_at, muted_by, updated_at";
+            + "resolution_reason, resolved_by, disposition, muted_at, muted_by, updated_at";
 
     private static final String LIVE_ORDER = "ORDER BY severity DESC, opened_at DESC";
 
@@ -342,9 +342,25 @@ public class CaseRepository {
             @Nullable String reason,
             @Nullable String actor,
             Instant now) {
+        resolve(projectId, id, resolution, reason, actor, null, now);
+    }
+
+    /**
+     * Close a case, recording the {@code disposition} a person chose for it ({@link CaseRow.Disposition}), or null
+     * where the case takes none.
+     */
+    public void resolve(
+            String projectId,
+            String id,
+            String resolution,
+            @Nullable String reason,
+            @Nullable String actor,
+            @Nullable String disposition,
+            Instant now) {
         jdbc.sql("""
                 UPDATE eval_case SET state = 'resolved', resolved_at = :now, resolution = :resolution,
-                    resolution_reason = :reason, resolved_by = :actor, updated_at = :now
+                    resolution_reason = :reason, resolved_by = :actor, disposition = :disposition,
+                    updated_at = :now
                 WHERE project_id = :pid AND id = :id AND state <> 'resolved'
                 """)
                 .param("pid", projectId)
@@ -352,6 +368,7 @@ public class CaseRepository {
                 .param("resolution", resolution)
                 .param("reason", reason)
                 .param("actor", actor)
+                .param("disposition", disposition)
                 .param("now", now.toString())
                 .update();
     }
@@ -410,6 +427,7 @@ public class CaseRepository {
                 rs.getString("resolution"),
                 rs.getString("resolution_reason"),
                 rs.getString("resolved_by"),
+                rs.getString("disposition"),
                 rs.getString("muted_at"),
                 rs.getString("muted_by"),
                 rs.getString("updated_at"));

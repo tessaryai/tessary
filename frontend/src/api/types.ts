@@ -509,6 +509,11 @@ export type VitalsDuration = S["Duration"];
  */
 export type Case = S["CaseView"];
 export type CaseDetail = S["CaseDetailView"];
+/**
+ * What a person said a resolved frustration case turned out to be. Both restart the call site's
+ * learned rate; `false_alarm` also clears the conversations the case cites. No other case takes one.
+ */
+export type CaseDisposition = "fixed" | "false_alarm";
 export type TriageView = S["TriageView"];
 /**
  * Who ruled the detection real, and what they said. `ruled_by` is `Human` or `Triage` and

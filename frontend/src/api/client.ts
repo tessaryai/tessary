@@ -58,6 +58,7 @@ import {
   type Case,
   type CaseDetail,
   type TriageView,
+  type CaseDisposition,
   type AlertRule,
   type UpsertAlertRule,
   type AlertChannel,
@@ -458,10 +459,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // muted; there is no claim endpoint because nothing in this product is assigned.
     getTriage: () => http<TriageView>(`${base}/cases`),
     getCase: (id: string) => http<CaseDetail>(`${base}/cases/${encodeURIComponent(id)}`),
-    resolveCase: (id: string, reason: string) =>
+    /**
+     * Close a case with a one-line reason. `disposition` is for a frustration case only: `fixed` restarts
+     * the call site's learned rate, `false_alarm` does that and clears the conversations the case cites.
+     * The server refuses one on any other case.
+     */
+    resolveCase: (id: string, reason: string, disposition?: CaseDisposition) =>
       http<Case>(`${base}/cases/${encodeURIComponent(id)}/resolve`, {
         method: "POST",
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify(disposition ? { reason, disposition } : { reason }),
       }),
     /**
      * Close the case and move the detector's reference, so the level it fired on becomes the new

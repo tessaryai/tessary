@@ -40,11 +40,11 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CaseDetail, EvidenceSpan, RcaReport } from "../../api/types";
+import type { CaseDetail, CaseDisposition, EvidenceSpan, RcaReport } from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, Card, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
+import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
 import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
@@ -54,6 +54,7 @@ import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, 
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
+import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
 
 /** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
 function stamp(iso: string): string {
@@ -99,7 +100,6 @@ export function CasePage() {
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [absorbOpen, setAbsorbOpen] = useState(false);
-  const [reason, setReason] = useState("");
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["case", api.base, caseId] });
@@ -107,10 +107,10 @@ export function CasePage() {
   };
 
   const resolveM = useMutation({
-    mutationFn: (r: string) => api.resolveCase(c?.id ?? "", r),
+    mutationFn: ({ reason, disposition }: { reason: string; disposition?: CaseDisposition }) =>
+      api.resolveCase(c?.id ?? "", reason, disposition),
     onSuccess: () => {
       setResolveOpen(false);
-      setReason("");
       invalidate();
     },
   });
@@ -291,7 +291,7 @@ export function CasePage() {
 
         {c.state === "resolved" && c.resolution_reason && (
           <p className="text-subtle mt-2.5 mx-0 mb-0 text-small">
-            Resolved {timeAgo(c.resolved_at ?? c.opened_at)}
+            Resolved{dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
             {c.resolved_by ? ` by ${c.resolved_by}` : ""}: {c.resolution_reason}
           </p>
         )}
@@ -375,28 +375,16 @@ export function CasePage() {
       )}
 
       <Modal open={resolveOpen} onClose={() => setResolveOpen(false)} title="Resolve this case?">
-        <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
-          One line on what this turned out to be. It is the only thing that makes a resolved case worth reading later.
-        </p>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Traffic mix shifted toward enterprise leads"
-          autoFocus
-        />
-        {resolveM.isError && <ErrorNote error={resolveM.error} />}
-        <div className="flex justify-end gap-2 mt-4.5">
-          <Button variant="ghost" size="sm" onClick={() => setResolveOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => resolveM.mutate(reason)}
-            disabled={reason.trim().length === 0 || resolveM.isPending}
-          >
-            {resolveM.isPending ? "Resolving…" : "Resolve case"}
-          </Button>
-        </div>
+        {/* Mounted only while open, so a reopened dialog starts from an empty reason. */}
+        {resolveOpen && (
+          <ResolveCaseForm
+            detector={c.detector}
+            pending={resolveM.isPending}
+            error={resolveM.isError ? resolveM.error : null}
+            onCancel={() => setResolveOpen(false)}
+            onResolve={(reason, disposition) => resolveM.mutate({ reason, disposition })}
+          />
+        )}
       </Modal>
 
       <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb as legitimate?">

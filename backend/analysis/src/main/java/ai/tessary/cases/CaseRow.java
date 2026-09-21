@@ -51,6 +51,8 @@ public record CaseRow(
         @Nullable String resolution,
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
+        /** What a person said a resolved frustration case was ({@link Disposition}); null on every other case. */
+        @Nullable String disposition,
         @Nullable String mutedAt,
         @Nullable String mutedBy,
         String updatedAt) {
@@ -195,6 +197,21 @@ public record CaseRow(
          * {@code absorbed} says the bar moved, and it will not.
          */
         public static final String ABSORBED = "absorbed";
+    }
+
+    /**
+     * {@code disposition} values: what a person said a resolved frustration case turned out to be. Both restart
+     * the call site's CUSUM and re-learn its normal rate from the traffic after the resolve; {@link #FALSE_ALARM}
+     * also clears the frustration flag on every conversation the case cites.
+     */
+    public static final class Disposition {
+        private Disposition() {}
+
+        /** The agent was changed; the rate after the resolve is the normal to learn. */
+        public static final String FIXED = "fixed";
+
+        /** The cited conversations were not frustration with the agent: they stop counting as frustrated. */
+        public static final String FALSE_ALARM = "false_alarm";
     }
 
     public boolean isLive() {
