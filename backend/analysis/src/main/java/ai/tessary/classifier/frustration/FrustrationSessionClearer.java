@@ -56,17 +56,18 @@ public class FrustrationSessionClearer {
         }
         if (classifierByFinding.isEmpty()) return 0;
 
+        // Walk findings in the case's order, not the returned map's, so the cleared list is deterministic.
+        Map<String, List<FindingEvidenceRow>> rowsByFinding =
+                evidence.listByFindings(projectId, new ArrayList<>(classifierByFinding.keySet()));
         Map<String, Set<String>> sessionsByClassifier = new LinkedHashMap<>();
-        evidence.listByFindings(projectId, new ArrayList<>(classifierByFinding.keySet()))
-                .forEach((findingId, rows) -> {
-                    String classifierId = classifierByFinding.get(findingId);
-                    for (FindingEvidenceRow row : rows) {
-                        if (row.sessionId() == null) continue;
-                        sessionsByClassifier
-                                .computeIfAbsent(classifierId, k -> new LinkedHashSet<>())
-                                .add(row.sessionId());
-                    }
-                });
+        for (Map.Entry<String, String> f : classifierByFinding.entrySet()) {
+            for (FindingEvidenceRow row : rowsByFinding.getOrDefault(f.getKey(), List.of())) {
+                if (row.sessionId() == null) continue;
+                sessionsByClassifier
+                        .computeIfAbsent(f.getValue(), k -> new LinkedHashSet<>())
+                        .add(row.sessionId());
+            }
+        }
 
         int conversations = 0;
         for (Map.Entry<String, Set<String>> e : sessionsByClassifier.entrySet()) {
