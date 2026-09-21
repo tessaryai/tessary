@@ -1,0 +1,125 @@
+---
+title: "OpenAI Agents SDK"
+description: "Send OpenAI Agents SDK traces to Tessary and tag each Runner.run() call with a call site, opening the OpenTelemetry span by hand around the run."
+---
+
+Send traces from [openai-agents-python](https://github.com/openai/openai-agents-python) to Tessary and tag each `Runner.run()` call with a call site. The SDK's built-in tracing sends to the OpenAI dashboard rather than to OpenTelemetry, so you open one span by hand around `Runner.run()` and fill in its attributes from the `RunResult` the call returns.
+
+## Prerequisites
+
+- A running Tessary instance, with the **Endpoint** and **Bearer Token** from its connect gate. See [Instrument your agent](/instrument/overview#prerequisites).
+- `OPENAI_API_KEY` set in the environment.
+- Python 3.10 or later, with `openai-agents`, `opentelemetry-sdk`, and `opentelemetry-exporter-otlp-proto-http` installed.
+
+## Add the exporter
+
+Tessary receives spans over OTLP (OpenTelemetry Protocol). Point the exporter at your Tessary instance with environment variables:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://your-tessary-host/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer <token>"
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+```
+
+Replace the host with your Tessary origin and `<token>` with the **Bearer Token** value from the connect gate.
+
+Then register an exporter that reads those variables. `OTLPSpanExporter()` with no arguments picks them up:
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+provider = TracerProvider(resource=Resource.create({"service.name": "openai-agents-sdk-recipe"}))
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)
+tracer = trace.get_tracer("tessary.recipe.openai-agents-sdk")
+```
+
+<Note>
+  If your application already configures a `TracerProvider`, skip this block. Add the Tessary exporter to the existing provider as described in [Configure an exporter](/instrument/exporters), and use its tracer. A span opened on a second provider that has no Tessary exporter is never sent.
+</Note>
+
+## Tag the Runner.run() call
+
+Each `Runner.run()` call is one call site. [The call-site tag](/instrument/call-site-tag) explains what counts as a call site and the rules for the id.
+
+Open a span around `Runner.run()`, set `tessary.call_site.id` as a literal, and fill in the fields [Span requirements](/instrument/span-requirements) marks required. Set the request fields before the call, then read the output and token usage off the returned `RunResult`:
+
+```python
+import asyncio
+import json
+
+from agents import Agent, Runner
+
+agent = Agent(name="Assistant", instructions="You are a helpful assistant", model="gpt-4o-mini")
+
+
+async def main() -> None:
+    prompt = "Write a haiku about recursion in programming."
+    with tracer.start_as_current_span("openai-agents-sdk.run") as span:
+        span.set_attribute("tessary.call_site.id", "support.answer")
+        span.set_attribute("gen_ai.operation.name", "invoke_agent")
+        span.set_attribute("gen_ai.provider.name", "openai")
+        span.set_attribute("gen_ai.request.model", "gpt-4o-mini")
+        span.set_attribute(
+            "gen_ai.input.messages",
+            json.dumps([{"role": "user", "parts": [{"type": "text", "content": prompt}]}]),
+        )
+
+        result = await Runner.run(agent, prompt)
+        print(result.final_output)
+
+        usage = result.context_wrapper.usage
+        span.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens)
+        span.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens)
+        span.set_attribute(
+            "gen_ai.output.messages",
+            json.dumps([{
+                "role": "assistant",
+                "parts": [{"type": "text", "content": result.final_output}],
+                "finish_reason": "stop",
+            }]),
+        )
+
+    provider.force_flush()
+
+
+asyncio.run(main())
+```
+
+`context_wrapper.usage` totals the tokens for every model request in the run, so the span reports the whole run's usage.
+
+<Warning>
+  Keep `tessary.call_site.id` a literal string, never an f-string or a variable. [The call-site tag](/instrument/call-site-tag#four-rules-that-are-not-negotiable) explains why: a computed value cannot be traced back to the code that produced it.
+</Warning>
+
+## Verify it works
+
+Run the example. It prints the agent's reply. Your text will differ:
+
+```text
+Code calls itself back,
+Infinite loops of logic,
+Depths of thought unfold.
+```
+
+<Check>
+  The connect gate opens once the tagged span arrives, with 1 trace and the `support.answer` call site. On a project already past the gate, the call site appears in the project instead. If a span arrives without the tag, [What done looks like](/instrument/overview#what-done-looks-like) describes the states you see instead.
+</Check>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="The call-site tag" icon="tag" href="/instrument/call-site-tag">
+    What counts as a call site, and the four non-negotiable rules for the id.
+  </Card>
+  <Card title="Span requirements" icon="table-list" href="/instrument/span-requirements">
+    Every field Tessary reads off a span, beyond what this page sets.
+  </Card>
+  <Card title="Configure an exporter" icon="share-nodes" href="/instrument/exporters">
+    The in-code and collector forms, and how to add Tessary to an exporter setup you already run.
+  </Card>
+</CardGroup>
