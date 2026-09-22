@@ -23,7 +23,7 @@ import type { RcaCause, RcaHypothesis, RcaRuledOutCheck } from "../api/types";
 const METRIC_LABEL: Record<string, string> = {
   pass_rate: "Pass rate",
   score: "Score",
-  frustration: "Frustrated conversations",
+  frustration: "Frustrated sessions",
 };
 
 const SUBJECT_LABEL: Record<string, string> = {
@@ -266,7 +266,7 @@ export function RcaReport() {
   const worse = r.delta < 0;
   const frustration = r.report_kind === "frustration_causes";
   const subtitle = frustration
-    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}Frustrated conversations rose to ${pct1(
+    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}Frustrated sessions rose to ${pct1(
         r.current_value,
       )} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
     : `${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${

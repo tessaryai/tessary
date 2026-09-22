@@ -150,7 +150,7 @@ export function FrustrationEnableModal({
               <li>Sends redacted user messages to {choice.label} for TypeSafe's Jev model to score.</li>
               <li>Costs about $0.04 per 1,000 messages on your {choice.label} key.</li>
               <li>
-                Learns each call site's normal rate from its first 200 conversations, then opens a case when the
+                Learns each call site's normal rate from its first 200 sessions, then opens a case when the
                 rate rises.
               </li>
             </ul>

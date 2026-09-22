@@ -160,8 +160,10 @@ public class RcaAnalysisService {
      * classifier that writes no {@code witness} is unaffected: for those, {@code member} IS the flagged
      * population and the behaviour is exactly as before.
      *
-     * <p>{@code sessions} holds the session-grain refs, which carry no trace id. Only Frustration writes
-     * them: each is a frustrated conversation, cited beside the trace of the turn that fired in it.
+     * <p>{@code sessions} holds the session-grain refs, which carry no trace id, on the same witness-first rule.
+     * Only Frustration writes them: {@code member} is every session its rate scored, and {@code witness} each
+     * frustrated one, cited beside the trace of the turn that fired in it. The witnesses are what RCA reads
+     * and may cite.
      */
     private record Sides(List<String> baseline, List<String> flagged, List<String> sessions) {}
 
@@ -178,10 +180,15 @@ public class RcaAnalysisService {
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnesses = new LinkedHashSet<>();
         Set<String> population = new LinkedHashSet<>();
-        Set<String> sessions = new LinkedHashSet<>();
+        Set<String> witnessSessions = new LinkedHashSet<>();
+        Set<String> populationSessions = new LinkedHashSet<>();
         for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
             if (row.traceId() == null && row.sessionId() != null) {
-                if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) sessions.add(row.sessionId());
+                if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
+                    witnessSessions.add(row.sessionId());
+                } else if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
+                    populationSessions.add(row.sessionId());
+                }
                 continue;
             }
             // Span-grain rows carry their trace id too, so nothing is dropped by keying on it here — but
@@ -201,6 +208,8 @@ public class RcaAnalysisService {
         // The narrowest set the classifier drew. A witness is a member the detector singled out, so where
         // both exist the witnesses are the claim and the members are what it was a fraction OF.
         Set<String> flagged = witnesses.isEmpty() ? population : witnesses;
+        // Sessions the same way: a frustration finding's members are every session it scored, most of them calm.
+        Set<String> sessions = witnessSessions.isEmpty() ? populationSessions : witnessSessions;
         // A trace cited on both sides is flagged: it is what the claim is about, and offering it as a
         // baseline anchor as well would let the agent cite the same trace as both sides of a comparison.
         baseline.removeAll(flagged);

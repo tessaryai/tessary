@@ -126,9 +126,8 @@ class FrustrationResolveIntegrationTest {
         assertNull(state.get("baseline_failures"));
         assertNotNull(state.get("reset_at"));
         assertEquals("rolled back the prompt", state.get("reset_note"));
-        assertEquals(0, clearedRows(pid), "fixed clears no conversation");
-        assertEquals(
-                "{\"disposition\": \"fixed\", \"conversations_cleared\": 0}", resolvedEventDetail(pid, opened.id()));
+        assertEquals(0, clearedRows(pid), "fixed clears no session");
+        assertEquals("{\"disposition\": \"fixed\", \"sessions_cleared\": 0}", resolvedEventDetail(pid, opened.id()));
 
         rates.refresh(pid, signal, Instant.now());
 
@@ -139,16 +138,17 @@ class FrustrationResolveIntegrationTest {
     }
 
     @Test
-    void falseAlarmAlsoClearsEveryCitedConversationSoItIsScoredAgain() {
+    void falseAlarmClearsEveryFrustratedSessionOfTheSpellSoItIsScoredAgain() {
         String pid = project("fr-false-alarm");
         ClassifierRow signal = frustration(pid);
         CaseRow opened = rise(pid, signal);
         FindingRow finding = findings.listByCase(pid, opened.id()).get(0);
         List<String> cited = evidence.listByFinding(pid, finding.id()).stream()
+                .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()))
                 .map(FindingEvidenceRow::sessionId)
                 .filter(s -> s != null)
                 .toList();
-        assertEquals(FrustrationRateService.MAX_WITNESSES, cited.size());
+        assertEquals(72, cited.size(), "every frustrated session since onset, past the fifty a page shows");
         String conversation = cited.get(0);
         new SubstrateV2Fixtures(sessions, traces, spans, payloads)
                 .trace(pid, "tr-later", "sess-later", conversation, null, Instant.now());
@@ -163,8 +163,8 @@ class FrustrationResolveIntegrationTest {
         assertEquals(
                 CaseRow.Disposition.FALSE_ALARM,
                 cases.findById(pid, opened.id()).orElseThrow().disposition());
-        assertEquals(cited.size(), clearedRows(pid), "every cited conversation, and only those");
-        assertTrue(flaggedRows(pid) > cited.size(), "the uncited flagged conversations stay flagged");
+        assertEquals(cited.size(), clearedRows(pid), "every frustrated session of the spell, and only those");
+        assertTrue(flaggedRows(pid) > cited.size(), "flags from before the spell are not this case's");
         assertEquals(
                 Set.of(),
                 detections.tracesInUnclearedFlaggedConversations(
@@ -172,8 +172,7 @@ class FrustrationResolveIntegrationTest {
                 "its later turn is scorable again");
         assertNull(state(pid).get("baseline_calls"), "a false alarm re-learns too");
         assertEquals(
-                "{\"disposition\": \"false_alarm\", \"conversations_cleared\": 50}",
-                resolvedEventDetail(pid, opened.id()));
+                "{\"disposition\": \"false_alarm\", \"sessions_cleared\": 72}", resolvedEventDetail(pid, opened.id()));
         assertEquals(1, assessmentsFlagged(pid, conversation), "the assessment still says what the scorer said");
     }
 

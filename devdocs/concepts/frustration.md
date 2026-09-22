@@ -68,10 +68,13 @@ its Tuning row says `learning n/200`.
 ## What a case says, and what a resolve does
 
 An alarming call site files one `frustration_rate` finding per spell, ruled positive at filing with no
-triage, and opens or joins its case. Its evidence is pairs of witness rows: the frustrated conversation
-at session grain and its flagged turn at trace grain, newest first, capped at 50. RCA on the case writes
-a cause report instead of a metric-movement report: causes grouped by what the agent did, each citing
-the conversations that show it.
+triage, and opens or joins its case. Its evidence is the rate's two sides, enumerated the way Tool Error
+enumerates its calls: every session scored on the call site since onset as `member`, and every frustrated
+one as `witness`, a session row followed by a trace row for the turn that fired. Neither is capped, and both
+are written on every pass up to the spell's last hour. The finding and case pages read the witnesses 50 at
+a time (`GET /findings/{id}/frustrated-sessions`). RCA on the case reads every witness session and writes a
+cause report instead of a metric-movement report: causes grouped by what the agent did, each citing the
+sessions that show it.
 
 Resolving the case, either way, zeroes the accumulator and drops the reference, so the call site
 learns its rate again from the traffic after the resolve (Tool Error keeps its reference on reset; this

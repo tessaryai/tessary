@@ -23,6 +23,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedConversationView;
+import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedSessionPage;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
@@ -42,7 +43,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * A rising call site end to end against Postgres: the replay files one finding for the spell, ruled positive at
- * filing, with the frustrated conversations as session and trace witness pairs; the case opens under detector
+ * filing, with every scored session as a member and every frustrated one as a session and trace witness pair,
+ * read back a page at a time; the case opens under detector
  * {@code frustration}; a second pass refreshes rather than re-files; and once someone runs RCA on the case, the
  * next spell opens a new one.
  */
@@ -80,6 +82,9 @@ class FrustrationRateIntegrationTest {
     ClassifierService classifierService;
 
     @Autowired
+    FrustrationDetailService frustrationDetail;
+
+    @Autowired
     JdbcClient jdbc;
 
     @Autowired
@@ -89,7 +94,7 @@ class FrustrationRateIntegrationTest {
     CapabilityFixture capabilities;
 
     @Test
-    void aRiseFilesOneRuledFindingWithConversationWitnessesAndOpensItsCase() {
+    void aRiseFilesOneRuledFindingWithEverySessionAsEvidenceAndOpensItsCase() {
         String pid = project("fr-case");
         ClassifierRow signal = frustration(pid);
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
@@ -108,24 +113,29 @@ class FrustrationRateIntegrationTest {
         assertEquals(FrustrationEvidence.SUMMARY, finding.triageSummary());
         assertNull(finding.escalatedAt(), "never escalated to Layer 2");
         String title = FindingTitle.of(finding);
-        assertTrue(
-                title.matches("Frustrated conversations increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
-        assertEquals(180, finding.sampleCount(), "conversations since onset");
+        assertTrue(title.matches("Frustrated sessions increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
+        assertEquals(180, finding.sampleCount(), "sessions since onset");
         assertEquals(210, finding.payload().path("baseline_conversations").asLong());
         assertEquals(VERSION, finding.payload().path("scorer_version").asText());
 
-        List<FindingEvidenceRow> rows = evidence.listByFinding(pid, finding.id());
-        assertTrue(rows.stream().allMatch(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role())), "witness only");
+        List<FindingEvidenceRow> all = evidence.listByFinding(pid, finding.id());
+        List<FindingEvidenceRow> members = all.stream()
+                .filter(r -> FindingEvidenceRow.Role.MEMBER.equals(r.role()))
+                .toList();
+        List<FindingEvidenceRow> rows = all.stream()
+                .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()))
+                .toList();
+        assertEquals(180, members.size(), "every session the rate counted, calm ones included");
+        assertTrue(members.stream().allMatch(r -> "session".equals(r.grain())));
         long sessions = rows.stream().filter(r -> "session".equals(r.grain())).count();
         long traces = rows.stream().filter(r -> "trace".equals(r.grain())).count();
-        assertEquals(FrustrationRateService.MAX_WITNESSES, sessions, "capped at fifty conversations");
-        assertEquals(sessions, traces, "each conversation beside the turn that fired in it");
+        assertEquals(72, sessions, "every frustrated session, not a sample of them");
+        assertEquals(sessions, traces, "each session beside the turn that fired in it");
         FindingEvidenceRow first = rows.get(0);
         FindingEvidenceRow second = rows.get(1);
         assertEquals("session", first.grain());
         assertEquals("trace", second.grain());
-        assertEquals("conv-" + second.traceId(), first.sessionId(), "the pair names one conversation");
-        assertEquals("conv-cs-chat-12-11", first.sessionId(), "newest conversations first");
+        assertEquals("conv-" + second.traceId(), first.sessionId(), "the pair names one session");
 
         assertNotNull(finding.caseId(), "the case opened in the same pass");
         CaseRow opened = cases.findById(pid, finding.caseId()).orElseThrow();
@@ -134,7 +144,7 @@ class FrustrationRateIntegrationTest {
         assertEquals("cs-chat", opened.subjectId());
         assertEquals(FrustrationEvidence.MEASURE, opened.metric());
         assertEquals(FindingTitle.of(finding), opened.title());
-        assertTrue(opened.basis().startsWith("72 of the 180 conversations since"), opened.basis());
+        assertTrue(opened.basis().startsWith("72 of the 180 sessions since"), opened.basis());
 
         BehaviorFindingDetailView detail =
                 triageSource.detail(pid, finding.id()).orElseThrow();
@@ -144,14 +154,42 @@ class FrustrationRateIntegrationTest {
         assertEquals(72, block.rate().failuresCur());
         assertEquals(210, block.rate().nRef());
         assertEquals(14, block.baselineFrustrated(), "two of every thirty in the seven reference hours");
-        assertEquals(FrustrationRateService.MAX_WITNESSES, block.conversations().size());
+        assertEquals(FrustrationDetailService.PAGE_SIZE, block.conversations().size(), "the first page");
+        assertEquals("50", block.conversationsNextCursor());
         FrustratedConversationView row = block.conversations().get(0);
-        assertEquals(first.sessionId(), row.conversationId());
+        assertEquals("conv-cs-chat-12-11", row.conversationId(), "newest flag first");
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
         assertEquals(
                 row.traceId(), row.contextTraceIds().get(row.contextTraceIds().size() - 1), "flagged turn last");
+
+        FrustratedSessionPage rest = frustrationDetail.page(finding, null, FrustrationDetailService.PAGE_SIZE, "50");
+        assertEquals(22, rest.rows().size(), "the rest, on the next page");
+        assertEquals(72, rest.total());
+        assertNull(rest.nextCursor(), "nothing after it");
+        assertTrue(
+                rest.rows().stream()
+                        .noneMatch(r -> block.conversations().stream()
+                                .anyMatch(b -> b.traceId().equals(r.traceId()))),
+                "no session on both pages");
+
+        // The second cause names one session and cites one trace: the page reads them off the stored report.
+        String report = rcaReport(
+                pid,
+                finding.id(),
+                "[{\"evidence_session_ids\":[\"conv-cs-chat-12-00\"],\"evidence_trace_ids\":[]},"
+                        + "{\"evidence_session_ids\":[\"conv-cs-chat-10-00\"],"
+                        + "\"evidence_trace_ids\":[\"cs-chat-11-01\"]}]");
+        FrustratedSessionPage oneCause =
+                frustrationDetail.page(finding, new FrustrationRateRepository.CauseRef(report, 1), 50, null);
+        assertEquals(
+                List.of("cs-chat-11-01", "cs-chat-10-00"),
+                oneCause.rows().stream()
+                        .map(FrustratedConversationView::traceId)
+                        .toList(),
+                "a cause's share, by its sessions or its traces");
+        assertEquals(2, oneCause.total());
 
         FrustrationDetail onCase = caseService.detail(pid, opened.id()).frustration();
         assertNotNull(onCase, "the case page gets the same block");
@@ -225,6 +263,33 @@ class FrustrationRateIntegrationTest {
     }
 
     // ---- fixtures
+
+    /** A finished frustration RCA report on {@code findingId} carrying {@code causes}, and its job. */
+    private String rcaReport(String pid, String findingId, String causes) {
+        String job = Ids.ulid();
+        String report = Ids.ulid();
+        String now = Instant.now().toString();
+        jdbc.sql("INSERT INTO job (id, project_id, kind, status, payload, created_at, updated_at)"
+                        + " VALUES (:id, :pid, 'rca', 'done', CAST('{}' AS jsonb), :now, :now)")
+                .param("id", job)
+                .param("pid", pid)
+                .param("now", now)
+                .update();
+        jdbc.sql("INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label, metric,"
+                        + " window_from, window_split, window_to, current_value, prior_value, delta, status,"
+                        + " created_at, engine, finding_id, report_kind, causes)"
+                        + " VALUES (:id, :pid, :job, 'call_site', 'cs-chat', 'cs-chat', 'frustration_rate',"
+                        + " :now, :now, :now, 0, 0, 0, 'done', :now, 'agentic', :fid, 'frustration_causes',"
+                        + " CAST(:causes AS jsonb))")
+                .param("id", report)
+                .param("pid", pid)
+                .param("job", job)
+                .param("now", now)
+                .param("fid", findingId)
+                .param("causes", causes)
+                .update();
+        return report;
+    }
 
     private String project(String slug) {
         return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))

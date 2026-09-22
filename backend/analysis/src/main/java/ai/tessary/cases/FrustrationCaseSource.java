@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a call site whose share of frustrated conversations rose above its learned rate into a case, from the
+ * Shapes a call site whose share of frustrated sessions rose above its learned rate into a case, from the
  * CUSUM {@link FrustrationRateService} replays through tool_error's engine.
  *
  * <p><b>No triage gate.</b> {@link FrustrationRateService} rules each spell's finding positive when it files it
@@ -60,8 +60,7 @@ public class FrustrationCaseSource implements CaseSource {
     private static String basis(FindingRow finding, RateDetail read) {
         return String.format(
                 Locale.ROOT,
-                "%d of the %d conversations since %s were frustrated with the agent. Learned rate %s over %d"
-                        + " conversations.",
+                "%d of the %d sessions since %s were frustrated with the agent. Learned rate %s over %d" + " sessions.",
                 read.failuresCur(),
                 read.nCur(),
                 finding.onsetAt(),

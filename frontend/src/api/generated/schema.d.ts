@@ -868,6 +868,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/frustrated-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_frustratedSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/malformed-outputs": {
         parameters: {
             query?: never;
@@ -2116,6 +2132,10 @@ export interface components {
             data?: components["schemas"]["FindingEvidenceSpanPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFrustratedSessionPage: {
+            data?: components["schemas"]["FrustratedSessionPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFrustrationTuningView: {
             data?: components["schemas"]["FrustrationTuningView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -3096,6 +3116,12 @@ export interface components {
             sessionId: string | null;
             traceId: string;
         };
+        FrustratedSessionPage: {
+            nextCursor: string | null;
+            rows: components["schemas"]["FrustratedConversationView"][];
+            /** Format: int64 */
+            total: number;
+        };
         FrustrationCallSiteView: {
             /** Format: int64 */
             baseline_conversations: number | null;
@@ -3121,6 +3147,7 @@ export interface components {
             /** Format: int64 */
             baselineFrustrated: number;
             conversations: components["schemas"]["FrustratedConversationView"][];
+            conversationsNextCursor: string | null;
             /** Format: double */
             jevThreshold: number;
             /** Format: double */
@@ -6272,6 +6299,36 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFindingEvidenceSpanPage"];
+                };
+            };
+        };
+    };
+    FindingController_frustratedSessions: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                rcaReport?: string;
+                cause?: number;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustratedSessionPage"];
                 };
             };
         };

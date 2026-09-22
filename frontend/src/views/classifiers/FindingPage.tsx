@@ -281,13 +281,13 @@ export function FindingPage() {
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
-              <span className="text-subtle text-small">Share of conversations with a user frustrated with the agent</span>
+              <span className="text-subtle text-small">Share of sessions with a user frustrated with the agent</span>
             </div>
             <FrustrationRate detail={frustration} />
           </section>
           <section className="mt-7">
             <div className="flex items-baseline gap-3 mb-2.75">
-              <h2 className="font-mono text-label uppercase text-muted">Frustrated conversations</h2>
+              <h2 className="font-mono text-label uppercase text-muted">Frustrated sessions</h2>
               <span className="text-subtle text-small">
                 {frustration.conversations.length > 0 && frustration.conversations.every((c) => c.cleared)
                   ? "Cleared when the case was resolved as a false alarm. They no longer count toward the rate."
@@ -295,8 +295,12 @@ export function FindingPage() {
               </span>
             </div>
             <FrustratedConversations
-              conversations={frustration.conversations}
-              total={frustration.rate.failuresCur}
+              findingId={findingId}
+              first={{
+                rows: frustration.conversations,
+                nextCursor: frustration.conversationsNextCursor,
+                total: frustration.rate.failuresCur,
+              }}
               basePath={basePath}
             />
           </section>
@@ -316,8 +320,8 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      {/* A frustration finding's evidence is its conversations, drawn above; the raw witness rows
-          would list the same fifty again as bare ids. */}
+      {/* A frustration finding's evidence is its sessions, drawn above; the raw witness rows
+          would list the same sessions again as bare ids. */}
       {!frustration && (
         <section className="mt-7">
           <h2 className="font-mono text-label uppercase text-muted mb-1.5">

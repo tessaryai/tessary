@@ -17,7 +17,7 @@ const DISPOSITIONS: [CaseDisposition, string, string][] = [
   [
     "false_alarm",
     "False alarm",
-    "The same, and the conversations this case cites stop counting as frustrated and become scorable again.",
+    "The same, and the sessions this case cites stop counting as frustrated and become scorable again.",
   ],
 ];
 

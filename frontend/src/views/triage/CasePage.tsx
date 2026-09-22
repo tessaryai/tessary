@@ -332,7 +332,7 @@ export function CasePage() {
             basePath={basePath}
             onShow={(i) => {
               setCauseFilter(String(i));
-              document.getElementById("frustrated-conversations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              document.getElementById("frustrated-sessions")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           />
         ) : (
@@ -362,8 +362,10 @@ export function CasePage() {
       )}
 
       {/* ------------------------------------------------------- the failures */}
-      {frustration ? (
+      {frustration && detail.latest_finding_id ? (
         <FrustrationList
+          findingId={detail.latest_finding_id}
+          rcaReportId={report?.id ?? null}
           frustration={frustration}
           causes={frustrationCauses}
           filter={causeFilter}
@@ -487,7 +489,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
   // A frustration case draws the finding page's own figure, whose first note already states the basis.
   if (detail.frustration) {
     return (
-      <Block label="What changed" note="Share of conversations with a user frustrated with the agent">
+      <Block label="What changed" note="Share of sessions with a user frustrated with the agent">
         <FrustrationRate detail={detail.frustration} />
       </Block>
     );
@@ -1024,10 +1026,10 @@ function FrustrationCauses({
       <Card className="border border-border p-0">
         <p className="m-0 border-b border-border py-4 px-5 text-body text-fg-secondary">
           Tessary identified {causes.length} likely {causes.length === 1 ? "cause" : "causes"} from the{" "}
-          {n.toLocaleString()} frustrated conversations{withRepo ? " and the agent's repository" : ""}.
+          {n.toLocaleString()} frustrated sessions{withRepo ? " and the agent's repository" : ""}.
         </p>
         {causes.map((k, i) => {
-          const shown = causeConversations(k, frustration).length;
+          const shown = causeSessionCount(k);
           const where = withRepo && k.attribution && k.attribution.kind !== "unknown" ? k.attribution : null;
           return (
             <div key={k.title} className={cn("flex flex-col gap-2.5 py-4 px-5", i > 0 && "border-t border-border")}>
@@ -1058,7 +1060,7 @@ function FrustrationCauses({
               {shown > 0 && (
                 <div>
                   <Button size="sm" variant="secondary" onClick={() => onShow(i)}>
-                    Show {shown} {shown === 1 ? "conversation" : "conversations"}
+                    Show {shown} {shown === 1 ? "session" : "sessions"}
                   </Button>
                 </div>
               )}
@@ -1083,20 +1085,24 @@ function FrustrationCauses({
   );
 }
 
-/** The conversations the case cites that a cause names, in the list's own order. */
-function causeConversations(cause: RcaCause, frustration: FrustrationDetail) {
-  const ids = new Set([...cause.evidence_session_ids, ...cause.evidence_trace_ids]);
-  return frustration.conversations.filter((c) => ids.has(c.conversationId) || ids.has(c.traceId));
+/** How many sessions a cause names. */
+function causeSessionCount(cause: RcaCause) {
+  return new Set(cause.evidence_session_ids).size;
 }
 
-/** The case's frustrated conversations, filtered to one cause when the reader asked for it. */
+/** The case's frustrated sessions, filtered to one cause when the reader asked for it. */
 function FrustrationList({
+  findingId,
+  rcaReportId,
   frustration,
   causes,
   filter,
   onFilter,
   basePath,
 }: {
+  findingId: string;
+  /** The report the causes come from, which the server reads a cause's sessions off. */
+  rcaReportId: string | null;
   frustration: FrustrationDetail;
   causes: RcaCause[];
   filter: string;
@@ -1105,23 +1111,27 @@ function FrustrationList({
 }) {
   const index = filter === "all" ? -1 : Number(filter);
   const cause = index >= 0 ? causes[index] : undefined;
-  const rows = cause ? causeConversations(cause, frustration) : frustration.conversations;
   const options = [
-    { key: "all", label: `All · ${frustration.conversations.length}` },
+    { key: "all", label: `All · ${frustration.rate.failuresCur.toLocaleString()}` },
     ...causes
-      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeConversations(k, frustration).length}` }))
+      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeSessionCount(k)}` }))
       .filter((o) => !o.label.endsWith(" · 0")),
   ];
   return (
-    <div id="frustrated-conversations">
-      <Block label="Frustrated conversations" note="Each flagged message with the turns before it">
+    <div id="frustrated-sessions">
+      <Block label="Frustrated sessions" note="Each flagged message with the turns before it">
         {options.length > 1 && (
           <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
         )}
         <FrustratedConversations
           key={cause ? filter : "all"}
-          conversations={rows}
-          total={cause ? rows.length : frustration.rate.failuresCur}
+          findingId={findingId}
+          first={{
+            rows: frustration.conversations,
+            nextCursor: frustration.conversationsNextCursor,
+            total: frustration.rate.failuresCur,
+          }}
+          filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
           basePath={basePath}
         />
       </Block>

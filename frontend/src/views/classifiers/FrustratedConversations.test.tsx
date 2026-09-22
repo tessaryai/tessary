@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * FrustratedConversations: the list shows each flagged message, selecting one reads its turns from the
- * real traces and draws the flagged user message in the flagged tint, and a conversation whose traces
- * have aged out says so instead of drawing nothing.
+ * real traces and draws the flagged user message in the flagged tint, the list reads the next page of
+ * sessions when asked, and a session whose traces have aged out says so instead of drawing nothing.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { FrustratedConversation, TraceDetailView } from "../../api/types";
+import type { FrustratedConversation, FrustratedSessionPage, TraceDetailView } from "../../api/types";
 import { FrustratedConversations } from "./FrustratedConversations";
 
 const getTrace = vi.fn<(id: string) => Promise<TraceDetailView>>();
+const getFrustratedSessions =
+  vi.fn<
+    (id: string, params?: { cursor?: string | null; cause?: { rcaReport: string; index: number } }) => Promise<FrustratedSessionPage>
+  >();
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
@@ -20,7 +24,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
     useTenant: () => ({
       orgSlug: "acme",
       projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getTrace },
+      api: { base: "/api/orgs/acme/projects/default", getTrace, getFrustratedSessions },
     }),
   };
 });
@@ -28,6 +32,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   getTrace.mockReset();
+  getFrustratedSessions.mockReset();
 });
 
 function conversation(over: Partial<FrustratedConversation> = {}): FrustratedConversation {
@@ -70,12 +75,22 @@ function trace(id: string, user: string, reply: string, at: string): TraceDetail
   };
 }
 
-function renderList(rows: FrustratedConversation[], total = rows.length) {
+function renderList(
+  rows: FrustratedConversation[],
+  total = rows.length,
+  nextCursor: string | null = null,
+  filter?: { rcaReport: string; index: number },
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <FrustratedConversations conversations={rows} total={total} basePath="/orgs/acme/projects/default" />
+        <FrustratedConversations
+          findingId="f-1"
+          first={{ rows, nextCursor, total }}
+          filter={filter}
+          basePath="/orgs/acme/projects/default"
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -92,7 +107,7 @@ describe("FrustratedConversations", () => {
     );
     renderList([conversation()], 71);
 
-    expect(screen.getByText("1 of 71 kept as evidence")).toBeTruthy();
+    expect(screen.getByText("1 of 71 sessions")).toBeTruthy();
     await screen.findByText("policy holder anjali patil");
     expect(getTrace.mock.calls.map((c) => c[0])).toEqual(["t-1", "t-2", "t-3"]);
 
@@ -141,7 +156,42 @@ describe("FrustratedConversations", () => {
     expect(getTrace).toHaveBeenCalledWith("t-9");
   });
 
-  it("says so when the conversation's traces are no longer stored", async () => {
+  it("reads the next page of sessions and adds it below the first", async () => {
+    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    getFrustratedSessions.mockResolvedValue({
+      rows: [conversation({ conversationId: "conv-2", traceId: "t-9", contextTraceIds: ["t-9"], message: "older" })],
+      total: 2,
+      nextCursor: null,
+    });
+    renderList([conversation()], 2, "1");
+    expect(screen.getByText("1 of 2 sessions")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Load more sessions/ }));
+
+    await screen.findByRole("button", { name: /older/ });
+    expect(getFrustratedSessions).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "1" }));
+    expect(screen.getByText("2 sessions")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Load more sessions/ })).toBeNull();
+  });
+
+  it("reads one cause's sessions from the server rather than the first page", async () => {
+    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    getFrustratedSessions.mockResolvedValue({
+      rows: [conversation({ conversationId: "conv-7", traceId: "t-7", contextTraceIds: ["t-7"], message: "caused" })],
+      total: 1,
+      nextCursor: null,
+    });
+    renderList([conversation()], 80, "50", { rcaReport: "rca-1", index: 2 });
+
+    await screen.findByRole("button", { name: /caused/ });
+    expect(getFrustratedSessions).toHaveBeenCalledWith(
+      "f-1",
+      expect.objectContaining({ cursor: null, cause: { rcaReport: "rca-1", index: 2 } }),
+    );
+    expect(screen.queryByRole("button", { name: /that cant be right/ })).toBeNull();
+  });
+
+  it("says so when the session's traces are no longer stored", async () => {
     getTrace.mockRejectedValue(new Error("not found"));
     renderList([conversation()]);
 

@@ -66,7 +66,7 @@ export function FrustrationBanner({ classifier }: { classifier: Classifier }) {
       <div className="flex-1 min-w-0">
         <div className="text-body font-medium text-fg">Frustration classifier is off</div>
         <p className="text-small text-muted m-0 mt-0.5" style={{ maxWidth: 560 }}>
-          Turn it on to find conversations where users get frustrated with your agent.{" "}
+          Turn it on to find sessions where users get frustrated with your agent.{" "}
           {storedLabel ? `Runs on your organization's ${storedLabel} key.` : "Runs on your OpenRouter or TypeSafe key."}
         </p>
       </div>

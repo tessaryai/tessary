@@ -440,6 +440,7 @@ export type MalformedOutputPage = S["FailingOutputPage"];
  */
 export type FrustrationDetail = S["FrustrationDetail"];
 export type FrustratedConversation = S["FrustratedConversationView"];
+export type FrustratedSessionPage = S["FrustratedSessionPage"];
 
 /**
  * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the

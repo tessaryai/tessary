@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -231,28 +232,36 @@ class FrustrationRateServiceTest {
     }
 
     @Test
-    void theEvidenceIsEachFrustratedConversationThenItsFlaggedTurnCappedAtFiftyPairs() {
+    void theEvidenceIsEveryScoredSessionAsMemberAndEveryFrustratedOneWithItsFlaggedTurnAsWitness() {
         Spell spell = firstSpell();
         when(findings.findOpenByCause(PROJECT, "frustration", CAUSE))
                 .thenReturn(Optional.of(ruled("f1", spell.decision().onsetAt())));
-        when(rates.frustratedSince(anyString(), anyString(), anyString(), anyString(), any(), any(), anyInt()))
+        when(rates.scoredSince(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(List.of("conv-new", "conv-calm", "conv-old"));
+        when(rates.frustratedSince(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
                 .thenReturn(List.of(
                         new FrustratedConversation("conv-new", "t-new"),
                         new FrustratedConversation("conv-old", "t-old")));
 
         service.refresh(PROJECT, signal(), at);
 
+        Instant onset = Instant.parse(spell.decision().onsetAt());
+        // Both sides stop at the end of the spell's last hour, where its counts stop.
+        Instant until =
+                Instant.parse(Objects.requireNonNull(spell.lastBucket())).plus(Duration.ofHours(1));
+        String version = FrustrationConfig.defaults().scorerVersion();
+        verify(rates).scoredSince(eq(PROJECT), eq("sig-1"), eq(version), eq(CALL_SITE), any(), eq(onset), eq(until));
         verify(rates)
-                .frustratedSince(
-                        eq(PROJECT),
-                        eq("sig-1"),
-                        eq(FrustrationConfig.defaults().scorerVersion()),
-                        eq(CALL_SITE),
-                        any(),
-                        eq(Instant.parse(spell.decision().onsetAt())),
-                        eq(FrustrationRateService.MAX_WITNESSES));
+                .frustratedSince(eq(PROJECT), eq("sig-1"), eq(version), eq(CALL_SITE), any(), eq(onset), eq(until));
         verify(evidence)
-                .recordUpTo(
+                .record(
+                        PROJECT,
+                        "f1",
+                        FindingEvidenceRow.Role.MEMBER,
+                        List.of(Ref.session("conv-new"), Ref.session("conv-calm"), Ref.session("conv-old")),
+                        at.toString());
+        verify(evidence)
+                .record(
                         PROJECT,
                         "f1",
                         FindingEvidenceRow.Role.WITNESS,
@@ -261,8 +270,8 @@ class FrustrationRateServiceTest {
                                 Ref.trace("t-new"),
                                 Ref.session("conv-old"),
                                 Ref.trace("t-old")),
-                        FrustrationRateService.MAX_WITNESSES * 2,
                         at.toString());
+        verify(evidence, never()).recordUpTo(anyString(), anyString(), anyString(), any(), anyInt(), anyString());
     }
 
     // ---- fixtures

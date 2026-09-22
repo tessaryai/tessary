@@ -315,9 +315,10 @@ class RcaWorkerTest {
     }
 
     /**
-     * A frustration finding cites frustrated conversations as session refs beside the turns that fired. The
-     * run gets those sessions as citable receipts, measures only the cohort shape (there is no baseline side
-     * for serving_model to compare), and its ranked causes persist on a frustration_causes report.
+     * A frustration finding cites every scored session as a member and the frustrated ones as witness session
+     * refs beside the turns that fired. The run gets only the frustrated sessions as citable receipts, never the
+     * calm members, measures only the cohort shape (there is no baseline side for serving_model to compare), and
+     * its ranked causes persist on a frustration_causes report.
      */
     @Test
     @SuppressWarnings("unchecked")
@@ -328,8 +329,18 @@ class RcaWorkerTest {
         String sessionB = seedSession(pid);
         String turnA = seedTrace(pid, sessionA, SPLIT.plus(Duration.ofHours(2)));
         String turnB = seedTrace(pid, sessionB, SPLIT.plus(Duration.ofHours(3)));
+        String calm = seedSession(pid);
         String findingId = seedFinding(pid, List.of(), List.of());
         String now = Instant.now().toString();
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(
+                        FindingEvidenceRepository.Ref.session(sessionA),
+                        FindingEvidenceRepository.Ref.session(calm),
+                        FindingEvidenceRepository.Ref.session(sessionB)),
+                now);
         evidence.record(
                 pid,
                 findingId,
@@ -379,7 +390,8 @@ class RcaWorkerTest {
                         flagged.capture(),
                         citableSessions.capture(),
                         anySet());
-        assertEquals(Set.of(sessionA, sessionB), citableSessions.getValue());
+        assertEquals(
+                Set.of(sessionA, sessionB), citableSessions.getValue(), "the frustrated sessions, not the calm one");
         assertEquals(Set.of(turnA, turnB), flagged.getValue());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();

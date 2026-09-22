@@ -24,16 +24,18 @@ public final class FrustrationEvidence {
     public static final String MEASURE = "frustration_rate";
 
     /** The ruling every spell's finding is filed with. It never goes through triage. */
-    public static final String SUMMARY = "Frustrated conversations at this call site rose above its own learned"
+    public static final String SUMMARY = "Frustrated sessions at this call site rose above its own learned"
             + " rate. Opened without triage; the numbers are on the finding.";
 
     private FrustrationEvidence() {}
 
     /**
      * The finding page's frustration block: the rate since onset against the learned rate, the tuning it was
-     * judged under, and the conversations it cites with the turn that fired in each.
+     * judged under, and the first page of the frustrated sessions it cites with the turn that fired in each.
      *
      * @param jevThreshold the per-turn score above which a turn was flagged
+     * @param conversations the newest frustrated sessions, one page of them
+     * @param conversationsNextCursor where the next page starts, or null when this is all of them
      */
     public record FrustrationDetail(
             RateDetail rate,
@@ -42,17 +44,36 @@ public final class FrustrationEvidence {
             double jevThreshold,
             long arlTarget,
             double minDecisionInterval,
-            List<FrustratedConversationView> conversations) {
+            List<FrustratedConversationView> conversations,
+            @Nullable String conversationsNextCursor) {
 
-        /** The same block with no conversation or trace ids, for the agent door. */
+        /** The same block with no session or trace ids, for the agent door. */
         public FrustrationDetail withoutIds() {
             return new FrustrationDetail(
-                    rate, baselineFrustrated, scorerVersion, jevThreshold, arlTarget, minDecisionInterval, List.of());
+                    rate,
+                    baselineFrustrated,
+                    scorerVersion,
+                    jevThreshold,
+                    arlTarget,
+                    minDecisionInterval,
+                    List.of(),
+                    null);
+        }
+    }
+
+    /** One page of a finding's frustrated sessions, and how many it cites under the same filter. */
+    public record FrustratedSessionPage(
+            List<FrustratedConversationView> rows,
+            long total,
+            @Nullable String nextCursor) {
+
+        public FrustratedSessionPage {
+            rows = List.copyOf(rows);
         }
     }
 
     /**
-     * One frustrated conversation the finding cites.
+     * One frustrated session the finding cites.
      *
      * @param callSiteId the flagged turn's own call site, which can differ from the finding's: a conversation
      *     counts on the call site of its first scored turn
@@ -136,8 +157,9 @@ public final class FrustrationEvidence {
                 body.path("criticality").asDouble(0));
     }
 
-    /** The page block for a finding, with the conversations the caller read for it. */
-    public static FrustrationDetail detail(FindingRow finding, List<FrustratedConversationView> conversations) {
+    /** The page block for a finding, with the first page of sessions the caller read for it. */
+    public static FrustrationDetail detail(
+            FindingRow finding, List<FrustratedConversationView> conversations, @Nullable String nextCursor) {
         JsonNode body = finding.payload();
         JsonNode version = body.path("scorer_version");
         return new FrustrationDetail(
@@ -147,7 +169,8 @@ public final class FrustrationEvidence {
                 body.path("jev_threshold").asDouble(0),
                 body.path("arl_target").asLong(0),
                 body.path("min_decision_interval").asDouble(0),
-                List.copyOf(conversations));
+                List.copyOf(conversations),
+                nextCursor);
     }
 
     /** Ordering weight for a case, the squash every rate detector on tool_error's engine shares. */

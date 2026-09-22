@@ -334,36 +334,35 @@ public final class ClassifierMethodCard {
             """;
 
     private static final String FRUSTRATION = """
-            ## frustration: a Bernoulli CUSUM over one call site's frustrated conversations
+            ## frustration: a Bernoulli CUSUM over one call site's frustrated sessions
 
-            **Measures** the fraction of one call site's conversations in which the user became
+            **Measures** the fraction of one call site's sessions in which the user became
             frustrated with the agent. Each eligible user turn is one question to a hosted decision model:
             a turn is eligible only when the four messages before it are user, assistant, user, assistant,
-            each with text, so a conversation's first two user turns are never scored. A turn is flagged
+            each with text, so a session's first two user turns are never scored. A turn is flagged
             when its `unhappy_with_assistant` score exceeds the threshold; frustration aimed at something
-            outside the chat never flags. A conversation stops being scored at its first flag.
+            outside the chat never flags. A session stops being scored at its first flag.
 
             **Compares against** the rate that call site learned as its own normal over its first
-            conversations, a fitted number and not a stretch of traffic. A call site that was frustrating
+            sessions, a fitted number and not a stretch of traffic. A call site that was frustrating
             from the start learned that as normal and is flagged only for getting worse. A resolve
             restarts the accumulator and re-learns the rate from the traffic after it.
 
-            A conversation is one trial, counted on the call site of its first scored turn, and it is a
+            A session is one trial, counted on the call site of its first scored turn, and it is a
             failure while it holds an uncleared flag. The flagged turn can sit on another call site.
 
             **The claim's numbers** are in `get_finding` under `frustration`: `rate` (`refRate` and
-            `curRate` as fractions of conversations, `nRef`, `nCur`, `failuresCur`, `statistic` against
+            `curRate` as fractions of sessions, `nRef`, `nCur`, `failuresCur`, `statistic` against
             `threshold`, `effectSize`, `direction`, `onsetAt`, and no pattern breakdown),
             `baselineFrustrated`, `jevThreshold`, `arlTarget`, `minDecisionInterval` and `scorerVersion`.
-            The denominator `nCur` is a count, not enumerated rows.
 
             **Evidence**
-            - `witness` session rows: frustrated conversations since onset, newest first, capped at 50.
-            - `witness` trace rows: the user turn that was flagged inside each of those conversations, in
-              the same order, so the two lists pair.
+            - `member` session rows: every session scored on the call site since onset, the rate's
+              denominator.
+            - `witness` session rows: every frustrated session since onset, the numerator. Read these.
+            - `witness` trace rows: the user turn that was flagged inside each of those sessions.
 
             **Absent roles**
-            - No `member`: the denominator is `rate.nCur`, not rows.
             - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
               side to enumerate.
             - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
@@ -371,9 +370,9 @@ public final class ClassifierMethodCard {
 
             ### Cause: `frustration_rate`
 
-            The share of one call site's conversations in which the user was frustrated with the agent has
+            The share of one call site's sessions in which the user was frustrated with the agent has
             risen above the rate it learned. Some frustration is normal. The claim holds when the witness
-            conversations show the user reacting to something the agent did, and that behaviour is
+            sessions show the user reacting to something the agent did, and that behaviour is
             what changed, not who the users are or what they asked.
             """;
 

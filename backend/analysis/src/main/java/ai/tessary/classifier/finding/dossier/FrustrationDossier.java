@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
- * The {@code frustration_rate} shape: a call site's share of frustrated conversations against the rate it
+ * The {@code frustration_rate} shape: a call site's share of frustrated sessions against the rate it
  * learned as its normal. Restates the rate in conversations and says what the two witness grains mean, since a
  * session row beside a trace row is not something the other shapes teach an agent to read.
  */
@@ -27,7 +27,7 @@ final class FrustrationDossier {
                 .append("`\n");
         sb.append(String.format(
                 Locale.ROOT,
-                "- frustrated conversations: %.2f%% learned → %.2f%% since onset (CUSUM %.2f past a %.2f decision"
+                "- frustrated sessions: %.2f%% learned → %.2f%% since onset (CUSUM %.2f past a %.2f decision"
                         + " interval)%n",
                 root.path("baseline_rate").asDouble(0) * 100,
                 root.path("current_rate").asDouble(0) * 100,
@@ -35,7 +35,7 @@ final class FrustrationDossier {
                 root.path("threshold").asDouble(0)));
         sb.append(String.format(
                 Locale.ROOT,
-                "- learned from %d conversations, %d frustrated%n",
+                "- learned from %d sessions, %d frustrated%n",
                 root.path("baseline_conversations").asLong(0),
                 root.path("baseline_frustrated").asLong(0)));
         sb.append(String.format(

@@ -37,7 +37,7 @@ export function FrustrationHeader({
       title={finding.title}
       subtitle={
         closed
-          ? "This finding is closed. This call site is learning its normal rate again from its next conversations."
+          ? "This finding is closed. This call site is learning its normal rate again from its next sessions."
           : "Frustration findings skip triage. Tessary opened a case as soon as the rate rose above this call site's normal."
       }
       actions={
@@ -60,21 +60,21 @@ export function FrustrationHeader({
   );
 }
 
-/** "What changed": the rate chart tool error uses, and the two numbers behind it in conversations. */
+/** "What changed": the rate chart tool error uses, and the two numbers behind it in sessions. */
 export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
   const rate = detail.rate;
   const since = rate.onsetAt ? new Date(rate.onsetAt).toLocaleString(undefined, DAY_MONTH_TIME) : null;
   const points = Math.abs(rate.deltaPp);
   return (
     <>
-      <RateChart rate={rate} label="Frustrated conversations" />
+      <RateChart rate={rate} label="Frustrated sessions" />
       <PinList>
-        <Pin n={1} title={`${formatRate(rate.curRate)} of conversations are frustrated`}>
-          {rate.failuresCur.toLocaleString()} of {rate.nCur.toLocaleString()} conversations
+        <Pin n={1} title={`${formatRate(rate.curRate)} of sessions are frustrated`}>
+          {rate.failuresCur.toLocaleString()} of {rate.nCur.toLocaleString()} sessions
           {since ? ` since ${since}` : ""} had a user frustrated with the agent. This rate opened the case.
         </Pin>
         <Pin n={2} title={`${formatRate(rate.refRate)} is normal for this call site`}>
-          Learned from its first {rate.nRef.toLocaleString()} conversations. The current rate is{" "}
+          Learned from its first {rate.nRef.toLocaleString()} sessions. The current rate is{" "}
           {points.toFixed(1)} percentage {points === 1 ? "point" : "points"} higher. A message counts as
           frustrated when its score is above {detail.jevThreshold.toFixed(2)}.
         </Pin>

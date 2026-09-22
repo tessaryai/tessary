@@ -68,13 +68,14 @@ public class FrustrationRateRepository {
             """;
 
     /**
-     * The frustrated conversations a finding cites: the tally's own grouping, so a conversation is listed on the
-     * call site and in the hour it was a trial in, joined to its newest uncleared flag for the turn that fired.
-     * {@code :windowFrom} is the replay window's start, so the first scored turn is found over the same rows the
-     * tally read; {@code :onset} then keeps the conversations since the spell began. Reads neither {@code request}
-     * nor {@code response}.
+     * The sessions a spell's finding enumerates, in the tally's own grouping: each session on the call site and
+     * in the hour it was a trial in. {@code :windowFrom} is the replay window's start, so the first scored turn
+     * is found over the same rows the tally read; {@code :onset} and {@code :until} then bound the sessions to
+     * the hours the spell's rate covers. {@code {frustrated}} is empty for every scored session (the rate's
+     * denominator) or {@code HAVING BOOL_OR(a.frustrated)} for the frustrated ones (its numerator). Reads
+     * neither {@code request} nor {@code response}.
      */
-    static final String FRUSTRATED_SINCE = """
+    private static final String SPELL_SESSIONS = """
             WITH conv AS (
               SELECT a.conversation_id,
                      MIN(a.turn_started_at) AS first_scored_at,
@@ -83,22 +84,65 @@ public class FrustrationRateRepository {
                WHERE a.project_id = :pid AND a.classifier_id = :cid
                  AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :windowFrom
                GROUP BY a.conversation_id
-              HAVING BOOL_OR(a.frustrated))
-            SELECT c.conversation_id, d.subject_trace_id
+              {frustrated})
+            SELECT c.conversation_id{flaggedColumn}
               FROM conv c
-              JOIN LATERAL (
+              {flaggedJoin}
+             WHERE c.call_site_id = :callSite AND c.first_scored_at >= :onset AND c.first_scored_at < :until
+             ORDER BY c.first_scored_at DESC, c.conversation_id DESC
+            """;
+
+    /** The newest uncleared flag of each frustrated session: the turn that fired in it. */
+    private static final String FLAGGED_JOIN = """
+            JOIN LATERAL (
                 SELECT d.subject_trace_id
                   FROM {detections} d
                  WHERE d.project_id = :pid AND d.classifier_id = :cid
                    AND d.subject_session_id = c.conversation_id AND d.cleared_at IS NULL
                  ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
+                 LIMIT 1) d ON true""";
+
+    static final String FRUSTRATED_SINCE = SPELL_SESSIONS
+            .replace("{frustrated}", "HAVING BOOL_OR(a.frustrated)")
+            .replace("{flaggedColumn}", ", d.subject_trace_id")
+            .replace("{flaggedJoin}", FLAGGED_JOIN);
+
+    static final String SCORED_SINCE = SPELL_SESSIONS
+            .replace("{frustrated}", "")
+            .replace("{flaggedColumn}", "")
+            .replace("{flaggedJoin}", "");
+
+    /**
+     * One page of the frustrated sessions a finding cites, newest flag first: its witness trace rows, each the
+     * turn that fired in a session, ordered by when that turn happened. With {@code {filter}} set, only one RCA
+     * cause's share: the witnesses whose session the cause names, or whose trace it cites, read off the stored
+     * report (which must be this finding's) so the request carries two short values rather than every id.
+     */
+    private static final String WITNESS_PAGE = """
+            SELECT e.trace_id, COUNT(*) OVER () AS total
+              FROM finding_evidence e
+              LEFT JOIN LATERAL (
+                SELECT d.subject_session_id, d.subject_started_at
+                  FROM {detections} d
+                 WHERE d.project_id = e.project_id AND d.classifier_id = :cid AND d.subject_trace_id = e.trace_id
+                 ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
                  LIMIT 1) d ON true
-             WHERE c.call_site_id = :callSite AND c.first_scored_at >= :onset
-             ORDER BY c.first_scored_at DESC, c.conversation_id DESC
-             LIMIT :limit
+             WHERE e.project_id = :pid AND e.finding_id = :fid AND e.role = 'witness'
+               AND e.trace_id IS NOT NULL AND e.span_id IS NULL
+               {filter}
+             ORDER BY d.subject_started_at DESC NULLS LAST, e.trace_id DESC
+             LIMIT :limit OFFSET :offset
             """;
 
-    /** One frustrated conversation a finding cites, and the flagged turn inside it. */
+    /** One page of witness trace ids and how many the finding cites in all, under the same filter. */
+    public record WitnessPage(List<String> traceIds, long total) {
+
+        public WitnessPage {
+            traceIds = List.copyOf(traceIds);
+        }
+    }
+
+    /** One frustrated session a finding cites, and the flagged turn inside it. */
     public record FrustratedConversation(String conversationId, String flaggedTraceId) {}
 
     /**
@@ -182,8 +226,8 @@ public class FrustrationRateRepository {
     }
 
     /**
-     * The frustrated conversations of one call site's stream since {@code onset}, newest first, at most
-     * {@code limit}. Empty while no frustration detection table is registered.
+     * Every frustrated session of one call site's stream in {@code [onset, until)}, newest first: the spell's
+     * witnesses. Empty while no frustration detection table is registered.
      */
     public List<FrustratedConversation> frustratedSince(
             String projectId,
@@ -192,20 +236,90 @@ public class FrustrationRateRepository {
             String callSiteId,
             Instant windowFrom,
             Instant onset,
-            int limit) {
+            Instant until) {
         String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
-        if (table == null || limit <= 0) return List.of();
-        return jdbc.sql(FRUSTRATED_SINCE.replace("{detections}", table))
-                .param("pid", projectId)
-                .param("cid", classifierId)
-                .param("scorerVersion", scorerVersion)
-                .param("windowFrom", Timestamp.from(windowFrom))
+        if (table == null) return List.of();
+        return spellSessions(FRUSTRATED_SINCE.replace("{detections}", table), projectId, classifierId, scorerVersion)
                 .param("callSite", callSiteId)
+                .param("windowFrom", Timestamp.from(windowFrom))
                 .param("onset", Timestamp.from(onset))
-                .param("limit", limit)
+                .param("until", Timestamp.from(until))
                 .query((rs, n) ->
                         new FrustratedConversation(rs.getString("conversation_id"), rs.getString("subject_trace_id")))
                 .list();
+    }
+
+    /**
+     * Every scored session of one call site's stream in {@code [onset, until)}, newest first: the spell's
+     * members, the population its rate is a fraction of.
+     */
+    public List<String> scoredSince(
+            String projectId,
+            String classifierId,
+            String scorerVersion,
+            String callSiteId,
+            Instant windowFrom,
+            Instant onset,
+            Instant until) {
+        return spellSessions(SCORED_SINCE, projectId, classifierId, scorerVersion)
+                .param("callSite", callSiteId)
+                .param("windowFrom", Timestamp.from(windowFrom))
+                .param("onset", Timestamp.from(onset))
+                .param("until", Timestamp.from(until))
+                .query((rs, n) -> rs.getString("conversation_id"))
+                .list();
+    }
+
+    private JdbcClient.StatementSpec spellSessions(
+            String sql, String projectId, String classifierId, String scorerVersion) {
+        return jdbc.sql(sql).param("pid", projectId).param("cid", classifierId).param("scorerVersion", scorerVersion);
+    }
+
+    /** The filter that keeps one RCA cause's witnesses: {@code :report} and its 0-based {@code :cause}. */
+    private static final String CAUSE_FILTER = """
+            AND EXISTS (
+                SELECT 1 FROM rca_report r
+                 WHERE r.id = :report AND r.project_id = e.project_id AND r.finding_id = e.finding_id
+                   AND (d.subject_session_id IN (
+                            SELECT jsonb_array_elements_text(r.causes -> CAST(:cause AS int) -> 'evidence_session_ids'))
+                        OR e.trace_id IN (
+                            SELECT jsonb_array_elements_text(r.causes -> CAST(:cause AS int) -> 'evidence_trace_ids'))))""";
+
+    /** One RCA cause: the report that found it and its 0-based position in that report's causes. */
+    public record CauseRef(String reportId, int index) {}
+
+    /**
+     * One page of {@code findingId}'s witness trace ids, newest flag first, and the total under the same filter.
+     * With {@code cause} set, only the witnesses that cause names: its share.
+     */
+    public WitnessPage witnessPage(
+            String projectId, String classifierId, String findingId, @Nullable CauseRef cause, int limit, int offset) {
+        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
+        if (table == null || limit <= 0) return new WitnessPage(List.of(), 0);
+        JdbcClient.StatementSpec spec = jdbc.sql(WITNESS_PAGE
+                        .replace("{detections}", table)
+                        .replace("{filter}", cause == null ? "" : CAUSE_FILTER))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("fid", findingId)
+                .param("limit", limit)
+                .param("offset", Math.max(0, offset));
+        if (cause != null) {
+            spec = spec.param("report", cause.reportId()).param("cause", cause.index());
+        }
+        long[] total = {0};
+        List<String> ids = spec.query((rs, n) -> {
+                    total[0] = rs.getLong("total");
+                    return rs.getString("trace_id");
+                })
+                .list();
+        if (ids.isEmpty() && offset > 0) {
+            // Past the end: the window count is on no row, so read it on its own.
+            return new WitnessPage(
+                    List.of(),
+                    witnessPage(projectId, classifierId, findingId, cause, 1, 0).total());
+        }
+        return new WitnessPage(ids, total[0]);
     }
 
     /**

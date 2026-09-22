@@ -466,7 +466,7 @@ public class CaseService {
                     : 0;
             detail = disposition == null
                     ? null
-                    : "{\"disposition\":\"" + disposition + "\",\"conversations_cleared\":" + cleared + "}";
+                    : "{\"disposition\":\"" + disposition + "\",\"sessions_cleared\":" + cleared + "}";
         }
         events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, detail, now);
 

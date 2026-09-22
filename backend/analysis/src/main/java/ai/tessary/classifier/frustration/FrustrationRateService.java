@@ -57,9 +57,13 @@ import org.springframework.transaction.support.TransactionOperations;
  * <p><b>A spell opens a finding and a case without triage.</b> Each rising call site files one finding per spell,
  * ruled positive at filing with {@link FrustrationEvidence#SUMMARY}, and opens or joins its case in the same
  * transaction, the path a high-confidence secret leak takes. A later pass over the same spell (same onset)
- * refreshes that finding's numbers and tops up its evidence instead of filing again. The evidence is the
- * frustrated conversations since onset, newest first, each as a session witness followed by a trace witness
- * for the turn that fired.
+ * refreshes that finding's numbers and its evidence instead of filing again.
+ *
+ * <p><b>The evidence is the rate's two sides, enumerated as tool_error enumerates its calls</b>: every session
+ * scored on the call site since onset as {@code member}, and every frustrated one as {@code witness}, a session
+ * row followed by a trace row for the turn that fired. Neither is capped, since a cap is a sample with an
+ * undeclared selection rule, and both are written on every pass up to the end of the spell's last hour, so they
+ * grow with the spell and match its counts. A false-alarm resolve clears the witnesses, and RCA reads them.
  *
  * <p>Only a rise is reported. Runs when the TURN sweep reaches the head of the stream, never mid-page, so the
  * assessment table is complete up to the cursor whenever this reads it. It reads tables, not the provider, so a
@@ -78,12 +82,6 @@ public class FrustrationRateService implements ClassifierCatchUp {
 
     /** How long a spell may go unrefreshed before the next firing is a new one: tool_error's window. */
     static final Duration QUIET_WINDOW = Duration.ofHours(6);
-
-    /**
-     * Frustrated conversations kept on a finding for a reader to open, the cap secret_leak and Malformed Output
-     * use. Each is two witness rows, the conversation and its flagged turn, so the role holds twice this.
-     */
-    static final int MAX_WITNESSES = 50;
 
     private final FrustrationRateRepository rates;
     private final FindingRepository findings;
@@ -262,19 +260,28 @@ public class FrustrationRateService implements ClassifierCatchUp {
 
         String onset = d.onsetAt();
         Instant since = onset != null ? parse(onset, windowFrom) : windowFrom;
-        List<FrustratedConversation> frustrated = rates.frustratedSince(
-                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, MAX_WITNESSES);
-        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>(frustrated.size() * 2);
-        for (FrustratedConversation c : frustrated) {
-            refs.add(FindingEvidenceRepository.Ref.session(c.conversationId()));
-            refs.add(FindingEvidenceRepository.Ref.trace(c.flaggedTraceId()));
+        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
+        Instant until =
+                spell.lastBucket() != null ? parse(spell.lastBucket(), at).plus(Duration.ofHours(1)) : at;
+        List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
+        for (String session :
+                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until)) {
+            members.add(FindingEvidenceRepository.Ref.session(session));
         }
-        int stored = evidence.recordUpTo(
-                projectId, findingId, FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES * 2, now);
+        List<FrustratedConversation> frustrated = rates.frustratedSince(
+                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>(frustrated.size() * 2);
+        for (FrustratedConversation c : frustrated) {
+            witnesses.add(FindingEvidenceRepository.Ref.session(c.conversationId()));
+            witnesses.add(FindingEvidenceRepository.Ref.trace(c.flaggedTraceId()));
+        }
+        // Rows already stored are skipped by the ref's unique index, so each pass adds only what is new.
+        int stored = evidence.record(projectId, findingId, FindingEvidenceRow.Role.MEMBER, members, now)
+                + evidence.record(projectId, findingId, FindingEvidenceRow.Role.WITNESS, witnesses, now);
 
         StructuredLog.info(log, Markers.OPS, "frustration.spell")
                 .message(
-                        "%s: %.1f%% of conversations frustrated since %s, against a learned %.1f%%",
+                        "%s: %.1f%% of sessions frustrated since %s, against a learned %.1f%%",
                         callSite,
                         d.currentRate() * 100,
                         onset == null ? "the window's start" : onset,
@@ -284,10 +291,10 @@ public class FrustrationRateService implements ClassifierCatchUp {
                 .field("callSiteId", callSite)
                 .field("finding", findingId)
                 .field("opened", filed)
-                .field("conversationsSinceOnset", d.callsSinceOnset())
+                .field("sessionsSinceOnset", d.callsSinceOnset())
                 .field("frustratedSinceOnset", d.failuresSinceOnset())
                 .field("criticality", d.criticality())
-                .field("witnessesStored", stored)
+                .field("evidenceStored", stored)
                 .log();
     }
 
