@@ -245,7 +245,7 @@ function pipelineFor(head) {
         // any sane task size (the 6 GB Fargate task OOM'd on exactly this, 2026-07-12).
         // Without the arena, inference memory returns to baseline after every
         // micro-batch — ~10-20% slower, bounded forever.
-        session_options: { enableCpuMemArena: false },
+        session_options: { enableCpuMemArena: false, intraOpNumThreads: intraOpThreads() },
       };
       if (spec.subfolder !== undefined) opts.subfolder = spec.subfolder;
       console.log(`classify: loading head '${head}' (${spec.model}@${spec.revision})`);
@@ -400,6 +400,16 @@ async function classify(payload) {
 }
 
 // Token heads: whole-response scoring, see groundedness.js for the contract and the encoding.
+// onnxruntime sizes its intra-op pool to the HOST's cores, not the container's CPU quota: under
+// `--cpus 2` it spawned twelve threads that spun against a two-CPU cgroup and a short response took
+// 2.2 s that the same engine scores in 0.25 s outside the container (measured). Pin the pool to what
+// the process may actually run on; ONNX_INTRA_THREADS overrides for a deliberate choice.
+const intraOpThreads = () => {
+  const fromEnv = Number(process.env.ONNX_INTRA_THREADS);
+  if (Number.isInteger(fromEnv) && fromEnv > 0) return fromEnv;
+  return Math.max(1, require('node:os').availableParallelism());
+};
+
 const tokenHead = require('./groundedness');
 const tokenModels = new Map();
 async function tokenModelFor(head) {
@@ -410,9 +420,9 @@ async function tokenModelFor(head) {
       tf.env.localModelPath = process.env.HF_CACHE_DIR || '/models';
       tf.env.allowRemoteModels = false;
       const spec = HEADS[head];
-      const opts = { dtype: spec.dtype, session_options: { enableCpuMemArena: false } };
+      const opts = { dtype: spec.dtype, session_options: { enableCpuMemArena: false, intraOpNumThreads: intraOpThreads() } };
       if (spec.subfolder !== undefined) opts.subfolder = spec.subfolder;
-      console.log(`classify: loading token head '${head}' (${spec.model}@${spec.revision})`);
+      console.log(`classify: loading token head '${head}' (${spec.model}@${spec.revision}, ${intraOpThreads()} intra-op threads)`);
       const started = Date.now();
       const tokenizer = await tf.AutoTokenizer.from_pretrained(spec.model);
       const model = await tf.AutoModelForTokenClassification.from_pretrained(spec.model, opts);

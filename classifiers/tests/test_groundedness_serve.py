@@ -23,6 +23,18 @@ def test_validate_mirrors_the_js_contract():
         serve.validate({"head": "groundedness", "responses": [{"passages": ["p"], "answer": "a"}] * 17})
 
 
+def test_gate_bounds_inflight_and_queue_and_answers_the_rest_with_a_refusal():
+    gate = serve.Gate(max_inflight=1, max_queue=1, timeout_s=0.05)
+    assert gate.acquire() is True, "the one slot, taken without queueing"
+    assert gate.acquire() is False, "the one queue place times out waiting for the slot"
+    gate.release()
+    assert gate.acquire() is True, "the released slot is reusable"
+    gate.release()
+    strict = serve.Gate(max_inflight=1, max_queue=0, timeout_s=0.05)
+    assert strict.acquire() is True, "no queue still means the free slot is granted"
+    assert strict.acquire() is False, "and the second concurrent request is refused at once"
+
+
 def test_reduce_takes_the_max_token_per_sentence_and_skips_short_ones():
     answer = "The refund takes two hours to arrive. Ok. Second sentence is also long enough."
     # Three "tokens" per sentence, laid over character offsets; one context token first (seq 0).

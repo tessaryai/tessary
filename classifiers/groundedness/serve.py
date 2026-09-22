@@ -57,6 +57,36 @@ def pick_device(requested: str) -> str:
     return "cpu"
 
 
+class Gate:
+    """classify-service's ConcurrencyGate, in Python: at most `max_inflight` requests score at once,
+    at most `max_queue` wait for a slot, and a waiter gives up after `timeout_s`. Past either bound the
+    request is answered 429 with Retry-After, so the backend backs off in-process instead of piling
+    threads onto the one GPU and timing out its own 5-minute requests."""
+
+    def __init__(self, max_inflight: int, max_queue: int, timeout_s: float):
+        self.slots = threading.BoundedSemaphore(max(1, max_inflight))
+        self.max_queue = max(0, max_queue)
+        self.timeout_s = timeout_s
+        self.waiting = 0
+        self.lock = threading.Lock()
+
+    def acquire(self) -> bool:
+        if self.slots.acquire(blocking=False):
+            return True  # a free slot: no queueing at all
+        with self.lock:
+            if self.waiting >= self.max_queue:
+                return False  # the queue is full: refuse now rather than hold a socket open
+            self.waiting += 1
+        try:
+            return self.slots.acquire(timeout=self.timeout_s)
+        finally:
+            with self.lock:
+                self.waiting -= 1
+
+    def release(self) -> None:
+        self.slots.release()
+
+
 class Head:
     """The loaded model and the one scoring function. One forward pass per response, serialised."""
 
@@ -133,11 +163,13 @@ def validate(payload: dict) -> list[dict]:
     return responses
 
 
-def make_handler(head: Head, key: str):
+def make_handler(head: Head, key: str, gate: Gate):
     class Handler(BaseHTTPRequestHandler):
-        def _json(self, status: int, body: dict) -> None:
+        def _json(self, status: int, body: dict, headers: dict | None = None) -> None:
             data = json.dumps(body).encode()
             self.send_response(status)
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -160,6 +192,8 @@ def make_handler(head: Head, key: str):
                 return self._json(400, {"error": str(e)})
             except Exception as e:  # noqa: BLE001 — malformed JSON is a 400, not a crash
                 return self._json(400, {"error": f"bad request: {e}"})
+            if not gate.acquire():
+                return self._json(429, {"error": "at capacity, retry later"}, {"Retry-After": "2"})
             started = time.time()
             try:
                 scores = [head.score(r["passages"], r.get("question"), r["answer"]) for r in responses]
@@ -168,6 +202,8 @@ def make_handler(head: Head, key: str):
             except Exception as e:  # noqa: BLE001 — an OOM or a device fault is a 500, never a dropped socket
                 log.exception("scoring failed on %s", head.device)
                 return self._json(500, {"error": f"scoring failed: {type(e).__name__}"})
+            finally:
+                gate.release()
             log.info("scored %d response(s) in %.3fs on %s", len(scores), time.time() - started, head.device)
             return self._json(200, {"scores": scores})
 
@@ -187,6 +223,12 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "18080")))
     ap.add_argument("--key", default=os.environ.get("CLASSIFY_API_KEY"),
                     help="the bearer key the backend presents (TESSARY_OBSERVER_ENCODER_API_KEY); generated if omitted")
+    ap.add_argument("--max-inflight", type=int, default=int(os.environ.get("MAX_INFLIGHT", "1")),
+                    help="requests scoring at once (one GPU: 1); the backend's encoder.max-inflight must not exceed it")
+    ap.add_argument("--max-queue", type=int, default=int(os.environ.get("MAX_QUEUE", "8")),
+                    help="requests allowed to wait for a slot before 429")
+    ap.add_argument("--queue-timeout", type=float, default=float(os.environ.get("QUEUE_TIMEOUT_S", "20")),
+                    help="seconds a request may wait for a slot before 429")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     key = args.key or secrets.token_urlsafe(24)
@@ -199,7 +241,10 @@ def main() -> None:
         log.info("no --key given; generated one for this run: %s", key)
     log.info("listening on http://%s:%d — set TESSARY_OBSERVER_ENCODER_URL=http://host.docker.internal:%d and "
              "TESSARY_OBSERVER_ENCODER_API_KEY to the key", args.host, args.port, args.port)
-    ThreadingHTTPServer((args.host, args.port), make_handler(head, key)).serve_forever()
+    gate = Gate(args.max_inflight, args.max_queue, args.queue_timeout)
+    log.info("inflight %d, queue %d, queue timeout %.0fs; past those the answer is 429 + Retry-After",
+             args.max_inflight, args.max_queue, args.queue_timeout)
+    ThreadingHTTPServer((args.host, args.port), make_handler(head, key, gate)).serve_forever()
 
 
 if __name__ == "__main__":

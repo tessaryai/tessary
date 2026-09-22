@@ -50,6 +50,14 @@ request shapes depending on the head:
   bounded work per request is this service's founding lesson).
 - `GET /healthz` — unauthenticated, used by the ECS health check.
 
+### Concurrency and CPU quota
+
+`MAX_INFLIGHT` (2) requests score at once, `MAX_QUEUE` (8) wait, the rest get 429 with the backend
+retrying after a backoff; the backend keeps its own side under `tessary.observer.encoder.max-inflight`
+so it never sends more than this service can hold. onnxruntime's thread pool is pinned to the CPUs
+the container may use (`os.availableParallelism()`, override `ONNX_INTRA_THREADS`): unpinned it
+sized itself to the host's cores and spun against the cgroup quota, measured at nine times slower.
+
 ### Token head: `groundedness`
 
 `groundedness.js`. The head reads every retrieved passage and the whole answer in ONE encoder pass

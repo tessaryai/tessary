@@ -130,6 +130,7 @@ time it took.
 | `--dtype` | `fp32` | `fp16` is 20 to 30 percent faster and halves memory, and moves scores by up to 0.03. Use it on a 16 GB Mac; expect a few borderline answers to change band. |
 | `--port` | `18080` | Any free port; change the URL in `.env` to match. |
 | `--model` | `tessaryai/groundedness-token-v1` at the pinned revision | A local checkpoint directory, for a model you trained yourself. |
+| `--max-inflight` | `1` | Requests scored at once. One GPU scores one at a time, so leave it; set the backend's `TESSARY_OBSERVER_ENCODER_MAX_INFLIGHT` to the same value. Past it, up to `--max-queue` (8) requests wait `--queue-timeout` (20 s) and the rest are answered 429, which the backend retries with backoff. |
 
 ## Where it does not help
 

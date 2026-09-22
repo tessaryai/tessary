@@ -193,6 +193,7 @@ public final class GroundednessDetector implements BuiltInDetector {
         List<EncoderScorer.ResponseScore> scores = scorer.scoreResponses("groundedness", responses);
         for (int r = 0; r < scores.size(); r++) {
             EncoderScorer.ResponseScore rs = scores.get(r);
+            if (!rs.scored()) continue; // refused by the encoder (too long): no verdict, not "clean"
             double unsupported = rs.unsupported();
             if (unsupported < low) continue;
             String confidence = unsupported >= high ? Detection.Confidence.HIGH : Detection.Confidence.LOW;

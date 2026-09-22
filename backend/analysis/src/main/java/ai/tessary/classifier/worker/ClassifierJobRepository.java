@@ -146,6 +146,24 @@ public class ClassifierJobRepository {
      * consistent. {@code attempts} resets to 0 on a genuine success so {@link #markFailed}'s cap always
      * measures <em>consecutive</em> failures since the last healthy sweep, not a lifetime total.
      */
+    /**
+     * Persist a sweep's progress WITHOUT releasing the job: the cursor moves, the lease and the
+     * {@code claimed} status stay, so an encoder-backed sweep paging within its drain budget cannot
+     * be re-claimed by another worker mid-drain, and a failure after this write re-scores only the
+     * pages after it.
+     */
+    public void advanceCursor(String id, String cursorAt, String cursorId) {
+        jdbc.sql("""
+            UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId, updated_at = :now
+            WHERE id = :id AND status = 'claimed'
+            """)
+                .param("id", id)
+                .param("cursorAt", cursorAt)
+                .param("cursorId", cursorId)
+                .param("now", Instant.now().toString())
+                .update();
+    }
+
     public void markSwept(String id, @Nullable String cursorAt, @Nullable String cursorId) {
         jdbc.sql("""
             UPDATE job SET status = 'done',

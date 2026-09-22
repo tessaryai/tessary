@@ -77,11 +77,18 @@ public class ClassifierWorker {
      * <p>A backlog for these arrives all at once rather than a page a minute: a backfill upload lands months
      * of spans in one go, and Malformed Output rewinds to the start of history the moment a call site's schema
      * arrives. At one page a tick, a 250,000-span project takes most of a day to catch up. Both are
-     * deterministic and cheap per span. The encoder-backed kinds are left at one page a tick on purpose:
-     * draining them would put a whole backlog of scoring calls on the classify service in a single tick.
+     * deterministic and cheap per span.
+     *
+     * <p>The encoder-backed kind (groundedness) drains too, but at {@code encoder-batch-size} a page rather than
+     * {@code batch-size}: each observation is a model call, so a page is sized to finish well inside the
+     * lease on a CPU encoder, the cursor lands after every page, and the scorer holds at most {@code
+     * tessary.observer.encoder.max-inflight} requests open and backs off on a 429 — so a backlog reaches
+     * the classify service at the pace it can take, never as one tick's worth of calls.
      */
-    private static final Set<String> DRAIN_TO_HEAD =
-            Set.of(BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT);
+    private static final Set<String> DRAIN_TO_HEAD = Set.of(
+            BuiltInDetector.Kind.SECRET_LEAK,
+            BuiltInDetector.Kind.MALFORMED_OUTPUT,
+            BuiltInDetector.Kind.GROUNDEDNESS);
 
     // A job stuck failing every tick gets one full stacktrace, then a "still failing" summary
     // every 30 occurrences (~30 ticks at the default 60s heartbeat) instead of one per tick.
@@ -454,6 +461,9 @@ public class ClassifierWorker {
         String detectorConfig = signal.configJson();
         boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
         Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
+        int pageSize = BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())
+                ? props.getEncoderBatchSize()
+                : props.getBatchSize();
 
         String cursorAt = job.cursorAt();
         String cursorId = job.cursorId();
@@ -467,7 +477,7 @@ public class ClassifierWorker {
         // when a whole drain fires.
         NewDetection firstNew = null;
         while (true) {
-            Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId);
+            Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId, pageSize);
             if (page == null) {
                 jobs.markSwept(job.id(), null, null);
                 atHead = true;
@@ -490,13 +500,13 @@ public class ClassifierWorker {
             cursorAt = page.cursorAt();
             cursorId = page.cursorId();
             boolean more = drain
-                    && page.windowSize() >= props.getBatchSize()
+                    && page.windowSize() >= pageSize
                     && Duration.between(start, Instant.now()).compareTo(budget) < 0;
             if (more) {
                 leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.getLeaseSeconds());
             } else {
                 jobs.markSwept(job.id(), cursorAt, cursorId);
-                atHead = page.windowSize() < props.getBatchSize();
+                atHead = page.windowSize() < pageSize;
             }
             // The classifier's own arming, evaluated here rather than by an alerting worker reading the
             // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
@@ -595,7 +605,8 @@ public class ClassifierWorker {
             @Nullable BuiltInDetector detector,
             @Nullable String detectorConfig,
             @Nullable String cursorAt,
-            @Nullable String cursorId) {
+            @Nullable String cursorId,
+            int pageSize) {
         // The window is what the cursor advances over, the same unfiltered stream at both grains so
         // the cursor always moves. `obs`, what actually gets scored, is the window minus the rows the
         // grain rejects, so a dropped row is never re-offered on a later tick.
@@ -603,7 +614,7 @@ public class ClassifierWorker {
         List<SubstrateObservation> obs;
         if (grain == Grain.TURN) {
             List<SubstrateReadRepository.TurnCandidate> candidates =
-                    substrate.turnCandidatesAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
+                    substrate.turnCandidatesAfter(job.projectId(), cursorAt, cursorId, pageSize);
             window = candidates.stream()
                     .map(SubstrateReadRepository.TurnCandidate::observation)
                     .toList();
@@ -616,7 +627,7 @@ public class ClassifierWorker {
                             .map(SubstrateReadRepository.TurnCandidate::observation)
                             .toList()));
         } else {
-            window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
+            window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, pageSize);
             obs = window;
         }
         if (window.isEmpty()) return null;
