@@ -244,19 +244,41 @@ class JevFrustrationDetectorTest {
     }
 
     @Test
-    void twoFlaggedTurnsOfOneConversationOnOnePageFlagItOnce() {
-        SubstrateObservation first = eligibleTurn("t-1", "conv-a");
-        SubstrateObservation second = eligibleTurn("t-2", "conv-a");
-        client.answer("t-1", 0.8, 0.0);
-        client.answer("t-2", 0.9, 0.0);
+    void aConversationStopsBeingSentAtItsFirstFlagOnThePage() {
+        SubstrateObservation calm = eligibleTurn("t-1", "conv-a", 30);
+        SubstrateObservation flagged = eligibleTurn("t-2", "conv-a", 20);
+        SubstrateObservation after = eligibleTurn("t-3", "conv-a", 10);
+        SubstrateObservation other = eligibleTurn("t-4", "conv-b", 5);
+        client.answer("t-1", 0.1, 0.0);
+        client.answer("t-2", 0.8, 0.0);
+        client.answer("t-3", 0.9, 0.0);
+        client.answer("t-4", 0.1, 0.0);
         JevFrustrationDetector d = detector();
 
-        List<FiredTurn> fired =
-                d.complete(signal("{}"), d.score(signal("{}"), List.of(first, second)), PageAction.PERSIST, 5);
+        // Out of order on the page: the conversation is still scored earliest turn first.
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(after, other, flagged, calm));
+        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
 
-        assertEquals(1, fired.size(), "the conversation's flag is its first flagged turn");
-        assertEquals("t-1", fired.get(0).turn().traceId());
-        verify(assessments, times(2)).insert(any());
+        assertFalse(client.requests.containsKey("t-3"), "nothing after the conversation's flag is sent");
+        assertEquals(Set.of("t-1", "t-2", "t-4"), client.requests.keySet());
+        assertEquals(4, page.eligible());
+        assertEquals(3, page.sent());
+        assertEquals(1, fired.size());
+        assertEquals("t-2", fired.get(0).turn().traceId());
+        verify(assessments, times(3)).insert(any());
+    }
+
+    @Test
+    void aFailedCallDoesNotStopItsConversation() {
+        SubstrateObservation failed = eligibleTurn("t-1", "conv-a", 20);
+        SubstrateObservation next = eligibleTurn("t-2", "conv-a", 10);
+        client.fail("t-1", DecisionError.PROVIDER_UNAVAILABLE);
+        client.answer("t-2", 0.1, 0.0);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(failed, next));
+
+        assertEquals(Set.of("t-1", "t-2"), client.requests.keySet());
+        assertEquals(1, page.unavailable());
     }
 
     @Test
@@ -448,8 +470,13 @@ class JevFrustrationDetectorTest {
 
     /** A turn root with a clean user, assistant, user, assistant prefix, in conversation {@code conv}. */
     private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv) {
+        return eligibleTurn(traceId, conv, 60);
+    }
+
+    /** As {@link #eligibleTurn(String, String)}, started {@code secondsAgo} before now. */
+    private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv, long secondsAgo) {
         SubstrateObservation obs = observation(traceId);
-        facts.put(traceId, new TurnFacts(conv, NOW.minusSeconds(60)));
+        facts.put(traceId, new TurnFacts(conv, NOW.minusSeconds(secondsAgo)));
         when(assembler.assembleStructured(obs))
                 .thenReturn(Optional.of(new StructuredThread(
                         List.of(

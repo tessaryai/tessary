@@ -33,6 +33,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -249,10 +251,12 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             eligibleFacts.add(f);
         }
 
-        List<Outcome> outcomes = send(projectId, target, eligible);
+        List<@Nullable Outcome> outcomes = send(projectId, target, eligible, eligibleFacts, threshold);
         List<Sent> sent = new ArrayList<>(eligible.size());
         for (int i = 0; i < eligible.size(); i++) {
-            sent.add(new Sent(eligibleTurns.get(i), eligible.get(i), eligibleFacts.get(i), outcomes.get(i)));
+            Outcome outcome = outcomes.get(i);
+            if (outcome == null) continue;
+            sent.add(new Sent(eligibleTurns.get(i), eligible.get(i), eligibleFacts.get(i), outcome));
         }
         if (sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()))) {
             classifiers.pause(projectId, signal.id(), ClassifierPause.PROVIDER_REJECTED, now);
@@ -262,32 +266,63 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         return new Page(Status.SCORED, null, eligible.size(), sent, threshold, scorerVersion);
     }
 
-    /** Send each eligible turn, at most {@code concurrency} at once, returning outcomes in page order. */
-    private List<Outcome> send(String projectId, DecisionTarget target, List<EligibleTurn> eligible) {
+    /**
+     * Send the eligible turns, at most {@code concurrency} calls at once, returning outcomes in page order.
+     * One conversation's turns go one at a time, earliest first, and stop at its first flag or refused
+     * key: a turn after that is never sent and its outcome is null. Conversations run side by side.
+     */
+    private List<@Nullable Outcome> send(
+            String projectId,
+            DecisionTarget target,
+            List<EligibleTurn> eligible,
+            List<TurnFacts> facts,
+            double threshold) {
         if (eligible.isEmpty()) return List.of();
+        Map<String, List<Integer>> byConversation = new LinkedHashMap<>();
+        for (int i = 0; i < eligible.size(); i++) {
+            byConversation
+                    .computeIfAbsent(Objects.requireNonNull(facts.get(i).conversationId()), k -> new ArrayList<>())
+                    .add(i);
+        }
+        List<@Nullable Outcome> outcomes = new ArrayList<>(Collections.nCopies(eligible.size(), null));
         Semaphore permits = new Semaphore(Math.max(1, props.getConcurrency()));
-        List<Future<Outcome>> futures = new ArrayList<>(eligible.size());
+        List<Future<?>> futures = new ArrayList<>(byConversation.size());
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (EligibleTurn turn : eligible) {
+            for (List<Integer> indexes : byConversation.values()) {
+                indexes.sort(Comparator.comparing((Integer i) -> facts.get(i).startedAt()));
                 futures.add(executor.submit(() -> {
-                    permits.acquire();
-                    try {
-                        return call(projectId, target, turn);
-                    } finally {
-                        permits.release();
+                    for (int i : indexes) {
+                        Outcome outcome;
+                        try {
+                            permits.acquire();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        try {
+                            outcome = call(projectId, target, eligible.get(i));
+                        } catch (RuntimeException e) {
+                            outcome = new Outcome(null, Outcome.FAILED);
+                        } finally {
+                            permits.release();
+                        }
+                        synchronized (outcomes) {
+                            outcomes.set(i, outcome);
+                        }
+                        if (Outcome.REJECTED.equals(outcome.failure())) return;
+                        DecisionAnswer answer = outcome.answer();
+                        if (answer != null && score(answer) > threshold) return;
                     }
                 }));
             }
         }
-        List<Outcome> outcomes = new ArrayList<>(futures.size());
-        for (Future<Outcome> f : futures) {
+        for (Future<?> f : futures) {
             try {
-                outcomes.add(f.get());
+                f.get();
             } catch (ExecutionException e) {
-                outcomes.add(new Outcome(null, Outcome.FAILED));
+                throw new IllegalStateException("frustration send task failed", e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                outcomes.add(new Outcome(null, Outcome.UNAVAILABLE));
             }
         }
         return outcomes;
