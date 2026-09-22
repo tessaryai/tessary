@@ -29,11 +29,9 @@ Two notes on the deterministic pair.
 
 ### Frustration, on your own key
 
-`frustration` is in this build and starts switched off on every project. It watches whether users become frustrated with the agent, and it is the one classifier that makes a call per item it scores: each eligible user message is one question to TypeSafe's Jev decision model, sent on your own OpenRouter or TypeSafe key. That is why it waits for you to turn it on. Turning it on under **Classifiers** asks which provider to use and takes the key if you have not stored one.
+`frustration` is in this build and starts switched off on every project. It watches whether users become frustrated with the agent, and it is the one classifier that makes a model call per item it scores: each eligible user message is one call to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key.
 
-A message is sent only when the four messages before it are user, assistant, user, assistant, each with text, so a conversation's first two user messages are never scored. Messages are redacted before they are stored, so what is sent is already redacted. A conversation stops being sent after its first flagged message. If the provider refuses the key, or the key is removed, the classifier pauses and says so on its row until a key works again.
-
-A flagged message is not a finding on its own. Each call site learns its own normal rate of frustrated conversations over its first 200 and is watched from then on with the same sequential test `tool_error` uses, with a conversation as the unit instead of a tool call. A finding opens, and a case with it, when that rate rises above the learned one. A call site that frustrates users from the start learns that as its normal, and is flagged only if it gets worse.
+A flagged message is not a finding on its own. Each call site learns its normal rate of frustrated sessions, and a finding and its case open together when that rate rises. [Watch for frustrated users](/classifiers/frustration) covers turning it on, what it sends, and reading the case.
 
 ### What is not available in the open edition
 
@@ -79,7 +77,7 @@ The record has four properties worth understanding, because they shape what you 
 
 **A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings — and, on the Classifiers page, charts its volume — on the real days that traffic occurred.
 
-**The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. [Cases](/concepts/cases) covers that step.
+**The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. A high-confidence secret leak and a frustration finding are the exceptions: each is filed already ruled, because its numbers are the claim, and opens its case without triage. [Cases](/concepts/cases) covers that step.
 
 ## Read next
 

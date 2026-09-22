@@ -67,7 +67,7 @@ Three of these are structural: the agent did not get worse, something around it 
 
 ### On a frustration case
 
-A frustration finding has no before-and-after comparison to explain. It says users at one call site became frustrated with the agent more often than that call site's learned rate, and it cites the frustrated conversations. So a run on one returns a different report: the causes behind those conversations, grouped by what the agent did wrong rather than by what the users said.
+A frustration finding has no before-and-after comparison to explain. It says users at one call site became frustrated with the agent more often than that call site's learned rate, and it cites the frustrated sessions. So a run on one returns a different report: the causes behind those sessions, grouped by what the agent did wrong rather than by what the users said.
 
 The verdict is one of two:
 
@@ -76,7 +76,7 @@ The verdict is one of two:
 | `causes_identified` | Causes identified. |
 | `no_cause_found` | No cause found. |
 
-Each cause names what the agent did, how many of the frustrated conversations show it, the conversations and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and a suggested fix. Every cited conversation is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no conversation is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
+Each cause names what the agent did, how many of the frustrated sessions show it, the sessions and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and a suggested fix. Every cited session is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no session is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
 
 ## What a run needs before it is useful
 

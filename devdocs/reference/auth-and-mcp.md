@@ -115,7 +115,9 @@ RCA-minted keys alone: `TenantContext` carries no marker for the key family and 
 coarse to tell them apart, and a firewall that depends on identifying its caller is a firewall with
 a bypass. What the surface loses is a ruling a human can see one click away in the UI, which reads
 these fields through `FindingController` (renamed from `BehaviorController`) and is untouched. Background:
-[`architecture.md`](./architecture.md) § *The three analysis layers*.
+[`architecture.md`](./architecture.md) § *The three analysis layers*. On a frustration finding or case, the
+`frustration` block goes out with its `conversations` list emptied (`FrustrationDetail.withoutIds()`), so
+no conversation or trace id reaches a caller through it; `get_finding_evidence` still pages the refs.
 
 **`get_finding` carries a second, separate redaction: no sample, no trace or span id of any kind.**
 It is a complete SUMMARY of every number a finding's classifier measured — a tool-error shift's

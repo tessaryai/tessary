@@ -52,8 +52,8 @@ Connect a GitHub repository under **Settings > Git integration** and both triage
 ## How it works
 
 1. **Watch every trace.** OTLP over HTTP and gRPC, and SDK push, normalize to the OpenTelemetry `gen_ai.*` conventions at the edge. PII (personally identifiable information) redaction runs before storage.
-2. **Filter cheaply.** Classifiers sweep every trace continuously and open a finding when one fires. The per-trace check stays cheap enough to afford at production volume, which is what makes reading all of it possible instead of sampling.
-3. **Group into cases.** Related findings collapse into one case, surfaced on **Triage**. A finding becomes a case only after an LLM triage step rules it a real deviation rather than a legitimate change.
+2. **Filter cheaply.** Classifiers sweep every trace continuously and open a finding when one fires. The per-trace check stays cheap enough to afford at production volume, which is what makes reading all of it possible instead of sampling. The one exception is `frustration`, which is off until you turn it on and then scores eligible user messages with a hosted model on your own OpenRouter or TypeSafe key.
+3. **Group into cases.** Related findings collapse into one case, surfaced on **Triage**. An LLM triage step rules whether a finding is a real deviation rather than a legitimate change, and only a finding it rules real becomes a case. Two kinds of finding are ruled when they are filed instead, because their numbers are the claim: a high-confidence secret leak, and a rise in frustrated conversations.
 4. **Explain the case.** RCA runs an agentic session over the failing traces and, when a repo is connected, the code itself. It returns grounded hypotheses and the checks it ruled out.
 5. **Route it to a human.** An alert carries the case to whoever owns it. Tessary explains and hands off. It doesn't open the fix.
 

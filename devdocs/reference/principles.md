@@ -161,7 +161,9 @@ never really about grading:
   degrades to a labeled placeholder on export (`[image: <url>]` / `[document omitted: ...]`),
   lossless-or-labeled, never a silent collapse to plain text.
 - **LLM inputs are never truncated.** Trace/span content fed to any platform LLM lane is bounded
-  by count (fewer items), never by clipping content.
+  by count (fewer items), never by clipping content. `frustration`'s decision call is the recorded
+  exception: it scores a fixed window with a fixed budget, so it clips long messages to head and tail
+  and replaces pastes with a marker (`FrustrationTurnBuilder`), and says so in the user docs.
 - **Cheap detection runs on all traffic; LLM work is the escalation.** Deterministic
   pattern/telemetry detectors and the shared ONNX encoder heads served CPU-side by
   classify-service's `/classify` run unsampled — model cost paid at train/serve time, not per
@@ -170,6 +172,12 @@ never really about grading:
   LLM only runs once a cheap detector has already filed a finding. This was the "online
   grading is opt-in and layered" principle, and it outlived the grading half: the layering was
   always the point, and Layer 2 is triage now.
+  **The one recorded exception is `frustration`**, which calls a hosted decision model per eligible
+  user turn in Layer 1. It is allowed only under all five conditions it meets today: off until a
+  person turns it on, on the org's own provider key, filtered by an eligibility rule before any
+  call, stopped at a conversation's first flag, and booked in the usage ledger. A new per-event model
+  call that misses any of the five is the thing this rule forbids. See
+  [concepts/frustration.md](../concepts/frustration.md).
 
 ## Signals & subsystems
 

@@ -29,7 +29,7 @@ Either way, open `http://localhost` once `docker compose -p tessary ps` reports 
 
 ## What the open edition includes
 
-Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. A sixth, [`frustration`](/classifiers/frustration), is included and starts switched off; it needs an OpenRouter or TypeSafe key. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
 
 <Card title="Open edition" icon="box-open" href="/open-edition">
   What is included, what needs configuring, what is unavailable here, and where the product's boundaries are today.
@@ -58,7 +58,7 @@ After that, three things appear in order:
 | You see | What it means |
 | --- | --- |
 | A **finding** on the Classifiers page | A classifier detected a change and recorded the production evidence for it. It is not yet a validated issue. |
-| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. |
+| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. A high-confidence secret leak and a frustration finding skip triage and open a case as soon as they are filed, because their numbers are the claim. |
 | An **RCA report** on the case | The agentic run reports a verdict, hypotheses with the traces it cites for each, and the checks it ruled out. Connect a repository and it can ground that work in your own code. |
 
 Tessary explains the issue and hands it to you. It does not open the fix.

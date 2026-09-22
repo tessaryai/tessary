@@ -36,7 +36,10 @@ individual turn — and `tool_error` recomputes a rate from an hourly aggregate 
 calls. There is no unit for a threshold rule to count for any of the three.
 
 What all three do produce, by construction rather than by coincidence, is a **case**: they pass the
-same Layer-2 triage gate, and a case is the thing a human is meant to act on. So coverage is
+same Layer-2 triage gate, and a case is the thing a human is meant to act on. Detectors that rule
+their own finding at filing (a high-confidence secret leak, `frustration`) reach the same rule by another
+door: `SecretLeakCaseSource` and `FrustrationCaseSource` open the case in the filing transaction, and
+`case_opened` fires on that open with no triage ruling behind it. So coverage is
 one rule for all detectors, present and future, instead of a per-detector mechanism that would need
 a new entry every time a detector lands.
 

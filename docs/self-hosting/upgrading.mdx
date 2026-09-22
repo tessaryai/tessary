@@ -171,6 +171,10 @@ in again. Nothing else is affected: accounts, API tokens and org membership are 
 API tokens do **not** change. They are minted as `tsy_<scope>_…` and always have been; that prefix
 is not part of this rename.
 
+## One-time: a frustration classifier appears, switched off
+
+Every project gains a `frustration` classifier, and it starts switched off because it scores messages on your own OpenRouter or TypeSafe key. Nothing changes until you turn it on under **Classifiers**. See [Watch for frustrated users](/classifiers/frustration).
+
 ## How migrations work
 
 Postgres schema migrations run automatically through Liquibase when the backend container starts. There's no separate migrate command to run, and no cloud account or external migration tool is involved.

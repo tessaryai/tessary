@@ -35,6 +35,10 @@ rig, and a design write-up rather than training code. Both drive the shipping Ja
 floor on the number the Java sweep actually computes, not on a Python re-implementation of it.
 Read each module's own `README.md` and `PROGRAM.md` before running anything in it.
 
+Frustration is an open classifier with no module here: it scores turns with a hosted decision model
+rather than a trained head, so there is nothing to train. Its rate test is tool_error's CUSUM with a
+conversation as the trial, and `tool_error/arl.py` prints a second report block for its budget.
+
 `data_gen/` is the emitter side rather than a classifier: `data_gen.emit_local` sends real OTLP
 traces at a running stack (it is what `scripts/check-open-boot.sh` uses to prove ingest works end
 to end), and `data_gen/food_delivery/` generates the synthetic agent corpus the demos read.

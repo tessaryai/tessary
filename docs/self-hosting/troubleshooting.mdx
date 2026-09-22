@@ -72,9 +72,17 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 **Symptom:** The frustration classifier shows no detections and opens no cases.
 
-**Cause:** One of three things. It starts switched off on every project, because it runs on your own provider key. It is paused, which its row on the **Classifiers** page says: "Provider rejected the key" when the provider refused the stored key, "No provider key" when no key is stored for the provider its lane uses. Or it is running and has not opened a case yet, because each call site first learns its own normal rate over 200 conversations, and a case opens only when the rate rises above that.
+**Cause:** One of three things. It starts switched off on every project, because it runs on your own provider key. It is paused, which its row on the **Classifiers** page says: "Provider rejected the key" when the provider refused the stored key, "No provider key" when no key is stored for the provider its lane uses. Or it is running and has not opened a case yet, because each call site first learns its own normal rate, and a case opens only when the rate rises above that. [Which messages are scored](/classifiers/frustration#which-messages-are-scored) lists why a message is not sent at all.
 
 **Resolution:** Turn it on under **Classifiers**, which asks for a provider and a key. For a paused classifier, fix the key under **Settings** then **Providers**; saving it lifts the pause, and **Retry** on the classifier does the same. Detections from before a case opens are listed on the classifier.
+
+## Frustration case lists sessions but shows none of them
+
+**Symptom:** A frustration finding or case lists flagged messages, but the session pane says their traces may have aged out.
+
+**Cause:** The traces behind those sessions are older than the project's trace retention period and have been deleted. The finding keeps its counts and its claim.
+
+**Resolution:** Nothing to repair for this case. To keep sessions readable for longer on future cases, raise the trace retention period under **Settings → Data retention**. See [Data retention](/self-hosting/configuration#data-retention).
 
 ## Agentic RCA or Layer-2 triage failing at the sandbox-launch step
 
