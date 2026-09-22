@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * Assembles the conversation a text-scoring head reads: the conversation
  * thread at the scored observation's CONVERSATION grain — the turns sharing the scored turn's parent
  * context node (the conversation tier, or the session when a turn hangs directly off the session) — in
- * chronological ({@code context.seq}) order up to and including the scored turn, reduced per the context
+ * chronological (span start time) order up to and including the scored turn, reduced per the context
  * contract ({@link ConversationThreadRenderer}) to a compact, trajectory-preserving form. A semantic
  * head never scores one row's text in isolation — it always sees the whole interaction, including the
  * agent's tool/failure history. Grouping at the session root would merge sibling conversations; grouping
@@ -147,7 +147,6 @@ public class ConversationThreadAssembler {
                 scored.projectId(),
                 scored.traceId(),
                 scored.observationId(),
-                scored.createdAt(),
                 props.getThreadMaxObservations());
         List<SubstrateObservation> chronological = new ArrayList<>(recentFirst);
         Collections.reverse(chronological);
@@ -227,7 +226,6 @@ public class ConversationThreadAssembler {
                 scored.projectId(),
                 scored.traceId(),
                 scored.observationId(),
-                scored.createdAt(),
                 props.getThreadMaxObservations());
         List<SubstrateObservation> chronological = new ArrayList<>(recentFirst);
         Collections.reverse(chronological);

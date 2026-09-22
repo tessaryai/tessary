@@ -155,6 +155,31 @@ class ConversationThreadAssemblerIntegrationTest {
     }
 
     /** One turn = one trace with a single root llm span carrying the dialogue. Returns the span. */
+    @Test
+    void ordersByWhenTheTurnHappenedNotWhenItWasStored() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-event-order").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        // Stored latest-first, as an upload or a batched exporter can deliver them.
+        seedTurn(pid, sessionId, base.plusMillis(4_000), user("a later question"), assistant("A later answer."));
+        SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
+        seedTurn(pid, sessionId, base.plusMillis(2_000), user("still broken"), assistant("Let me retry."));
+        seedTurn(pid, sessionId, base.plusMillis(1_000), user("can you export this?"), assistant("Sure."));
+
+        SubstrateObservation scored = substrate
+                .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
+                .orElseThrow();
+        StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
+
+        assertEquals(
+                java.util.List.of("can you export this?", "Sure.", "still broken", "Let me retry."),
+                thread.earlier().stream().map(StructuredThread.Message::text).toList(),
+                "turns stored after the scored one but started before it are earlier; the later turn is not");
+        assertEquals("nevermind", thread.current().text());
+    }
+
     private SpanRef seedTurn(
             String pid, String sessionId, Instant at, String input, @org.jspecify.annotations.Nullable String output) {
         return fx.turn(pid, SubstrateV2Fixtures.traceId(), sessionId, at, input, output);
@@ -165,7 +190,8 @@ class ConversationThreadAssemblerIntegrationTest {
      * all spans of ONE trace so they share the turn. Returns the llm span — the scored subject.
      *
      * <p>The spans are written agent-then-llm-then-tool, in that order, because the thread window orders
-     * by {@code (created_at, trace_id, id)} and {@code created_at} is the row's own insert time.
+     * by {@code (started_at, created_at, trace_id, id)}, the spans share a start, and {@code created_at}
+     * is the row's own insert time.
      */
     private SpanRef seedTwinTurn(
             String pid,

@@ -580,7 +580,11 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * Writing it as {@code IS NOT DISTINCT FROM} instead would hand that turn the whole project's
      * anonymous history as its thread.
      *
-     * <p>Ordering is the same {@code (created_at, trace_id, id)} keyset the sweep cursor uses.
+     * <p>Ordering is event time, {@code (started_at, created_at, trace_id, id)}, bounded at the scored
+     * span's own position in it. Not the sweep cursor's ingest-time keyset: spans that arrive out of
+     * order, or all at once from an upload or a batched exporter, would otherwise put later messages
+     * before the scored one. {@code created_at} only breaks ties within one start instant, where it keeps
+     * a turn's agent, llm and tool spans in the order they were written.
      * Both conversational spans ({@code kind in (llm, agent)}) and tool/retrieval spans ({@code
      * tool, mcp, retrieval, embedding, reranker}) are returned: the assembler renders one dialogue
      * contribution per turn and each tool span as a terse outcome marker, so the agent's failure
@@ -589,10 +593,11 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * (never the ingest hot path); the conversation lookup is a primary-key read on {@code trace}.
      */
     public List<SubstrateObservation> conversationObservationsUpTo(
-            String projectId, String scoredTraceId, String scoredSpanId, String uptoTs, int limit) {
+            String projectId, String scoredTraceId, String scoredSpanId, int limit) {
         return jdbc.sql(SELECT_SPAN + """
 
                         JOIN trace tr ON tr.project_id = s.project_id AND tr.id = s.trace_id
+                        JOIN span sc ON sc.project_id = :pid AND sc.trace_id = :scoredTraceId AND sc.id = :scoredSpanId
                         WHERE s.project_id = :pid
                           AND (
                             -- The scored trace's conversation, when it has one …
@@ -607,13 +612,13 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                                       WHERE str.project_id = :pid AND str.id = :scoredTraceId) IS NULL)
                           )
                           AND s.kind IN ('llm', 'agent', 'tool', 'mcp', 'retrieval', 'embedding', 'reranker')
-                          AND (s.created_at, s.trace_id, s.id) <= (:uptoTs::timestamptz, :scoredTraceId, :scoredSpanId)
-                        ORDER BY s.created_at DESC, s.trace_id DESC, s.id DESC
+                          AND (s.started_at, s.created_at, s.trace_id, s.id)
+                              <= (sc.started_at, sc.created_at, sc.trace_id, sc.id)
+                        ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC
                         LIMIT :limit""")
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
                 .param("scoredSpanId", scoredSpanId)
-                .param("uptoTs", uptoTs)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
                 .list();

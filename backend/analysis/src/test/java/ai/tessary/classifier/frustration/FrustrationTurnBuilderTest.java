@@ -48,7 +48,7 @@ class FrustrationTurnBuilderTest {
         List<SubstrateObservation> newestFirst = new ArrayList<>(List.of(chronological));
         java.util.Collections.reverse(newestFirst);
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
-        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyString(), anyInt()))
+        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(newestFirst);
         ClassifierProperties props = new ClassifierProperties();
         props.setThreadMaxObservations(40);

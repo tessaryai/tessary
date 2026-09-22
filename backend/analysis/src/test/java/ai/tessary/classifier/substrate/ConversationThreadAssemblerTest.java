@@ -32,7 +32,7 @@ class ConversationThreadAssemblerTest {
     private ConversationThreadAssembler assembler(ClassifierProperties props, List<SubstrateObservation> sessionDesc) {
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
         // The repository returns newest-first; the assembler reverses to chronological.
-        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyString(), anyInt()))
+        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(sessionDesc);
         return new ConversationThreadAssembler(substrate, props);
     }
