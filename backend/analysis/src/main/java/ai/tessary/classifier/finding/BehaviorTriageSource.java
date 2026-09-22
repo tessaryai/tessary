@@ -10,6 +10,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
@@ -132,6 +133,9 @@ public class BehaviorTriageSource implements TriageSource {
     /** The {@code secret_leak} branch of {@link #detail}; every other cause never touches it. */
     private final SecretLeakDetailService secretLeaks;
 
+    /** The {@code frustration_rate} branch of {@link #detail}; every other cause never touches it. */
+    private final FrustrationDetailService frustrations;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -150,7 +154,8 @@ public class BehaviorTriageSource implements TriageSource {
             ObjectProvider<CauseResolver> causeResolvers,
             ObjectMapper mapper,
             MalformedOutputDetailService malformedOutputs,
-            SecretLeakDetailService secretLeaks) {
+            SecretLeakDetailService secretLeaks,
+            FrustrationDetailService frustrations) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -173,6 +178,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.mapper = mapper;
         this.malformedOutputs = malformedOutputs;
         this.secretLeaks = secretLeaks;
+        this.frustrations = frustrations;
     }
 
     @Override
@@ -224,7 +230,11 @@ public class BehaviorTriageSource implements TriageSource {
         BehaviorTriageJobRepository.FailedTriage failed =
                 jobs.failedByFinding(projectId, List.of(findingId)).get(findingId);
         return Optional.of(BehaviorFindingDetailView.of(
-                finding, malformedOutputs.detail(finding), secretLeaks.detail(finding), failed));
+                finding,
+                malformedOutputs.detail(finding),
+                secretLeaks.detail(finding),
+                frustrations.detail(finding),
+                failed));
     }
 
     // ---- escalation -----------------------------------------------------------------------------

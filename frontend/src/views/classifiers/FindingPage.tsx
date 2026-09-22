@@ -34,6 +34,8 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
+import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
+import { FrustratedConversations } from "./FrustratedConversations";
 import { EvidenceTable } from "./EvidenceTable";
 // This build's baseline renderer returns null by default.
 import { paid } from "@paid";
@@ -94,10 +96,11 @@ export function FindingPage() {
   const rate = detail.toolError;
   const secretLeak = detail.secretLeak;
   const malformedOutput = detail.malformedOutput;
-  /* All four tell a before-and-after story with a figure, pins and a ruling, and all four put their
-     verbs behind triage. The rest of the detectors keep the older layout until they get a story of
-     their own. */
-  const story = shift ?? rate ?? secretLeak ?? malformedOutput;
+  const frustration = detail.frustration;
+  /* All five tell a before-and-after story with a figure, pins and a ruling. Four put their verbs
+     behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
+     layout until they get a story of their own. */
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration;
 
   return (
     <div style={CONTAINER}>
@@ -113,6 +116,8 @@ export function FindingPage() {
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
+      ) : frustration ? (
+        <FrustrationHeader finding={finding} basePath={basePath} />
       ) : malformedOutput ? (
         <MalformedHeader
           rate={malformedOutput.rate}
@@ -175,8 +180,9 @@ export function FindingPage() {
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
           the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
-          finding is frozen (decision 1), so there is nothing left to override. */}
-      {story && triaged && (
+          finding is frozen (decision 1), so there is nothing left to override. A frustration finding
+          states its ruling and links its case in its own header, so it skips this card. */}
+      {story && triaged && !frustration && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
           {finding.triageSummary && (
@@ -267,6 +273,40 @@ export function FindingPage() {
         </>
       )}
 
+      {frustration && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+              <span className="text-subtle text-small">Share of sessions with a user frustrated with the agent</span>
+            </div>
+            <FrustrationRate detail={frustration} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-2.75">
+              <h2 className="font-mono text-label uppercase text-muted">Frustrated sessions</h2>
+              <span className="text-subtle text-small">
+                {frustration.conversations.length > 0 && frustration.conversations.every((c) => c.cleared)
+                  ? "Cleared when the case was resolved as a false alarm. They no longer count toward the rate."
+                  : "Each flagged message with the turns before it"}
+              </span>
+            </div>
+            <FrustratedConversations
+              findingId={findingId}
+              first={{
+                rows: frustration.conversations,
+                nextCursor: frustration.conversationsNextCursor,
+                total: frustration.rate.failuresCur,
+              }}
+              basePath={basePath}
+            />
+          </section>
+        </>
+      )}
+
       {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
           the two `!detail.baseline` siblings below decide what renders in its place when there
           isn't one. */}
@@ -280,16 +320,20 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      <section className="mt-7">
-        <h2 className="font-mono text-label uppercase text-muted mb-1.5">
-          Evidence
-        </h2>
-        {finding.detector === "sop_conformance" ? (
-          !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
-        ) : (
-          <EvidenceTable findingId={findingId} basePath={basePath} />
-        )}
-      </section>
+      {/* A frustration finding's evidence is its sessions, drawn above; the raw witness rows
+          would list the same sessions again as bare ids. */}
+      {!frustration && (
+        <section className="mt-7">
+          <h2 className="font-mono text-label uppercase text-muted mb-1.5">
+            Evidence
+          </h2>
+          {finding.detector === "sop_conformance" ? (
+            !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
+          ) : (
+            <EvidenceTable findingId={findingId} basePath={basePath} />
+          )}
+        </section>
+      )}
     </div>
   );
 

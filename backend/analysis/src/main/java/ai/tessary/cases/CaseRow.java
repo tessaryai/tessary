@@ -51,6 +51,8 @@ public record CaseRow(
         @Nullable String resolution,
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
+        /** What a person said a resolved frustration case was ({@link Disposition}); null on every other case. */
+        @Nullable String disposition,
         @Nullable String mutedAt,
         @Nullable String mutedBy,
         String updatedAt) {
@@ -112,6 +114,13 @@ public record CaseRow(
          * {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
          */
         public static final String MALFORMED_OUTPUT = "malformed_output";
+
+        /**
+         * A call site whose share of conversations frustrated with the agent rose above the rate it learned.
+         * No triage gate: each spell's finding is ruled positive when it is filed, and opens or joins this case
+         * in the same transaction. See {@link FrustrationCaseSource}.
+         */
+        public static final String FRUSTRATION = "frustration";
     }
 
     /** {@code subject_kind} values: what the case is about. */
@@ -188,6 +197,21 @@ public record CaseRow(
          * {@code absorbed} says the bar moved, and it will not.
          */
         public static final String ABSORBED = "absorbed";
+    }
+
+    /**
+     * {@code disposition} values: what a person said a resolved frustration case turned out to be. Both restart
+     * the call site's CUSUM and re-learn its normal rate from the traffic after the resolve; {@link #FALSE_ALARM}
+     * also clears the frustration flag on every conversation the case cites.
+     */
+    public static final class Disposition {
+        private Disposition() {}
+
+        /** The agent was changed; the rate after the resolve is the normal to learn. */
+        public static final String FIXED = "fixed";
+
+        /** The cited conversations were not frustration with the agent: they stop counting as frustrated. */
+        public static final String FALSE_ALARM = "false_alarm";
     }
 
     public boolean isLive() {

@@ -10,6 +10,9 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.finding.BehaviorDtos.EvidenceRefView;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
+import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
@@ -66,19 +69,23 @@ public class FindingService {
     /** The one classifier-specific read on this surface: a {@code malformed_rate} finding's failing outputs. */
     private final MalformedOutputDetailService malformedOutputs;
 
+    private final FrustrationDetailService frustrations;
+
     public FindingService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             ClassifierService classifiers,
             BehaviorBaselineEventRepository events,
             List<TriageSource> triageSources,
-            MalformedOutputDetailService malformedOutputs) {
+            MalformedOutputDetailService malformedOutputs,
+            FrustrationDetailService frustrations) {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
         this.events = events;
         this.triageSources = triageSources;
         this.malformedOutputs = malformedOutputs;
+        this.frustrations = frustrations;
     }
 
     /**
@@ -205,6 +212,28 @@ public class FindingService {
             String projectId, String findingId, String field, int limit, @Nullable String cursor) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         return malformedOutputs.failingOutputs(finding, field, limit, cursor);
+    }
+
+    /**
+     * One page of the frustrated sessions a {@code frustration_rate} finding cites, newest flag first: what the
+     * finding and case pages' session list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
+     * position in that report's causes) narrow it to one RCA cause's share; both or neither. Any other finding
+     * has none.
+     */
+    public FrustrationEvidence.FrustratedSessionPage frustratedSessions(
+            String projectId,
+            String findingId,
+            @Nullable String rcaReport,
+            @Nullable Integer cause,
+            int limit,
+            @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())) {
+            return new FrustrationEvidence.FrustratedSessionPage(List.of(), 0, null);
+        }
+        FrustrationRateRepository.CauseRef ref =
+                rcaReport == null || cause == null ? null : new FrustrationRateRepository.CauseRef(rcaReport, cause);
+        return frustrations.page(finding, ref, limit, cursor);
     }
 
     /**

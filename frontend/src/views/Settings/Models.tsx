@@ -40,7 +40,9 @@ import { Button, cn, Modal, PageBody, PageHeader, Select, Skeleton, useToast } f
  * The one split worth understanding while reading this file is the section split: an "LLM calls" lane
  * is a request we compose and send, so a service tier and a reasoning effort are ours to choose, while
  * an "Agent in a VM" lane hands a model id to an agent inside a sandbox that composes its own
- * requests. That is why the second section is a model dropdown and nothing else.
+ * requests. That is why the second section is a model dropdown and nothing else. A "Decision models"
+ * lane asks a hosted decision model one question per turn, and each provider serves exactly one, so
+ * its row is a provider select and nothing else (`model_selectable` is false for that group).
  */
 
 /**
@@ -298,7 +300,8 @@ function Footnote({ models }: { models: ModelOption[] }) {
       )}
       Reasoning effort trades answer depth against tokens, on the models that declare levels for it.
       Both controls belong to requests Tessary composes, so neither appears on a lane whose model is
-      driven by an agent inside a sandbox. And note the region: GPT-5.6 Luna is served from{" "}
+      driven by an agent inside a sandbox. A decision model lane offers a provider and nothing else,
+      because each provider serves one decision model. And note the region: GPT-5.6 Luna is served from{" "}
       <span className="font-mono">us-east-1</span>, which need not be the region the rest of this stack
       runs in, so a lane pointed at it can send that lane's trace content out of your region.
     </p>
@@ -508,27 +511,29 @@ function LaneRow({
           )}
         </div>
 
-        <div className={cn("flex flex-col gap-1", MODEL_W)}>
-          <Select
-            aria-label={`${lane.label} model`}
-            className="w-full"
-            disabled={busy || noProvider || modelsForProvider.length === 0}
-            value={effectiveKey ?? NO_PROVIDER}
-            onChange={(e) => handleModel(e.target.value)}
-          >
-            {modelsForProvider.length === 0 && (
-              <option value={NO_PROVIDER} disabled>
-                No model
-              </option>
-            )}
-            {modelsForProvider.map((k) => (
-              <option key={k} value={k}>
-                {models.find((m) => m.model_key === k)?.display_name ?? k}
-                {crossesPriceGate(k) && " · higher cost"}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {group.model_selectable && (
+          <div className={cn("flex flex-col gap-1", MODEL_W)}>
+            <Select
+              aria-label={`${lane.label} model`}
+              className="w-full"
+              disabled={busy || noProvider || modelsForProvider.length === 0}
+              value={effectiveKey ?? NO_PROVIDER}
+              onChange={(e) => handleModel(e.target.value)}
+            >
+              {modelsForProvider.length === 0 && (
+                <option value={NO_PROVIDER} disabled>
+                  No model
+                </option>
+              )}
+              {modelsForProvider.map((k) => (
+                <option key={k} value={k}>
+                  {models.find((m) => m.model_key === k)?.display_name ?? k}
+                  {crossesPriceGate(k) && " · higher cost"}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
 
         {/* A tier is only a choice where there is more than one of them. The others hold the column so
             the rows still line up down the section. */}

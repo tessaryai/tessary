@@ -100,6 +100,21 @@ public final class ToolErrorTrend {
             ToolErrorConfig config,
             Map<String, AcceptedReference> accepted,
             Map<String, CarriedState> carried) {
+        return sweep(tallies, config, accepted, carried, STATE_SCHEMA_VERSION);
+    }
+
+    /**
+     * {@link #sweep(List, ToolErrorConfig, Map, Map)} under a caller's own schema version, for a classifier whose
+     * accumulator also depends on something this engine does not know about (frustration's scorer version and
+     * threshold floor). The version is baked into every carried row's epoch, so the caller can tell a row built
+     * under other tuning by comparing {@link CarriedState#epochOf} against it.
+     */
+    public static Sweep sweep(
+            List<HourlyToolTally> tallies,
+            ToolErrorConfig config,
+            Map<String, AcceptedReference> accepted,
+            Map<String, CarriedState> carried,
+            String schemaVersion) {
         Map<String, List<HourlyToolTally>> byTool = new LinkedHashMap<>();
         for (HourlyToolTally t : tallies) {
             byTool.computeIfAbsent(t.toolKey(), k -> new ArrayList<>()).add(t);
@@ -107,7 +122,8 @@ public final class ToolErrorTrend {
         List<Spell> spells = new ArrayList<>();
         List<CarriedState> advanced = new ArrayList<>();
         for (Map.Entry<String, List<HourlyToolTally>> e : byTool.entrySet()) {
-            Replayed r = replay(e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()));
+            Replayed r = replay(
+                    e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()), schemaVersion);
             if (r == null) continue; // still learning a reference; nothing to judge and nothing to carry
             if (r.spell() != null) spells.add(r.spell());
             advanced.add(r.carried());
@@ -125,6 +141,16 @@ public final class ToolErrorTrend {
             ToolErrorConfig config,
             @Nullable AcceptedReference accepted,
             @Nullable CarriedState carried) {
+        return replay(toolKey, buckets, config, accepted, carried, STATE_SCHEMA_VERSION);
+    }
+
+    private static @Nullable Replayed replay(
+            String toolKey,
+            List<HourlyToolTally> buckets,
+            ToolErrorConfig config,
+            @Nullable AcceptedReference accepted,
+            @Nullable CarriedState carried,
+            String schemaVersion) {
         // The reference is built from the leading buckets until it is thick enough to judge against, then
         // frozen. Frozen, not sliding: a reference that moved with the traffic would drift along with a
         // slow degradation and never notice it — the failure CusumDetector's comment names as the reason
@@ -155,6 +181,14 @@ public final class ToolErrorTrend {
         } else {
             baseline = new ToolErrorRate();
             i = 0;
+            // Learned only from traffic after a human reset (see CarriedState#resetAt). A reset that also
+            // dropped the reference means "the old normal was wrong"; re-learning it from the hours before
+            // the reset would put it straight back.
+            while (i < buckets.size()
+                    && carried != null
+                    && carried.fencedOff(buckets.get(i).bucket())) {
+                i++;
+            }
             while (i < buckets.size() && baseline.calls() < config.minBaselineCalls()) {
                 HourlyToolTally b = buckets.get(i);
                 fold(baseline, b.calls(), b.failures());
@@ -165,13 +199,19 @@ public final class ToolErrorTrend {
 
         // Resume or rebuild. Resuming is the fast path and the fragile one, so it is taken only when the
         // state was built under this exact tuning against this exact reference — see resumableUnder.
-        String epoch = CarriedState.epochOf(config, STATE_SCHEMA_VERSION);
+        String epoch = CarriedState.epochOf(config, schemaVersion);
         State state = State.EMPTY;
         String watermark = null;
+        boolean resumed = false;
         if (carried != null && carried.resumableUnder(epoch, baseline)) {
+            resumed = true;
             state = carried.state();
             watermark = carried.watermarkBucket();
         }
+        // A rebuild starts from zero and would otherwise re-read the hours a human reset just ruled on,
+        // re-accumulating the very spell they closed. A resume is fenced by its watermark instead, and
+        // is left exactly as it was.
+        @Nullable CarriedState fence = resumed ? null : carried;
 
         ToolErrorRate observed = new ToolErrorRate();
         for (int j = i; j < buckets.size(); j++) {
@@ -179,13 +219,15 @@ public final class ToolErrorTrend {
             // Strictly after the watermark. A bucket at or before it has already been folded in, and
             // folding it again is how a retried sweep invents a case out of evidence it already counted.
             if (watermark != null && b.bucket().compareTo(watermark) <= 0) continue;
+            if (fence != null && fence.fencedOff(b.bucket())) continue;
             state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
             fold(observed, b.calls(), b.failures());
             watermark = b.bucket();
         }
 
-        // The pending absorb rides through untouched: it is a human decision, and a sweep passing over it
-        // must neither honour nor forget it. ToolErrorService installs it once the run is thick enough.
+        // The pending absorb and the reset fence ride through untouched: both are human decisions, and a
+        // sweep passing over them must neither honour nor forget them. ToolErrorService installs a pending
+        // absorb once the run is thick enough.
         CarriedState next = new CarriedState(
                 toolKey,
                 state,
@@ -193,7 +235,8 @@ public final class ToolErrorTrend {
                 watermark,
                 epoch,
                 carried == null ? null : carried.pendingPinBy(),
-                carried == null ? null : carried.pendingPinAt());
+                carried == null ? null : carried.pendingPinAt(),
+                carried == null ? null : carried.resetAt());
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
                 next,

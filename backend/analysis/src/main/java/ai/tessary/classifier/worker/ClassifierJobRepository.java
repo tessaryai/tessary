@@ -36,7 +36,7 @@ public class ClassifierJobRepository {
     // classifier_id is sourced from the payload jsonb; the rest are the shared job columns (cursor_at/cursor_id
     // stay first-class for the keyset sweep).
     private static final String COLS = "id, project_id, payload->>'classifier_id' AS classifier_id, status, cursor_at, "
-            + "cursor_id, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at";
+            + "cursor_id, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at, page_retries";
 
     private final JdbcClient jdbc;
 
@@ -151,7 +151,7 @@ public class ClassifierJobRepository {
             UPDATE job SET status = 'done',
                            cursor_at = COALESCE(:cursorAt, cursor_at),
                            cursor_id = COALESCE(:cursorId, cursor_id),
-                           attempts = 0,
+                           attempts = 0, page_retries = 0,
                            last_error = NULL, updated_at = :now
             WHERE id = :id
             """)
@@ -160,6 +160,19 @@ public class ClassifierJobRepository {
                 .param("now", Instant.now().toString())
                 .param("id", id)
                 .update();
+    }
+
+    /**
+     * Finish the job without moving its cursor and count one more hold of the page past it: the page's
+     * provider calls mostly failed, so the next tick sends it again. A healthy sweep's attempt budget is
+     * untouched, since a provider outage is not the sweep failing; {@link #markSwept} resets the count.
+     */
+    public void holdPage(String id) {
+        jdbc.sql("""
+            UPDATE job SET status = 'done', page_retries = page_retries + 1,
+                           attempts = 0, last_error = NULL, updated_at = :now
+            WHERE id = :id
+            """).param("now", Instant.now().toString()).param("id", id).update();
     }
 
     /**
@@ -174,7 +187,7 @@ public class ClassifierJobRepository {
      */
     public boolean advanceCursor(String id, String leaseOwner, String cursorAt, String cursorId, long leaseSeconds) {
         Instant now = Instant.now();
-        return jdbc.sql("UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId,"
+        return jdbc.sql("UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId, page_retries = 0,"
                         + " lease_expires_at = :expires, updated_at = :now"
                         + " WHERE id = :id AND lease_owner = :owner AND status = 'claimed'"
                         + " RETURNING id")
@@ -257,6 +270,7 @@ public class ClassifierJobRepository {
                 rs.getInt("attempts"),
                 rs.getString("last_error"),
                 rs.getString("created_at"),
-                rs.getString("updated_at"));
+                rs.getString("updated_at"),
+                rs.getInt("page_retries"));
     }
 }

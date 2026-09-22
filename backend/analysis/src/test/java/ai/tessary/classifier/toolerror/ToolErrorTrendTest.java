@@ -119,12 +119,85 @@ class ToolErrorTrendTest {
                         was.watermarkBucket(),
                         was.stateEpoch(),
                         null,
+                        null,
                         null));
 
         series(s, 40, 60, 200, 0.01); // the tool is genuinely fixed
         assertTrue(
                 ToolErrorTrend.sweep(s, CONFIG, Map.of(), cleared).spells().isEmpty(),
                 "cleared evidence plus a healthy tool must not re-raise the same spell");
+    }
+
+    /**
+     * The same reset, on a replay that rebuilds rather than resumes. Malformed Output rebuilds every pass, and a
+     * tuning change rebuilds tool_error too. With no watermark to resume from, the rebuild would re-fold the
+     * hours before the reset and hand back the spell a human just closed, so it skips them instead.
+     */
+    @Test
+    void aResetFencesARebuild() {
+        List<HourlyToolTally> s = series(20, 200, 0.01);
+        series(s, 20, 20, 200, 0.05);
+        Sweep broken = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of());
+        assertEquals(1, broken.spells().size());
+        CarriedState was = broken.advanced().get(0);
+
+        // What a rebuilding caller hands in after a reset: arms and watermark cleared, reference kept, and
+        // the reset stamped mid-hour, after the last broken bucket.
+        String resetAt = START.plus(Duration.ofHours(39))
+                .plusSeconds(1234)
+                .plusMillis(567)
+                .toString();
+        CarriedState rebuilding = new CarriedState(
+                TOOL, ToolErrorDetector.State.EMPTY, was.baseline(), null, was.stateEpoch(), null, null, resetAt);
+
+        series(s, 40, 60, 200, 0.01); // healthy again
+        Sweep after = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of(TOOL, rebuilding));
+        assertTrue(after.spells().isEmpty(), "the rebuild must not re-accumulate the hours before the reset");
+        assertEquals(0.0, after.advanced().get(0).state().sUp(), 1e-9);
+        assertEquals(resetAt, after.advanced().get(0).resetAt(), "the fence rides through to the next pass");
+
+        Sweep unfenced = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of(TOOL, withoutReset(rebuilding)));
+        assertEquals(1, unfenced.spells().size(), "and without the fence the closed spell comes straight back");
+    }
+
+    /** A reset that also dropped the reference re-learns it from the traffic after the reset, never before. */
+    @Test
+    void aResetWithoutAReferenceRelearnsOnlyFromAfterIt() {
+        List<HourlyToolTally> s = series(20, 200, 0.01);
+        series(s, 20, 20, 200, 0.05); // the degraded stretch a human resolved
+        String resetAt = START.plus(Duration.ofHours(40)).toString();
+        CarriedState relearning = new CarriedState(
+                TOOL,
+                ToolErrorDetector.State.EMPTY,
+                null,
+                null,
+                CarriedState.epochOf(CONFIG, ToolErrorTrend.STATE_SCHEMA_VERSION),
+                null,
+                null,
+                resetAt);
+
+        assertNull(
+                ToolErrorTrend.replay(TOOL, s, CONFIG, null, relearning),
+                "every hour so far is before the reset, so there is nothing to learn from");
+
+        series(s, 40, 10, 200, 0.05); // the post-reset traffic runs at 5%, and that is the new normal
+        Sweep after = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of(TOOL, relearning));
+        ToolErrorRate learned = requireBaseline(after);
+        assertEquals(600, learned.calls(), "the leading post-reset traffic, once");
+        assertTrue(learned.rate() > 0.04, "learned from after the reset, not from the healthy hours before it");
+        assertTrue(after.spells().isEmpty(), "and the rate it learned is not judged against itself");
+    }
+
+    private static CarriedState withoutReset(CarriedState c) {
+        return new CarriedState(
+                c.toolKey(),
+                c.state(),
+                c.baseline(),
+                c.watermarkBucket(),
+                c.stateEpoch(),
+                c.pendingPinBy(),
+                c.pendingPinAt(),
+                null);
     }
 
     @Test

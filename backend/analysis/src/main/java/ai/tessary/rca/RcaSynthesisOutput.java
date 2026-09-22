@@ -3,12 +3,16 @@ package ai.tessary.rca;
 
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.rca.RcaDtos.Attribution;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -25,12 +29,16 @@ import org.slf4j.LoggerFactory;
  *       all-hallucinated hypothesis survives with no receipts rather than fabricated ones).</li>
  *   <li>Checklist assessments are matched to the ids {@link RcaChecklist} actually measured; an
  *       invented check id is dropped the same way an invented trace id is.</li>
- *   <li>The verdict is normalized to the five values the {@code rca_report_verdict_check}
+ *   <li>The verdict is normalized to the five metric-movement values the {@code rca_report_verdict_check}
  *       constraint allows, and the two comparative verdicts carry a burden of proof: a
  *       {@code traffic_shift} or {@code behavior_change} that cites no baseline-side trace is a
  *       comparison whose "before" side was never observed, so it is downgraded to
  *       {@code inconclusive} (with a note the report surfaces) rather than persisted as fact. A
  *       bad RCA is worse than no RCA.</li>
+ *   <li>A frustration report ({@link #parseFrustration}) has no baseline side and no hypotheses. Each
+ *       cause's session ids are checked against the finding's session refs and its trace ids against
+ *       the flagged turns; a cause left citing no session is dropped, and a {@code causes_identified}
+ *       verdict with no cause left is downgraded to {@code no_cause_found}.</li>
  * </ul>
  */
 final class RcaSynthesisOutput {
@@ -44,7 +52,24 @@ final class RcaSynthesisOutput {
             @Nullable String verdict,
             @Nullable List<HypothesisBody> hypotheses,
             @Nullable List<ChecklistBody> checklist,
+            @Nullable List<CauseBody> causes,
             @Nullable String detailed_report) {}
+
+    record CauseBody(
+            @Nullable String title,
+            @Nullable String what_the_agent_did,
+            @Nullable Integer sessions_affected,
+            @Nullable List<String> evidence_session_ids,
+            @Nullable List<String> evidence_trace_ids,
+            @Nullable AttributionBody attribution,
+            @Nullable String fix_suggestion,
+            @Nullable String confidence) {}
+
+    record AttributionBody(
+            @Nullable String kind,
+            @Nullable String path,
+            @Nullable String commit,
+            @Nullable String excerpt) {}
 
     record HypothesisBody(
             @Nullable String title,
@@ -61,11 +86,13 @@ final class RcaSynthesisOutput {
     record ChecklistAssessment(String check, String assessment, String detail) {}
 
     /** A validated run result. {@code detailedReport} is null when the agent ignored its schema;
-     *  {@code verdictNote} is non-null when the verdict was downgraded and explains why. */
+     *  {@code verdictNote} is non-null when the verdict was downgraded and explains why. A metric-movement
+     *  run has no causes and a frustration run has no hypotheses. */
     record Parsed(
             String summary,
             String verdict,
             List<Hypothesis> hypotheses,
+            List<Cause> causes,
             List<ChecklistAssessment> checklist,
             @Nullable String detailedReport,
             @Nullable String verdictNote) {}
@@ -85,29 +112,7 @@ final class RcaSynthesisOutput {
             Set<String> flaggedTraceIds,
             Set<String> measuredChecks,
             String projectId) {
-        ReportBody body = null;
-        Exception failure = null;
-        try {
-            body = bind(mapper, text);
-        } catch (Exception e) {
-            // Keep the FIRST failure as the cause: it is the one that names the offending property or
-            // offset in the reply the agent actually sent. The fence-stripped salvage below reports a
-            // miss as null rather than throwing, because its own failure says nothing this one did not.
-            failure = e;
-            body = salvage(mapper, extractObject(text));
-        }
-        if (body == null) {
-            // The most expensive failure in this file: it lands at the END of a run that already spent
-            // its wall clock and its tokens, and until now it said only "not the expected JSON shape",
-            // which does not distinguish prose from a fence from a truncated reply. A short, bounded
-            // prefix is what makes the next one diagnosable without re-running the investigation.
-            log.warn(
-                    "rca analysis project={} unparseable body ({} chars), starts: {}",
-                    projectId,
-                    text == null ? 0 : text.length(),
-                    abbreviate(text));
-            throw new TessaryException(RcaError.UPSTREAM_FAILED, failure, "analysis was not the expected JSON shape");
-        }
+        ReportBody body = body(mapper, text, projectId);
         Set<String> citable = new HashSet<>(baselineTraceIds);
         citable.addAll(flaggedTraceIds);
         String verdict = normalizeVerdict(body.verdict());
@@ -144,7 +149,135 @@ final class RcaSynthesisOutput {
         String bodyDetailed = body.detailed_report();
         String summary = bodySummary == null || bodySummary.isBlank() ? text : bodySummary;
         String detailed = bodyDetailed == null || bodyDetailed.isBlank() ? null : bodyDetailed;
-        return new Parsed(summary, verdict, hypotheses, checklist, detailed, verdictNote);
+        return new Parsed(summary, verdict, hypotheses, List.of(), checklist, detailed, verdictNote);
+    }
+
+    /**
+     * Parse and validate a frustration run. There is no baseline side to demand a citation from; the
+     * receipts are the finding's frustrated sessions and the turns that fired inside them.
+     *
+     * @param flaggedTraceIds the finding's witness trace refs, the turns that fired
+     * @param sessionIds the finding's witness session refs, the frustrated conversations
+     */
+    static Parsed parseFrustration(
+            ObjectMapper mapper,
+            String text,
+            Set<String> flaggedTraceIds,
+            Set<String> sessionIds,
+            Set<String> measuredChecks,
+            String projectId) {
+        ReportBody body = body(mapper, text, projectId);
+        List<Cause> causes = new ArrayList<>();
+        int dropped = 0;
+        List<CauseBody> bodies = body.causes();
+        for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
+            String title = c.title();
+            if (title == null || title.isBlank()) continue;
+            Cause cause = validated(c, title, flaggedTraceIds, sessionIds);
+            if (cause == null) {
+                dropped++;
+            } else {
+                causes.add(cause);
+            }
+        }
+        if (dropped > 0) {
+            log.warn(
+                    "rca analysis project={} dropped {} cause(s) that cited no session of this finding",
+                    projectId,
+                    dropped);
+        }
+        // Stable, so the agent's own order breaks ties.
+        causes.sort(Comparator.comparingInt(Cause::sessionsAffected).reversed());
+        String verdict = RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(body.verdict())
+                ? RcaReportRow.Verdict.CAUSES_IDENTIFIED
+                : RcaReportRow.Verdict.NO_CAUSE_FOUND;
+        String verdictNote = null;
+        if (RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(verdict) && causes.isEmpty()) {
+            verdictNote = "> **Verdict downgraded by the platform.** The analysis returned `causes_identified`,"
+                    + " but no cause cited a frustrated session from this finding's evidence, so none survived."
+                    + " Recorded as `no_cause_found`; the finding's `witness` session refs list what was"
+                    + " available to cite.";
+            log.warn("rca analysis project={} downgraded verdict causes_identified -> no_cause_found", projectId);
+            verdict = RcaReportRow.Verdict.NO_CAUSE_FOUND;
+        }
+        List<ChecklistAssessment> checklist = validatedChecklist(body.checklist(), measuredChecks, projectId);
+        String bodySummary = body.summary();
+        String bodyDetailed = body.detailed_report();
+        String summary = bodySummary == null || bodySummary.isBlank() ? text : bodySummary;
+        String detailed = bodyDetailed == null || bodyDetailed.isBlank() ? null : bodyDetailed;
+        return new Parsed(summary, verdict, List.of(), List.copyOf(causes), checklist, detailed, verdictNote);
+    }
+
+    /** One cause with its receipts filtered to this finding's refs, or null when no session survives. */
+    private static @Nullable Cause validated(
+            CauseBody c, String title, Set<String> flaggedTraceIds, Set<String> sessionIds) {
+        List<String> sessions = distinct(c.evidence_session_ids()).stream()
+                .filter(sessionIds::contains)
+                .toList();
+        if (sessions.isEmpty()) return null;
+        List<String> traces = distinct(c.evidence_trace_ids()).stream()
+                .filter(flaggedTraceIds::contains)
+                .toList();
+        Integer claimed = c.sessions_affected();
+        int affected = Math.max(claimed == null ? 0 : claimed, sessions.size());
+        return new Cause(
+                title,
+                c.what_the_agent_did() == null ? "" : c.what_the_agent_did(),
+                affected,
+                sessions,
+                traces,
+                attribution(c.attribution()),
+                c.fix_suggestion() == null ? "" : c.fix_suggestion(),
+                confidence(c.confidence()));
+    }
+
+    private static @Nullable Attribution attribution(@Nullable AttributionBody a) {
+        if (a == null) return null;
+        String kind = a.kind() != null && Attribution.KINDS.contains(a.kind()) ? a.kind() : Attribution.UNKNOWN;
+        return new Attribution(kind, blankToNull(a.path()), blankToNull(a.commit()), blankToNull(a.excerpt()));
+    }
+
+    private static List<String> distinct(@Nullable List<String> ids) {
+        return ids == null ? List.of() : List.copyOf(new LinkedHashSet<>(ids));
+    }
+
+    private static @Nullable String blankToNull(@Nullable String v) {
+        return v == null || v.isBlank() ? null : v;
+    }
+
+    private static String confidence(@Nullable String raw) {
+        return switch (raw == null ? "" : raw) {
+            case "high", "medium", "low" -> raw;
+            default -> "low";
+        };
+    }
+
+    /** Bind the agent's reply, or throw: a persisted immutable report must not degrade to unvalidated prose. */
+    private static ReportBody body(ObjectMapper mapper, String text, String projectId) {
+        ReportBody body = null;
+        Exception failure = null;
+        try {
+            body = bind(mapper, text);
+        } catch (Exception e) {
+            // Keep the FIRST failure as the cause: it is the one that names the offending property or
+            // offset in the reply the agent actually sent. The fence-stripped salvage below reports a
+            // miss as null rather than throwing, because its own failure says nothing this one did not.
+            failure = e;
+            body = salvage(mapper, extractObject(text));
+        }
+        if (body == null) {
+            // The most expensive failure in this file: it lands at the END of a run that already spent
+            // its wall clock and its tokens, and until now it said only "not the expected JSON shape",
+            // which does not distinguish prose from a fence from a truncated reply. A short, bounded
+            // prefix is what makes the next one diagnosable without re-running the investigation.
+            log.warn(
+                    "rca analysis project={} unparseable body ({} chars), starts: {}",
+                    projectId,
+                    text == null ? 0 : text.length(),
+                    abbreviate(text));
+            throw new TessaryException(RcaError.UPSTREAM_FAILED, failure, "analysis was not the expected JSON shape");
+        }
+        return body;
     }
 
     /** The verdicts that compare the flagged side against the baseline one — the ones that carry a
@@ -158,7 +291,7 @@ final class RcaSynthesisOutput {
         return hypotheses.stream().flatMap(h -> h.evidenceTraceIds().stream()).noneMatch(baselineTraceIds::contains);
     }
 
-    /** Constrain to the five verdicts the DB check constraint allows; a schema-ignoring model falls
+    /** Constrain to the five metric-movement verdicts; a schema-ignoring model falls
      *  to inconclusive, which is also the honest value for "no change located". All five are the
      *  agent's to assign — nothing here rules a cause in or out on its behalf. */
     static String normalizeVerdict(@Nullable String verdict) {
@@ -206,13 +339,7 @@ final class RcaSynthesisOutput {
                     cited.size() - kept.size(),
                     h.title());
         }
-        String rawConfidence = h.confidence();
-        String confidence =
-                switch (rawConfidence == null ? "" : rawConfidence) {
-                    case "high", "medium", "low" -> rawConfidence;
-                    default -> "low";
-                };
-        return new Hypothesis(h.title(), confidence, h.rationale() == null ? "" : h.rationale(), kept);
+        return new Hypothesis(h.title(), confidence(h.confidence()), h.rationale() == null ? "" : h.rationale(), kept);
     }
 
     /**

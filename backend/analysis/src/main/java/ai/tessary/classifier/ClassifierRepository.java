@@ -116,6 +116,37 @@ public class ClassifierRepository {
                 .update();
     }
 
+    /** The classifier's pause, or empty when it is not paused (or does not exist). */
+    public Optional<ClassifierPause> findPause(String projectId, String id) {
+        return jdbc.sql("SELECT paused_reason, paused_at FROM classifier"
+                        + " WHERE project_id = :pid AND id = :id AND paused_reason IS NOT NULL")
+                .param("pid", projectId)
+                .param("id", id)
+                .query((rs, n) ->
+                        new ClassifierPause(rs.getString("paused_reason"), Instant.parse(rs.getString("paused_at"))))
+                .optional();
+    }
+
+    /** Pause the classifier for {@code reason}, restamping {@code paused_at}. Returns rows affected. */
+    public int pause(String projectId, String id, String reason, Instant at) {
+        return jdbc.sql("UPDATE classifier SET paused_reason = :reason, paused_at = :at"
+                        + " WHERE project_id = :pid AND id = :id")
+                .param("reason", reason)
+                .param("at", at.toString())
+                .param("pid", projectId)
+                .param("id", id)
+                .update();
+    }
+
+    /** Clear the classifier's pause. Returns rows affected (0 = it was not paused). */
+    public int unpause(String projectId, String id) {
+        return jdbc.sql("UPDATE classifier SET paused_reason = NULL, paused_at = NULL"
+                        + " WHERE project_id = :pid AND id = :id AND paused_reason IS NOT NULL")
+                .param("pid", projectId)
+                .param("id", id)
+                .update();
+    }
+
     /** Bump a built-in's definition (catalog re-seed) and its version, keyed by (project, classifier_key). */
     public void updateDefinition(ClassifierRow row) {
         jdbc.sql("""

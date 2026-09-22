@@ -194,7 +194,7 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
         </THead>
         <TBody>
           {rows.map((row, i) => (
-            <TR key={`${row.role}-${row.traceId ?? ""}-${row.spanId ?? ""}-${i}`}>
+            <TR key={`${row.role}-${row.sessionId ?? ""}-${row.traceId ?? ""}-${row.spanId ?? ""}-${i}`}>
               {columns.map((col) => (
                 <Cell key={col.key} col={col.key} row={row} basePath={basePath} />
               ))}
@@ -315,12 +315,19 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
         NONE
       );
     }
+    // A session-grain row (a frustrated conversation) has no trace: it links to the conversation.
     case "trace":
       return row.traceId ? (
         <Link
           to={`${basePath}/traces/${encodeURIComponent(row.traceId)}`}
           className="font-mono text-link hover:text-link-hover transition-colors">
           {row.traceId.slice(0, 8)}…
+        </Link>
+      ) : row.sessionId ? (
+        <Link
+          to={`${basePath}/sessions/${encodeURIComponent(row.sessionId)}`}
+          className="font-mono text-link hover:text-link-hover transition-colors">
+          conversation {row.sessionId.slice(0, 8)}…
         </Link>
       ) : (
         NONE

@@ -35,7 +35,6 @@ class CapabilityFlagLayerTest {
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(
             Capability.BEHAVIOR_DRIFT,
             Capability.SOP_CONFORMANCE,
-            Capability.FRUSTRATION,
             Capability.GROUNDEDNESS,
             Capability.TRIAGE_AUTOMATIC);
 
@@ -64,15 +63,11 @@ class CapabilityFlagLayerTest {
                     resolved.isEnabled(capability),
                     capability.wire() + " should default " + (expected ? "on" : "off") + " in an open build");
         }
-        // The five that are off are off for two different reasons, and the payload has to say which.
+        // The four that are off are off for two different reasons, and the payload has to say which.
         assertEquals(
-                Set.of(
-                        Capability.BEHAVIOR_DRIFT,
-                        Capability.SOP_CONFORMANCE,
-                        Capability.FRUSTRATION,
-                        Capability.GROUNDEDNESS),
+                Set.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.GROUNDEDNESS),
                 Set.copyOf(capabilities.unavailable()),
-                "only the four paid classifiers are UNAVAILABLE; triage_automatic is merely off");
+                "only the three paid classifiers are UNAVAILABLE; triage_automatic is merely off");
     }
 
     @Test

@@ -157,8 +157,8 @@ dev_choices_resolve() {
 
     dev_resolve TESSARY_SKIP_CLASSIFY 0 1 \
         "Run the encoder classifier service?" \
-        "1|No    Like a self-hosted install. Frustration and groundedness stay dormant; everything else runs." \
-        "0|Yes   Adds the classify service: an 8 GB container and a gated encoder-weight download on first run."
+        "1|No    Like a self-hosted install. Groundedness stays dormant; everything else runs, frustration included (it uses your OpenRouter or TypeSafe key, not this service)." \
+        "0|Yes   Adds the classify service for groundedness: an 8 GB container and a gated encoder-weight download on first run."
 
     dev_resolve TESSARY_AUTH_DISABLED false 1 \
         "Enforce sign-in?" \

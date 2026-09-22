@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -75,14 +76,18 @@ public class ProviderCredentialController {
     /** The live, per-(org, provider) model catalog; see {@link #catalog}. */
     private final ModelCatalogFetchService catalogFetchService;
 
+    private final ApplicationEventPublisher events;
+
     public ProviderCredentialController(
             ProviderCredentialRepository repo,
             ChatModelFactory factory,
             SecretBox secretBox,
             TenantPathResolver resolver,
             CapabilityService capabilities,
-            ModelCatalogFetchService catalogFetchService) {
+            ModelCatalogFetchService catalogFetchService,
+            ApplicationEventPublisher events) {
         this.repo = repo;
+        this.events = events;
         this.factory = factory;
         this.secretBox = secretBox;
         this.resolver = resolver;
@@ -296,6 +301,7 @@ public class ProviderCredentialController {
             repo.insert(row);
         }
         factory.invalidate(r.org().id(), provider);
+        events.publishEvent(new ProviderCredentialSavedEvent(r.org().id(), provider));
         return ApiResponse.ok(toView(row));
     }
 

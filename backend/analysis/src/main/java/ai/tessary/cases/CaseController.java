@@ -91,7 +91,7 @@ public class CaseController {
             @PathVariable String id,
             @Valid @RequestBody ResolveCaseRequest req) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.resolve(r.project().id(), id, req.reason(), ctx.userEmail()));
+        return ApiResponse.ok(service.resolve(r.project().id(), id, req.reason(), ctx.userEmail(), req.disposition()));
     }
 
     /**

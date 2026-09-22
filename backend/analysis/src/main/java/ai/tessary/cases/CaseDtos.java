@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
@@ -9,6 +10,7 @@ import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -47,6 +49,8 @@ public final class CaseDtos {
             @Nullable String resolution,
             @JsonProperty("resolution_reason") @Nullable String resolutionReason,
             @JsonProperty("resolved_by") @Nullable String resolvedBy,
+            /** {@code fixed} | {@code false_alarm} on a resolved frustration case; null on every other case. */
+            @Nullable String disposition,
             @JsonProperty("muted_at") @Nullable String mutedAt,
             @JsonProperty("muted_by") @Nullable String mutedBy,
             /** How many findings this case holds (1b: a case reads over all of them; the newest stands
@@ -105,6 +109,7 @@ public final class CaseDtos {
                     row.resolution(),
                     row.resolutionReason(),
                     row.resolvedBy(),
+                    row.disposition(),
                     row.mutedAt(),
                     row.mutedBy(),
                     row.findingCount(),
@@ -269,6 +274,8 @@ public final class CaseDtos {
      *     counts, and the not-JSON / pre-rework buckets. Null for every other detector.
      * @param secretLeak "When it leaked" for a {@code secret_leak} case: the rule, the leak count,
      *     and the per-key and per-leak breakdowns. Null for every other detector.
+     * @param frustration the rate and the conversations it cites for a {@code frustration_rate} case, the
+     *     same block the finding page shows. Null for every other detector.
      */
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
@@ -286,11 +293,19 @@ public final class CaseDtos {
             @JsonProperty("tool_error") @Nullable RateDetail toolError,
             @JsonProperty("malformed_output") @Nullable MalformedDetail malformedOutput,
             @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
+            @Nullable FrustrationDetail frustration,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}
 
-    /** Closing a case. The reason is required and is the point of the record. */
+    /**
+     * Closing a case. The reason is required and is the point of the record.
+     *
+     * @param disposition only on a frustration case: {@code fixed} (the call site re-learns its normal rate from
+     *     here) or {@code false_alarm} (the same, and the conversations the case cites stop counting as
+     *     frustrated). Refused on any other case.
+     */
     public record ResolveCaseRequest(
-            @NotBlank @Size(max = 500) String reason) {}
+            @NotBlank @Size(max = 500) String reason,
+            @Nullable @Pattern(regexp = "fixed|false_alarm") String disposition) {}
 }

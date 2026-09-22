@@ -7,6 +7,7 @@ Every prompt the platform sends to a model lives as markdown under
 |---|---|---|
 | `analysis` · `triage/` | `classifier/finding/BehaviorTriageEngine` | Layer-2: is a detector's claim about production traffic true? |
 | `analysis` · `rca/` | `rca/AgenticRcaEngine` | Layer-3: what change caused it? |
+| `analysis` · `rca/frustration/` | `rca/AgenticRcaEngine` | Layer-3 on a frustration finding: what did the agent do that frustrated these users? |
 
 ## What belongs there, and what does not
 

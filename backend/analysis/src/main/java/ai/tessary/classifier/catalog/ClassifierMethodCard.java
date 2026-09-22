@@ -333,6 +333,49 @@ public final class ClassifierMethodCard {
             asked.
             """;
 
+    private static final String FRUSTRATION = """
+            ## frustration: a Bernoulli CUSUM over one call site's frustrated sessions
+
+            **Measures** the fraction of one call site's sessions in which the user became
+            frustrated with the agent. Each eligible user turn is one question to a hosted decision model:
+            a turn is eligible only when the four messages before it are user, assistant, user, assistant,
+            each with text, so a session's first two user turns are never scored. A turn is flagged
+            when its `unhappy_with_assistant` score exceeds the threshold; frustration aimed at something
+            outside the chat never flags. A session stops being scored at its first flag.
+
+            **Compares against** the rate that call site learned as its own normal over its first
+            sessions, a fitted number and not a stretch of traffic. A call site that was frustrating
+            from the start learned that as normal and is flagged only for getting worse. A resolve
+            restarts the accumulator and re-learns the rate from the traffic after it.
+
+            A session is one trial, counted on the call site of its first scored turn, and it is a
+            failure while it holds an uncleared flag. The flagged turn can sit on another call site.
+
+            **The claim's numbers** are in `get_finding` under `frustration`: `rate` (`refRate` and
+            `curRate` as fractions of sessions, `nRef`, `nCur`, `failuresCur`, `statistic` against
+            `threshold`, `effectSize`, `direction`, `onsetAt`, and no pattern breakdown),
+            `baselineFrustrated`, `jevThreshold`, `arlTarget`, `minDecisionInterval` and `scorerVersion`.
+
+            **Evidence**
+            - `member` session rows: every session scored on the call site since onset, the rate's
+              denominator.
+            - `witness` session rows: every frustrated session since onset, the numerator. Read these.
+            - `witness` trace rows: the user turn that was flagged inside each of those sessions.
+
+            **Absent roles**
+            - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
+              side to enumerate.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
+
+            ### Cause: `frustration_rate`
+
+            The share of one call site's sessions in which the user was frustrated with the agent has
+            risen above the rate it learned. Some frustration is normal. The claim holds when the witness
+            sessions show the user reacting to something the agent did, and that behaviour is
+            what changed, not who the users are or what they asked.
+            """;
+
     /**
      * Cards for the classifiers that write findings through a detector of their own. The armed-signal
      * family shares one shape and is rendered from {@link #ARMED_SIGNAL} with its key substituted.
@@ -344,7 +387,8 @@ public final class ClassifierMethodCard {
             BuiltInDetector.Kind.BEHAVIOR_DRIFT, BEHAVIOR_DRIFT,
             BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE,
             BuiltInDetector.Kind.SECRET_LEAK, SECRET_LEAK,
-            BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT);
+            BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT,
+            BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION);
 
     /**
      * The card for one classifier key, or null when the key names nothing this knows about — a
@@ -371,13 +415,6 @@ public final class ClassifierMethodCard {
      * the evidence in front of it.
      */
     private static final Map<String, String> ARMED_SIGNAL_MEASURES = Map.of(
-            BuiltInDetector.Kind.FRUSTRATION,
-            "**Measures** emotional frustration in one user turn: an encoder head scores that turn for"
-                    + " annoyance and anger, against the last exchange for context. A conversation's opening"
-                    + " turn is never scored, because the agent has not acted yet and whatever the user arrived"
-                    + " with is not something it caused. A high score is re-scored by a second head and demoted"
-                    + " unless the frustration is attributable to the agent. This catches emotional frustration"
-                    + " only: a failing or looping task with no feeling in the turn does not fire it.",
             BuiltInDetector.Kind.GROUNDEDNESS,
             "**Measures** whether an answer contradicts its own source: a three-way NLI head scores each"
                     + " asserted sentence against the source the trace actually produced, the retrieved"

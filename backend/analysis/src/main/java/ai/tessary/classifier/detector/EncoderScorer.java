@@ -5,8 +5,8 @@ import java.util.List;
 
 /**
  * Scores texts against one of the standalone classify-service's built-in encoder heads
- * ({@code /classify}). The seam between {@link EncoderDetector} (which decides what text to score
- * and how to band the score) and the serving side (transformers.js ONNX heads in the standalone
+ * ({@code /classify}). The seam between a detector (which decides what text to score and how to
+ * band the score) and the serving side (transformers.js ONNX heads in the standalone
  * classify-service, ECS Fargate).
  */
 public interface EncoderScorer {

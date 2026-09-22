@@ -9,6 +9,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
@@ -112,6 +113,26 @@ public class FindingController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(
                 service.malformedOutputs(r.project().id(), id, field, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
+    }
+
+    /**
+     * One page of the frustrated sessions a {@code frustration_rate} finding cites, newest flag first: what the
+     * finding and case pages' session list loads as it scrolls past the first page. {@code rcaReport} and
+     * {@code cause}, the cause's 0-based position in that report, narrow it to one RCA cause's sessions.
+     */
+    @GetMapping("/{id}/frustrated-sessions")
+    public ApiResponse<FrustrationEvidence.FrustratedSessionPage> frustratedSessions(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @RequestParam(required = false) @Nullable String rcaReport,
+            @RequestParam(required = false) @Nullable Integer cause,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String cursor) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(service.frustratedSessions(
+                r.project().id(), id, rcaReport, cause, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
     }
 
     /**

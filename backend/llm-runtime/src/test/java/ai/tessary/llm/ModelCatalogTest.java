@@ -43,6 +43,14 @@ class ModelCatalogTest {
     }
 
     @Test
+    void onlyTypeSafeNamesTheLaneItIsFor() {
+        for (PlatformCatalog.PlatformDescriptor p : PlatformCatalog.platforms()) {
+            List<String> expected = p.id() == ModelProvider.TYPESAFE ? List.of("frustration") : List.of();
+            assertEquals(expected, p.usedBy(), p.id().name());
+        }
+    }
+
+    @Test
     void mergeLiveWithNoLiveListing_passesTheStaticTableThroughUnchanged() {
         // A cold cache (no credential, or a fetch that failed with nothing to fall back to) must
         // degrade to today's static list, not to nothing, at this seam.
@@ -123,5 +131,43 @@ class ModelCatalogTest {
         assertEquals(
                 "bedrock_mantle/openai.gpt-5.6-luna",
                 ModelCatalog.pricingId(ModelProvider.BEDROCK_MANTLE, "openai.gpt-5.6-luna"));
+    }
+
+    @Test
+    void jevIsOfferedAsADecisionModelOnTypeSafeAndOpenRouterOnly_neverAgentic() {
+        List<String> decisionKeys = ModelCatalog.entries().stream()
+                .filter(ModelCatalog.CatalogEntry::decision)
+                .map(ModelCatalog::key)
+                .toList();
+        assertEquals(List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"), decisionKeys);
+        assertTrue(ModelCatalog.entries().stream()
+                .filter(ModelCatalog.CatalogEntry::decision)
+                .noneMatch(ModelCatalog.CatalogEntry::agentic));
+        assertTrue(ModelCatalog.entries().stream()
+                .filter(e -> e.provider() == ModelProvider.TYPESAFE)
+                .allMatch(ModelCatalog.CatalogEntry::decision));
+    }
+
+    @Test
+    void pricingIdPricesTypeSafeUnderItsBookPrefix() {
+        assertEquals("typesafe/jev-latest", ModelCatalog.pricingId(ModelProvider.TYPESAFE, "jev-latest"));
+    }
+
+    @Test
+    void mergeLiveDropsPinnedJevVersionsFromAnOpenRouterListing_keepingTheStaticEntry() {
+        List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
+                ModelProvider.OPENROUTER,
+                List.of(
+                        new ProviderModel("typesafe/jev-latest", "TypeSafe: Jev", "TypeSafe"),
+                        new ProviderModel("typesafe/jev-1.13-20260917", "TypeSafe: Jev 1.13", "TypeSafe")));
+
+        List<String> jev = merged.stream()
+                .map(ModelCatalog.CatalogEntry::modelName)
+                .filter(n -> n.startsWith("typesafe/"))
+                .toList();
+        assertEquals(List.of("typesafe/jev-latest"), jev);
+        assertTrue(merged.stream()
+                .filter(e -> e.modelName().equals("typesafe/jev-latest"))
+                .allMatch(ModelCatalog.CatalogEntry::decision));
     }
 }

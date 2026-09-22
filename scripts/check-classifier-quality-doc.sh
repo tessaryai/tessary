@@ -9,7 +9,8 @@
 # no longer has, which is worse than no page because it reads as verified.
 #
 # WHAT IS AND IS NOT CHECKED. The machine-readable half only: served model revisions (CQ_MODELS)
-# and thresholds (BuiltInClassifierCatalog, which is in this tree). Whether a number is still
+# and thresholds (BuiltInClassifierCatalog, which is in this tree). Frustration has no served
+# revision: its scorer is a hosted decision model, so only its flag threshold is pinned. Whether a number is still
 # right for a changed eval set is a judgement no script can make, and stays a co-update rule in
 # AGENTS.md.
 #
@@ -62,12 +63,11 @@ catalog = open(
     encoding='utf-8').read()
 
 
-# Both frustration and groundedness carry threshold_high/threshold_low, so a bare search finds
-# whichever block appears first — each block is identified by something only that classifier's
-# config contains.
-def config_block(marker):
-    """The config-string literal for the classifier whose block contains `marker`."""
-    for block in re.findall(r'"\{\\"threshold_high.*?\}",', catalog, re.S):
+# Groundedness's config is the one threshold_high/threshold_low literal left; frustration's is the one
+# that opens with its Jev threshold. Each is found by a marker only its own literal contains.
+def config_block(pattern, marker):
+    """The config-string literal matching `pattern` whose text contains `marker`."""
+    for block in re.findall(pattern, catalog, re.S):
         if marker in block:
             return block
     return None
@@ -80,18 +80,14 @@ def number_in(block, key):
     return m.group(1) if m else None
 
 
-frustration_cfg = config_block('attribution_head')
-groundedness_cfg = config_block('threshold_low\\":0.6}')
+groundedness_cfg = config_block(r'"\{\\"threshold_high.*?\}",', 'threshold_low\\":0.6}')
+frustration_cfg = config_block(r'"\{\\"threshold\\".*?\}",', 'min_baseline_conversations')
 
 expected = {
     'groundedness_revision': models['groundedness']['revision'],
-    'frustration_revision': models['frustration']['revision'],
-    'attribution_revision': models['attribution']['revision'],
-    'attribution_threshold': number_in(frustration_cfg, 'attribution_threshold'),
-    'frustration_high': number_in(frustration_cfg, 'threshold_high'),
-    'frustration_low': number_in(frustration_cfg, 'threshold_low'),
     'groundedness_high': number_in(groundedness_cfg, 'threshold_high'),
     'groundedness_low': number_in(groundedness_cfg, 'threshold_low'),
+    'frustration_threshold': number_in(frustration_cfg, 'threshold'),
 }
 
 problems = []

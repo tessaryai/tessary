@@ -38,9 +38,12 @@ import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBoun
 export function ConversationView({
   spans,
   focusId,
+  flagged = false,
 }: {
   spans: Span[];
   focusId: string | null;
+  /** Draw the turn's question as the message a classifier fired on. */
+  flagged?: boolean;
 }) {
   const plan = useMemo(() => planConversation(spans), [spans]);
   const tools = useMemo(() => planTools(spans), [spans]);
@@ -71,7 +74,7 @@ export function ConversationView({
       <PriorContext messages={plan.prior} />
 
       {/* The question the turn is answering. */}
-      {root && question.length > 0 && chrome(root, <ChatItems items={question} />)}
+      {root && question.length > 0 && chrome(root, <ChatItems items={question} flagged={flagged} />)}
 
       {/* The work, in the order it ran: what each model call said, then the tools
           it asked for, batched onto one line. */}
@@ -452,10 +455,13 @@ export function SessionConversationView({
   traces,
   spansByTrace,
   focusId,
+  flaggedTraceId = null,
 }: {
   traces: TraceListItem[];
   spansByTrace: SpansByTrace;
   focusId: string | null;
+  /** The trace whose user message a classifier fired on; its question is drawn flagged. */
+  flaggedTraceId?: string | null;
 }) {
   if (traces.length === 0) {
     return (
@@ -469,7 +475,11 @@ export function SessionConversationView({
       {traces.map((t, i) => (
         <div key={t.id}>
           <TraceDivider trace={t} first={i === 0} />
-          <ConversationView spans={spansByTrace.get(t.id) ?? []} focusId={focusId} />
+          <ConversationView
+            spans={spansByTrace.get(t.id) ?? []}
+            focusId={focusId}
+            flagged={flaggedTraceId === t.id}
+          />
         </div>
       ))}
     </div>

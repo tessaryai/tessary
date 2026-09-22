@@ -16,6 +16,10 @@ import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.decisions.DecisionProviderResolver;
+import ai.tessary.llm.decisions.DecisionTarget;
+import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -34,6 +38,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
@@ -63,6 +68,7 @@ public class ClassifierService {
     private final ClassifierProperties props;
     private final CapabilityService capabilities;
     private final ProjectRepository projects;
+    private final DecisionProviderResolver decisionProviders;
 
     public ClassifierService(
             ClassifierRepository signals,
@@ -74,8 +80,10 @@ public class ClassifierService {
             ClassifierProperties props,
             CapabilityService capabilities,
             ProjectRepository projects,
-            MetricBaselineRepository baselines) {
+            MetricBaselineRepository baselines,
+            DecisionProviderResolver decisionProviders) {
         this.baselines = baselines;
+        this.decisionProviders = decisionProviders;
         this.signals = signals;
         this.detections = detections;
         this.jobs = jobs;
@@ -89,8 +97,9 @@ public class ClassifierService {
 
     /**
      * Seed the built-in catalog into a project, idempotently: a missing built-in is inserted
-     * enabled; an existing one whose catalog version advanced has its definition re-synced
-     * (enable/disable state preserved). Returns the number newly inserted.
+     * enabled, or disabled when its module says so (Frustration); an existing one whose catalog
+     * version advanced has its definition re-synced (enable/disable state preserved). Returns the
+     * number newly inserted.
      *
      * <p>Two triggers: {@link ClassifierSeedListener} on project creation, and {@link
      * #resyncBuiltIns} from {@code ClassifierCatalogWorker} for every active project, which
@@ -136,10 +145,10 @@ public class ClassifierService {
                         b.defaultConfigJson(),
                         true,
                         b.version(),
-                        // Every built-in seeds ON. A classifier whose numbers we do not trust is
-                        // held back by its capability flag, not by a second switch in the
-                        // catalog; see BuiltIn.
-                        true,
+                        // Every built-in seeds ON except one that spends the org's own provider
+                        // credit; a classifier whose numbers we do not trust is held back by its
+                        // capability flag instead. See BuiltIn.
+                        b.defaultEnabled(),
                         // The operating point the catalog declares for this built-in: DISCOVERY
                         // (high recall) is right for a classifier nobody has characterised yet;
                         // frustration declares TRACKING once it has been. See
@@ -419,6 +428,12 @@ public class ClassifierService {
      * schema's arrival rewinds to check.
      */
     public @Nullable String readiness(String projectId, ClassifierRow row) {
+        if (BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) {
+            if (!row.enabled()) return null;
+            return signals.findPause(projectId, row.id())
+                    .map(ClassifierPause::reason)
+                    .orElse(null);
+        }
         if (!BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(row.detector())) return null;
         return substrate.anyOutputSchema(projectId) ? null : ClassifierDtos.ClassifierView.WAITING_ON_SCHEMAS;
     }
@@ -439,13 +454,44 @@ public class ClassifierService {
     /**
      * Enable or disable a signal definition. Guarded by {@link #get} first, so a withheld
      * built-in 404s instead of being written and then 404ing on the read back.
+     *
+     * <p>Frustration spends the org's own provider credit, so enabling it without a key its lane can
+     * run on is refused with {@link ClassifierError#PROVIDER_REQUIRED} rather than accepted and paused on
+     * the first sweep. Any enable clears a pause: it is how a person says "try again", and the next
+     * sweep pauses again if the provider still refuses.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
-        get(projectId, id); // tenant + existence + capability guard
+        ClassifierRow row = get(projectId, id); // tenant + existence + capability guard
+        if (enabled
+                && BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
+                && decisionProviders.resolve(projectId, ModelLane.FRUSTRATION).isEmpty()) {
+            throw new TessaryException(ClassifierError.PROVIDER_REQUIRED, row.name());
+        }
         if (signals.setEnabled(projectId, id, enabled) == 0) {
             throw new TessaryException(ClassifierError.NOT_FOUND, id);
         }
+        if (enabled) signals.unpause(projectId, id);
         return get(projectId, id);
+    }
+
+    /**
+     * Lift the pause on every paused classifier in {@code orgId} whose lane now runs on {@code provider}:
+     * the org just saved that provider's key, so the next sweep tries it instead of waiting out
+     * {@code tessary.frustration.credential-retry-seconds}. A classifier whose lane resolves elsewhere, or
+     * still to nothing, stays paused. Returns how many were lifted.
+     */
+    public int unpauseForProvider(String orgId, ModelProvider provider) {
+        int lifted = 0;
+        for (Project project : projects.findByOrg(orgId)) {
+            for (ClassifierRow row : signals.listByProject(project.id())) {
+                if (!BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) continue;
+                if (signals.findPause(project.id(), row.id()).isEmpty()) continue;
+                Optional<DecisionTarget> target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
+                if (target.isEmpty() || target.get().provider() != provider) continue;
+                lifted += signals.unpause(project.id(), row.id());
+            }
+        }
+        return lifted;
     }
 
     /**

@@ -480,14 +480,14 @@ export function groupTools(items: ChatItem[]): GroupedItem[] {
   return out;
 }
 
-function Items({ items, failed }: { items: ChatItem[]; failed?: boolean }) {
+function Items({ items, failed, flagged }: { items: ChatItem[]; failed?: boolean; flagged?: boolean }) {
   return (
     <div className="flex flex-col gap-2">
       {groupTools(items).map((group, i) =>
         group.kind === "tools" ? (
           <ToolCallBatch key={`t${i}`} steps={group.steps} />
         ) : (
-          <Turn key={`m${i}`} item={group} failed={failed} />
+          <Turn key={`m${i}`} item={group} failed={failed} flagged={flagged} />
         ),
       )}
     </div>
@@ -521,12 +521,25 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-/** Rendered dialogue for a run of items, the caller decides there are any. */
-export function ChatItems({ items, failed }: { items: ChatItem[]; failed?: boolean }) {
-  return <Items items={items} failed={failed} />;
+/**
+ * Rendered dialogue for a run of items, the caller decides there are any.
+ *
+ * <p>`flagged` marks the run as the message a classifier fired on, drawn in the error tint so it reads
+ * as the one the finding is about. It is not `failed`: nothing broke, the user's words were judged.
+ */
+export function ChatItems({ items, failed, flagged }: { items: ChatItem[]; failed?: boolean; flagged?: boolean }) {
+  return <Items items={items} failed={failed} flagged={flagged} />;
 }
 
-function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; failed?: boolean }) {
+function Turn({
+  item,
+  failed,
+  flagged,
+}: {
+  item: Extract<ChatItem, { kind: "message" }>;
+  failed?: boolean;
+  flagged?: boolean;
+}) {
   const { label, side } = classify(item.message);
 
   return (
@@ -538,7 +551,7 @@ function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; 
           {label}
         </span>
       )}
-      <Bubble side={side} failed={failed}>
+      <Bubble side={side} failed={failed} flagged={flagged}>
         <Clamped>
           <div className="flex flex-col gap-2">
             {item.text.length > 0 && <Markdown>{item.text}</Markdown>}
@@ -647,16 +660,19 @@ function Clamped({ children }: { children: React.ReactNode }) {
 function Bubble({
   side,
   failed,
+  flagged,
   children,
 }: {
   side: "left" | "right";
   failed?: boolean;
+  flagged?: boolean;
   children: React.ReactNode;
 }) {
   const right = side === "right";
   return (
     <div className={cn("flex", right ? "justify-end" : "justify-start")}>
       <div
+        data-flagged={flagged ? "true" : undefined}
         className={cn(
           "chat-bubble min-w-0 text-body py-2.5 px-3.5",
           right ? "bg-raised text-fg" : "bg-bg text-fg",
@@ -670,8 +686,11 @@ function Bubble({
             // Read by the fold's fade gradient, which has to end in this
             // bubble's own colour to look like the text runs out rather than
             // like a grey band was laid over it.
-            "--bubble-bg": right ? "var(--color-raised)" : "var(--color-bg)",
+            "--bubble-bg": flagged ? "var(--color-error-subtle)" : right ? "var(--color-raised)" : "var(--color-bg)",
             ...(failed ? { borderColor: "var(--color-error)" } : null),
+            ...(flagged
+              ? { background: "var(--color-error-subtle)", border: "1px solid var(--color-error)" }
+              : null),
           } as React.CSSProperties
         }
       >

@@ -352,7 +352,9 @@ echo
 echo "fixture coverage (every value a rename could touch must be present BEFORE the new chains)"
 echo "-- open lane, always --"
 expect "job.kind='classifier'"                1 "SELECT count(*) FROM job WHERE kind='classifier'"
-expect "classifier row"                       1 "SELECT count(*) FROM classifier"
+expect "classifier rows"                      2 "SELECT count(*) FROM classifier"
+expect "frustration built-in enabled (pre-0022)" 1 "SELECT count(*) FROM classifier
+                                                      WHERE classifier_key='frustration' AND built_in AND enabled"
 expect "eval_case.detector='classifier'"      3 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
 expect "eval_case both finding arms"          3 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
                                                       + (SELECT count(*) FROM eval_case WHERE finding_id IS NULL AND state='resolved')"
@@ -499,6 +501,18 @@ if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0013-rule-hi
                                 FROM finding WHERE id='fnd_fix_leak_low'"
 else
   skip "0013 rule high-confidence leaks" "0013 is not in databasechangelog, it has not landed"
+fi
+
+echo
+echo "0022: frustration ships off"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0022-frustration-off')")" = "t" ]; then
+  expect "frustration built-in is disabled"     f "SELECT enabled FROM classifier WHERE id='cls_fix_frustration'"
+  expect "its updated_at parses as a timestamp" t "SELECT CAST(updated_at AS timestamptz) > '2026-01-01T00:00:00Z'
+                                FROM classifier WHERE id='cls_fix_frustration'"
+  expect "the fixture classifier is untouched"  t "SELECT enabled FROM classifier WHERE id='cls_fix'"
+  expect "frustration_detection is empty"       0 "SELECT count(*) FROM frustration_detection"
+else
+  skip "0022 frustration off" "0022 is not in databasechangelog, it has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

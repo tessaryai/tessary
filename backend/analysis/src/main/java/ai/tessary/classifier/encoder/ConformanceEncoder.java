@@ -7,8 +7,8 @@ import java.util.List;
 /**
  * Embeds turn text with the frozen sentence encoder the artifact bundle was fitted against.
  *
- * <p>Same port as {@link EncoderScorer}, which the built-in encoder classifiers (frustration,
- * groundedness) also serve through: the interface names the model ({@code checkpoint} here,
+ * <p>Same port as {@link EncoderScorer}, which the built-in encoder classifier (groundedness)
+ * also serves through: the interface names the model ({@code checkpoint} here,
  * {@code head} there) and carries no opinion about who runs it. The production implementation is
  * {@link HttpConformanceEncoder}, calling classify-service's {@code POST /embed} endpoint, which
  * tokenizes to 256 with the checkpoint's own tokenizer, mean-pools with the mask, and L2-normalizes.

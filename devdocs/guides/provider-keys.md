@@ -21,6 +21,8 @@ Pick a platform, paste its credential, Save:
 - **API-key platforms** (OpenAI, Anthropic, OpenRouter, Moonshot, Gemini, GLM, Grok, and Custom —
   any other OpenAI-compatible endpoint) — an API key, optionally a base URL override (required for
   Custom, which has no default to assume).
+- **TypeSafe** — an API key, optionally a base URL override. TypeSafe serves decision models
+  (Jev), not chat models, so its key never runs RCA or Triage. See *Decision-model keys* below.
 - **AWS Bedrock / Bedrock Mantle** — an AWS region, plus either an access key + secret key
   (`auth_mode=api_key`, the default) or an explicit opt-in to your own host's ambient AWS identity
   (`auth_mode=iam_role`) — see the IAM-role section below for what that opt-in does and does not
@@ -71,6 +73,42 @@ configured. If the org has configured no provider at all, the run fails closed w
 `MISSING_CREDENTIALS` error. There is no silent "whatever AWS credentials the host happens to
 carry" path any more, in either edition.
 
+## Decision-model keys (TypeSafe, OpenRouter)
+
+A decision model answers a typed question about a piece of text in one call, rather than chatting.
+The Frustration classifier uses TypeSafe's Jev this way. Two keys can carry that call:
+
+- a **TypeSafe** key, which calls `jev-latest` at `https://api.typesafe.ai/v1/systemone`;
+- an **OpenRouter** key, which calls `typesafe/jev-latest` at
+  `https://openrouter.ai/api/alpha/decisions`. The same key keeps serving chat models on the RCA
+  and Triage lanes.
+
+Which one runs is the **Frustration** lane on the Models page, in its own "Decision models"
+section. The lane offers a provider select and nothing else: each provider serves one decision model,
+and there is no tier or effort to set. Left on Automatic it takes TypeSafe when the org holds both
+keys; pinning OpenRouter keeps it there. Only decision models can be saved on the lane, and a decision
+model cannot be saved on RCA or Triage (`ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE`). A base URL
+override on either credential replaces the host; a trailing `/v1` is dropped, since neither decision
+path sits under it.
+
+Each call is booked in the usage ledger on the org's own key, and priced from the price book under
+`typesafe/jev-latest` on both routes: the book has no OpenRouter-specific Jev rate, so an OpenRouter
+markup, if any, is not in the booked figure. OpenRouter's own reported cost is kept with the call's
+raw response for audit. Only `jev-latest` is offered, with no pinned versions; the version that
+answered each call is recorded with it.
+
+A decision key is refused anywhere a chat model is built (`ModelConfigError.NOT_A_CHAT_PROVIDER`).
+A rejected key (HTTP 401 or 403) fails with `DECISION.PROVIDER_REJECTED` and is not retried.
+
+The Providers page marks TypeSafe "Used by Frustration" (the catalog's `used_by` on that platform),
+since that is the only thing its key does. Enabling Frustration without a key its lane can run on is
+refused with `CLASSIFIER.PROVIDER_REQUIRED`; the Catalog's enable dialog picks the provider, takes the
+key when the org has none, and sets the lane before it enables. When the provider later refuses the
+key, or the key is deleted, the classifier pauses (`readiness` reads `provider_rejected` or
+`no_provider`, shown on the Catalog row and rail) and sends nothing until the key works again. Saving
+the key the lane runs on lifts the pause at once, as does the rail's Retry or any re-enable; otherwise
+the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
+
 ## The `auth_mode=iam_role` opt-in — what it does and does not cover
 
 A Bedrock or Bedrock-mantle credential can opt into `auth_mode=iam_role`: the backend's own direct
@@ -106,4 +144,5 @@ else.
 - [reference/principles.md](../reference/principles.md#product--positioning) for the single-tenant /
   no-shared-training guarantee that also governs how a project's own data is (and isn't) used.
 - `backend/llm-runtime/src/main/java/ai/tessary/llm/ProviderCredentialController.java`,
-  `ChatModelFactory.java`, and `AgenticCredentialResolver.java` for the code this doc describes.
+  `ChatModelFactory.java`, `AgenticCredentialResolver.java`, and `decisions/JevDecisionClient.java`
+  for the code this doc describes.

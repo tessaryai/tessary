@@ -35,6 +35,15 @@ import {
  * upsert/remove mutations, are unchanged.
  */
 
+/** Display names for `PlatformDescriptor.used_by` lane ids; an unknown id shows as sent. */
+const LANE_LABELS: Record<string, string> = { frustration: "Frustration" };
+
+/** "Used by Frustration" for a provider that serves one feature and no chat lane, else null. */
+export function usedByLine(p: PlatformDescriptor): string | null {
+  if (p.used_by.length === 0) return null;
+  return `Used by ${p.used_by.map((lane) => LANE_LABELS[lane] ?? lane).join(", ")}`;
+}
+
 /** What credential shape a not-yet-configured provider expects, read aloud. */
 function expectedFields(p: PlatformDescriptor): string {
   if (p.auth === "aws") return "Access key · secret · region";
@@ -165,6 +174,7 @@ function ProviderRow({
   const configured = !!cred && (cred.has_api_key || cred.has_aws_credentials);
   const names = models.map((m) => m.display_name);
   const namePreview = names.slice(0, 2).join(", ");
+  const usedBy = usedByLine(platform);
 
   return (
     <div className="flex flex-col justify-between rounded-card border border-border p-4">
@@ -181,6 +191,8 @@ function ProviderRow({
           <span className="text-label uppercase text-subtle">Not configured</span>
         )}
       </div>
+
+      {usedBy && <div className="mt-1 text-label text-muted">{usedBy}</div>}
 
       <div className="mt-2.5 text-label text-muted">
         {configured ? (

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
+import ai.tessary.llmspi.ModelLane;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Optional;
@@ -20,12 +21,24 @@ public final class PlatformCatalog {
 
     public static final String AUTH_AWS = "aws";
 
+    /**
+     * @param usedBy the lanes, by wire name, that are the only reason to add this platform's key: set for a
+     *     provider that serves one feature and no chat lane, so the Providers page can say what it is for.
+     *     Empty for a chat provider, which every agentic lane may use.
+     */
     public record PlatformDescriptor(
             ModelProvider id,
             String label,
             String auth,
             @JsonProperty("supports_base_url") boolean supportsBaseUrl,
-            @JsonProperty("default_base_url") String defaultBaseUrl) {}
+            @JsonProperty("default_base_url") String defaultBaseUrl,
+            @JsonProperty("used_by") List<String> usedBy) {
+
+        PlatformDescriptor(
+                ModelProvider id, String label, String auth, boolean supportsBaseUrl, String defaultBaseUrl) {
+            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, List.of());
+        }
+    }
 
     // Every platform requires an org-provided credential; there is no credential-free platform.
     // ChatModelFactory never falls back to an ambient key for a run selection.
@@ -60,7 +73,15 @@ public final class PlatformCatalog {
             // Mantle authenticates with the same AWS credentials as Bedrock (SigV4), just against the
             // bedrock-mantle service name, so it reuses AUTH_AWS and the Providers form renders it
             // unchanged. No base-URL override: the host is derived from the region.
-            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null));
+            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null),
+            // A decision-model provider, not a chat one: its key reaches llm/decisions/ only.
+            new PlatformDescriptor(
+                    ModelProvider.TYPESAFE,
+                    "TypeSafe",
+                    AUTH_API_KEY,
+                    true,
+                    "https://api.typesafe.ai",
+                    List.of(ModelLane.FRUSTRATION.wire())));
 
     private PlatformCatalog() {}
 

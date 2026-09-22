@@ -136,6 +136,7 @@ class CasePageCodecTest {
                 null,
                 null,
                 null,
+                null,
                 openedAt);
     }
 }

@@ -12,12 +12,10 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 
 /**
  * Acceptance for the signal <b>definition</b> model + lifecycle: the built-in catalog seeds
@@ -25,7 +23,6 @@ import org.springframework.context.annotation.Import;
  * against the real pgvector Postgres (Testcontainers), so the signal schema is applied for real.
  */
 @SpringBootTest
-@Import(TurnGrainTestDetectionConfig.class)
 class ClassifierDefinitionIntegrationTest {
 
     @Autowired
@@ -62,10 +59,16 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(0, service.seedBuiltIns(pid), "re-seeding is a no-op (idempotent)");
         assertEquals(9, service.list(pid).size(), "all built-ins are listable");
         assertTrue(defs.stream().allMatch(ClassifierRow::builtIn), "all seeded signals are marked built_in");
-        // Every built-in seeds enabled, with no per-classifier exceptions: whether a classifier
-        // actually runs for an org is a capability-flag decision, not something the seeded row
-        // encodes. What reaches a project at all is asserted in PartnerCatalogTest.
-        assertTrue(defs.stream().allMatch(ClassifierRow::enabled), "every built-in seeds enabled");
+        // Every built-in seeds enabled except Frustration, whose sweep spends the org's own provider
+        // credit, so a person turns it on. Otherwise whether a classifier runs for an org is a
+        // capability-flag decision, not something the seeded row encodes. What reaches a project at
+        // all is asserted in PartnerCatalogTest.
+        for (ClassifierRow def : defs) {
+            assertEquals(
+                    !"frustration".equals(def.classifierKey()),
+                    def.enabled(),
+                    def.classifierKey() + " seeds with the wrong switch");
+        }
     }
 
     @Test
@@ -220,9 +223,10 @@ class ClassifierDefinitionIntegrationTest {
      * Bootstrap a tenant whose org has all four capability-gated classifiers switched on before its
      * project is created.
      *
-     * <p>Two things make this necessary. {@code behavior_drift}, {@code sop_conformance}, {@code
-     * frustration}, and {@code groundedness} default off, so without a grant these cases would
-     * assert the capability default rather than the behavior they name. And the grant has to
+     * <p>Two things make this necessary. {@code behavior_drift}, {@code sop_conformance} and {@code
+     * groundedness} are unavailable in this build, so without a grant these cases would assert the
+     * capability default rather than the behavior they name ({@code frustration} is granted too, so the
+     * set does not depend on which edition's default it has). And the grant has to
      * precede the project, because project creation is what seeds the built-in classifiers: grant
      * afterwards and the classifier row is never inserted, leaving the test hunting findings from a
      * classifier the project doesn't have.

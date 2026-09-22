@@ -16,9 +16,9 @@ const OPTS = { windowChars: 100, overlap: 20, maxWindows: 4 };
 
 // Which edition is this checkout? models.json — the manifest binding each head to a
 // pinned checkpoint — lives outside this tree, which ships `{}` in its place. The two
-// residency tests below assert against real manifest entries (a model id to build a fixture path
-// from, a `gated` flag to expect), so they are meaningful only where the manifest is populated;
-// when it's empty the third test runs instead, which pins the behavior that replaces them.
+// residency test below asserts against a real manifest entry (a model id to build a fixture path
+// from), so it is meaningful only where the manifest is populated; when it's empty the next test
+// runs instead, which pins the behavior that replaces it.
 // Read directly rather than via classify.js so this is a statement about the FILE, not about the
 // registry classify.js derives from it.
 const OPEN_EDITION = Object.keys(require('./models.json')).length === 0;
@@ -91,13 +91,6 @@ test('a pair head rejects a texts-shaped request', async () => {
   await assert.rejects(() => classify({ head: 'groundedness', texts: ['x'] }), /send pairs, not texts/);
 });
 
-test('a single-text head rejects a pairs-shaped request', async () => {
-  await assert.rejects(
-    () => classify({ head: 'frustration', pairs: [{ premise: 'a', claim: 'b' }] }),
-    /send texts, not pairs/,
-  );
-});
-
 test('a pair head rejects a malformed pairs array', async () => {
   await assert.rejects(() => classify({ head: 'groundedness', pairs: [{ premise: 'only' }] }), /non-empty array/);
   await assert.rejects(() => classify({ head: 'groundedness', pairs: [] }), /non-empty array/);
@@ -121,12 +114,11 @@ test('deBlob leaves ordinary prose untouched', () => {
   assert.equal(deBlob(prose), prose);
 });
 
-// headResidency() / gated-head "unavailable" (this build has no HF_TOKEN,
-// so frustration + attribution never get baked). No model download needed — this only
-// touches the filesystem marker check (residentModelDir), the same one embed.js's
-// checkpointResidency() uses for /embed. Restores HF_CACHE_DIR in a `finally` so this test
-// can't leak state into whatever runs after it in the same process.
-test('headResidency reports gated heads missing and the public head resident from marker files alone', paidOnly, () => {
+// headResidency() from marker files alone. No model download needed — this only touches the
+// filesystem marker check (residentModelDir), the same one embed.js's checkpointResidency() uses
+// for /embed. Restores HF_CACHE_DIR in a `finally` so this test can't leak state into whatever runs
+// after it in the same process.
+test('headResidency reports the public head resident from marker files alone', paidOnly, () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'classify-residency-'));
   const groundednessDir = path.join(fixtureRoot, 'Xenova', 'bart-large-mnli');
   fs.mkdirSync(groundednessDir, { recursive: true });
@@ -138,7 +130,7 @@ test('headResidency reports gated heads missing and the public head resident fro
   try {
     const { resident, missing } = headResidency();
     assert.deepEqual(resident.sort(), ['groundedness']);
-    assert.deepEqual(missing.sort(), ['attribution', 'frustration']);
+    assert.deepEqual(missing, []);
   } finally {
     if (prevCacheDir === undefined) delete process.env.HF_CACHE_DIR;
     else process.env.HF_CACHE_DIR = prevCacheDir;
@@ -146,25 +138,9 @@ test('headResidency reports gated heads missing and the public head resident fro
   }
 });
 
-test('classify() throws statusCode 400 for a gated head with no weights on disk (unavailable, not a crash)', paidOnly, async () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'classify-residency-'));
-  const prevCacheDir = process.env.HF_CACHE_DIR;
-  process.env.HF_CACHE_DIR = fixtureRoot; // empty: nothing resident, including groundedness
-  try {
-    await assert.rejects(
-      () => classify({ head: 'frustration', texts: ['x'] }),
-      (e) => e.statusCode === 400 && /not baked into this image/.test(e.message),
-    );
-  } finally {
-    if (prevCacheDir === undefined) delete process.env.HF_CACHE_DIR;
-    else process.env.HF_CACHE_DIR = prevCacheDir;
-    fs.rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-});
-
-// This build's counterpart to the two tests above. With an empty models.json every
+// This build's counterpart to the test above. With an empty models.json every
 // scorer in classify.js is UNBACKED: still resolvable by name — the backend's
-// BuiltInClassifierCatalog / EncoderDetector ask for these heads by name and must not be told
+// BuiltInClassifierCatalog / EncoderScorer ask for these heads by name and must not be told
 // they are unknown — but unservable, and saying so in a way a caller can tell apart from a
 // serving failure. Runs whether or not the manifest is populated: when it is, this test asserts
 // the opposite, that no head is unbacked, so a manifest entry silently disappearing can never

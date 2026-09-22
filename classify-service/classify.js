@@ -13,12 +13,15 @@
  * fixed: these heads are the product's built-in semantic classifiers, best-in-class
  * off-the-shelf ONNX checkpoints.
  *
- * `frustration` is single-text (scores one string in isolation); `groundedness` is a PAIR
- * head (score a claim against a premise/context) — see "Pair-input heads" below.
+ * `groundedness` is a PAIR head (score a claim against a premise/context) — see "Pair-input
+ * heads" below. The single-text path (`texts`) stays for any single-text head; none is registered
+ * today.
  *
- * Licenses: frustration (ModernBERT fine-tune) Apache-2.0; groundedness (MiniCheck) MIT.
+ * Licenses: groundedness (bart-large-mnli) MIT.
  * (2026-07-16: refusal/jailbreak/unsafe_text were retired from the default catalog and
- * decommissioned here — their non-permissive licenses are moot now that nothing serves them.)
+ * decommissioned here — their non-permissive licenses are moot now that nothing serves them.
+ * The frustration and attribution heads went the same way when frustration moved to a
+ * decision model the backend calls directly.)
  */
 
 // node:fs / node:path — only for residentModelDir/headResidency below (mirrors embed.js's
@@ -43,13 +46,13 @@ const MAX_TEXT_CHARS = Number(process.env.MAX_TEXT_CHARS || 4096);
 // shape. fp32 per-text scores are batch-independent (attention masks make padding
 // inert); the q8 heads use dynamic quantization, whose activation scales depend on the
 // batch's value range, so scores there can shift by a few hundredths with batch
-// composition — real, measured (frustration 0.718 paired vs 0.690 solo), and why
+// composition — real, measured (0.718 paired vs 0.690 solo on one q8 head), and why
 // BuiltInSignalCatalog thresholds need margin, but never enough to flip a confident
 // verdict.
 const INFER_BATCH = Number(process.env.INFER_BATCH || 8);
 
 // Sliding-window scoring (behind WINDOW_SCORING, default off). Single-text encoder heads see only
-// ~512 tokens, so frustration buried past the head of a long turn is otherwise invisible. When
+// ~512 tokens, so behavior buried past the head of a long turn is otherwise invisible. When
 // enabled, a long text is scored in overlapping char windows sized to
 // fit the encoder window, and the head's score is the MAX across windows (behavior present
 // anywhere fires). Cost is bounded: at most MAX_WINDOWS forward passes per text — the windows are
@@ -85,36 +88,9 @@ function deBlob(text) {
 const MODELS = require('./models.json');
 
 const SCORERS = {
-  // EMOTION member of the frustration signal: cirimus ModernBERT-GoEmotions (28-label). Frustration =
-  // emotion PROXY = max(annoyance, anger) over the per-label sigmoids (transformers.js applies sigmoid
-  // per label for this multi_label model). The raw proxy is LOW/compressed, so we bake a Platt
-  // CALIBRATION: calibrated = sigmoid(w·logit(proxy)+b).
-  //
-  // CAVEAT — (w,b) were fit on the SYNTHETIC agentic register (~51% positive) AND on the older
-  // three-label proxy, so they are now stale twice over. Real traffic measures ~19% positive, and that
-  // prior shift alone moves the operating point well off the "clean ~0.5" the fit was designed around.
-  // Both are absorbed by the consuming band in BuiltInClassifierCatalog, re-derived empirically on 300
-  // human-labelled production turns for this exact scorer (LOW 0.66 / HIGH 0.90). Believe the band,
-  // not this intercept, until (w,b) are refit on real traffic — at which point the band should move
-  // back toward 0.5 and this caveat should go. (Behavioral frustration — task-failure/loops with no
-  // emotion — is a SEPARATE classifier `task_failure`, unioned at the signal layer, not scored here.)
-  frustration: (labels) => {
-    // annoyance + anger only. `disappointment` was in this max until it was measured: on 300
-    // human-labelled production turns it drove 31 of 50 FALSE fires (62%) but only 8 of 44 true ones
-    // (18%) — a 4:1 lean the wrong way. The cause is semantic, not calibration: GoEmotions'
-    // `disappointment` covers being let down by any OUTCOME ("wait, 5 lakh? I thought 1 crore" — a
-    // fact, not a grievance with the agent), so in any domain whose subject matter is bad news it
-    // tracks the TOPIC rather than the user's stance. Dropping it lifts precision 0.47 -> 0.58 at a
-    // recall cost of 0.03. `anger` is kept though it never once drove the max here: polite support
-    // register suppresses it, other registers will not.
-    const proxy = Math.max(labels.get('annoyance') ?? 0, labels.get('anger') ?? 0);
-    const p = Math.min(1 - 1e-6, Math.max(1e-6, proxy));
-    const z = Math.log(p / (1 - p)); // logit
-    return 1 / (1 + Math.exp(-(1.6841 * z + 7.4265))); // calibrated -> operating point ≈ 0.5
-  },
   // bart-large-mnli (MIT), THREE-WAY NLI: {contradiction, neutral, entailment} softmax over a
-  // joined `document </s> claim` input. A PAIR head (see PAIR_HEADS below): unlike the single-text
-  // heads, it scores a (premise, claim) relationship rather than one string in isolation.
+  // joined `document </s> claim` input. A PAIR head (see PAIR_HEADS below): it scores a
+  // (premise, claim) relationship rather than one string in isolation.
   //
   // WHY NOT MiniCheck ANY MORE. MiniCheck is BINARY — config id2label {'0','1'}, trained to answer
   // "is this claim supported, yes or no" — so "the document does not mention it" collapses into NO.
@@ -137,27 +113,6 @@ const SCORERS = {
   // Measured on the 40-claim set (bart-large-mnli): precision 1.000, recall 0.500 — 0 false fires
   // across 20 should-be-quiet claims, against ~28% false firing in production today.
   groundedness: (labels) => 1 - (labels.get('contradiction') ?? 0),
-  // ATTRIBUTION member of the frustration signal — a DIFFERENT question from `frustration` above.
-  // That head asks "is there negative affect"; this one asks "did the AGENT cause it". Both are
-  // needed because the two are close to independent: on an 884-turn hand-labelled census only 21%
-  // of the emotion head's HIGH fires are agent-caused, and INSIDE that band the emotion score
-  // separates causation at chance (AUC 0.541), so no threshold on it can recover the difference.
-  //
-  // No Platt calibration, unlike `frustration`. That head needs one because it repurposes a
-  // 28-label GoEmotions model through a max() proxy; this one is a purpose-trained binary head, so
-  // its softmax already IS the quantity the band wants. Labels are named in the checkpoint
-  // (`not_agent_caused` / `agent_caused`) rather than left as LABEL_0/LABEL_1 specifically so this
-  // lookup keys on meaning — a retrain that reordered the classes would otherwise silently invert
-  // every score while still looking valid. The LABEL_1 fallback is belt-and-braces for a checkpoint
-  // exported without the names.
-  //
-  // INPUT SHAPE IS LOAD-BEARING. This head must receive the FULL thread — assistant prose and tool
-  // markers intact — NOT the narrowed, assistant-stubbed string `frustration` is configured for. It
-  // judges what the agent DID, and an input with the agent's turns stubbed to "[reply]" carries
-  // none of that evidence. EncoderDetector assembles the two inputs separately and
-  // EncoderDetectorTest pins it; feeding this head the emotion head's string would present as a
-  // calibration problem rather than the wiring bug it is.
-  attribution: (labels) => labels.get('agent_caused') ?? labels.get('LABEL_1') ?? 0,
 };
 
 // Heads that score a (premise, claim) RELATIONSHIP rather than one string in isolation. A pair
@@ -197,8 +152,8 @@ const HEADS = Object.fromEntries(
 // condition that is the open edition's normal, expected shape.
 //
 // Registered rather than omitted, deliberately: the open backend still asks for these heads
-// by name — BuiltInClassifierCatalog carries their thresholds and EncoderDetector /
-// EncoderScorer call them — so /classify must answer "I know this head, this edition cannot
+// by name — BuiltInClassifierCatalog carries their thresholds and EncoderScorer calls
+// them — so /classify must answer "I know this head, this edition cannot
 // serve it" (UNAVAILABLE_IN_OPEN_EDITION, thrown by requireResident below) and NOT the
 // generic `unknown classify head`, which reads as a caller bug and would send someone
 // hunting a typo that isn't there.
@@ -213,9 +168,9 @@ for (const head of Object.keys(SCORERS)) {
 // Is a head's weights layer actually resident under HF_CACHE_DIR? Mirrors embed.js's
 // residentModelDir/checkpointResidency precedent exactly (same two marker files, same
 // localModelPath root) so "is this on disk?" has one definition across /classify and
-// /embed. A gated head (frustration, attribution — see models.json) that skipped
-// download.js's fetch (no HF_TOKEN at build time) never has this directory; a
-// non-gated head (groundedness) is always expected to have it, and if it somehow
+// /embed. A gated head (`"gated": true` in models.json) that skipped download.js's
+// fetch (no HF_TOKEN at build time) never has this directory; a non-gated head
+// (groundedness) is always expected to have it, and if it somehow
 // doesn't, that's a real build defect — this is not a supported "unavailable" path for
 // it, so callers below only special-case `spec.gated`, never every missing head.
 function residentModelDir(spec) {
@@ -311,7 +266,7 @@ function pipelineFor(head) {
  * Load every head sequentially (used by server startup pre-warm). A gated head with no
  * baked weights (keyless open-edition build) is skipped rather than loaded — the
  * whole point of gating is that server.js's unconditional boot-time warmAll() must not
- * crash-loop the container just because frustration/attribution weren't baked; it used
+ * crash-loop the container just because a gated head wasn't baked; it used
  * to, before this check existed, because pipelineFor's tf.pipeline() call throws hard on
  * a missing on-disk model with allowRemoteModels=false.
  */
@@ -426,7 +381,7 @@ async function classify(payload) {
   return PAIR_HEADS.has(head) ? classifyPairs(head, spec, payload) : classifyTexts(head, spec, payload);
 }
 
-// A gated head (frustration, attribution) with no baked weights (keyless
+// A gated head (`"gated": true` in models.json) with no baked weights (keyless
 // open-edition build, no HF_TOKEN at build time) is a known, distinguishable
 // "unavailable" — not the transport/serving failure EncoderScorer's fail-loud contract
 // means to catch. Checked here, right before the only place that would otherwise reach

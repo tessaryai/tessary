@@ -40,20 +40,23 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CaseDetail, EvidenceSpan, RcaReport } from "../../api/types";
+import type { CaseDetail, CaseDisposition, EvidenceSpan, FrustrationDetail, RcaCause, RcaReport } from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, Card, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
+import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
 import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
 import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
+import { FrustrationRate } from "../classifiers/frustrationStory";
+import { ConversationFilter, FrustratedConversations } from "../classifiers/FrustratedConversations";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, timeAgo, truncateId } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
+import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
 
 /** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
 function stamp(iso: string): string {
@@ -98,8 +101,9 @@ export function CasePage() {
   const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
   const [resolveOpen, setResolveOpen] = useState(false);
+  // Which cause's conversations the list shows: "all", or a cause's index in the report.
+  const [causeFilter, setCauseFilter] = useState("all");
   const [absorbOpen, setAbsorbOpen] = useState(false);
-  const [reason, setReason] = useState("");
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["case", api.base, caseId] });
@@ -107,10 +111,10 @@ export function CasePage() {
   };
 
   const resolveM = useMutation({
-    mutationFn: (r: string) => api.resolveCase(c?.id ?? "", r),
+    mutationFn: ({ reason, disposition }: { reason: string; disposition?: CaseDisposition }) =>
+      api.resolveCase(c?.id ?? "", reason, disposition),
     onSuccess: () => {
       setResolveOpen(false);
-      setReason("");
       invalidate();
     },
   });
@@ -165,12 +169,21 @@ export function CasePage() {
   }
 
   const live = c.state !== "resolved";
-  const cause = causeLine(c);
+  const frustration = detail.frustration ?? null;
+  // A frustration case carries its cause in the card right under the header, so the header does not
+  // repeat it.
+  const cause = frustration ? null : causeLine(c);
+  const frustrationCauses =
+    frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes ?? [] : [];
 
   // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
   const openedAt =
-    detail.tool_error?.onsetAt ?? detail.malformed_output?.rate?.onsetAt ?? detail.secret_leak?.firstAt ?? c.onset_at;
+    detail.tool_error?.onsetAt ??
+    detail.malformed_output?.rate?.onsetAt ??
+    detail.secret_leak?.firstAt ??
+    detail.frustration?.rate.onsetAt ??
+    c.onset_at;
   const closedAt =
     detail.tool_error?.windowClosedAt ??
     detail.malformed_output?.rate?.windowClosedAt ??
@@ -291,7 +304,7 @@ export function CasePage() {
 
         {c.state === "resolved" && c.resolution_reason && (
           <p className="text-subtle mt-2.5 mx-0 mb-0 text-small">
-            Resolved {timeAgo(c.resolved_at ?? c.opened_at)}
+            Resolved{dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
             {c.resolved_by ? ` by ${c.resolved_by}` : ""}: {c.resolution_reason}
           </p>
         )}
@@ -312,7 +325,19 @@ export function CasePage() {
 
       {/* ----------------------------------------------------------------- why */}
       {(rcaEnabled || detail.rca_report_id != null) && (
-        <Answer report={report} analysing={analysing} basePath={basePath} />
+        frustration && report?.report_kind === "frustration_causes" && !analysing && report.status !== "failed" ? (
+          <FrustrationCauses
+            report={report}
+            frustration={frustration}
+            basePath={basePath}
+            onShow={(i) => {
+              setCauseFilter(String(i));
+              document.getElementById("frustrated-sessions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+        ) : (
+          <Answer report={report} analysing={analysing} basePath={basePath} />
+        )
       )}
 
       {/* -------------------------------------------------------------- how big */}
@@ -337,7 +362,19 @@ export function CasePage() {
       )}
 
       {/* ------------------------------------------------------- the failures */}
-      <Failures detail={detail} basePath={basePath} />
+      {frustration && detail.latest_finding_id ? (
+        <FrustrationList
+          findingId={detail.latest_finding_id}
+          rcaReportId={report?.id ?? null}
+          frustration={frustration}
+          causes={frustrationCauses}
+          filter={causeFilter}
+          onFilter={setCauseFilter}
+          basePath={basePath}
+        />
+      ) : (
+        <Failures detail={detail} basePath={basePath} />
+      )}
 
       <Activity events={detail.events} />
 
@@ -354,10 +391,13 @@ export function CasePage() {
                 Close this case
               </span>
             )}
+            {!analysed && frustration && (
+              <span className="text-subtle text-small">Run RCA before resolving this case.</span>
+            )}
             <div className="ml-auto flex items-center gap-2">
               {analysed && (
                 <Button size="sm" variant="ghost" onClick={() => setResolveOpen(true)}>
-                  Resolve
+                  {frustration ? "Resolve case" : "Resolve"}
                 </Button>
               )}
               {analysed && detail.absorb_available && (
@@ -366,7 +406,7 @@ export function CasePage() {
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => muteM.mutate()} disabled={muteM.isPending}>
-                {c.state === "muted" ? "Unmute" : "Mute"}
+                {c.state === "muted" ? (frustration ? "Unmute case" : "Unmute") : frustration ? "Mute case" : "Mute"}
               </Button>
             </div>
           </div>
@@ -375,28 +415,16 @@ export function CasePage() {
       )}
 
       <Modal open={resolveOpen} onClose={() => setResolveOpen(false)} title="Resolve this case?">
-        <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
-          One line on what this turned out to be. It is the only thing that makes a resolved case worth reading later.
-        </p>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Traffic mix shifted toward enterprise leads"
-          autoFocus
-        />
-        {resolveM.isError && <ErrorNote error={resolveM.error} />}
-        <div className="flex justify-end gap-2 mt-4.5">
-          <Button variant="ghost" size="sm" onClick={() => setResolveOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => resolveM.mutate(reason)}
-            disabled={reason.trim().length === 0 || resolveM.isPending}
-          >
-            {resolveM.isPending ? "Resolving…" : "Resolve case"}
-          </Button>
-        </div>
+        {/* Mounted only while open, so a reopened dialog starts from an empty reason. */}
+        {resolveOpen && (
+          <ResolveCaseForm
+            detector={c.detector}
+            pending={resolveM.isPending}
+            error={resolveM.isError ? resolveM.error : null}
+            onCancel={() => setResolveOpen(false)}
+            onResolve={(reason, disposition) => resolveM.mutate({ reason, disposition })}
+          />
+        )}
       </Modal>
 
       <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb as legitimate?">
@@ -458,6 +486,14 @@ function Block({ label, note, children }: { label: string; note?: string; childr
  * That is the rule this file has always held; it now has something real to hold it against.
  */
 function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: string; basePath: string }) {
+  // A frustration case draws the finding page's own figure, whose first note already states the basis.
+  if (detail.frustration) {
+    return (
+      <Block label="What changed" note="Share of sessions with a user frustrated with the agent">
+        <FrustrationRate detail={detail.frustration} />
+      </Block>
+    );
+  }
   const rate = detail.tool_error;
   const shift = detail.metric;
   const secretLeak = detail.secret_leak;
@@ -953,4 +989,152 @@ function RcaErrorNote({ error }: { error: unknown }) {
     );
   }
   return <ErrorNote error={error} />;
+}
+
+/**
+ * A frustration report's answer: one card, every cause the run ranked, each with what the agent did, where
+ * in the repository it comes from when a repository was read, and the fix. The conversations behind a
+ * cause are one press away, filtered in the list below rather than on another page.
+ */
+function FrustrationCauses({
+  report,
+  frustration,
+  basePath,
+  onShow,
+}: {
+  report: RcaReport;
+  frustration: FrustrationDetail;
+  basePath: string;
+  onShow: (index: number) => void;
+}) {
+  const causes = report.causes ?? [];
+  const withRepo = report.repo_available === true;
+  if (causes.length === 0) {
+    return report.summary ? (
+      <Block label="Likely cause" note={report.verdict ? RCA_VERDICT_LABEL[report.verdict] : undefined}>
+        <Card className="border border-border p-5">
+          <p className="text-fg m-0 text-body" style={{ maxWidth: 700 }}>
+            {report.summary}
+          </p>
+        </Card>
+      </Block>
+    ) : null;
+  }
+  const n = frustration.rate.failuresCur;
+  return (
+    <Block label="Likely cause">
+      <Card className="border border-border p-0">
+        <p className="m-0 border-b border-border py-4 px-5 text-body text-fg-secondary">
+          Tessary identified {causes.length} likely {causes.length === 1 ? "cause" : "causes"} from the{" "}
+          {n.toLocaleString()} frustrated sessions{withRepo ? " and the agent's repository" : ""}.
+        </p>
+        {causes.map((k, i) => {
+          const shown = causeSessionCount(k);
+          const where = withRepo && k.attribution && k.attribution.kind !== "unknown" ? k.attribution : null;
+          return (
+            <div key={k.title} className={cn("flex flex-col gap-2.5 py-4 px-5", i > 0 && "border-t border-border")}>
+              <p className="m-0 flex flex-wrap items-center gap-2.25">
+                <span className="font-mono text-small text-muted">{i + 1}</span>
+                <span className="text-body font-medium text-fg">{k.title}</span>
+                <Confidence level={k.confidence} />
+              </p>
+              <p className="m-0 text-body text-fg-secondary">{k.what_the_agent_did}</p>
+              {where && (
+                <div className="rounded-control border border-border overflow-hidden">
+                  <div className="flex items-center gap-2.5 bg-raised py-1.75 px-3 font-mono text-small">
+                    <span className="text-muted capitalize">{where.kind}</span>
+                    {where.path && <span className="text-fg truncate">{where.path}</span>}
+                    {where.commit && <span className="ml-auto text-muted">{truncateId(where.commit)}</span>}
+                  </div>
+                  {where.excerpt && (
+                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap">
+                      {where.excerpt}
+                    </pre>
+                  )}
+                </div>
+              )}
+              <p className="m-0 text-body text-fg-secondary">
+                <span className="text-muted">Suggested fix: </span>
+                {k.fix_suggestion}
+              </p>
+              {shown > 0 && (
+                <div>
+                  <Button size="sm" variant="secondary" onClick={() => onShow(i)}>
+                    Show {shown} {shown === 1 ? "session" : "sessions"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!withRepo && (
+          <p className="m-0 border-t border-border py-3 px-5 text-small text-muted">
+            These causes describe what the agent did. They aren't linked to a prompt or code because no
+            repository was connected. Connect a repository and run RCA again to find them.
+          </p>
+        )}
+      </Card>
+      {report.id && (
+        <p className="mt-2.5 mb-0 text-small">
+          <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
+            View the full report
+          </Link>
+        </p>
+      )}
+    </Block>
+  );
+}
+
+/** How many sessions a cause names. */
+function causeSessionCount(cause: RcaCause) {
+  return new Set(cause.evidence_session_ids).size;
+}
+
+/** The case's frustrated sessions, filtered to one cause when the reader asked for it. */
+function FrustrationList({
+  findingId,
+  rcaReportId,
+  frustration,
+  causes,
+  filter,
+  onFilter,
+  basePath,
+}: {
+  findingId: string;
+  /** The report the causes come from, which the server reads a cause's sessions off. */
+  rcaReportId: string | null;
+  frustration: FrustrationDetail;
+  causes: RcaCause[];
+  filter: string;
+  onFilter: (key: string) => void;
+  basePath: string;
+}) {
+  const index = filter === "all" ? -1 : Number(filter);
+  const cause = index >= 0 ? causes[index] : undefined;
+  const options = [
+    { key: "all", label: `All · ${frustration.rate.failuresCur.toLocaleString()}` },
+    ...causes
+      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeSessionCount(k)}` }))
+      .filter((o) => !o.label.endsWith(" · 0")),
+  ];
+  return (
+    <div id="frustrated-sessions">
+      <Block label="Frustrated sessions" note="Each flagged message with the turns before it">
+        {options.length > 1 && (
+          <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
+        )}
+        <FrustratedConversations
+          key={cause ? filter : "all"}
+          findingId={findingId}
+          first={{
+            rows: frustration.conversations,
+            nextCursor: frustration.conversationsNextCursor,
+            total: frustration.rate.failuresCur,
+          }}
+          filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          basePath={basePath}
+        />
+      </Block>
+    </div>
+  );
 }

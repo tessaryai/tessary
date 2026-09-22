@@ -55,6 +55,7 @@ traces (wiring the classifier/RCA workers through `LlmCaller` with a non-null
 | `E2bRcaSandbox` | `agentic-rca` | `agentic-rca` | |
 | `E2bTriageSandbox` | `layer2-triage` | `layer2-triage` | The Layer-2 ruling, on `ModelLane.TRIAGE`. Metadata: `tessary.triage.finding_id`, which is also the ledger subject the run's spend is booked against, so a cost per ruling is a join rather than an estimate. There is no lane attribute: the repo-grounded lane is gone and every run now rules on the evidence, so recording it would stamp a constant. |
 | `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under agentic roots (carve-out) |
+| `JevDecisionClient` | `decision-call` | — | One hosted decision-model call. Sets `gen_ai.operation.name=decision`, so Alloy admits it. Metadata: `lane`, `provider` (the gateway), `project_id`. No message content on the span. |
 
 **Span names retired, deliberately not re-homed:** `llm-grader-run`,
 `llm-grader-applies-when`, `deterministic-grader-run`, `agentic-synthesis`, `agentic-codegen`,

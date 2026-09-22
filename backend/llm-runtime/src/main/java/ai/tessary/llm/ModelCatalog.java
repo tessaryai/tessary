@@ -2,6 +2,7 @@
 package ai.tessary.llm;
 
 import ai.tessary.llm.catalog.ProviderModel;
+import ai.tessary.llm.catalog.SupportedMaker;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -57,7 +58,35 @@ public final class ModelCatalog {
              * ProjectModelSettings} is the only reader, it is the seam that lets a non-Bedrock model
              * be pointed at an {@link ai.tessary.llmspi.LaneGroup#AGENT_VM} lane at all.
              */
-            @JsonProperty("agentic") boolean agentic) {
+            @JsonProperty("agentic") boolean agentic,
+            /**
+             * Whether this entry is a hosted decision model (TypeSafe's Jev) rather than a chat model:
+             * it answers typed questions over {@code llm/decisions/}, never through {@code ChatModel},
+             * so no chat or agent lane may run it.
+             */
+            @JsonProperty("decision") boolean decision) {
+
+        /** A chat-model entry, the shape every entry but the decision models takes. */
+        public CatalogEntry(
+                ModelProvider provider,
+                String vendor,
+                String modelName,
+                String displayName,
+                boolean strictJsonSchema,
+                Set<String> effortLevels,
+                String defaultBaseUrl,
+                boolean agentic) {
+            this(
+                    provider,
+                    vendor,
+                    modelName,
+                    displayName,
+                    strictJsonSchema,
+                    effortLevels,
+                    defaultBaseUrl,
+                    agentic,
+                    false);
+        }
 
         /** Whether a reasoning effort is meaningful for this model at all. */
         @JsonIgnore
@@ -398,6 +427,28 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://api.x.ai/v1",
                     true),
+            // TypeSafe's Jev decision model, direct and over OpenRouter. Only the moving pointer is
+            // offered: the provider echoes the version that answered, which is what gets recorded.
+            new CatalogEntry(
+                    ModelProvider.TYPESAFE,
+                    "TypeSafe",
+                    "jev-latest",
+                    "Jev (latest)",
+                    false,
+                    NO_EFFORT,
+                    "https://api.typesafe.ai",
+                    false,
+                    true),
+            new CatalogEntry(
+                    ModelProvider.OPENROUTER,
+                    "TypeSafe",
+                    "typesafe/jev-latest",
+                    "Jev (latest)",
+                    false,
+                    NO_EFFORT,
+                    "https://openrouter.ai/api/v1",
+                    false,
+                    true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
             // shows unqualified; ChatModelFactory#buildOpenAiCompat overrides it whenever the stored
@@ -436,11 +487,17 @@ public final class ModelCatalog {
         }
     }
 
-    /** Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries. */
+    /**
+     * Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries for
+     * {@link LaneGroup#AGENT_VM} or the decision entries for {@link LaneGroup#DECISION_CALLS}.
+     */
     private static Set<String> offeredFor(LaneGroup group) {
         Set<String> offered = new LinkedHashSet<>(BedrockModelProfile.offeredFor(group));
         if (group == LaneGroup.AGENT_VM) {
             ENTRIES.stream().filter(CatalogEntry::agentic).forEach(e -> offered.add(key(e)));
+        }
+        if (group == LaneGroup.DECISION_CALLS) {
+            ENTRIES.stream().filter(CatalogEntry::decision).forEach(e -> offered.add(key(e)));
         }
         return offered;
     }
@@ -461,9 +518,17 @@ public final class ModelCatalog {
     }
 
     /**
+     * The book prefix every Jev call is priced under, whichever gateway carried it. The book has no
+     * {@code openrouter/typesafe/...} key, so the OpenRouter route prices its already-namespaced
+     * {@code typesafe/jev-latest} as is rather than through {@link #pricingId}'s {@code openrouter/} case.
+     */
+    public static final String DECISION_PRICING_PREFIX = "typesafe/";
+
+    /**
      * The id this {@code (provider, modelName)} pair is priced under in the vendored LiteLLM book,
      * distinct from {@code modelName} for the routes whose book keys carry a prefix this catalog's own
-     * names do not: {@code xai/}, {@code zai/}, {@code moonshot/}, {@code openrouter/}, and
+     * names do not: {@code xai/}, {@code zai/}, {@code moonshot/}, {@code openrouter/}, {@link #DECISION_PRICING_PREFIX} for
+     * {@link ModelProvider#TYPESAFE}, and
      * {@link BedrockModelProfile#MANTLE_ROUTE_PREFIX} for {@link ModelProvider#BEDROCK_MANTLE} (the
      * same split {@link BedrockModelProfile.ModelDescriptor#inferenceProfileId} documents for the
      * platform-funded lanes). Every other provider's book keys are bare, so {@code modelName} is
@@ -481,8 +546,18 @@ public final class ModelCatalog {
             case MOONSHOT -> "moonshot/" + modelName;
             case OPENROUTER -> "openrouter/" + modelName;
             case BEDROCK_MANTLE -> BedrockModelProfile.MANTLE_ROUTE_PREFIX + modelName;
+            case TYPESAFE -> DECISION_PRICING_PREFIX + modelName;
             default -> modelName;
         };
+    }
+
+    /**
+     * The id a decision model is priced under: {@code typesafe/<bare id>} on both gateways. OpenRouter's
+     * name is already {@code typesafe/jev-latest}, so it passes through unchanged rather than via
+     * {@link #pricingId}'s {@code openrouter/} case, which names no book key.
+     */
+    public static String decisionPricingId(ModelProvider provider, String modelName) {
+        return provider == ModelProvider.TYPESAFE ? pricingId(provider, modelName) : modelName;
     }
 
     public static Optional<CatalogEntry> find(ModelProvider provider, String modelName) {
@@ -530,10 +605,16 @@ public final class ModelCatalog {
                                     e.strictJsonSchema(),
                                     e.effortLevels(),
                                     e.defaultBaseUrl(),
-                                    e.agentic()));
+                                    e.agentic(),
+                                    e.decision()));
         }
         // Whatever is left in liveByName exists only in the live listing, synthesize fail-closed.
         for (ProviderModel m : liveByName.values()) {
+            // A decision model is offered only as its static entry: pinned Jev versions stay unlisted.
+            if (provider == ModelProvider.OPENROUTER
+                    && SupportedMaker.fromOpenRouterPrefix(m.modelName()).orElse(null) == SupportedMaker.TYPESAFE) {
+                continue;
+            }
             merged.add(new CatalogEntry(
                     provider, m.vendor(), m.modelName(), m.displayName(), false, NO_EFFORT, null, false));
         }

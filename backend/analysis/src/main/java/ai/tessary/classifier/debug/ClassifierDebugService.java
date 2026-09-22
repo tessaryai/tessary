@@ -68,13 +68,14 @@ public class ClassifierDebugService {
     }
 
     /**
-     * The debug family a detector belongs to: {@code BuiltInClassifierCatalog}'s three execution tiers,
-     * plus behaviour drift split out of "fitting" since its debug content (an n-gram profile) has nothing
-     * in common with a metric baseline's numeric sketch.
+     * The debug family a detector belongs to: {@code BuiltInClassifierCatalog}'s execution tiers, plus
+     * behaviour drift split out of "fitting" since its debug content (an n-gram profile) has nothing in
+     * common with a metric baseline's numeric sketch.
      */
     private static String familyOf(String detector) {
         if (Kind.ENCODER_BACKED.contains(detector)) return Family.ENCODER;
         return switch (detector) {
+            case Kind.FRUSTRATION -> Family.DECISION;
             case Kind.COST_DRIFT, Kind.DURATION_DRIFT -> Family.METRIC_DRIFT;
             case Kind.BEHAVIOR_DRIFT -> Family.BEHAVIOR_DRIFT;
             default -> Family.DETERMINISTIC; // secret_leak, malformed_output, regex, classifier, inert

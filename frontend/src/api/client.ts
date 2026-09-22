@@ -45,6 +45,7 @@ import {
   type BehaviorFindingDetail,
   type EvidenceSpanPage,
   type MalformedOutputPage,
+  type FrustratedSessionPage,
   type BehaviorAnalysis,
   type BehaviorFindings,
   type BehaviorFindingStatus,
@@ -58,6 +59,7 @@ import {
   type Case,
   type CaseDetail,
   type TriageView,
+  type CaseDisposition,
   type AlertRule,
   type UpsertAlertRule,
   type AlertChannel,
@@ -458,10 +460,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // muted; there is no claim endpoint because nothing in this product is assigned.
     getTriage: () => http<TriageView>(`${base}/cases`),
     getCase: (id: string) => http<CaseDetail>(`${base}/cases/${encodeURIComponent(id)}`),
-    resolveCase: (id: string, reason: string) =>
+    /**
+     * Close a case with a one-line reason. `disposition` is for a frustration case only: `fixed` restarts
+     * the call site's learned rate, `false_alarm` does that and clears the conversations the case cites.
+     * The server refuses one on any other case.
+     */
+    resolveCase: (id: string, reason: string, disposition?: CaseDisposition) =>
       http<Case>(`${base}/cases/${encodeURIComponent(id)}/resolve`, {
         method: "POST",
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify(disposition ? { reason, disposition } : { reason }),
       }),
     /**
      * Close the case and move the detector's reference, so the level it fired on becomes the new
@@ -607,6 +614,25 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       if (params?.cursor) q.set("cursor", params.cursor);
       const qs = q.toString();
       return http<EvidenceSpanPage>(`${base}/findings/${enc(id)}/evidence${qs ? `?${qs}` : ""}`);
+    },
+
+    /**
+     * One page of the frustrated sessions a `frustration_rate` finding cites, newest flag first. `cause`
+     * narrows it to one RCA cause's share: the report that found it and its 0-based position there.
+     */
+    getFrustratedSessions: (
+      id: string,
+      params?: { limit?: number; cursor?: string | null; cause?: { rcaReport: string; index: number } },
+    ) => {
+      const q = new URLSearchParams();
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.cursor) q.set("cursor", params.cursor);
+      if (params?.cause) {
+        q.set("rcaReport", params.cause.rcaReport);
+        q.set("cause", String(params.cause.index));
+      }
+      const qs = q.toString();
+      return http<FrustratedSessionPage>(`${base}/findings/${enc(id)}/frustrated-sessions${qs ? `?${qs}` : ""}`);
     },
 
     /**

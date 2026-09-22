@@ -11,14 +11,14 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a qualifying finding into a case for every classifier the four dedicated sources
+ * Shapes a qualifying finding into a case for every classifier the five dedicated sources
  * ({@link MetricDriftSource}, {@link ToolErrorCaseSource}, {@link MalformedOutputCaseSource},
- * {@link SecretLeakCaseSource}) don't own: behaviour drift, SOP conformance, and any per-span classifier
+ * {@link SecretLeakCaseSource}, {@link FrustrationCaseSource}) don't own: behaviour drift, SOP conformance, and any per-span classifier
  * an org authors and arms itself. None of these had a case source before decision 1 — behaviour drift's
  * findings never opened one at all, and an armed per-span classifier's only route to a case was a
  * human's <em>Real deviation</em> on a finding {@code ClassifierArming} filed.
  *
- * <p>Unlike the other four this source carries no evidence blob of its own shape to read numbers back
+ * <p>Unlike the other five this source carries no evidence blob of its own shape to read numbers back
  * from — its findings span whatever the classifier itself measured (a novel gram, a rule violated, N
  * detections in a window) — so the case it shapes states the fact plainly rather than a fitted
  * before/after pair. {@link #gateSentence} still records which authority ruled, matching every other
@@ -27,13 +27,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class GenericFindingCaseSource implements CaseSource {
 
-    /** The classifiers the four dedicated sources already own; this source claims everything else. */
+    /** The classifiers the five dedicated sources already own; this source claims everything else. */
     private static final Set<String> DEDICATED = Set.of(
             BuiltInDetector.Kind.DURATION_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT,
             BuiltInDetector.Kind.TOOL_ERROR,
             BuiltInDetector.Kind.MALFORMED_OUTPUT,
-            BuiltInDetector.Kind.SECRET_LEAK);
+            BuiltInDetector.Kind.SECRET_LEAK,
+            BuiltInDetector.Kind.FRUSTRATION);
 
     /** Severity for a cause this source cannot grade a magnitude for. Mid-list deliberately, same
      *  reasoning as the other sources' own unreadable-evidence fallback. */

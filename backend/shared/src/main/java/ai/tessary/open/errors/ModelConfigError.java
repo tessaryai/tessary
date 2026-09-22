@@ -36,6 +36,11 @@ public enum ModelConfigError implements ErrorCode {
      * rejects the pair — so offering it there would be a setting that could never take effect.
      */
     EFFORT_UNSUPPORTED_BY_MODEL(HttpStatus.BAD_REQUEST, "Model %2$s does not support the %1$s reasoning effort"),
+    /**
+     * A decision-model provider (TypeSafe) was asked to build a chat model. Its key answers typed
+     * questions through {@code llm/decisions/} and nothing else.
+     */
+    NOT_A_CHAT_PROVIDER(HttpStatus.BAD_REQUEST, "Provider %s serves decision models only, not chat models"),
     SECRET_KEY_NOT_CONFIGURED(HttpStatus.PRECONDITION_FAILED, "TESSARY_SECRET_KEY is required to store credentials"),
     MISSING_CREDENTIALS(
             HttpStatus.PRECONDITION_FAILED,

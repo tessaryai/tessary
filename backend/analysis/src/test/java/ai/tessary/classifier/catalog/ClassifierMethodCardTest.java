@@ -49,8 +49,8 @@ class ClassifierMethodCardTest {
     /** The armed-signal family shares one card, rendered with the key of the classifier that fired. */
     @Test
     void anArmedSignalCardNamesItsOwnClassifier() {
-        String card = cardOf(BuiltInDetector.Kind.FRUSTRATION);
-        assertTrue(card.contains(BuiltInDetector.Kind.FRUSTRATION), "the shared card is rendered with its own key");
+        String card = cardOf(BuiltInDetector.Kind.GROUNDEDNESS);
+        assertTrue(card.contains(BuiltInDetector.Kind.GROUNDEDNESS), "the shared card is rendered with its own key");
     }
 
     /**
@@ -64,7 +64,8 @@ class ClassifierMethodCardTest {
         assertTrue(cardOf(BuiltInDetector.Kind.COST_DRIFT).contains("### Cause: `distribution_shift`"));
         assertTrue(cardOf(BuiltInDetector.Kind.MALFORMED_OUTPUT).contains("### Cause: `malformed_rate`"));
         assertTrue(cardOf(BuiltInDetector.Kind.SECRET_LEAK).contains("### Cause: `armed_window`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.FRUSTRATION).contains("### Cause: `armed_window`"));
+        assertTrue(cardOf(BuiltInDetector.Kind.GROUNDEDNESS).contains("### Cause: `armed_window`"));
+        assertTrue(cardOf(BuiltInDetector.Kind.FRUSTRATION).contains("### Cause: `frustration_rate`"));
 
         String behaviorDrift = cardOf(BuiltInDetector.Kind.BEHAVIOR_DRIFT);
         assertTrue(behaviorDrift.contains("### Cause: `omission`"));
@@ -86,7 +87,8 @@ class ClassifierMethodCardTest {
                 BuiltInDetector.Kind.BEHAVIOR_DRIFT,
                 BuiltInDetector.Kind.SOP_CONFORMANCE,
                 BuiltInDetector.Kind.SECRET_LEAK,
-                BuiltInDetector.Kind.MALFORMED_OUTPUT)) {
+                BuiltInDetector.Kind.MALFORMED_OUTPUT,
+                BuiltInDetector.Kind.FRUSTRATION)) {
             String card = cardOf(key);
             assertFalse(card.contains("state.json"), key + "'s card still names the retired dossier file");
             assertFalse(card.contains("recompute"), key + "'s card still asks the agent to recompute a number");

@@ -35,6 +35,8 @@ class PromptResourceParityTest {
         m.put("rca#JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
         m.put("rca#RULES", ai.tessary.rca.AgenticRcaEngine.class);
         m.put("rca#MCP_DOOR", ai.tessary.rca.AgenticRcaEngine.class);
+        m.put("rca#FRUSTRATION_JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
+        m.put("rca#FRUSTRATION_RULES", ai.tessary.rca.AgenticRcaEngine.class);
         return m;
     }
 

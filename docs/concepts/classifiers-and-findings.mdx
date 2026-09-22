@@ -27,14 +27,22 @@ Two notes on the deterministic pair.
 
 `malformed_output` checks each output against its call site's schema, and opens a finding when a call site's failure rate rises above what its own history predicts, not on a fixed count. It needs a captured output schema to do anything, and says so: until your repository is connected and a call site declares one, the classifier reads as waiting on schemas rather than as quiet.
 
+### Frustration, on your own key
+
+`frustration` is in this build and starts switched off on every project. It watches whether users become frustrated with the agent, and it is the one classifier that makes a call per item it scores: each eligible user message is one question to TypeSafe's Jev decision model, sent on your own OpenRouter or TypeSafe key. That is why it waits for you to turn it on. Turning it on under **Classifiers** asks which provider to use and takes the key if you have not stored one.
+
+A message is sent only when the four messages before it are user, assistant, user, assistant, each with text, so a conversation's first two user messages are never scored. Messages are redacted before they are stored, so what is sent is already redacted. A conversation stops being sent after its first flagged message. If the provider refuses the key, or the key is removed, the classifier pauses and says so on its row until a key works again.
+
+A flagged message is not a finding on its own. Each call site learns its own normal rate of frustrated conversations over its first 200 and is watched from then on with the same sequential test `tool_error` uses, with a conversation as the unit instead of a tool call. A finding opens, and a case with it, when that rate rises above the learned one. A call site that frustrates users from the start learns that as its normal, and is flagged only if it gets worse.
+
 ### What is not available in the open edition
 
-Four classifiers exist in the product and cannot run here:
+Three classifiers exist in the product and cannot run here:
 
-- `frustration` and `groundedness` depend on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
+- `groundedness` depends on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
 - `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
 
-The capability API refuses an override for any of the four rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) states the same boundary from the install side.
+The capability API refuses an override for any of the three rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#the-encoder-based-classifier-is-unavailable-in-the-open-edition) states the same boundary from the install side.
 
 ## Fitting a baseline, and why a new project waits
 

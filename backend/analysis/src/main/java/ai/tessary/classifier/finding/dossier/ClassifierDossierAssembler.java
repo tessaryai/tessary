@@ -18,6 +18,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <h2>Dispatch is by PAYLOAD SHAPE, not by a classifier-key allowlist</h2>
  *
+ * <p>Frustration is recognised by the {@code cause_kind} its finding writer records in the payload, which a
+ * rename of the classifier does not change either.
+ *
  * <p>A key allowlist silently stops firing the moment a project renames or forks a built-in classifier,
  * or a new one reuses an existing detector's evidence shape under a different key. The three detector
  * families this covers ({@code tool_error}, {@code metric_drift}, and any classifier that publishes a
@@ -80,7 +83,9 @@ public final class ClassifierDossierAssembler {
         if (!root.isObject()) return Optional.empty();
 
         String body;
-        if (root.has("patterns") || root.has("failures")) {
+        if (FrustrationDossier.matches(root)) {
+            body = FrustrationDossier.build(root);
+        } else if (root.has("patterns") || root.has("failures")) {
             body = ToolErrorDossier.build(root);
         } else if (root.has("bucket") && (root.has("ratio") || root.has("w1_log"))) {
             body = MetricDriftDossier.build(root);

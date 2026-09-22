@@ -160,6 +160,48 @@ public class ClassifierDetectionWriteRepository {
                 .list());
     }
 
+    /**
+     * Of {@code traceIds}, the ones whose conversation this classifier has a detection for that nobody
+     * has cleared. The conversation is {@code COALESCE(trace.thread_id, trace.session_id)}, the key such a
+     * classifier writes into {@code subject_session_id}; a trace with neither is in no conversation and
+     * is never returned. Reads the detection table's partial index on uncleared rows.
+     */
+    public Set<String> tracesInUnclearedFlaggedConversations(
+            String detectorKind, String projectId, String classifierId, Collection<String> traceIds) {
+        String table = tableFor(detectorKind);
+        if (table == null || traceIds.isEmpty()) return Set.of();
+        return new HashSet<>(jdbc.sql("SELECT t.id FROM trace t"
+                        + " WHERE t.project_id = :pid AND t.id IN (:traces)"
+                        + " AND EXISTS (SELECT 1 FROM " + table + " d"
+                        + "   WHERE d.project_id = :pid AND d.classifier_id = :sid"
+                        + "     AND d.subject_session_id = COALESCE(t.thread_id, t.session_id)"
+                        + "     AND d.cleared_at IS NULL)")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("traces", traceIds)
+                .query(String.class)
+                .list());
+    }
+
+    /**
+     * Clear this classifier's detections in each of {@code sessionIds}, the conversations a human ruled not
+     * frustrated: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
+     * their first clear time. Returns how many rows it cleared; zero where no detection table is registered.
+     */
+    public int clearSessions(
+            String detectorKind, String projectId, String classifierId, Collection<String> sessionIds, String now) {
+        String table = tableFor(detectorKind);
+        if (table == null || sessionIds.isEmpty()) return 0;
+        return jdbc.sql("UPDATE " + table + " SET cleared_at = :now"
+                        + " WHERE project_id = :pid AND classifier_id = :sid"
+                        + " AND subject_session_id IN (:sessions) AND cleared_at IS NULL")
+                .param("now", now)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("sessions", sessionIds)
+                .update();
+    }
+
     /** A span, by both halves of its composite key. */
     public record SpanKey(String traceId, String spanId) {}
 

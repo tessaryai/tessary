@@ -62,7 +62,7 @@ public class ToolErrorStateRepository {
                         SELECT {key} AS bucket_key, s_up, s_down, onset_up_at, onset_down_at,
                                calls_since_onset_up, calls_since_onset_down,
                                baseline_calls, baseline_failures, watermark_bucket, state_epoch,
-                               pending_pin_by, pending_pin_at
+                               pending_pin_by, pending_pin_at, reset_at
                           FROM {table}
                          WHERE project_id = :pid
                          ORDER BY {key}
@@ -88,7 +88,8 @@ public class ToolErrorStateRepository {
                             rs.getString("watermark_bucket"),
                             rs.getString("state_epoch"),
                             rs.getString("pending_pin_by"),
-                            rs.getString("pending_pin_at"));
+                            rs.getString("pending_pin_at"),
+                            rs.getString("reset_at"));
                 })
                 .list();
     }
@@ -200,6 +201,40 @@ public class ToolErrorStateRepository {
                         """))
                 .param("pid", projectId)
                 .param("tool", toolKey)
+                .param("by", resetBy)
+                .param("note", note)
+                .param("at", resetAt)
+                .update();
+    }
+
+    /**
+     * Clear the accumulator AND the learned reference, so the replay re-learns the in-control rate from the
+     * traffic after this moment.
+     *
+     * <p>{@link #reset} keeps the reference, because a tool's reference is its healthy rate and a fix
+     * restores it. A classifier whose ruling means "the old normal was wrong" (frustration: a false alarm
+     * means the reference was learned on noise, a fix means the post-fix rate is the normal wanted) calls
+     * this instead. The reset fence ({@link CarriedState#resetAt}) makes the replay learn only from buckets
+     * after {@code resetAt}.
+     *
+     * <p>The watermark is cleared too: with no reference the row cannot resume, and a stale watermark would
+     * only be ignored.
+     *
+     * @param note why it was cleared. Required, as for {@link #reset}
+     */
+    public void resetAndRelearn(String projectId, String key, @Nullable String resetBy, String note, String resetAt) {
+        jdbc.sql(sql("""
+                        UPDATE {table}
+                           SET s_up = 0, s_down = 0,
+                               onset_up_at = NULL, onset_down_at = NULL,
+                               calls_since_onset_up = 0, calls_since_onset_down = 0,
+                               baseline_calls = NULL, baseline_failures = NULL,
+                               watermark_bucket = NULL,
+                               reset_at = :at, reset_by = :by, reset_note = :note, updated_at = :at
+                         WHERE project_id = :pid AND {key} = :key
+                        """))
+                .param("pid", projectId)
+                .param("key", key)
                 .param("by", resetBy)
                 .param("note", note)
                 .param("at", resetAt)

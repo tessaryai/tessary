@@ -8,6 +8,8 @@ import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
+import ai.tessary.classifier.catalog.PagedDetector;
+import ai.tessary.classifier.catalog.PagedDetector.PageAction;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.substrate.SubstrateObservation;
@@ -365,7 +367,14 @@ public class ClassifierWorker {
      * cost property, not a precision one.
      */
     private List<SubstrateObservation> suppressAlreadyFlaggedConversations(
-            String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
+            String projectId,
+            ClassifierRow signal,
+            @Nullable BuiltInDetector detector,
+            List<SubstrateObservation> candidates) {
+        if (detector != null
+                && detector.conversationSuppression() == BuiltInDetector.ConversationSuppression.FLAGGED_UNCLEARED) {
+            return suppressUnclearedConversations(projectId, signal, candidates);
+        }
         Set<String> sessions = candidates.stream()
                 .map(SubstrateObservation::sessionId)
                 .filter(Objects::nonNull)
@@ -379,6 +388,30 @@ public class ClassifierWorker {
                 .toList();
         StructuredLog.debug(log, "signal.sweep.conversation-suppressed")
                 .message("skipped %d turn(s) in conversations already flagged at high", candidates.size() - kept.size())
+                .field("signal", signal.classifierKey())
+                .field("suppressed", candidates.size() - kept.size())
+                .field("scored", kept.size())
+                .log();
+        return kept;
+    }
+
+    /**
+     * {@link #suppressAlreadyFlaggedConversations} for a detector that declares
+     * {@link BuiltInDetector.ConversationSuppression#FLAGGED_UNCLEARED}: a conversation with any detection
+     * nobody has cleared is not scored again, whatever its band, and one whose flag was cleared is.
+     */
+    private List<SubstrateObservation> suppressUnclearedConversations(
+            String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
+        if (candidates.isEmpty()) return candidates;
+        Set<String> traces =
+                candidates.stream().map(SubstrateObservation::traceId).collect(Collectors.toSet());
+        Set<String> flagged =
+                detections.tracesInUnclearedFlaggedConversations(signal.detector(), projectId, signal.id(), traces);
+        if (flagged.isEmpty()) return candidates;
+        List<SubstrateObservation> kept =
+                candidates.stream().filter(o -> !flagged.contains(o.traceId())).toList();
+        StructuredLog.debug(log, "signal.sweep.conversation-suppressed")
+                .message("skipped %d turn(s) in conversations already flagged", candidates.size() - kept.size())
                 .field("signal", signal.classifierKey())
                 .field("suppressed", candidates.size() - kept.size())
                 .field("scored", kept.size())
@@ -442,6 +475,16 @@ public class ClassifierWorker {
             }
             pages++;
             scanned += page.scored();
+            if (!page.advance()) {
+                // Held or abandoned: nothing was written, so the cursor stays and the next tick re-reads
+                // this page. Not at the head either, so the population work waits too.
+                if (page.held()) {
+                    jobs.holdPage(job.id());
+                } else {
+                    jobs.markSwept(job.id(), null, null);
+                }
+                break;
+            }
             fired += page.fired();
             if (firstNew == null) firstNew = page.firstNew();
             cursorAt = page.cursorAt();
@@ -526,6 +569,9 @@ public class ClassifierWorker {
      *
      * @param windowSize rows the cursor advanced over, which is how a drain tells a full page from the head
      * @param scored rows actually handed to the detector, after the grain's own filtering
+     * @param advance false when nothing was written and the cursor must stay (a {@link PagedDetector} page
+     *     held or abandoned)
+     * @param held of a page that does not advance, whether it was held for a re-send rather than abandoned
      */
     private record Page(
             int windowSize,
@@ -534,7 +580,9 @@ public class ClassifierWorker {
             @Nullable NewDetection firstNew,
             List<FindingEvidenceRepository.Ref> firedRefs,
             String cursorAt,
-            String cursorId) {}
+            String cursorId,
+            boolean advance,
+            boolean held) {}
 
     /**
      * Score one page past {@code (cursorAt, cursorId)} and write what fired, or return null when there is
@@ -562,6 +610,7 @@ public class ClassifierWorker {
             obs = suppressAlreadyFlaggedConversations(
                     job.projectId(),
                     signal,
+                    detector,
                     oneScoredObservationPerTurn(candidates.stream()
                             .filter(SubstrateReadRepository.TurnCandidate::turnRoot)
                             .map(SubstrateReadRepository.TurnCandidate::observation)
@@ -571,6 +620,9 @@ public class ClassifierWorker {
             obs = window;
         }
         if (window.isEmpty()) return null;
+        if (detector instanceof PagedDetector<?> paged) {
+            return pagedPage(job, signal, grain, paged, window, obs);
+        }
 
         int fired = 0;
         NewDetection firstNew = null;
@@ -631,7 +683,67 @@ public class ClassifierWorker {
                 firstNew,
                 firedRefs,
                 last.createdAt(),
-                SubstrateReadRepository.handle(last.traceId(), last.observationId()));
+                SubstrateReadRepository.handle(last.traceId(), last.observationId()),
+                true,
+                false);
+    }
+
+    /**
+     * {@link #sweepPage} for a {@link PagedDetector}: score the page, let {@link PageRetryRule} decide what
+     * becomes of it, then have the detector write what that allows. The detector writes its own detection
+     * rows, so the ones it reports back are already genuinely new.
+     */
+    private <P extends PagedDetector.ScoredPage> Page pagedPage(
+            ClassifierJobRow job,
+            ClassifierRow signal,
+            Grain grain,
+            PagedDetector<P> detector,
+            List<SubstrateObservation> window,
+            List<SubstrateObservation> obs) {
+        long started = System.nanoTime();
+        P scoredPage = detector.score(signal, obs);
+        PageAction action = PageRetryRule.decide(scoredPage, job.pageRetries(), detector.maxPageRetries());
+        List<PagedDetector.FiredTurn> newlyFired =
+                detector.complete(signal, scoredPage, action, (System.nanoTime() - started) / 1_000_000L);
+        SubstrateObservation first = window.get(0);
+        SubstrateObservation last = window.get(window.size() - 1);
+        String cursorId = SubstrateReadRepository.handle(last.traceId(), last.observationId());
+        if (action == PageAction.SKIP) {
+            StructuredLog.warn(log, Markers.OPS, "signal.sweep.page-skipped")
+                    .message(
+                            "skipped a page of %s after %d holds: the provider stayed unavailable for most of it",
+                            signal.classifierKey(), job.pageRetries())
+                    .field("job", job.id())
+                    .field("signal", signal.classifierKey())
+                    .field("classifierId", signal.id())
+                    .field("project", job.projectId())
+                    .field("from", SubstrateReadRepository.handle(first.traceId(), first.observationId()))
+                    .field("to", cursorId)
+                    .field("sent", scoredPage.sent())
+                    .field("unavailable", scoredPage.unavailable())
+                    .log();
+        }
+        boolean advance = action == PageAction.PERSIST || action == PageAction.SKIP || action == PageAction.PASS;
+        NewDetection firstNew = null;
+        List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>(newlyFired.size());
+        for (PagedDetector.FiredTurn f : newlyFired) {
+            if (firstNew == null) firstNew = new NewDetection(f.detectionId(), f.severity());
+            SubstrateObservation o = f.turn();
+            firedRefs.add(
+                    grain == Grain.TURN
+                            ? FindingEvidenceRepository.Ref.trace(o.traceId())
+                            : FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
+        }
+        return new Page(
+                window.size(),
+                obs.size(),
+                newlyFired.size(),
+                firstNew,
+                firedRefs,
+                last.createdAt(),
+                cursorId,
+                advance,
+                action == PageAction.HOLD);
     }
 
     /**

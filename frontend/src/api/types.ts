@@ -198,7 +198,9 @@ export type ModelProvider =
   | "GROK"
   | "CUSTOM"
   // AWS's second Bedrock endpoint: OpenAI-wire, and the only place the GPT-5.6 line lives.
-  | "BEDROCK_MANTLE";
+  | "BEDROCK_MANTLE"
+  // Decision models only (TypeSafe's Jev), never a chat or agent model.
+  | "TYPESAFE";
 
 // Every provider authenticates with an org-supplied key.
 export type PlatformAuth = "api_key" | "aws";
@@ -250,8 +252,9 @@ export type ModelLaneView = S["LaneView"];
 // what an org has or does not have: so this is the shape the two dropdowns read.
 export type LaneProviderOption = S["ProviderOptionView"];
 // One section of the Models page. The lanes split by how the platform reaches the model: a request
-// we compose, or a model id handed to an agent in a sandbox, and that split decides the heading, the
-// copy under it and whether a tier or an effort is a real choice, so the server sends all four.
+// we compose, a model id handed to an agent in a sandbox, or one typed question to a decision model.
+// That split decides the heading, the copy under it, whether a tier or an effort is a real choice and
+// whether there is a model to pick at all, so the server sends all of them.
 export type ModelLaneGroupView = S["GroupView"];
 // The Bedrock capability matrix row: which tiers, cache TTLs and reasoning-effort levels a platform
 // model actually supports, and which endpoint serves it.
@@ -273,6 +276,8 @@ export type ModelRateView = S["ModelRateView"];
 export type RcaReport = S["RcaReportView"];
 export type RcaRuledOutCheck = S["RuledOutCheck"];
 export type RcaHypothesis = S["Hypothesis"];
+/** One cause a frustration report found: what the agent did, and the frustrated sessions that show it. */
+export type RcaCause = S["Cause"];
 
 // ---- PII redaction ----
 export type RedactionRuleView = S["RuleView"];
@@ -430,6 +435,14 @@ export type MalformedOutputRow = S["FailingOutputView"];
 export type MalformedOutputPage = S["FailingOutputPage"];
 
 /**
+ * A `frustration_rate` finding's block: the frustrated-conversation rate against the call site's learned
+ * rate, and the conversations the finding cites, each with the turn that fired in it.
+ */
+export type FrustrationDetail = S["FrustrationDetail"];
+export type FrustratedConversation = S["FrustratedConversationView"];
+export type FrustratedSessionPage = S["FrustratedSessionPage"];
+
+/**
  * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
  * two breakdowns the page renders — one masked key at a time, and one leak at a time.
  */
@@ -499,6 +512,11 @@ export type VitalsDuration = S["Duration"];
  */
 export type Case = S["CaseView"];
 export type CaseDetail = S["CaseDetailView"];
+/**
+ * What a person said a resolved frustration case turned out to be. Both restart the call site's
+ * learned rate; `false_alarm` also clears the conversations the case cites. No other case takes one.
+ */
+export type CaseDisposition = "fixed" | "false_alarm";
 export type TriageView = S["TriageView"];
 /**
  * Who ruled the detection real, and what they said. `ruled_by` is `Human` or `Triage` and

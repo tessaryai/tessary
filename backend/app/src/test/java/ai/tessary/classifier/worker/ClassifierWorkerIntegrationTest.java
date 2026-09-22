@@ -20,11 +20,10 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
+import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.testsupport.TurnGrainTestDetectionConfig;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +43,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * {@code FOR UPDATE SKIP LOCKED} queue run for real.
  */
 @SpringBootTest
-@Import({StubEncoderScorerConfig.class, TurnGrainTestDetectionConfig.class})
+@Import(StubDecisionClientConfig.class)
 class ClassifierWorkerIntegrationTest {
 
     @Autowired
@@ -92,20 +91,23 @@ class ClassifierWorkerIntegrationTest {
 
     @Test
     void sweepDetectsToolFailureAndFrustration_idempotently() {
-        // Frustration is off by default in this build; this test's whole subject is its own
-        // detection behaviour, so it grants the capability before the project is created (the
-        // moment seeding reads it).
+        // Frustration seeds disabled, because enabling it spends the org's provider credit; this
+        // test's whole subject is its own detection behaviour, so it turns it on. The decision model
+        // and the provider key are StubDecisionClientConfig's.
         String pid = TenantFixture.bootstrap(
                         tenants, "signal-sweep", org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
                 .id();
+        service.seedBuiltIns(pid);
+        service.setEnabled(
+                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), true);
         Instant now = Instant.now();
 
         // Substrate: one session, one turn (= one trace); a tool span that FAILED, and an llm span
         // whose input carries a frustration phrase.
         String sessionId = SubstrateV2Fixtures.sessionId();
-        // Frustration skips a conversation opener; seed the preamble so the turn under test is scoreable.
-        ClassifierConversations.seedPriorTurn(fx, pid, sessionId, now.toString());
+        // Frustration sends a turn only after two earlier exchanges; seed them so the turn under test is sent.
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
         String traceId = SubstrateV2Fixtures.traceId();
 
         SpanRef tool = fx.spanSeed(pid)
@@ -147,7 +149,7 @@ class ClassifierWorkerIntegrationTest {
         assertEquals(traceId, frustrationSubjectId, "a frustration detection's subject is the turn, i.e. the trace");
         Map<String, Object> row = jdbc.sql(
                         "SELECT classifier_key, subject_session_id, subject_trace_id, subject_span_id,"
-                                + " severity, confidence FROM " + TurnGrainTestDetectionConfig.TABLE
+                                + " severity, confidence FROM " + "frustration_detection"
                                 + " WHERE project_id = :pid")
                 .param("pid", pid)
                 .query()
@@ -168,7 +170,7 @@ class ClassifierWorkerIntegrationTest {
         assertEquals(before, service.events(pid, 100).size(), "re-sweeping the same observations is a no-op");
         assertEquals(
                 1L,
-                jdbc.sql("SELECT COUNT(*) FROM " + TurnGrainTestDetectionConfig.TABLE + " WHERE project_id = :pid")
+                jdbc.sql("SELECT COUNT(*) FROM " + "frustration_detection" + " WHERE project_id = :pid")
                         .param("pid", pid)
                         .query(Long.class)
                         .single(),
@@ -202,8 +204,8 @@ class ClassifierWorkerIntegrationTest {
         Instant now = Instant.now();
 
         String sessionId = SubstrateV2Fixtures.sessionId();
-        // Frustration skips a conversation opener; seed the preamble so the turn under test is scoreable.
-        ClassifierConversations.seedPriorTurn(fx, pid, sessionId, now.toString());
+        // Frustration sends a turn only after two earlier exchanges; seed them so the turn under test is sent.
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
         String traceId = SubstrateV2Fixtures.traceId();
 
         // "search": one failed call + one successful call → 50% failure rate.

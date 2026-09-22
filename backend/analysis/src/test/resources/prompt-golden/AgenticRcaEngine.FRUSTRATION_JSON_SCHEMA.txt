@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {"type": "string", "description": "One short paragraph: what the agent did that frustrated these users, or that the sessions share no agent behaviour."},
+    "verdict": {"type": "string", "enum": ["causes_identified", "no_cause_found"]},
+    "checklist": {
+      "type": "array",
+      "description": "One entry per check id in dossier/checklist.md, your own call on each measurement.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {"type": "string", "description": "The check id, exactly as it appears in dossier/checklist.md."},
+          "assessment": {"type": "string", "enum": ["ruled_out", "contributing", "explains", "unknown"]},
+          "detail": {"type": "string", "description": "Why you assessed it that way, citing what you checked."}
+        },
+        "required": ["check", "assessment", "detail"]
+      }
+    },
+    "causes": {
+      "type": "array",
+      "description": "What the agent did wrong, one entry per group, most sessions first. Empty when no cause is found.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "what_the_agent_did": {"type": "string", "description": "The agent's behaviour, not the user's words."},
+          "sessions_affected": {"type": "integer", "description": "How many of the frustrated sessions show it."},
+          "evidence_session_ids": {"type": "array", "items": {"type": "string"}, "description": "Session ids from this finding's witness refs. At least one; unknown ids are dropped."},
+          "evidence_trace_ids": {"type": "array", "items": {"type": "string"}, "description": "The flagged turns' trace ids from this finding's witness refs."},
+          "attribution": {
+            "type": ["object", "null"],
+            "properties": {
+              "kind": {"type": "string", "enum": ["prompt", "code", "tool", "model", "unknown"]},
+              "path": {"type": ["string", "null"]},
+              "commit": {"type": ["string", "null"]},
+              "excerpt": {"type": ["string", "null"]}
+            },
+            "required": ["kind"]
+          },
+          "fix_suggestion": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+        },
+        "required": ["title", "what_the_agent_did", "sessions_affected", "evidence_session_ids", "evidence_trace_ids", "attribution", "fix_suggestion", "confidence"]
+      }
+    },
+    "detailed_report": {
+      "type": "string",
+      "description": "The full investigation as markdown. Must end with an '## Evidence audit' section, a table mapping every load-bearing claim to its evidence (a session id, a trace id, a repo path/commit, or a query), and a '## What would settle it' section."
+    }
+  },
+  "required": ["summary", "verdict", "checklist", "causes", "detailed_report"]
+}

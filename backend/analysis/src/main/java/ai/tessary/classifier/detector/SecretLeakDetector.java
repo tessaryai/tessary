@@ -49,7 +49,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>This detector deliberately ignores {@code config_json}: the corpus is the product's opinion of what a
  * credential looks like, not per-project state. A documented carve-out from the convention {@link
- * RegexDetector} and {@link EncoderDetector} follow.
+ * RegexDetector} follows.
  */
 public final class SecretLeakDetector implements BuiltInDetector {
 

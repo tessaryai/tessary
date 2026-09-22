@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
@@ -205,8 +206,8 @@ public final class BehaviorDtos {
      * and for a rate shift the signature that took over), so this view renders the numbers
      * themselves rather than a prose summary of them.
      *
-     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code
-     * secretLeak} and {@code armedWindow} is set, chosen by cause kind, and all five are null for a
+     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code secretLeak},
+     * {@code armedWindow} and {@code frustration} is set, chosen by cause kind, and all six are null for a
      * behaviour-drift cause (which carries no measured shift) or for any finding whose blob is missing
      * or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
      * on the evidence parsing, and a page that vanished because one column was malformed would be a
@@ -242,7 +243,13 @@ public final class BehaviorDtos {
              * Leak, whose {@link #secretLeak} carries the same bar plus the per-key and per-leak
              * breakdowns it enumerates from the detection table.
              */
-            @Nullable ArmedWindowDetail armedWindow) {
+            @Nullable ArmedWindowDetail armedWindow,
+            /**
+             * Set exactly on a {@code frustration_rate} finding: the frustrated-conversation rate against the
+             * call site's learned rate, and the conversations the finding cites with the turn that fired in
+             * each. DB-backed — see {@link ai.tessary.classifier.frustration.FrustrationDetailService#detail}.
+             */
+            @Nullable FrustrationDetail frustration) {
 
         /** For a caller with no malformed-output or secret-leak detail to attach. */
         public static BehaviorFindingDetailView of(FindingRow row) {
@@ -260,6 +267,16 @@ public final class BehaviorDtos {
                 @Nullable MalformedDetail malformedOutput,
                 @Nullable SecretLeakDetail secretLeak,
                 @Nullable FailedTriage failed) {
+            return of(row, malformedOutput, secretLeak, null, failed);
+        }
+
+        /** As above, with a frustration finding's own block. */
+        public static BehaviorFindingDetailView of(
+                FindingRow row,
+                @Nullable MalformedDetail malformedOutput,
+                @Nullable SecretLeakDetail secretLeak,
+                @Nullable FrustrationDetail frustration,
+                @Nullable FailedTriage failed) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
                     BehaviorFindingView.of(row, failed),
@@ -272,7 +289,8 @@ public final class BehaviorDtos {
                     secretLeak,
                     secretLeak == null && FindingRow.Cause.ARMED_WINDOW.equals(row.causeKind())
                             ? ArmedWindowEvidence.detail(evidence)
-                            : null);
+                            : null,
+                    frustration);
         }
     }
 

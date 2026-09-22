@@ -44,21 +44,16 @@ public class CapabilityService {
 
     /**
      * Capabilities this build cannot honour, because the classifier code behind them is not on this
-     * classpath. They are not all the same shape: some are missing a dedicated detector class
-     * entirely, while {@code frustration} rides the generic, always-open {@code EncoderDetector} —
-     * what is missing there is the trained artifact and its registration, not a package. All four
-     * are reported separately from "off" by {@link #unavailable} so a client can say "not
-     * available" rather than offering a switch that would do nothing, and the write path refuses to
-     * set an override for one.
+     * classpath. All three are reported separately from "off" by {@link #unavailable} so a client can
+     * say "not available" rather than offering a switch that would do nothing, and the write path
+     * refuses to set an override for one.
      *
-     * <p>This stays a constant rather than something derived from what is registered: {@code
-     * frustration}'s detector is reachable from {@code backend/analysis} regardless, so deriving
-     * availability from what is registered would misreport it as available here. The {@link Edition}
-     * bean decides whether this set applies at all; the edition is derived from the classpath, never
-     * from a property, for the reason {@link Edition}'s javadoc gives.
+     * <p>This stays a constant rather than something derived from what is registered. The {@link
+     * Edition} bean decides whether this set applies at all; the edition is derived from the classpath,
+     * never from a property, for the reason {@link Edition}'s javadoc gives.
      */
-    private static final Set<Capability> UNAVAILABLE_IN_OPEN_EDITION = EnumSet.of(
-            Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.FRUSTRATION, Capability.GROUNDEDNESS);
+    private static final Set<Capability> UNAVAILABLE_IN_OPEN_EDITION =
+            EnumSet.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.GROUNDEDNESS);
 
     /**
      * Capabilities that are present but start off. Exactly one: automatic Layer-2 triage drives LLM

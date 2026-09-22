@@ -60,13 +60,21 @@ Run both operations through the `postgres` service in your compose deployment, u
   This is expected behavior for a new project, not a malfunction. If findings still don't appear after traces have been flowing for an extended period, treat it as a separate problem rather than assuming the baseline period is still in progress.
 </Note>
 
-## Frustration and groundedness classifiers never fire
+## Groundedness classifier never fires
 
-**Symptom:** Every classifier except frustration and groundedness produces findings. Those two specific classifiers never fire, even on projects with active traffic.
+**Symptom:** Every classifier except groundedness produces findings. It never fires, even on projects with active traffic.
 
-**Cause:** Frustration and groundedness are served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `TESSARY_OBSERVER_ENCODER_URL` and `TESSARY_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for these two classifiers to call.
+**Cause:** Groundedness is served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `TESSARY_OBSERVER_ENCODER_URL` and `TESSARY_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for it to call.
 
-**Resolution:** None in the open edition. The model weights `classify-service` loads are gated and not published, so there is no self-host path to these two classifiers. This is expected behaviour, not a misconfiguration: every other classifier runs without them. See the encoder section of [configuration](/self-hosting/configuration) for the variables involved.
+**Resolution:** None in the open edition. The model weights `classify-service` loads are gated and not published, so there is no self-host path to this classifier. This is expected behavior, not a misconfiguration: every other classifier runs without it. See the encoder section of [configuration](/self-hosting/configuration) for the variables involved.
+
+## Frustration classifier produces nothing
+
+**Symptom:** The frustration classifier shows no detections and opens no cases.
+
+**Cause:** One of three things. It starts switched off on every project, because it runs on your own provider key. It is paused, which its row on the **Classifiers** page says: "Provider rejected the key" when the provider refused the stored key, "No provider key" when no key is stored for the provider its lane uses. Or it is running and has not opened a case yet, because each call site first learns its own normal rate over 200 conversations, and a case opens only when the rate rises above that.
+
+**Resolution:** Turn it on under **Classifiers**, which asks for a provider and a key. For a paused classifier, fix the key under **Settings** then **Providers**; saving it lifts the pause, and **Retry** on the classifier does the same. Detections from before a case opens are listed on the classifier.
 
 ## Agentic RCA or Layer-2 triage failing at the sandbox-launch step
 
