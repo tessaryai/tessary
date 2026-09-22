@@ -18,13 +18,25 @@
  * scrolling to the end of the list reads the next from the finding's frustrated-sessions page. A filter (one RCA
  * cause's sessions) reads its own pages from the start. Only the selected session's traces are fetched, keyed
  * like the trace page's own read so a trace opened from here is already cached there.
+ *
+ * <h2>Switching filters</h2>
+ * Every filter's first page is read ahead when the list mounts, so a switch usually draws from cache. When one
+ * is still in flight, the last list stays up for a moment, and only a slow read swaps it for the skeleton, which
+ * then stays long enough not to blink. Either way the frame holds its height and the page does not move.
  */
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { useInfiniteQuery, useQueries } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  useInfiniteQuery,
+  useQueries,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type { ProjectApi } from "../../api/client";
 import type { FrustratedConversation, FrustratedSessionPage } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { Button, cn } from "../../ui";
+import { Button, Skeleton, cn } from "../../ui";
 import { SessionConversationView } from "../traces/detail-views";
 import type { Span } from "../traces/detail-data";
 
@@ -33,6 +45,16 @@ const FLAGGED_BOTTOM_GAP = 24;
 
 /** Sessions read per page past the first. */
 const PAGE_SIZE = 50;
+
+/** How long a filter switch waits before swapping the last list for the skeleton, in ms. */
+const SKELETON_DELAY = 200;
+
+/** The shortest time the skeleton stays once drawn, in ms. */
+const SKELETON_HOLD = 400;
+
+/** The list and the session side by side, at a fixed height so the page never moves as they load. */
+const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
+const FRAME_STYLE = { gridTemplateColumns: "320px minmax(0, 1fr)", height: 720 };
 
 const DAY_TIME: Intl.DateTimeFormatOptions = {
   day: "numeric",
@@ -45,23 +67,9 @@ const DAY_TIME: Intl.DateTimeFormatOptions = {
 /** One RCA cause's share of the sessions: the report that found it and its 0-based position there. */
 export type SessionFilter = { rcaReport: string; index: number };
 
-export function FrustratedConversations({
-  findingId,
-  first,
-  basePath,
-  filter,
-}: {
-  findingId: string;
-  /** The page the finding came with: its first sessions and where the next page starts. */
-  first: { rows: FrustratedConversation[]; nextCursor: string | null; total: number };
-  basePath: string;
-  /** Narrows the list to one cause; read from the server, since its sessions may be past the first page. */
-  filter?: SessionFilter;
-}) {
-  const { api } = useTenant();
-  const filterKey = filter ? `${filter.rcaReport}:${filter.index}` : "all";
-  const pages = useInfiniteQuery({
-    queryKey: ["frustrated-sessions", api.base, findingId, filterKey],
+function sessionsQuery(api: ProjectApi, findingId: string, filter: SessionFilter | undefined) {
+  return infiniteQueryOptions({
+    queryKey: ["frustrated-sessions", api.base, findingId, filter ? `${filter.rcaReport}:${filter.index}` : "all"],
     queryFn: ({ pageParam }: { pageParam: string | null }) =>
       api.getFrustratedSessions(findingId, {
         limit: PAGE_SIZE,
@@ -70,19 +78,72 @@ export function FrustratedConversations({
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (last: FrustratedSessionPage) => last.nextCursor ?? undefined,
-    initialData: filter ? undefined : { pages: [first], pageParams: [null] },
     staleTime: Infinity,
   });
+}
+
+/** True once `active` has held for `delay` ms, and then for at least `hold` ms. */
+function useSettledFlag(active: boolean, delay: number, hold: number) {
+  const [shown, setShown] = useState(false);
+  const shownAt = useRef(0);
+  useEffect(() => {
+    if (active === shown) return;
+    const wait = active ? delay : Math.max(0, hold - (Date.now() - shownAt.current));
+    const timer = setTimeout(() => {
+      shownAt.current = Date.now();
+      setShown(active);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [active, shown, delay, hold]);
+  return shown;
+}
+
+export function FrustratedConversations({
+  findingId,
+  first,
+  basePath,
+  filter,
+  readAhead = [],
+}: {
+  findingId: string;
+  /** The page the finding came with: its first sessions and where the next page starts. */
+  first: { rows: FrustratedConversation[]; nextCursor: string | null; total: number };
+  basePath: string;
+  /** Narrows the list to one cause; read from the server, since its sessions may be past the first page. */
+  filter?: SessionFilter;
+  /** The other filters the reader can switch to, whose first pages are read ahead. */
+  readAhead?: SessionFilter[];
+}) {
+  const { api } = useTenant();
+  const filterKey = filter ? `${filter.rcaReport}:${filter.index}` : "all";
+  const pages = useInfiniteQuery({
+    ...sessionsQuery(api, findingId, filter),
+    initialData: filter ? undefined : { pages: [first], pageParams: [null] },
+    placeholderData: keepPreviousData,
+  });
+  const skeleton = useSettledFlag(pages.isPlaceholderData, SKELETON_DELAY, SKELETON_HOLD);
+
+  const queryClient = useQueryClient();
+  const readAheadKey = readAhead.map((f) => `${f.rcaReport}:${f.index}`).join(",");
+  useEffect(() => {
+    for (const f of readAhead) void queryClient.prefetchInfiniteQuery(sessionsQuery(api, findingId, f));
+    // readAheadKey stands in for readAhead, which is a fresh array on every render.
+  },[queryClient, api, findingId, readAheadKey]);
   const conversations = pages.data?.pages.flatMap((p) => p.rows) ?? [];
   const total = pages.data?.pages[0]?.total ?? first.total;
 
-  const [picked, setPicked] = useState<string | null>(null);
-  const selected = conversations.find((c) => c.traceId === picked) ?? conversations[0];
+  const [picked, setPicked] = useState<{ filterKey: string; traceId: string } | null>(null);
+  const pickedId = picked?.filterKey === filterKey ? picked.traceId : null;
+  const selected = conversations.find((c) => c.traceId === pickedId) ?? conversations[0];
 
   // Read the next page when the end of the list scrolls into view.
   const list = useRef<HTMLUListElement>(null);
   const end = useRef<HTMLLIElement>(null);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = pages;
+  const { isFetchingNextPage, fetchNextPage } = pages;
+  const hasNextPage = pages.hasNextPage && !pages.isPlaceholderData;
+  useEffect(() => {
+    if (list.current) list.current.scrollTop = 0;
+  }, [filterKey]);
   useEffect(() => {
     const root = list.current;
     const target = end.current;
@@ -97,8 +158,8 @@ export function FrustratedConversations({
     return () => seen.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  if (pages.isLoading) {
-    return <p className="text-small text-muted m-0">Loading sessions...</p>;
+  if (pages.isLoading || skeleton) {
+    return <SessionsSkeleton />;
   }
   if (conversations.length === 0) {
     return (
@@ -109,10 +170,7 @@ export function FrustratedConversations({
   }
 
   return (
-    <div
-      className="grid rounded-card border border-border overflow-hidden bg-surface"
-      style={{ gridTemplateColumns: "320px minmax(0, 1fr)", height: 720 }}
-    >
+    <div className={FRAME} style={FRAME_STYLE}>
       <div className="flex flex-col min-h-0 border-r border-border">
         <ul ref={list} className="m-0 p-0 list-none overflow-y-auto flex-1" aria-label="Frustrated sessions">
           {conversations.map((c) => {
@@ -122,7 +180,7 @@ export function FrustratedConversations({
                 <button
                   type="button"
                   aria-pressed={on}
-                  onClick={() => setPicked(c.traceId)}
+                  onClick={() => setPicked({ filterKey, traceId: c.traceId })}
                   className={cn(
                     "flex w-full flex-col text-left cursor-pointer border-b border-border py-3 px-4 transition-colors",
                     on ? "bg-raised" : "bg-surface hover:bg-hover",
@@ -159,6 +217,42 @@ export function FrustratedConversations({
         </p>
       </div>
       {selected && <Conversation key={selected.traceId} row={selected} basePath={basePath} />}
+    </div>
+  );
+}
+
+/** The frame the sessions will fill, drawn while a cause's first page loads. */
+function SessionsSkeleton() {
+  return (
+    <div className={FRAME} style={FRAME_STYLE} role="status" aria-label="Loading sessions">
+      <div className="flex flex-col min-h-0 border-r border-border">
+        <div className="flex-1 overflow-hidden">
+          {[82, 64, 90, 70, 58, 76, 66, 84].map((width, i) => (
+            <div key={i} className="border-b border-border py-3 px-4">
+              <div className="flex justify-between">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-8" />
+              </div>
+              <Skeleton className="mt-2 h-3.5" style={{ width: `${width}%` }} />
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border py-3 px-4">
+          <Skeleton className="h-3 w-28" />
+        </div>
+      </div>
+      <div className="flex flex-col min-w-0 min-h-0">
+        <div className="border-b border-border py-3.5 px-5">
+          <Skeleton className="h-3 w-40" />
+        </div>
+        <div className="flex flex-col gap-3 py-4.5 px-5">
+          <Skeleton className="h-3 w-3/5" />
+          <Skeleton className="mt-2 h-10 w-1/2" />
+          <Skeleton className="h-3.5 w-5/6" />
+          <Skeleton className="h-3.5 w-2/3" />
+          <Skeleton className="mt-2 h-10 w-1/2" />
+        </div>
+      </div>
     </div>
   );
 }

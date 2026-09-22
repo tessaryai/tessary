@@ -1124,7 +1124,6 @@ function FrustrationList({
           <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
         )}
         <FrustratedConversations
-          key={cause ? filter : "all"}
           findingId={findingId}
           first={{
             rows: frustration.conversations,
@@ -1132,6 +1131,11 @@ function FrustrationList({
             total: frustration.rate.failuresCur,
           }}
           filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          readAhead={
+            rcaReportId
+              ? options.filter((o) => o.key !== "all").map((o) => ({ rcaReport: rcaReportId, index: Number(o.key) }))
+              : []
+          }
           basePath={basePath}
         />
       </Block>
