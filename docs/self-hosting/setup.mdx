@@ -195,7 +195,7 @@ Connecting a GitHub repository is optional and not required to complete setup. I
 ## Encoder-based classifiers need a second service
 
 <Note>
-  The groundedness classifier scores through a separate `classify-service` that the default configuration does not start. It is **available in the open edition**: its model is public, and [Configuration](/self-hosting/configuration#classifier-encoder-service) shows the one profile and two variables that turn it on. Every other classifier runs out of the box, frustration included (it runs on your own provider key, not this service); setup reaches connected traces and a first case without groundedness.
+  The groundedness classifier scores through a separate `classify-service` that the default configuration does not start. It is **available in the open edition**: its model is public, and [Configuration](/self-hosting/configuration#classifier-encoder-service) shows the one profile and two variables that turn it on. Until the service answers its health check the classifier is unavailable on the instance, so a stack without it loses nothing but that one classifier. Every other classifier runs out of the box, frustration included (it runs on your own provider key, not this service); setup reaches connected traces and a first case without groundedness.
 </Note>
 
 The frustration classifier does not need that service. It sends eligible user messages to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key, so it starts switched off and asks for the key when you turn it on. [Watch for frustrated users](/classifiers/frustration) covers what it sends and when a case opens.

@@ -84,9 +84,12 @@ def number_in(block, key):
 groundedness_cfg = config_block(r'"\{\\"threshold_high.*?\}",', 'threshold_low\\":0.5')
 frustration_cfg = config_block(r'"\{\\"threshold\\".*?\}",', 'min_baseline_conversations')
 
-# Groundedness is pinned when the manifest binds it (its revision is the served checkpoint);
-# frustration's Jev threshold lives in the catalog alone, so it is pinned whatever the manifest says.
-expected = {'frustration_threshold': number_in(frustration_cfg, 'threshold')}
+# Groundedness is pinned when the manifest binds it (its revision is the served checkpoint).
+# Frustration's Jev threshold lives in the catalog alone and is pinned only on a page that carries
+# a frustration section (the overlay's copy); this tree's page measures groundedness alone.
+expected = {}
+if 'frustration_threshold' in pinned:
+    expected['frustration_threshold'] = number_in(frustration_cfg, 'threshold')
 if 'groundedness' in models:
     expected.update({
         'groundedness_revision': models['groundedness']['revision'],

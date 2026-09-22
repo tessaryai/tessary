@@ -62,11 +62,11 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 ## The groundedness classifier never fires
 
-**Symptom:** Every classifier except groundedness produces findings. It never fires, even on projects whose call sites declare a retrieval shape (`rag_answer`, `summarize`, `extract`) and carry retrieved documents.
+**Symptom:** Groundedness is missing from **Classifiers**, or is listed as unavailable, and never fires, even on projects whose call sites declare a retrieval shape (`rag_answer`, `summarize`, `extract`) and carry retrieved documents.
 
-**Cause:** Groundedness is scored by a separate `classify-service` that the default `docker-compose.yml` does not start, and `TESSARY_OBSERVER_ENCODER_URL` / `TESSARY_OBSERVER_ENCODER_API_KEY` ship blank, so the sweep has nowhere to send its requests. The backend logs the failure on every tick.
+**Cause:** Groundedness is scored by a separate `classify-service` that the default `docker-compose.yml` does not start, and `TESSARY_OBSERVER_ENCODER_URL` / `TESSARY_OBSERVER_ENCODER_API_KEY` ship blank. The backend probes the service's `/healthz` on boot and every minute, and while it gets no `200` the classifier is unavailable on the instance: withheld from every project rather than swept into nothing. `/actuator/health/encoder` (platform staff) states the reason, and the backend logs `encoder.health` whenever the answer changes.
 
-**Resolution:** Start the service with `docker compose --profile classify up -d` from a clone of the repository and set the two variables as [Configuration](/self-hosting/configuration#classifier-encoder-service) describes. The classifier is enabled by default and sweeps as soon as the service answers. On a Mac, [the GPU path](/self-hosting/groundedness-on-a-mac) is the faster option. Two further conditions are by design, not faults: it only scores turns whose call site shape declares verifiable source content, and it is quiet on a turn that reached no evidence.
+**Resolution:** Start the service with `docker compose --profile classify up -d` from a clone of the repository and set the two variables as [Configuration](/self-hosting/configuration#classifier-encoder-service) describes. Within a minute of the service answering its health check the classifier is on for every org and sweeps; an org that does not want it turns it off under its own capabilities. On a Mac, [the GPU path](/self-hosting/groundedness-on-a-mac) is the faster option. Two further conditions are by design, not faults: it only scores turns whose call site shape declares verifiable source content, and it is quiet on a turn that reached no evidence.
 
 ## Frustration classifier produces nothing
 

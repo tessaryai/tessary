@@ -1,7 +1,7 @@
 # Classifier quality: measured precision, recall, F1
 
 The current measured quality of the encoder classifier this tree serves, with the provenance of
-every number. The overlay's copy of this page adds the frustration pair; this page carries what the
+every number. The overlay's copy of this page adds frustration; this page carries what the
 open manifest binds.
 
 **Read the regime before you read the number.** The classifier has no single quality figure: it

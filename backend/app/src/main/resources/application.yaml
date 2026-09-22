@@ -119,6 +119,15 @@ management:
           include: ingestSpool
           show-details: always
           show-components: always
+        # /actuator/health/encoder: whether classify-service answered its last health probe, which
+        # is what decides if the groundedness classifier is available on this
+        # instance at all (EncoderAvailability). UNKNOWN, never DOWN, when it did not: the
+        # classifier is optional and the top-level document is what a container health check
+        # reads. The detail carries the reason: unset URL, unreachable, or a non-200 answer.
+        encoder:
+          include: classifyService
+          show-details: always
+          show-components: always
   otlp:
     metrics:
       export:

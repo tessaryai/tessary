@@ -76,6 +76,22 @@ public class ObserverProperties {
          */
         private int maxInflight = 2;
 
+        /**
+         * How often the backend asks the encoder's {@code /healthz} whether it is there. The answer
+         * is the instance-level switch on the encoder-backed classifiers ({@code EncoderAvailability});
+         * the catalog reconcile that reveals or withholds them runs on its own minute, so a faster
+         * probe buys little.
+         */
+        private long probeIntervalMs = 60_000;
+
+        public long getProbeIntervalMs() {
+            return probeIntervalMs;
+        }
+
+        public void setProbeIntervalMs(long v) {
+            this.probeIntervalMs = v;
+        }
+
         public int getMaxInflight() {
             return maxInflight;
         }

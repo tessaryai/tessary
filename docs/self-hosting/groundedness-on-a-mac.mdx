@@ -82,14 +82,18 @@ curl -s -X POST http://127.0.0.1:18080/classify \
 ```
 
 A working service answers with `"unsupported"` close to 1.0 and the flagged span. Then check the
-stack's side: the groundedness classifier is enabled by default on every project, so once traces
+stack's side: the backend probes the service's `/healthz` on boot and every minute, and within a
+minute of the first `200` the groundedness classifier is on for every org and project. Once traces
 whose call site declares a retrieval shape (`rag_answer`, `summarize`, `extract`) and carry retrieved
 documents are flowing, findings appear under **Classifiers** without any further setting. Three
 unsupported answers in a day open a finding; a confirmed finding opens a case, per
-[Cases](/concepts/cases).
+[Cases](/concepts/cases). An org that does not want the classifier turns it off under its own
+capabilities.
 
-If nothing appears, the backend log says why on every sweep tick: an unreachable encoder shows as a
-connection error against `host.docker.internal:18080`, a wrong key as a 401.
+If the classifier never appears, the backend never got a `200` from the service:
+`/actuator/health/encoder` states the reason, and an unreachable `host.docker.internal:18080` is the
+usual one. If it appears but never fires, the sweep log says why on every tick: a wrong key shows
+as a 401.
 
 ## 4. Keep it running
 

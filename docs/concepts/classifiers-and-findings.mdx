@@ -35,7 +35,7 @@ A flagged message is not a finding on its own. Each call site learns its normal 
 
 ### Groundedness, on a separate model service
 
-`groundedness` is in this build, but it scores through a separate encoder service that the default configuration does not start: it reads every retrieved document and the whole answer in one pass of a public token-classification model (`tessaryai/groundedness-token-v1`) and fires on anything the evidence does not support. Start the service with `docker compose --profile classify up -d` and point the backend at it; see [Configuration](/self-hosting/configuration#classifier-encoder-service). Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
+`groundedness` is in this build and on for every org once the instance's encoder answers its health check (an org can turn it off), but it scores through a separate encoder service that the default configuration does not start: it reads every retrieved document and the whole answer in one pass of a public token-classification model (`tessaryai/groundedness-token-v1`) and fires on anything the evidence does not support. Start the service with `docker compose --profile classify up -d` and point the backend at it; see [Configuration](/self-hosting/configuration#classifier-encoder-service). Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
 
 ### What is not available in the open edition
 

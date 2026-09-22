@@ -311,8 +311,10 @@ export type CapabilityWire =
  * a version skew rather than a meaningful "off".
  *
  * `unavailable` answers the second question separately: a capability can be off because nobody
- * turned it on, or absent because this build does not carry the code behind it. Those need
- * different UI, a switch versus an explanation, and the difference is not derivable from the map.
+ * turned it on, or absent because this build does not carry the code behind it or, for an
+ * encoder-backed classifier, because this instance's encoder is not answering its health check.
+ * Those need different UI, a switch versus an explanation, and the difference is not derivable
+ * from the map.
  */
 export interface CapabilitiesView {
   capabilities: Record<CapabilityWire, boolean>;
