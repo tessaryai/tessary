@@ -2605,6 +2605,7 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
+            frustration: components["schemas"]["FrustrationDetail"] | null;
             latest_finding_id: string | null;
             malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
@@ -3086,10 +3087,13 @@ export interface components {
         FrustratedConversationView: {
             callSiteId: string | null;
             cleared: boolean;
+            contextTraceIds: string[];
             conversationId: string;
             flaggedAt: string | null;
+            message: string | null;
             /** Format: double */
             score: number | null;
+            sessionId: string | null;
             traceId: string;
         };
         FrustrationCallSiteView: {

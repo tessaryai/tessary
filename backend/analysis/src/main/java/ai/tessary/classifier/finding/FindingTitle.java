@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
@@ -118,12 +119,19 @@ public final class FindingTitle {
     }
 
     /**
-     * {@code "Users are frustrated with checkout-agent"}. No rate in the headline, for the reason {@link #toolError}
-     * gives.
+     * {@code "Frustrated conversations increased from 20.3% to 36.6% on checkout-agent"}. Unlike {@link #toolError}
+     * the rates are in the headline: both are shares of the same call site's own conversations, the learned
+     * normal and the rate since onset, so the sentence states what happened rather than inviting a comparison
+     * across call sites. A payload that carries no rates falls back to the sentence without them.
      */
     private static String frustrationRate(FindingRow finding) {
-        String callSite = finding.callSiteId();
-        return "Users are frustrated with " + (callSite == null ? finding.nativeCauseKey() : callSite);
+        String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
+        JsonNode body = finding.payload();
+        if (!body.path("baseline_rate").isNumber() || !body.path("current_rate").isNumber()) {
+            return "Frustrated conversations increased on " + callSite;
+        }
+        return "Frustrated conversations increased from " + pct(body.path("baseline_rate").asDouble())
+                + " to " + pct(body.path("current_rate").asDouble()) + " on " + callSite;
     }
 
     /**

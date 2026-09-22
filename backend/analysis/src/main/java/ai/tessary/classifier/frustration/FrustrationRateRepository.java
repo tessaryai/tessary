@@ -8,6 +8,7 @@ import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,13 +106,20 @@ public class FrustrationRateRepository {
      * own call site and when it happened. {@code cleared} once a {@code false_alarm} resolve cleared the
      * conversation.
      */
+    /**
+     * One flagged turn.
+     *
+     * @param message the user message as it was scored, for a one-line preview; null once retention cleared
+     *     the stored request, or when no assessment is kept for the turn
+     */
     public record FlaggedTurn(
             String traceId,
             @Nullable String conversationId,
             @Nullable Double score,
             @Nullable String callSiteId,
             @Nullable String startedAt,
-            boolean cleared) {}
+            boolean cleared,
+            @Nullable String message) {}
 
     /** A human reset on one call site's state row, for the Tuning view. */
     public record Reset(String resetAt, @Nullable String note) {}
@@ -209,10 +217,14 @@ public class FrustrationRateRepository {
         String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
         Map<String, FlaggedTurn> out = new HashMap<>();
         if (table == null || traceIds.isEmpty()) return out;
-        jdbc.sql("SELECT subject_trace_id, subject_session_id, evidence ->> 'score' AS score,"
-                        + " evidence ->> 'call_site_id' AS call_site_id, subject_started_at, cleared_at"
-                        + " FROM " + table
-                        + " WHERE project_id = :pid AND classifier_id = :cid AND subject_trace_id IN (:traces)")
+        jdbc.sql("SELECT d.subject_trace_id, d.subject_session_id, d.evidence ->> 'score' AS score,"
+                        + " d.evidence ->> 'call_site_id' AS call_site_id, d.subject_started_at, d.cleared_at,"
+                        + " (SELECT a.request -> 'state' ->> 'current_user_message' FROM frustration_assessment a"
+                        + "   WHERE a.project_id = d.project_id AND a.classifier_id = d.classifier_id"
+                        + "     AND a.trace_id = d.subject_trace_id"
+                        + "   ORDER BY a.created_at DESC LIMIT 1) AS message"
+                        + " FROM " + table + " d"
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :cid AND d.subject_trace_id IN (:traces)")
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("traces", traceIds)
@@ -225,10 +237,65 @@ public class FrustrationRateRepository {
                             score == null ? null : parseScore(score),
                             rs.getString("call_site_id"),
                             started == null ? null : started.toInstant().toString(),
-                            rs.getString("cleared_at") != null);
+                            rs.getString("cleared_at") != null,
+                            rs.getString("message"));
                 })
                 .list()
                 .forEach(t -> out.put(t.traceId(), t));
+        return out;
+    }
+
+    /**
+     * The turns shown around a flagged one: the flagged trace's session, for a link to the whole
+     * conversation, and the ids of the {@code before} top-level traces that started before it in the same
+     * conversation, oldest first.
+     *
+     * @param sessionId null when the flagged trace carries no session
+     */
+    public record ConversationContext(@Nullable String sessionId, List<String> priorTraceIds) {
+
+        public ConversationContext {
+            priorTraceIds = List.copyOf(priorTraceIds);
+        }
+    }
+
+    /**
+     * {@link ConversationContext} for each of {@code traceIds}, keyed by trace id. The conversation key is
+     * {@code COALESCE(thread_id, session_id)}, the grain the classifier scored at, read in event time so
+     * an upload that stored its turns out of order still reads them in the order they happened.
+     */
+    public Map<String, ConversationContext> conversationContext(String projectId, List<String> traceIds, int before) {
+        Map<String, ConversationContext> out = new HashMap<>();
+        if (traceIds.isEmpty() || before <= 0) return out;
+        Map<String, String> sessions = new HashMap<>();
+        Map<String, List<String>> prior = new HashMap<>();
+        jdbc.sql("""
+                        SELECT f.id AS flagged_id, f.session_id AS session_id, p.id AS prior_id, p.started_at AS prior_at
+                          FROM trace f
+                          LEFT JOIN LATERAL (
+                                SELECT t.id, t.started_at FROM trace t
+                                 WHERE t.project_id = f.project_id
+                                   AND t.parent_trace_id IS NULL
+                                   AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
+                                   AND (t.started_at, t.id) < (f.started_at, f.id)
+                                 ORDER BY t.started_at DESC, t.id DESC
+                                 LIMIT :before) p ON TRUE
+                         WHERE f.project_id = :pid AND f.id IN (:traces)
+                         ORDER BY f.id, p.started_at, p.id
+                        """)
+                .param("pid", projectId)
+                .param("traces", traceIds)
+                .param("before", before)
+                .query(rs -> {
+                    String flagged = rs.getString("flagged_id");
+                    sessions.put(flagged, rs.getString("session_id"));
+                    List<String> ids = prior.computeIfAbsent(flagged, k -> new ArrayList<>());
+                    String priorId = rs.getString("prior_id");
+                    if (priorId != null) ids.add(priorId);
+                });
+        for (Map.Entry<String, List<String>> e : prior.entrySet()) {
+            out.put(e.getKey(), new ConversationContext(sessions.get(e.getKey()), e.getValue()));
+        }
         return out;
     }
 

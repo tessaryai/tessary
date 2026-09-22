@@ -94,3 +94,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0022-frustration-off.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0023-trace-conversation-index.sql
+      relativeToChangelogFile: false

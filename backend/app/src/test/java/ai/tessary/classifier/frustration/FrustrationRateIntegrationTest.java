@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
+import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
@@ -67,6 +68,9 @@ class FrustrationRateIntegrationTest {
     CaseRepository cases;
 
     @Autowired
+    CaseService caseService;
+
+    @Autowired
     BehaviorTriageSource triageSource;
 
     @Autowired
@@ -103,7 +107,9 @@ class FrustrationRateIntegrationTest {
         assertEquals(FindingRow.TriageVerdict.POSITIVE, finding.triageVerdict(), "ruled at filing, no triage");
         assertEquals(FrustrationEvidence.SUMMARY, finding.triageSummary());
         assertNull(finding.escalatedAt(), "never escalated to Layer 2");
-        assertEquals("Users are frustrated with cs-chat", FindingTitle.of(finding));
+        String title = FindingTitle.of(finding);
+        assertTrue(
+                title.matches("Frustrated conversations increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
         assertEquals(180, finding.sampleCount(), "conversations since onset");
         assertEquals(210, finding.payload().path("baseline_conversations").asLong());
         assertEquals(VERSION, finding.payload().path("scorer_version").asText());
@@ -127,7 +133,7 @@ class FrustrationRateIntegrationTest {
         assertEquals(CaseRow.SubjectKind.CALL_SITE, opened.subjectKind());
         assertEquals("cs-chat", opened.subjectId());
         assertEquals(FrustrationEvidence.MEASURE, opened.metric());
-        assertEquals("Users are frustrated with cs-chat", opened.title());
+        assertEquals(FindingTitle.of(finding), opened.title());
         assertTrue(opened.basis().startsWith("72 of the 180 conversations since"), opened.basis());
 
         BehaviorFindingDetailView detail =
@@ -144,6 +150,12 @@ class FrustrationRateIntegrationTest {
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
+        assertEquals(row.traceId(), row.contextTraceIds().get(row.contextTraceIds().size() - 1), "flagged turn last");
+
+        FrustrationDetail onCase = caseService.detail(pid, opened.id()).frustration();
+        assertNotNull(onCase, "the case page gets the same block");
+        assertEquals(block.rate().nCur(), onCase.rate().nCur());
+        assertEquals(block.conversations().size(), onCase.conversations().size());
     }
 
     @Test

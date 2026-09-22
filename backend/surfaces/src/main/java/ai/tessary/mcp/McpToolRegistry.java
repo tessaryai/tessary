@@ -1185,6 +1185,7 @@ public class McpToolRegistry {
         String projectId = requireProject(ctx).id();
         try {
             CaseDetailView detail = cases.detail(projectId, id);
+            FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
             // Same firewall as get_finding: a case's `ruling` is the triage ruling RCA must not read about
             // the finding it's investigating. `rca` is deliberately not stripped: the firewall is about
             // triage, and an earlier RCA report is this lane's own prior work, not the gate it checks.
@@ -1200,6 +1201,8 @@ public class McpToolRegistry {
                     detail.toolError(),
                     detail.malformedOutput(),
                     detail.secretLeak(),
+                    // Ids stripped, as get_finding strips them: the agent reads the rate, not the traces.
+                    frustration == null ? null : frustration.withoutIds(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());

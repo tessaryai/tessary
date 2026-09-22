@@ -6,6 +6,7 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedConversationView;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.ConversationContext;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.FlaggedTurn;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,12 +46,25 @@ public class FrustrationDetailService {
             if (row.traceId() != null && row.spanId() == null) traces.add(row.traceId());
         }
         Map<String, FlaggedTurn> flagged = rates.flaggedTurns(finding.projectId(), finding.subjectId(), traces);
+        Map<String, ConversationContext> context = rates.conversationContext(
+                finding.projectId(), traces, FrustrationEvidence.CONTEXT_TURNS_BEFORE);
         List<FrustratedConversationView> conversations = new ArrayList<>();
         for (String trace : traces) {
             FlaggedTurn turn = flagged.get(trace);
             if (turn == null || turn.conversationId() == null) continue;
+            ConversationContext ctx = context.get(trace);
+            List<String> shown = new ArrayList<>(ctx == null ? List.of() : ctx.priorTraceIds());
+            shown.add(trace);
             conversations.add(new FrustratedConversationView(
-                    turn.conversationId(), trace, turn.score(), turn.callSiteId(), turn.startedAt(), turn.cleared()));
+                    turn.conversationId(),
+                    trace,
+                    turn.score(),
+                    turn.callSiteId(),
+                    turn.startedAt(),
+                    turn.cleared(),
+                    ctx == null ? null : ctx.sessionId(),
+                    shown,
+                    turn.message()));
         }
         return FrustrationEvidence.detail(finding, conversations);
     }

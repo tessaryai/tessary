@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
@@ -273,6 +274,8 @@ public final class CaseDtos {
      *     counts, and the not-JSON / pre-rework buckets. Null for every other detector.
      * @param secretLeak "When it leaked" for a {@code secret_leak} case: the rule, the leak count,
      *     and the per-key and per-leak breakdowns. Null for every other detector.
+     * @param frustration the rate and the conversations it cites for a {@code frustration_rate} case, the
+     *     same block the finding page shows. Null for every other detector.
      */
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
@@ -290,6 +293,7 @@ public final class CaseDtos {
             @JsonProperty("tool_error") @Nullable RateDetail toolError,
             @JsonProperty("malformed_output") @Nullable MalformedDetail malformedOutput,
             @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
+            @Nullable FrustrationDetail frustration,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}

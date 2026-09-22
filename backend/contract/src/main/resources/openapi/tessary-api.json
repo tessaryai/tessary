@@ -3048,6 +3048,16 @@
             },
             "type" : "array"
           },
+          "frustration" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FrustrationDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "latest_finding_id" : {
             "type" : [
               "string",
@@ -3130,6 +3140,7 @@
           "detector_available",
           "events",
           "exemplars",
+          "frustration",
           "latest_finding_id",
           "malformed_output",
           "metric",
@@ -5170,10 +5181,22 @@
           "cleared" : {
             "type" : "boolean"
           },
+          "contextTraceIds" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "conversationId" : {
             "type" : "string"
           },
           "flaggedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "message" : {
             "type" : [
               "string",
               "null"
@@ -5186,6 +5209,12 @@
               "null"
             ]
           },
+          "sessionId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "traceId" : {
             "type" : "string"
           }
@@ -5193,9 +5222,12 @@
         "required" : [
           "callSiteId",
           "cleared",
+          "contextTraceIds",
           "conversationId",
           "flaggedAt",
+          "message",
           "score",
+          "sessionId",
           "traceId"
         ],
         "type" : "object"

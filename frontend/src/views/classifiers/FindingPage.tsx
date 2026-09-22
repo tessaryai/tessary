@@ -34,7 +34,8 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
-import { FrustratedConversations, FrustrationHeader, FrustrationRate } from "./frustrationStory";
+import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
+import { FrustratedConversations } from "./FrustratedConversations";
 import { EvidenceTable } from "./EvidenceTable";
 // This build's baseline renderer returns null by default.
 import { paid } from "@paid";
@@ -116,7 +117,7 @@ export function FindingPage() {
           onAnalyze={() => analyzeM.mutate()}
         />
       ) : frustration ? (
-        <FrustrationHeader detail={frustration} finding={finding} basePath={basePath} />
+        <FrustrationHeader finding={finding} basePath={basePath} />
       ) : malformedOutput ? (
         <MalformedHeader
           rate={malformedOutput.rate}
@@ -278,19 +279,23 @@ export function FindingPage() {
             style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
-              <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
-              <span className="text-subtle text-small">share of conversations frustrated with the agent</span>
+              <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+              <span className="text-subtle text-small">Share of conversations with a user frustrated with the agent</span>
             </div>
             <FrustrationRate detail={frustration} />
           </section>
           <section className="mt-7">
-            <div className="flex items-baseline gap-3 mb-1.5">
+            <div className="flex items-baseline gap-3 mb-2.75">
               <h2 className="font-mono text-label uppercase text-muted">Frustrated conversations</h2>
-              <span className="text-subtle text-small">each beside the user message that was flagged</span>
+              <span className="text-subtle text-small">
+                {frustration.conversations.length > 0 && frustration.conversations.every((c) => c.cleared)
+                  ? "Cleared when the case was resolved as a false alarm. They no longer count toward the rate."
+                  : "Each flagged message with the turns before it"}
+              </span>
             </div>
             <FrustratedConversations
-              detail={frustration}
-              callSiteId={finding.callSiteId ?? null}
+              conversations={frustration.conversations}
+              total={frustration.rate.failuresCur}
               basePath={basePath}
             />
           </section>

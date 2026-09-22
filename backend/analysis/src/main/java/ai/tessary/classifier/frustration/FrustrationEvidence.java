@@ -57,6 +57,12 @@ public final class FrustrationEvidence {
      * @param callSiteId the flagged turn's own call site, which can differ from the finding's: a conversation
      *     counts on the call site of its first scored turn
      * @param cleared true once a {@code false_alarm} resolve cleared the conversation's flag
+     * @param sessionId the flagged trace's session, which the page links to for the whole conversation;
+     *     null when the trace carries none
+     * @param contextTraceIds the turns the page draws, oldest first: up to {@link #CONTEXT_TURNS_BEFORE}
+     *     turns before the flagged one, then the flagged trace itself
+     * @param message the flagged user message as it was scored, clipped, for the list's preview line; null
+     *     once retention cleared it
      */
     public record FrustratedConversationView(
             String conversationId,
@@ -64,7 +70,18 @@ public final class FrustrationEvidence {
             @Nullable Double score,
             @Nullable String callSiteId,
             @Nullable String flaggedAt,
-            boolean cleared) {}
+            boolean cleared,
+            @Nullable String sessionId,
+            List<String> contextTraceIds,
+            @Nullable String message) {
+
+        public FrustratedConversationView {
+            contextTraceIds = List.copyOf(contextTraceIds);
+        }
+    }
+
+    /** How many turns before a flagged one its conversation view shows. */
+    public static final int CONTEXT_TURNS_BEFORE = 2;
 
     /** The payload a spell's finding carries. {@code cause_kind} is added by the finding writer. */
     static String payload(

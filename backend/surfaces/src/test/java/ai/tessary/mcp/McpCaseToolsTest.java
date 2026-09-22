@@ -309,6 +309,7 @@ class McpCaseToolsTest {
                 null,
                 null,
                 null,
+                null,
                 true,
                 true,
                 true);

@@ -16,6 +16,7 @@ import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.frustration.FrustrationSessionClearer;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
@@ -96,6 +97,7 @@ public class CaseService {
     private final MalformedOutputDetailService malformedOutputDetail;
     /** "When it leaked" — the same builder the secret-leak finding page reads. */
     private final SecretLeakDetailService secretLeakDetail;
+    private final FrustrationDetailService frustrationDetail;
 
     public CaseService(
             CaseRepository cases,
@@ -115,7 +117,8 @@ public class CaseService {
             FrustrationRateRepository frustrationRates,
             FrustrationSessionClearer frustrationSessions,
             MalformedOutputDetailService malformedOutputDetail,
-            SecretLeakDetailService secretLeakDetail) {
+            SecretLeakDetailService secretLeakDetail,
+            FrustrationDetailService frustrationDetail) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -134,6 +137,7 @@ public class CaseService {
         this.frustrationSessions = frustrationSessions;
         this.malformedOutputDetail = malformedOutputDetail;
         this.secretLeakDetail = secretLeakDetail;
+        this.frustrationDetail = frustrationDetail;
     }
 
     // ---- reads -------------------------------------------------------------------------------
@@ -270,6 +274,7 @@ public class CaseService {
                 rateDetail(finding),
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
+                finding == null ? null : frustrationDetail.detail(finding),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
