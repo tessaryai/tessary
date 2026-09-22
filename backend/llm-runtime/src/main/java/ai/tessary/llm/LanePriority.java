@@ -86,16 +86,15 @@ public final class LanePriority {
     private static final String ANTHROPIC_SONNET_5 = "ANTHROPIC:claude-sonnet-5";
     private static final String ANTHROPIC_HAIKU_4_5 = "ANTHROPIC:claude-haiku-4-5";
     // The OpenAI-compatible providers, current generation, one model at each of the two sizes.
-    // Terra is the third route to the same model as the mantle TERRA above, at the lowest of the
-    // three prices ($2/$12), which is why it and not the $4/$20 flagship is what RCA takes here.
-    private static final String GPT_5_6_TERRA = "OPENAI:gpt-5.6-terra";
+    // GPT-6 Sol ($2/$10) and not the $4/$20 flagship is what RCA takes here.
+    private static final String GPT_6_SOL = "OPENAI:gpt-6-sol";
     private static final String GPT_5_6 = "OPENAI:gpt-5.6";
-    private static final String GPT_5_6_LUNA = "OPENAI:gpt-5.6-luna";
-    // The same GPT-5.6 pair over OpenRouter. Its model NAMES carry a slash of their own
-    // ("openai/gpt-5.6-terra" is one name, not provider + model) — the launcher's toProviderModel
+    private static final String GPT_6_LUNA = "OPENAI:gpt-6-luna";
+    // The same GPT-6 pair over OpenRouter. Its model NAMES carry a slash of their own
+    // ("openai/gpt-6-sol" is one name, not provider + model) — the launcher's toProviderModel
     // has an OpenRouter branch for exactly that.
-    private static final String OR_TERRA = "OPENROUTER:openai/gpt-5.6-terra";
-    private static final String OR_LUNA = "OPENROUTER:openai/gpt-5.6-luna";
+    private static final String OR_SOL = "OPENROUTER:openai/gpt-6-sol";
+    private static final String OR_LUNA = "OPENROUTER:openai/gpt-6-luna";
     // Moonshot direct. One model at one size, so it is both this provider's RCA and TRIAGE answer.
     private static final String KIMI_K2_6 = "MOONSHOT:kimi-k2.6";
     private static final String GEMINI_3_1_PRO = "GEMINI:gemini-3.1-pro-preview";
@@ -132,7 +131,7 @@ public final class LanePriority {
                 // is not what should decide second place.
                 new ProviderOption(
                         ModelProvider.ANTHROPIC, List.of(ANTHROPIC_SONNET_5, ANTHROPIC_HAIKU_4_5), ANTHROPIC_SONNET_5),
-                new ProviderOption(ModelProvider.OPENAI, List.of(GPT_5_6_TERRA, GPT_5_6, GPT_5_6_LUNA), GPT_5_6_TERRA),
+                new ProviderOption(ModelProvider.OPENAI, List.of(GPT_6_SOL, GPT_5_6, GPT_6_LUNA), GPT_6_SOL),
                 new ProviderOption(ModelProvider.BEDROCK_MANTLE, List.of(TERRA, MANTLE_LUNA), TERRA),
                 new ProviderOption(ModelProvider.GEMINI, List.of(GEMINI_3_1_PRO, GEMINI_3_7_FLASH), GEMINI_3_1_PRO),
                 new ProviderOption(ModelProvider.GROK, List.of(GROK_4_6, GROK_CODE_FAST), GROK_4_6),
@@ -140,7 +139,7 @@ public final class LanePriority {
                 // Both after the direct routes to the models they resolve to: an aggregator
                 // adds a hop and a second price book to the same weights, and Kimi K2.6 is a
                 // smaller model than every flagship above it.
-                new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_TERRA, OR_LUNA), OR_TERRA),
+                new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_SOL, OR_LUNA), OR_SOL),
                 new ProviderOption(ModelProvider.MOONSHOT, List.of(KIMI_K2_6), KIMI_K2_6),
                 new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL));
         m.put(ModelLane.RCA, agentVmOrder);
