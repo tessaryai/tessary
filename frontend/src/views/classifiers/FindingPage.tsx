@@ -180,8 +180,9 @@ export function FindingPage() {
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
           the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
-          finding is frozen (decision 1), so there is nothing left to override. */}
-      {story && triaged && (
+          finding is frozen (decision 1), so there is nothing left to override. A frustration finding
+          states its ruling and links its case in its own header, so it skips this card. */}
+      {story && triaged && !frustration && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
           {finding.triageSummary && (
@@ -315,16 +316,20 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      <section className="mt-7">
-        <h2 className="font-mono text-label uppercase text-muted mb-1.5">
-          Evidence
-        </h2>
-        {finding.detector === "sop_conformance" ? (
-          !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
-        ) : (
-          <EvidenceTable findingId={findingId} basePath={basePath} />
-        )}
-      </section>
+      {/* A frustration finding's evidence is its conversations, drawn above; the raw witness rows
+          would list the same fifty again as bare ids. */}
+      {!frustration && (
+        <section className="mt-7">
+          <h2 className="font-mono text-label uppercase text-muted mb-1.5">
+            Evidence
+          </h2>
+          {finding.detector === "sop_conformance" ? (
+            !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
+          ) : (
+            <EvidenceTable findingId={findingId} basePath={basePath} />
+          )}
+        </section>
+      )}
     </div>
   );
 
