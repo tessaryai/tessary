@@ -20,14 +20,12 @@ import org.springframework.context.ConfigurableApplicationContext;
  * @DynamicPropertySource} without this initializer clobbering it — same guard, same reasoning as
  * the auth initializer.
  */
-public class TestTelemetryDisabledInitializer
-        implements ApplicationContextInitializer<ConfigurableApplicationContext> {
+public class TestTelemetryDisabledInitializer implements ApplicationContextInitializer<ConfigurableApplicationContext> {
 
     @Override
     public void initialize(ConfigurableApplicationContext applicationContext) {
         if (!applicationContext.getEnvironment().containsProperty("tessary.telemetry.enabled")) {
-            TestPropertyValues.of("tessary.telemetry.enabled=false")
-                    .applyTo(applicationContext.getEnvironment());
+            TestPropertyValues.of("tessary.telemetry.enabled=false").applyTo(applicationContext.getEnvironment());
         }
     }
 }
