@@ -2,6 +2,7 @@
 package ai.tessary.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,11 +15,15 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseDtos.CaseDetailView;
+import ai.tessary.cases.CaseDtos.CaseExemplarView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.Pipeline;
 import ai.tessary.open.errors.CaseError;
 import ai.tessary.open.errors.TessaryException;
@@ -292,27 +297,125 @@ class McpCaseToolsTest {
         assertEquals(Boolean.TRUE, result.get("isError"));
     }
 
+    /**
+     * <b>{@code get_case} strips ids the way {@code get_finding} does.</b> The case carries the same summary
+     * blocks as its finding plus the exemplar traces, so without this an agent reads the sample
+     * {@code get_finding} withholds by calling one tool over. The numbers stay; the ids go.
+     */
+    @Test
+    void getCase_toolError_keepsTheNumbersAndDropsFailingTracesAndExemplars() throws Exception {
+        when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(toolErrorRate(), null, exemplar()));
+
+        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+
+        JsonNode toolError = body.get("tool_error");
+        assertEquals(5_000, toolError.get("nCur").asLong());
+        assertEquals(400, toolError.get("failuresCur").asLong());
+        assertEquals(0, toolError.get("failingTraces").size(), "the agent view carries no trace ids");
+        assertEquals(0, body.get("exemplars").size(), "exemplars are paged through get_finding_evidence");
+        assertEquals("find-9", body.get("latest_finding_id").asText());
+        assertFalse(body.toString().contains("trace-failing-1"), "a failing trace id reached the agent");
+        assertFalse(body.toString().contains("trace-exemplar-1"), "an exemplar trace id reached the agent");
+    }
+
+    @Test
+    void getCase_secretLeak_keepsTheMaskedKeyAndDropsLeakIdsAndExemplars() throws Exception {
+        when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(null, secretLeak(), exemplar()));
+
+        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+
+        JsonNode secretLeak = body.get("secret_leak");
+        assertEquals(3, secretLeak.get("leakCount").asLong());
+        assertEquals(2, secretLeak.get("traceCount").asLong());
+        JsonNode leak = secretLeak.get("leaks").get(0);
+        assertTrue(leak.get("traceId").isNull(), "the agent view carries no trace id");
+        assertTrue(leak.get("spanId").isNull(), "the agent view carries no span id");
+        assertEquals("AKIA…WXYZ", leak.get("masked").asText());
+        assertEquals(0, body.get("exemplars").size(), "exemplars are paged through get_finding_evidence");
+        assertFalse(body.toString().contains("trace-secret-9"), "a witness trace id reached the agent");
+        assertFalse(body.toString().contains("trace-exemplar-1"), "an exemplar trace id reached the agent");
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static CaseDetailView detail(String rcaReportId, @Nullable RcaReportView rca) {
+        return detail(rcaReportId, rca, null, null, List.of());
+    }
+
+    private static CaseDetailView detail(
+            ToolErrorEvidence.@Nullable RateDetail toolError,
+            SecretLeakEvidence.@Nullable SecretLeakDetail secretLeak,
+            CaseExemplarView exemplar) {
+        return detail(null, null, toolError, secretLeak, List.of(exemplar));
+    }
+
+    private static CaseDetailView detail(
+            @Nullable String rcaReportId,
+            @Nullable RcaReportView rca,
+            ToolErrorEvidence.@Nullable RateDetail toolError,
+            SecretLeakEvidence.@Nullable SecretLeakDetail secretLeak,
+            List<CaseExemplarView> exemplars) {
         return new CaseDetailView(
                 sampleCase("case-118", "C-118", "open"),
                 List.of(),
                 "find-9",
                 null,
-                List.of(),
+                exemplars,
                 rcaReportId,
                 rca,
-                // No measured shift on this fixture: these tools are about the RCA payload, and a
-                // detector whose shift has no drawable shape sends both as null anyway.
                 null,
+                toolError,
                 null,
-                null,
-                null,
+                secretLeak,
                 null,
                 true,
                 true,
                 true);
+    }
+
+    private static CaseExemplarView exemplar() {
+        return new CaseExemplarView(
+                "trace-exemplar-1", "exemplar", 1, "search_orders", "cs-1", 120L, 0.002, "2026-08-12T00:00:00Z");
+    }
+
+    private static ToolErrorEvidence.RateDetail toolErrorRate() {
+        return new ToolErrorEvidence.RateDetail(
+                "search_orders",
+                0.01,
+                0.08,
+                7.0,
+                20_000,
+                5_000,
+                400,
+                List.of(),
+                false,
+                List.of("trace-failing-1", "trace-failing-2"),
+                "2026-08-12T00:00:00Z",
+                null,
+                null,
+                "up",
+                9.0,
+                5.0,
+                0.3,
+                0.8);
+    }
+
+    private static SecretLeakEvidence.SecretLeakDetail secretLeak() {
+        return new SecretLeakEvidence.SecretLeakDetail(
+                "aws-access-token",
+                FindingRow.Confidence.HIGH,
+                3L,
+                2L,
+                "2026-08-12T00:00:00Z",
+                "2026-08-13T00:00:00Z",
+                List.of(new SecretLeakEvidence.SecretLeakKeyView("AKIA…WXYZ", 3L, 2L, "2026-08-13T00:00:00Z", false)),
+                List.of(new SecretLeakEvidence.SecretLeakLeakView(
+                        "2026-08-13T00:00:00Z", "AKIA…WXYZ", "masked", "trace-secret-9", "span-1")),
+                "event_count",
+                1L,
+                86_400L,
+                "2026-08-12T00:00:00Z",
+                "2026-08-13T00:00:00Z");
     }
 
     private static RcaReportView report() {
