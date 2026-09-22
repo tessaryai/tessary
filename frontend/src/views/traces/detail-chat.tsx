@@ -672,6 +672,7 @@ function Bubble({
   return (
     <div className={cn("flex", right ? "justify-end" : "justify-start")}>
       <div
+        data-flagged={flagged ? "true" : undefined}
         className={cn(
           "chat-bubble min-w-0 text-body py-2.5 px-3.5",
           right ? "bg-raised text-fg" : "bg-bg text-fg",

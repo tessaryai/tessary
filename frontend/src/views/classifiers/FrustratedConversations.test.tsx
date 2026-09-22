@@ -107,6 +107,26 @@ describe("FrustratedConversations", () => {
     expect(screen.getByText(/Showing the 2 turns before it/)).toBeTruthy();
   });
 
+  it("scrolls the conversation pane so the flagged message is the last thing in view", async () => {
+    const top = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      // The pane ends at 820; the flagged message ends at 1500, below it.
+      const bottom = this.dataset.flagged === "true" ? 1500 : 820;
+      return { top: 0, bottom, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    renderList([conversation()]);
+
+    await screen.findByText("message t-3");
+    const flagged = screen.getAllByText("message t-3").map((el) => el.closest(".chat-bubble")).find(Boolean);
+    let pane = flagged?.parentElement ?? null;
+    while (pane && !pane.className.includes("overflow-y-auto")) pane = pane.parentElement;
+    // Its bottom lands at the pane's bottom, with the gap left under it.
+    await waitFor(() => expect(pane?.scrollTop).toBe(1500 - 820 + 24));
+    top.mockRestore();
+  });
+
   it("reads another conversation's traces when it is selected", async () => {
     getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
     renderList([

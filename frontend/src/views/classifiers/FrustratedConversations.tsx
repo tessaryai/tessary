@@ -17,7 +17,7 @@
  * A finding cites up to fifty conversations; each is three trace reads. They load when selected, keyed
  * like the trace page's own read so a trace opened from here is already cached there.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import type { FrustratedConversation } from "../../api/types";
@@ -25,6 +25,9 @@ import { useTenant } from "../../tenant/TenantContext";
 import { Button, cn } from "../../ui";
 import { SessionConversationView } from "../traces/detail-views";
 import type { Span } from "../traces/detail-data";
+
+/** Space left under the flagged message when the pane scrolls to it, in px. */
+const FLAGGED_BOTTOM_GAP = 24;
 
 const DAY_TIME: Intl.DateTimeFormatOptions = {
   day: "numeric",
@@ -121,6 +124,35 @@ function Conversation({ row, basePath }: { row: FrustratedConversation; basePath
   const spansByTrace = new Map<string, Span[]>(loaded.map((d) => [d.trace.id, d.spans]));
   const before = ids.length - 1;
 
+  // The flagged message is usually the last user turn, below the turns that led to it. Once the traces
+  // are drawn, scroll this pane (never the page) so it is the last thing in view, with the turns before
+  // it filling the pane above. Long messages fold themselves after they render, and on a first page load
+  // fonts and the rest of the page are still settling, so the pane re-aligns whenever its content
+  // resizes, until the reader touches it: a scroll, a key, a tap or a click hands the pane to them.
+  const pane = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = pane.current;
+    const inner = content.current;
+    if (loading || !box || !inner) return;
+    const align = () => {
+      const flagged = box.querySelector<HTMLElement>('[data-flagged="true"]');
+      if (!flagged) return;
+      const below = flagged.getBoundingClientRect().bottom - box.getBoundingClientRect().bottom;
+      box.scrollTop = Math.max(0, box.scrollTop + below + FLAGGED_BOTTOM_GAP);
+    };
+    align();
+    const settle = new ResizeObserver(align);
+    settle.observe(inner);
+    const stop = () => settle.disconnect();
+    const handOver = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+    for (const e of handOver) box.addEventListener(e, stop, { once: true, passive: true });
+    return () => {
+      stop();
+      for (const e of handOver) box.removeEventListener(e, stop);
+    };
+  }, [loading]);
+
   return (
     <div className="flex flex-col min-w-0 min-h-0">
       <div className="flex items-center gap-2.5 border-b border-border py-3 px-5 text-small">
@@ -143,7 +175,10 @@ function Conversation({ row, basePath }: { row: FrustratedConversation; basePath
           )}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto py-4.5 px-5">
+      {/* No scroll anchoring: the browser's own adjustment moves the pane as messages fold, and would
+          undo the alignment above. */}
+      <div ref={pane} className="flex-1 overflow-y-auto py-4.5 px-5" style={{ overflowAnchor: "none" }}>
+        <div ref={content}>
         <p className="mt-0 mb-3.5 text-small text-muted">
           {row.cleared ? "Cleared" : "Flagged"} with a score of {row.score != null ? row.score.toFixed(2) : "–"}
           {row.flaggedAt ? ` on ${new Date(row.flaggedAt).toLocaleString(undefined, DAY_TIME)}` : ""}.
@@ -163,6 +198,7 @@ function Conversation({ row, basePath }: { row: FrustratedConversation; basePath
             flaggedTraceId={row.traceId}
           />
         )}
+        </div>
       </div>
     </div>
   );
