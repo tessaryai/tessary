@@ -16,7 +16,7 @@ Four categories are worth keeping apart, because they need different things from
 
 ## What the open edition includes
 
-Every stage of the pipeline runs here. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases, and an agentic root-cause analysis (RCA) run investigates a case. The bundled `sandbox-runner` service runs the agentic work, and Compose wires it up for you.
+Every stage of the pipeline runs here. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), and an agentic root-cause analysis (RCA) run investigates a case. The bundled `sandbox-runner` service runs the agentic work, and Compose wires it up for you.
 
 What the open edition does not include is the commercially licensed overlay, and Tessary Cloud, the hosted service. Neither is documented here.
 
@@ -59,7 +59,7 @@ These are in this build and waiting on something from you.
 | Capability | What it needs |
 | --- | --- |
 | Triage, and everything downstream of it | A model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. |
-| `frustration` | An OpenRouter or TypeSafe key. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. |
+| `frustration` | An OpenRouter or TypeSafe key. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. See [Watch for frustrated users](/classifiers/frustration). |
 | Automatic triage | An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
 | Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
 | A case reaching you | An alert rule and a notification destination. Nothing is sent until you add both. |

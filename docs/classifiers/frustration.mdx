@@ -1,0 +1,132 @@
+---
+title: "Watch for frustrated users"
+description: "Turn on the frustration classifier, see what it sends and to whom, and read and resolve the case it opens when users at a call site get frustrated with your agent more often."
+---
+
+The frustration classifier finds sessions where users get frustrated with your agent, and opens a case when that happens more often than usual at a call site. It starts switched off on every project, because each message it scores is a call to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key.
+
+## Before you start
+
+- An OpenRouter or TypeSafe API key. You can paste it while turning the classifier on, or store it first under **Settings** then **Providers**.
+- Traces whose spans carry user and assistant messages, tagged with a call site. See [Call sites](/concepts/call-sites).
+- Traces that carry a thread ID or a session ID, so messages from one session can be read together.
+
+## Turn it on
+
+1. Open **Classifiers**.
+2. Select **Enable Frustration** on the banner at the top of the page.
+3. Choose the provider to run it on. Each provider shows **Key stored** or **No key added**.
+4. If the provider has no key, paste it into the API key field.
+5. Select **Save key and enable**, or **Enable** when a key is already stored.
+
+The banner goes away, and the classifier's row reads as enabled. Tessary encrypts a key you paste here and uses it across your organization.
+
+## What is sent, and to whom
+
+For each message it scores, Tessary sends:
+
+- The user's message and the four messages before it.
+- Text only. Tool calls, tool results, and reasoning are not sent.
+- The text as stored, which means after PII redaction.
+- Pasted blocks replaced by a marker such as `[PASTE: 40 lines, 1873 chars]`, and long messages cut to their start and end.
+
+The request goes to TypeSafe directly, or to OpenRouter, which passes it to TypeSafe, depending on the provider you chose. It is sent on your key. This is the one classifier that sends conversation text outside your Tessary instance. TypeSafe's [privacy policy](https://typesafe.ai/legal/privacy-policy) and [data processing addendum](https://typesafe.ai/legal/data-processing) state how it handles and keeps what it receives. Read them before you turn it on.
+
+## What it costs
+
+Scoring costs about $0.04 per 1,000 messages. Your provider bills each call to your key, so track the spend in your provider's dashboard. Only messages that can be scored are sent, and each session stops being sent after its first flag, so the number of calls is lower than your message count.
+
+## Which messages are scored
+
+A user message is scored only when the four messages before it are user, assistant, user, assistant, and each has text. So:
+
+- A session's first two user messages are never scored.
+- A message whose previous assistant turn ended on a tool call with no text is not scored.
+- A session here is the messages that share a trace's thread ID, or its session ID when it has no thread.
+- Once one message in a session is flagged, the rest of that session is not scored.
+
+The classifier sweeps new traces continuously, so a message is scored shortly after it arrives.
+
+A message is flagged only when the user is unhappy with the assistant, in their own words or by re-asking after a clear failure. These are not flagged:
+
+- A user who is annoyed about something outside the chat, such as a late delivery.
+- A message that is only confused or urgent.
+- Emotion inside text the user pasted or asked for.
+- A message too ambiguous to call. When unsure, the model reads it as neutral.
+
+## When a case opens
+
+One flagged message is not a finding and pages nobody. It is listed on the classifier as a detection.
+
+Each call site learns its own normal rate of frustrated sessions from its first sessions, then watches that rate. When the rate rises above what it learned, Tessary files a finding and opens a case in one step, titled for example "Frustrated sessions increased from 2.1% to 6.8% on support-chat". The finding does not wait for triage: its numbers are the claim, so it is ruled when it is filed.
+
+<Note>
+  A call site that frustrates users from its first day learns that rate as its normal, and opens a case only if it gets worse.
+</Note>
+
+## Read the finding and the case
+
+Both pages show the same evidence:
+
+- A chart of the call site's rate of frustrated sessions over time, against the rate it learned.
+- The frustrated sessions, newest first, each with its flagged message and score. Every session the rate counted is listed; scroll to the end or select **Load more sessions** for the next page.
+- The selected session as it happened: the flagged turn and the two turns before it, with tool calls, read from the real traces. The flagged message is highlighted, and the pane scrolls to it.
+
+If a session's traces have passed your retention period, the page says the traces may have aged out. The finding's counts still stand.
+
+## Run RCA on the case
+
+Select **Run RCA** on the case. Root-cause analysis reads every frustrated session the finding cites and, with a connected repository, your code. It returns one of two verdicts: **Causes identified** or **No cause found**.
+
+Each cause shows:
+
+- What the agent did, and how many sessions show it.
+- A confidence: high, medium, or low.
+- Where it comes from: a prompt, code, a tool, the model, or unknown, with the file, commit, and excerpt when one lines up.
+- A suggested fix.
+- The sessions and turns that show it. On the case, the **Show** link on a cause, such as **Show 12 sessions**, narrows the session list to that cause.
+
+[Root-cause analysis](/concepts/root-cause-analysis#on-a-frustration-case) covers how the report checks its own citations.
+
+## Resolve the case
+
+Select **Resolve**, write one line on what happened, and choose what the case turned out to be:
+
+| Choice | What it does |
+| --- | --- |
+| **Fixed** | The call site learns its normal rate again from the sessions after the resolve. The sessions the case cites still count as frustrated. |
+| **False alarm** | The same, and every session cited by the case stops counting as frustrated. Their later messages can be scored again. |
+
+Resolve as **Fixed** only once the fix is live. Resolved earlier, the call site learns the frustrated rate as its normal. A frustration case cannot be absorbed.
+
+## When it pauses
+
+If the key stops working, the classifier stops sending and its row on **Classifiers** says why:
+
+| Row reads | Cause | Fix |
+| --- | --- | --- |
+| **Provider rejected the key** | The provider refused the stored key. | Replace the key under **Settings** then **Providers**. |
+| **No provider key** | No key is stored for the provider the classifier runs on. | Add one under **Settings** then **Providers**. |
+
+Saving a working key lifts the pause. **Retry** on the classifier lifts it right away, or says why it cannot. Messages that arrive while it is paused are skipped, not scored later.
+
+## What Tessary keeps
+
+- The text sent for scoring is deleted on the same schedule as the trace it came from. See [Data retention](/self-hosting/configuration#data-retention).
+- Whether a message was flagged, the model's scores, the cost, and the response time are kept after the text is deleted, because the call site's rate is rebuilt from them.
+- Flagged sessions are detections, and follow the detection retention period.
+
+## Turn it off
+
+Switch the classifier off on its row under **Classifiers**. It stops sending messages. Cases it already opened stay open until someone resolves them.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How a case collects findings, and the states it moves through.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/self-hosting/troubleshooting#frustration-classifier-produces-nothing">
+    What to check when the classifier shows no detections.
+  </Card>
+</CardGroup>

@@ -57,6 +57,12 @@
         ]
       },
       {
+        "group": "Classifiers",
+        "pages": [
+          "classifiers/frustration"
+        ]
+      },
+      {
         "group": "Reference",
         "pages": [
           "reference/api-keys",

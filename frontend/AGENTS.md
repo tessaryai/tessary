@@ -139,7 +139,7 @@ Every user-visible string follows the handbook: the
 [product copy guide](../handbook/product-copy-guide.md) for surfaces, states, and actions, the
 [writing style guide](../handbook/writing-style-guide.md) for language rules, and the
 [product glossary](../handbook/product-glossary.md) for terms (a classifier creates a finding;
-triage turns a sound finding into a case; "detector" is a wire key, never a label). Those docs are
+triage turns a sound finding into a case, while a high-confidence secret leak and frustration rule their own; "detector" is a wire key, never a label). Those docs are
 the only home for the rules.
 
 ## Before you commit

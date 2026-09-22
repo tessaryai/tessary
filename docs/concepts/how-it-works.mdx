@@ -32,9 +32,9 @@ The stage's real gate is not volume, it is attribution. A span that carries no `
 
 A classifier is a check that evaluates traces against a defined condition, and it creates a finding when that condition is met. Classifiers sweep the stored spans continuously and strictly off the ingest hot path, so a slow classifier delays a finding rather than an accepted batch.
 
-They are built to be cheap enough to run against every trace rather than a sample. None of the five costs a model call: `duration_drift`, `cost_drift` and `tool_error` are arithmetic over stored spans, and `secret_leak` and `malformed_output` are pattern and schema checks.
+They are built to be cheap enough to run against every trace rather than a sample. None of the five that run by default costs a model call: `duration_drift`, `cost_drift` and `tool_error` are arithmetic over stored spans, and `secret_leak` and `malformed_output` are pattern and schema checks.
 
-Model calls arrive later, at triage and root-cause analysis, and they are spent per finding and per case rather than per span. In our testing, that shape cost 5x less than grading on 1% sampled traces.
+Model calls arrive later, at triage and root-cause analysis, and they are spent per finding and per case rather than per span. The one exception is [`frustration`](/classifiers/frustration), which makes one call per message it scores. It does so only after you turn it on, only on your own OpenRouter or TypeSafe key, and only for the user messages it can score. In our testing, that shape cost 5x less than grading on 1% sampled traces.
 
 Three of them compare a call site, or a single tool, against its own recent past, which is why a new project stays quiet for a while. There is no shipped notion of "good" latency, "good" spend, or a "good" failure rate, so each of those classifiers has to watch its population long enough to learn what that population normally does before it can say anything moved. The milestone ladder names that wait: a project sits at `fitting` until its classifiers reach `watching`.
 
@@ -44,7 +44,7 @@ Three of them compare a call site, or a single tool, against its own recent past
 
 A finding is a change detected in production. It is not yet a validated issue, and Tessary does not page anyone about one.
 
-Triage is the step in between. It runs an agent in a sandbox against the finding's own claim and evidence and asks one question: does the claim hold, over enough samples, carried by the evidence it cites? A `positive` ruling opens a case. A `negative` ruling closes the finding.
+Triage is the step in between. It runs an agent in a sandbox against the finding's own claim and evidence and asks one question: does the claim hold, over enough samples, carried by the evidence it cites? A `positive` ruling opens a case. A `negative` ruling closes the finding. A high-confidence secret leak and a frustration finding skip this step: the classifier files each one already ruled `positive` and opens the case itself, because its numbers are the claim.
 
 A case is the unit a person is meant to act on, and there is one live case per classifier, subject, and metric. Several findings about the same tool over several weeks collapse onto one case rather than opening a queue of near-duplicates.
 

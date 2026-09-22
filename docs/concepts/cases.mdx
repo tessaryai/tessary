@@ -3,7 +3,7 @@ title: "Cases"
 description: "Understand how triage turns a finding into a case, how related findings collapse onto one case, and the states a case moves through."
 ---
 
-A case is a validated issue that requires attention. It is the one shape in Tessary that is meant to reach a person, and it exists only after triage has ruled that the finding behind it represents a real issue.
+A case is a validated issue that requires attention. It is the one shape in Tessary that is meant to reach a person, and it exists only after triage has ruled that the finding behind it represents a real issue, or, for a high-confidence secret leak or a frustration finding, once the classifier has filed it already ruled.
 
 Findings are cheap and plentiful by design, because the classifiers that produce them are built to run against every trace. Putting every finding in front of someone would undo that. Triage is the gate that makes watching everything affordable to read.
 
@@ -39,7 +39,7 @@ Three things identify a case: the classifier that noticed, the subject it fired 
 
 The subject is the population, not the finding. A tool's failure rate rising in March and falling in April are two causes to explain and one thing to page about, so both land on the same case. The same holds for a call site whose latency moved twice.
 
-A case opens the moment a finding's ruling qualifies it — a triage positive, or a person's **Real deviation** — never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
+A case opens the moment a finding's ruling qualifies it — a triage positive, a person's **Real deviation**, or the ruling a high-confidence secret leak or a frustration finding carries when it is filed — never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
 
 A case closes only when a person resolves or absorbs it — nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
 
@@ -60,20 +60,20 @@ A resolved case records why it closed, and the difference between the reasons is
 | `human` | A person closed it, with a required one-line reason. The classifier's reference did not move, so an unchanged population opens another case. |
 | `absorbed` | A person ruled the shift legitimate and the classifier's reference moved to include every window the case held. This level is the new baseline, and it does not open another case. |
 
-Both close every finding the case still holds open, in the same action.
+Both close every finding the case still holds open, in the same action. A frustration case cannot be absorbed. Resolving it records a disposition, and the call site learns its normal rate again, as [Resolving a frustration case](#resolving-a-frustration-case) describes.
 
 **Absorb as legitimate** is the one that ends the argument rather than this instance of it. Use **Resolve** when you have shipped a fix and the window has not caught up yet; use **Absorb as legitimate** when the new level is correct and you want it to become normal.
 
 ### Resolving a frustration case
 
-A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated conversations rises above the rate it learned, because the numbers on the finding are the claim.
+A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated sessions rises above the rate it learned, because the numbers on the finding are the claim.
 
-Resolving one asks what it was, and both answers restart that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the conversations after the resolve.
+Resolving one asks what it was, and both answers restart that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the sessions after the resolve.
 
 | Disposition | What it does |
 | --- | --- |
-| **Fixed** | Restarts the test. The conversations the case cites still count as frustrated. |
-| **False alarm** | Restarts the test, and every conversation cited by any finding in the case stops counting as frustrated. Their later user messages can be scored again. |
+| **Fixed** | Restarts the test. The sessions the case cites still count as frustrated. |
+| **False alarm** | Restarts the test, and every session cited by any finding in the case stops counting as frustrated. Their later user messages can be scored again. |
 
 The rate is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live. Resolved before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
 

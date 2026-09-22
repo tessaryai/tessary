@@ -20,6 +20,9 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
 classify-service `node --test`, and live ITs (`*LiveIT.java`).
+`JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
+skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
+key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
 
 ## Running it
 

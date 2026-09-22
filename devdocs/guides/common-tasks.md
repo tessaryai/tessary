@@ -67,6 +67,12 @@ Not a cross-stack recipe with a fixed shape — a classifier attaches through th
 port and its read-side siblings, and that seam has its own document:
 [`../reference/classifier-extension-interface.md`](../reference/classifier-extension-interface.md).
 
+A classifier that spends the org's own provider key per item has a second shape, and
+`classifier/frustration/` is the example: a `PagedDetector` supplied through a `DetectorSupplier`,
+seeded with `defaultEnabled = false`, pausing through `ClassifierPause` (surfaced as the row's
+`readiness`), and lifted by `ProviderCredentialListener` when a key is saved. It must also meet the
+five conditions [`principles.md`](../reference/principles.md) records for a per-event model call.
+
 (This heading replaced *New curation kind*. Curation — the accept/edit/reject overlay over an
 imported pipeline — was removed on the backend along with graders,
 `CurationController` and the `curation_entry` table. Frontend still carries dead `Curation`/
