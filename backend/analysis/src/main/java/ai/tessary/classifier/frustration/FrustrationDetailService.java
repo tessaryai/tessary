@@ -46,8 +46,8 @@ public class FrustrationDetailService {
             if (row.traceId() != null && row.spanId() == null) traces.add(row.traceId());
         }
         Map<String, FlaggedTurn> flagged = rates.flaggedTurns(finding.projectId(), finding.subjectId(), traces);
-        Map<String, ConversationContext> context = rates.conversationContext(
-                finding.projectId(), traces, FrustrationEvidence.CONTEXT_TURNS_BEFORE);
+        Map<String, ConversationContext> context =
+                rates.conversationContext(finding.projectId(), traces, FrustrationEvidence.CONTEXT_TURNS_BEFORE);
         List<FrustratedConversationView> conversations = new ArrayList<>();
         for (String trace : traces) {
             FlaggedTurn turn = flagged.get(trace);

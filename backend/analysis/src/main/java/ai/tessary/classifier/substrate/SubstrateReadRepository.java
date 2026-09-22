@@ -622,9 +622,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                                         <= (sc.started_at, sc.created_at, sc.trace_id, sc.id)
                                   ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC
                                   LIMIT :limit)
-                        """
-                        + SPAN_COLUMNS
-                        + """
+                        """ + SPAN_COLUMNS + """
 
                         FROM picked s
                           LEFT JOIN span_payload pl

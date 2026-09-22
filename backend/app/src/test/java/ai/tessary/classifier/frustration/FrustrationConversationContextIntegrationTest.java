@@ -80,7 +80,8 @@ class FrustrationConversationContextIntegrationTest {
 
     @Test
     void aConversationsFirstTurnHasNoPriorTurns() {
-        String pid = TenantFixture.bootstrap(tenants, "fr-context-first").project().id();
+        String pid =
+                TenantFixture.bootstrap(tenants, "fr-context-first").project().id();
         SpanRef first = turn(pid, SubstrateV2Fixtures.sessionId(), Instant.now());
 
         ConversationContext ctx = Objects.requireNonNull(
@@ -90,6 +91,7 @@ class FrustrationConversationContextIntegrationTest {
     }
 
     private SpanRef turn(String pid, String session, Instant at) {
-        return fx.turn(pid, SubstrateV2Fixtures.traceId(), session, at, "[{\"role\":\"user\",\"content\":\"q\"}]", null);
+        return fx.turn(
+                pid, SubstrateV2Fixtures.traceId(), session, at, "[{\"role\":\"user\",\"content\":\"q\"}]", null);
     }
 }

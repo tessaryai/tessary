@@ -130,8 +130,9 @@ public final class FindingTitle {
         if (!body.path("baseline_rate").isNumber() || !body.path("current_rate").isNumber()) {
             return "Frustrated conversations increased on " + callSite;
         }
-        return "Frustrated conversations increased from " + pct(body.path("baseline_rate").asDouble())
-                + " to " + pct(body.path("current_rate").asDouble()) + " on " + callSite;
+        return "Frustrated conversations increased from "
+                + pct(body.path("baseline_rate").asDouble()) + " to "
+                + pct(body.path("current_rate").asDouble()) + " on " + callSite;
     }
 
     /**

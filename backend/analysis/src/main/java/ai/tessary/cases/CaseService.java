@@ -97,6 +97,7 @@ public class CaseService {
     private final MalformedOutputDetailService malformedOutputDetail;
     /** "When it leaked" — the same builder the secret-leak finding page reads. */
     private final SecretLeakDetailService secretLeakDetail;
+
     private final FrustrationDetailService frustrationDetail;
 
     public CaseService(

@@ -150,7 +150,8 @@ class FrustrationRateIntegrationTest {
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
-        assertEquals(row.traceId(), row.contextTraceIds().get(row.contextTraceIds().size() - 1), "flagged turn last");
+        assertEquals(
+                row.traceId(), row.contextTraceIds().get(row.contextTraceIds().size() - 1), "flagged turn last");
 
         FrustrationDetail onCase = caseService.detail(pid, opened.id()).frustration();
         assertNotNull(onCase, "the case page gets the same block");

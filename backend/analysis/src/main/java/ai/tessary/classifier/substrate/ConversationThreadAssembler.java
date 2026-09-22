@@ -144,10 +144,7 @@ public class ConversationThreadAssembler {
         // is half the keyset position the window is bounded at. Passing the span id twice, as this did
         // when a bare id was an address, would now bound the page at the wrong row.
         List<SubstrateObservation> recentFirst = substrate.conversationObservationsUpTo(
-                scored.projectId(),
-                scored.traceId(),
-                scored.observationId(),
-                props.getThreadMaxObservations());
+                scored.projectId(), scored.traceId(), scored.observationId(), props.getThreadMaxObservations());
         List<SubstrateObservation> chronological = new ArrayList<>(recentFirst);
         Collections.reverse(chronological);
 
@@ -223,10 +220,7 @@ public class ConversationThreadAssembler {
             return Optional.empty();
         }
         List<SubstrateObservation> recentFirst = substrate.conversationObservationsUpTo(
-                scored.projectId(),
-                scored.traceId(),
-                scored.observationId(),
-                props.getThreadMaxObservations());
+                scored.projectId(), scored.traceId(), scored.observationId(), props.getThreadMaxObservations());
         List<SubstrateObservation> chronological = new ArrayList<>(recentFirst);
         Collections.reverse(chronological);
 
