@@ -359,8 +359,10 @@ public class McpToolRegistry {
         add(new McpTool(
                 "get_case",
                 "Fetch one case by id, scoped to this token's project: the case, its activity trail, the newest"
-                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the ruling, the"
-                        + " exemplar traces, and the RCA report INLINE in rca when one has finished — its"
+                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the"
+                        + " classifier's summary numbers with no trace or span ids (page the finding's rows with"
+                        + " get_finding_evidence and latest_finding_id), and the RCA report INLINE in rca when one"
+                        + " has finished — its"
                         + " verdict, hypotheses, the checks it ruled out, and the agent's full written"
                         + " investigation. rca is null while a report is still running (rca_report_id names it,"
                         + " so poll) and when none has been run; rca_available says whether one could be."
@@ -1185,23 +1187,28 @@ public class McpToolRegistry {
         String projectId = requireProject(ctx).id();
         try {
             CaseDetailView detail = cases.detail(projectId, id);
+            // Both of get_finding's firewalls (see agentView). A case's `ruling` is the triage ruling RCA
+            // must not read about the finding it's investigating, and the summary blocks and exemplars
+            // lose every trace and span id; the exemplars are the finding's evidence rows, which
+            // get_finding_evidence pages with latest_finding_id. `rca` is deliberately not stripped: the
+            // firewall is about triage, and an earlier RCA report is this lane's own prior work, not the
+            // gate it checks.
+            ToolErrorEvidence.RateDetail toolError = detail.toolError();
+            MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
+            SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
             FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
-            // Same firewall as get_finding: a case's `ruling` is the triage ruling RCA must not read about
-            // the finding it's investigating. `rca` is deliberately not stripped: the firewall is about
-            // triage, and an earlier RCA report is this lane's own prior work, not the gate it checks.
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
                     detail.latestFindingId(),
                     null,
-                    detail.exemplars(),
+                    List.of(),
                     detail.rcaReportId(),
                     detail.rca(),
                     detail.metric(),
-                    detail.toolError(),
-                    detail.malformedOutput(),
-                    detail.secretLeak(),
-                    // Ids stripped, as get_finding strips them: the agent reads the rate, not the traces.
+                    toolError == null ? null : withoutIds(toolError),
+                    malformedOutput == null ? null : withoutIds(malformedOutput),
+                    secretLeak == null ? null : withoutIds(secretLeak),
                     frustration == null ? null : frustration.withoutIds(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),

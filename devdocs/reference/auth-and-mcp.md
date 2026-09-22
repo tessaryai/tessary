@@ -128,8 +128,10 @@ the server, on both the RCA and the triage lane. `McpToolRegistry#agentView` is 
 same method that strips the triage ruling above); `McpFindingToolsTest` pins it. The UI's own `GET
 /findings/{id}` renders `BehaviorFindingDetailView` unstripped — a human following a link is a
 reading aid, not an undeclared sample presented as the whole population, which is what handing an
-agent a handful of ids would be. `get_finding_evidence` is where an agent gets ids on purpose, one
-row per unit the detector measured, never a sample.
+agent a handful of ids would be. `get_case` applies the same stripping to its `tool_error`,
+`malformed_output`, `secret_leak` and `frustration` blocks and returns `exemplars` empty, since those are the
+finding's evidence rows; the UI's `GET /cases/{id}` keeps every id. `get_finding_evidence` is where
+an agent gets ids on purpose, one row per unit the detector measured, never a sample.
 
 ## Known limitations
 

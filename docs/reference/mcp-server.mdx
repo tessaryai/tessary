@@ -96,7 +96,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_cases` | none | `state` (`open` \| `muted` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open and muted pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
-| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
+| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, the classifier's summary numbers, and the root-cause report inline in `rca` once one has finished. The ruling, exemplars, and every trace and span id are redacted on this surface; page the finding's rows with `get_finding_evidence` and `latest_finding_id` |
 
 On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session counts behind each, and the scoring settings the finding was filed under.
 
