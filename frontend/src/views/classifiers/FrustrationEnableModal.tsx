@@ -17,6 +17,9 @@ import { Button, ErrorNote, Field, Input, LoadingRow, Modal } from "../../ui";
 /** `ModelLane.FRUSTRATION`'s wire name. */
 export const FRUSTRATION_LANE = "frustration";
 
+/** Frustration's detector key: enabling it spends the org's own provider credit, so it opens this modal. */
+export const FRUSTRATION_DETECTOR = "frustration";
+
 export function FrustrationEnableModal({
   classifierId,
   onClose,
@@ -94,7 +97,14 @@ export function FrustrationEnableModal({
       )}
       {choice && (
         <>
-          <div className="rounded-card border border-border divide-y divide-border" role="radiogroup" aria-label="Provider">
+          <div id="frustration-provider-label" className="text-small font-medium text-fg-secondary mb-1.5">
+            Provider
+          </div>
+          <div
+            className="rounded-card border border-border divide-y divide-border"
+            role="radiogroup"
+            aria-labelledby="frustration-provider-label"
+          >
             {options.map((o) => (
               <label key={o.provider} className="flex items-start gap-3 px-4 py-3 cursor-pointer">
                 <input
@@ -109,7 +119,7 @@ export function FrustrationEnableModal({
                 <span className="min-w-0">
                   <span className="block text-small text-fg">{o.label}</span>
                   <span className="block text-label text-muted">
-                    {configured.has(o.provider) ? "Key stored" : "No key yet"}
+                    {configured.has(o.provider) ? "Key stored" : "No key added"}
                   </span>
                 </span>
               </label>
@@ -120,7 +130,7 @@ export function FrustrationEnableModal({
             <Field
               className="mt-3.5"
               label={`${choice.label} API key`}
-              hint="Stored encrypted for the whole organization, the same key Settings, Providers holds."
+              hint="Tessary encrypts the key and uses it across your organization."
             >
               {(p) => (
                 <Input
@@ -134,12 +144,17 @@ export function FrustrationEnableModal({
             </Field>
           )}
 
-          <p className="text-small text-muted mt-3.5 mb-0">
-            Eligible user messages, already redacted, are sent to {choice.label} and scored by TypeSafe's Jev on your
-            key. About $0.04 per 1,000 messages at the current rate. Each call site first learns its own normal rate
-            over its first 200 conversations; a case opens when the rate rises above it. A call site that is already
-            bad at the start learns that as its normal and is flagged only if it gets worse.
-          </p>
+          <div className="mt-3.5 text-small">
+            <div className="font-medium text-fg-secondary">Once enabled, Frustration</div>
+            <ul className="text-muted mt-1.5 mb-0 pl-4.5 list-disc flex flex-col gap-1">
+              <li>Sends redacted user messages to {choice.label} for TypeSafe's Jev model to score.</li>
+              <li>Costs about $0.04 per 1,000 messages on your {choice.label} key.</li>
+              <li>
+                Learns each call site's normal rate from its first 200 conversations, then opens a case when the
+                rate rises.
+              </li>
+            </ul>
+          </div>
         </>
       )}
       {enableM.isError && <ErrorNote className="mt-3" error={enableM.error} />}

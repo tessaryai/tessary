@@ -126,7 +126,7 @@ describe("FrustrationEnableModal", () => {
 
     const key = await screen.findByLabelText("TypeSafe API key");
     expect(screen.getByRole("button", { name: "Save key and enable" })).toHaveProperty("disabled", true);
-    screen.getByText(/already redacted, are sent to TypeSafe/);
+    screen.getByText(/Sends redacted user messages to TypeSafe/);
 
     fireEvent.change(key, { target: { value: "ts-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Save key and enable" }));

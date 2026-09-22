@@ -53,6 +53,8 @@ import {
   isClosedByTriage,
   triageState,
 } from "./shared";
+import { FrustrationBanner } from "./FrustrationBanner";
+import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
 
 export function ClassifiersPage() {
   const { api } = useTenant();
@@ -75,6 +77,7 @@ export function ClassifiersPage() {
 
   const classifiers = classifiersQ.data ?? [];
   const enabled = enabledDetectors(classifiers);
+  const frustration = classifiers.find((c) => c.detector === FRUSTRATION_DETECTOR);
 
   const { live, closed } = useMemo(() => {
     const findings = allQ.data?.findings ?? [];
@@ -101,6 +104,8 @@ export function ClassifiersPage() {
           </Link>
         }
       />
+
+      {frustration && <FrustrationBanner classifier={frustration} />}
 
       {allQ.isLoading && <LoadingRow />}
       {allQ.isError && <ErrorNote error={allQ.error} />}

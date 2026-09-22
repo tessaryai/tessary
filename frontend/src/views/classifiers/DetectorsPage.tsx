@@ -30,7 +30,7 @@ import type {
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Toggle, cn } from "../../ui";
-import { FrustrationEnableModal } from "./FrustrationEnableModal";
+import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
   BEHAVIOR_DETECTOR,
@@ -55,8 +55,6 @@ const SCHEMAS_EXPLAINED =
   "Waiting on schemas. No call site declares an output schema yet, so there is nothing to check outputs against. " +
   "Schemas arrive when your repository is connected and assessed.";
 
-/** Frustration's detector key: enabling it spends the org's own provider credit, so it opens a modal. */
-const FRUSTRATION_DETECTOR = "frustration";
 
 /**
  * `ClassifierView.readiness` while a classifier that calls a provider on the org's key is paused: the
