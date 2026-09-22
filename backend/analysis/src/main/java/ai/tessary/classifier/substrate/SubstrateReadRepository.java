@@ -573,12 +573,11 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * <p>Grouping grain is the pinned {@code COALESCE(trace.thread_id, trace.session_id)}: the
      * producer's own thread id when it sent one, else the session.
      *
-     * <p>A trace with neither a thread nor a session id has a null conversation key, and the
-     * predicate is written in two explicit branches because of it: the equality arm matches nothing
-     * when the scored key is null (SQL equality on null is unknown, not true), and the second arm
-     * then matches the scored trace alone, so an anonymous turn is its own single-turn conversation.
-     * Writing it as {@code IS NOT DISTINCT FROM} instead would hand that turn the whole project's
-     * anonymous history as its thread.
+     * <p>A trace with neither a thread nor a session id has a null conversation key: the equality
+     * matches nothing when the scored key is null (SQL equality on null is unknown, not true), and the
+     * scored trace, always added, is then the whole conversation, so an anonymous turn is its own
+     * single-turn conversation. Writing it as {@code IS NOT DISTINCT FROM} instead would hand that
+     * turn the whole project's anonymous history as its thread.
      *
      * <p>Ordering is event time, {@code (started_at, created_at, trace_id, id)}, bounded at the scored
      * span's own position in it. Not the sweep cursor's ingest-time keyset: spans that arrive out of
@@ -590,32 +589,47 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * contribution per turn and each tool span as a terse outcome marker, so the agent's failure
      * history stays visible without raw payloads polluting the thread. Kept in sync with {@code
      * ConversationThreadAssembler.TOOL_KINDS}. Perf: one read per scored span on the async sweep
-     * (never the ingest hot path); the conversation lookup is a primary-key read on {@code trace}.
+     * (never the ingest hot path): the conversation's traces first, then their spans by primary-key
+     * prefix, then payloads for the {@code limit} rows kept only.
      */
     public List<SubstrateObservation> conversationObservationsUpTo(
             String projectId, String scoredTraceId, String scoredSpanId, int limit) {
-        return jdbc.sql(SELECT_SPAN + """
+        // Each step is materialized so the plan never rests on the project's row estimates: a project
+        // that grew since span was last analyzed looked empty to the planner, which then re-scanned the
+        // whole project once per span (seconds per turn) instead of walking one conversation's traces.
+        return jdbc.sql("""
+                        WITH scored AS MATERIALIZED (
+                                 SELECT started_at, created_at, trace_id, id FROM span
+                                  WHERE project_id = :pid AND trace_id = :scoredTraceId AND id = :scoredSpanId),
+                             -- The scored trace's conversation, when it has one, else the scored trace alone.
+                             -- An anonymous turn is its own conversation: equality on a null key matches
+                             -- nothing, so only the scored trace is left, never the project's other
+                             -- session-less traces.
+                             conversation AS MATERIALIZED (
+                                 SELECT tr.id FROM trace tr
+                                  WHERE tr.project_id = :pid
+                                    AND COALESCE(tr.thread_id, tr.session_id) = (
+                                        SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
+                                         WHERE str.project_id = :pid AND str.id = :scoredTraceId)
+                                 UNION
+                                 SELECT :scoredTraceId),
+                             picked AS MATERIALIZED (
+                                 SELECT s.* FROM conversation c
+                                   JOIN span s ON s.project_id = :pid AND s.trace_id = c.id
+                                   CROSS JOIN scored sc
+                                  WHERE s.kind IN ('llm', 'agent', 'tool', 'mcp', 'retrieval', 'embedding', 'reranker')
+                                    AND (s.started_at, s.created_at, s.trace_id, s.id)
+                                        <= (sc.started_at, sc.created_at, sc.trace_id, sc.id)
+                                  ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC
+                                  LIMIT :limit)
+                        """
+                        + SPAN_COLUMNS
+                        + """
 
-                        JOIN trace tr ON tr.project_id = s.project_id AND tr.id = s.trace_id
-                        JOIN span sc ON sc.project_id = :pid AND sc.trace_id = :scoredTraceId AND sc.id = :scoredSpanId
-                        WHERE s.project_id = :pid
-                          AND (
-                            -- The scored trace's conversation, when it has one …
-                            COALESCE(tr.thread_id, tr.session_id) = (
-                                SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
-                                 WHERE str.project_id = :pid AND str.id = :scoredTraceId)
-                            -- … else the scored trace alone. An anonymous turn is its own conversation;
-                            -- pooling every session-less trace in the project would be a thread made of
-                            -- unrelated strangers.
-                            OR (s.trace_id = :scoredTraceId
-                                AND (SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
-                                      WHERE str.project_id = :pid AND str.id = :scoredTraceId) IS NULL)
-                          )
-                          AND s.kind IN ('llm', 'agent', 'tool', 'mcp', 'retrieval', 'embedding', 'reranker')
-                          AND (s.started_at, s.created_at, s.trace_id, s.id)
-                              <= (sc.started_at, sc.created_at, sc.trace_id, sc.id)
-                        ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC
-                        LIMIT :limit""")
+                        FROM picked s
+                          LEFT JOIN span_payload pl
+                            ON pl.project_id = s.project_id AND pl.trace_id = s.trace_id AND pl.span_id = s.id
+                        ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC""")
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
                 .param("scoredSpanId", scoredSpanId)
