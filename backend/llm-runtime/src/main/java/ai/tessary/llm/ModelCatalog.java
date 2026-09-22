@@ -146,8 +146,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
-                    "claude-opus-4-7",
-                    "Claude Opus 4.7",
+                    "claude-opus-5-5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     "https://api.anthropic.com/v1",
@@ -184,8 +184,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
-                    "anthropic/claude-opus-4.7",
-                    "Claude Opus 4.7",
+                    "anthropic/claude-opus-5.5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
@@ -226,15 +226,15 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
-            // The GPT-5.6 line over OpenRouter, the two agentic lanes' defaults for this provider. Named
-            // with the route, like the OpenAI-direct and mantle spellings of the same models, since three
-            // providers reach Terra and Luna at three different prices. Priced via #pricingId's
-            // "openrouter/" prefix, not by modelName alone — see that method's javadoc.
+            // GPT-6 Sol and Luna over OpenRouter, the two agentic lanes' models for this provider. Named
+            // with the route, like the OpenAI-direct spellings of the same models, since each route
+            // prices them separately. Priced via #pricingId's "openrouter/" prefix, not by modelName
+            // alone — see that method's javadoc.
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
-                    "openai/gpt-5.6-terra",
-                    "GPT-5.6 Terra (OpenRouter)",
+                    "openai/gpt-6-sol",
+                    "GPT-6 Sol (OpenRouter)",
                     false,
                     OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
@@ -242,8 +242,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
-                    "openai/gpt-5.6-luna",
-                    "GPT-5.6 Luna (OpenRouter)",
+                    "openai/gpt-6-luna",
+                    "GPT-6 Luna (OpenRouter)",
                     false,
                     OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
@@ -292,8 +292,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.BEDROCK,
                     "Anthropic",
-                    "anthropic.claude-opus-4-7",
-                    "Claude Opus 4.7",
+                    "anthropic.claude-opus-5-5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     null,
@@ -339,15 +339,14 @@ public final class ModelCatalog {
             // the same table that prices a completed run. Google Vertex is not covered: its
             // service-account/ADC auth fits none of PlatformCatalog's three auth kinds.
             //
-            // The GPT-5.6 line direct, distinct from the two bedrock-mantle entries above: same models,
-            // a different route at a different price. Terra is RCA's default on this provider since it's
-            // half the price of the flagship gpt-5.6 on the same line and cheaper than the mantle route
-            // to itself. Both stay offered; the price book decides the default.
+            // OpenAI direct. Sol is RCA's default on this provider: GPT-6 Sol ($2/$10) is half the input
+            // price of the flagship gpt-5.6 and replaced GPT-5.6 Terra ($2/$12) outright, since OpenAI
+            // shipped no GPT-6 Terra. Both stay offered; the price book decides the default.
             new CatalogEntry(
                     ModelProvider.OPENAI,
                     "OpenAI",
-                    "gpt-5.6-terra",
-                    "GPT-5.6 Terra (OpenAI)",
+                    "gpt-6-sol",
+                    "GPT-6 Sol (OpenAI)",
                     true,
                     OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
@@ -388,13 +387,13 @@ public final class ModelCatalog {
             // declared with their provider's own rows above instead, since each is that provider's only
             // current-generation model at its size.
             //
-            // Luna is named for its route, since the platform also reaches it over bedrock-mantle at a
-            // different price on a different credential.
+            // Luna is named for its route, like Sol above, since OpenRouter reaches it at a different
+            // price on a different credential.
             new CatalogEntry(
                     ModelProvider.OPENAI,
                     "OpenAI",
-                    "gpt-5.6-luna",
-                    "GPT-5.6 Luna (OpenAI)",
+                    "gpt-6-luna",
+                    "GPT-6 Luna (OpenAI)",
                     true,
                     OPENAI_EFFORTS,
                     "https://api.openai.com/v1",

@@ -254,7 +254,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aChatModelIsRefusedOnTheFrustrationLane() {
-        for (String chat : List.of(SONNET_5, "OPENROUTER:openai/gpt-5.6-terra", "GROK:grok-4.6")) {
+        for (String chat : List.of(SONNET_5, "OPENROUTER:openai/gpt-6-sol", "GROK:grok-4.6")) {
             TessaryException ex = assertThrows(
                     TessaryException.class,
                     () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat, ServiceTier.STANDARD, null));
