@@ -43,9 +43,19 @@ def test_a_session_cannot_smuggle_one_through() -> None:
         boto3.Session().client("bedrock-runtime", region_name="us-east-1")
 
 
-def test_other_aws_services_still_work() -> None:
-    """The ban is Bedrock, not AWS. A guard that broke S3 would be reverted within the week."""
+def test_other_aws_services_still_work(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ban is Bedrock, not AWS. A guard that broke S3 would be reverted within the week.
+
+    Empty AWS config files, so the answer does not depend on the host's ~/.aws: a profile using the
+    login credential provider makes botocore raise MissingDependencyException without botocore[crt].
+    """
     boto3 = pytest.importorskip("boto3")
+    empty = tmp_path / "aws-empty"
+    empty.write_text("")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(empty))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(empty))
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
     assert boto3.client("s3", region_name="us-east-1") is not None
 
 

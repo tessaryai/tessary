@@ -28,20 +28,28 @@ import java.nio.file.Path;
 var MAPPER = new ObjectMapper();
 
 /**
- * EIGHT components, called positionally so this breaks loudly the next time one is added or removed.
+ * NINE components, called positionally so this breaks loudly the next time one is added or removed.
  * That is the intended failure mode: a bridge that silently accepted a changed record would be a bridge
  * measuring a detector the backend no longer has.
+ *
+ * <p>The shipping detector has no flat `h`: it derives one per tool from `arlTarget` and the tool's
+ * in-control rate (`decisionIntervalFor`), clamped below by `minDecisionInterval` and above by
+ * `MAX_DECISION_INTERVAL`. The eval's `h` is passed as that floor, the one threshold component the
+ * record takes directly, with the budget held at the shipped default. So a tool whose derived threshold
+ * is above the candidate `h` is judged at its own threshold, and the effective value is reported as
+ * `threshold` on every armed result.
  */
 ToolErrorConfig configOf(double h, double minEffect, int minBaseline) {
     return new ToolErrorConfig(
-            h,
+            ToolErrorConfig.DEFAULT_ARL_TARGET,
             ToolErrorConfig.DEFAULT_SHIFT_MULTIPLE,
             ToolErrorConfig.DEFAULT_SHIFT_FLOOR,
             minEffect,
             minBaseline,
             ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
             ToolErrorConfig.DEFAULT_SETTLE_SECONDS,
-            ToolErrorConfig.DEFAULT_MAX_PATTERNS);
+            ToolErrorConfig.DEFAULT_MAX_PATTERNS,
+            h);
 }
 
 /** A reference window of raw counts, built the way the replay builds one. */
@@ -79,6 +87,7 @@ ObjectNode replay(JsonNode series, double h, double minEffect, int minBaseline) 
     out.put("armed", true);
     out.put("baseline_calls", baseline.calls());
     out.put("baseline_rate", baseline.rate());
+    out.put("threshold", config.decisionIntervalFor(ToolErrorDetector.baselineRate(baseline)));
 
     State state = State.EMPTY;
     long seen = 0;

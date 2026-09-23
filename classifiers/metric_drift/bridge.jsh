@@ -117,49 +117,73 @@ TokenPriceBook prices() {
     return PRICES;
 }
 
+/** A nullable token count off a leaf: absent or null means the producer reported none. */
+long tokens(JsonNode leaf, String field) {
+    JsonNode v = leaf.get(field);
+    return (v == null || v.isNull()) ? 0L : v.asLong();
+}
+
+boolean reportsAny(JsonNode leaf) {
+    for (String f : List.of("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")) {
+        JsonNode v = leaf.get(f);
+        if (v != null && !v.isNull()) return true;
+    }
+    return false;
+}
+
 /**
- * One turn's dollars and token buckets, summed over its llm leaves — `MetricSource.spendOf`'s
- * arithmetic, reached through the same two classes rather than restated.
+ * One turn's dollars and token buckets, summed over its llm leaves: `MetricSource.spendOf`'s
+ * arithmetic over the same `TokenUsage` record, with the dollars from `TokenPriceBook`, the
+ * database-free book the backend keeps for this harness.
  *
- * <p>`TokenUsage.plus` normalizes both sides before adding, so the running total is disjoint at every
- * step: an OpenAI generation arrives wearing Anthropic key names while still carrying a
- * cache-INCLUSIVE input count, and adding the raw blobs bills its cache reads twice.
+ * <p>Each leaf carries the span's four typed token columns (`input_tokens`, `output_tokens`,
+ * `cache_read_tokens`, `cache_write_tokens`), exactly what `MetricSourceRepository.leafUsage` reads.
+ * Ingest already made them disjoint, so the sum is a plain `TokenUsage.plus` with no re-derivation. A
+ * leaf that still ships the pre-substrate raw `usage` blob is refused rather than read as zeros: a
+ * cost run that quietly abstained on every turn looks exactly like one that measured a quiet corpus.
  *
- * <p><b>One unpriced leaf abstains the whole turn</b> — a null `cost_usd`, never a zero. Pricing the
+ * <p><b>One unpriced leaf abstains the whole turn</b>, a null `cost_usd`, never a zero. Pricing the
  * rest would understate that turn's spend by an unknown amount and put a plausible number into the
  * distribution, which is worse than the honest gap; an unpriced model is unpriced, not free.
  *
- * <p>The four bucket sums are reported as sums, NOT as the abstention-aware `tok_*` measures — the
- * harness reads only the cache-read ratio the injector collapses, and `tok_cache_write`'s "reported
- * zero versus not measured at all" distinction is a property of a measure this eval does not run.
+ * <p>The four bucket sums are reported as sums, NOT as the abstention-aware `tok_*` measures: the
+ * harness reads only the cache-read ratio the injector collapses.
  */
 ObjectNode priceTurn(JsonNode spec) {
-    TokenUsage total = TokenUsage.EMPTY;
+    TokenUsage total = new TokenUsage(0, 0, 0, 0);
     BigDecimal usd = BigDecimal.ZERO;
     boolean anyReported = false;
     boolean unpriced = false;
     for (JsonNode leaf : spec.path("leaves")) {
-        JsonNode usage = leaf.get("usage");
-        if (usage == null || !usage.isObject()) continue;
+        if (!reportsAny(leaf)) {
+            if (leaf.has("usage")) {
+                throw new IllegalArgumentException("leaf of " + spec.path("id").asText() + " carries a raw `usage`"
+                        + " blob, not the span's typed token columns; re-export the corpus");
+            }
+            continue;
+        }
         anyReported = true;
         String model = orNull(leaf, "model");
-        TokenUsage parsed = TokenUsage.of(usage, model);
+        TokenUsage parsed = new TokenUsage(
+                tokens(leaf, "input_tokens"),
+                tokens(leaf, "output_tokens"),
+                tokens(leaf, "cache_read_tokens"),
+                tokens(leaf, "cache_write_tokens"));
         total = total.plus(parsed);
         var leafCost = prices().costOf(model, parsed);
         if (leafCost.isEmpty()) unpriced = true;
         else usd = usd.add(leafCost.get());
     }
 
-    TokenUsage disjoint = total.nonOverlapping();
     ObjectNode out = MAPPER.createObjectNode();
     out.put("id", spec.path("id").asText());
     if (!anyReported || unpriced) out.putNull("cost_usd");
     else out.put("cost_usd", usd.doubleValue());
     if (anyReported) {
-        out.put("input_tokens", disjoint.inputTokens());
-        out.put("output_tokens", disjoint.outputTokens());
-        out.put("cache_read_tokens", disjoint.cacheReadTokens());
-        out.put("cache_write_tokens", disjoint.cacheWriteTokens());
+        out.put("input_tokens", total.inputTokens());
+        out.put("output_tokens", total.outputTokens());
+        out.put("cache_read_tokens", total.cacheReadTokens());
+        out.put("cache_write_tokens", total.cacheWriteTokens());
     } else {
         out.putNull("input_tokens");
         out.putNull("output_tokens");

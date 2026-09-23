@@ -266,10 +266,11 @@ class SymbolRequest:
 
 @dataclass
 class PriceRequest:
-    """One turn's llm leaves, `[{"model": ..., "usage": {...}}]`, to be summed and priced.
+    """One turn's llm leaves, to be summed and priced on the Java side.
 
-    The usage blobs go over RAW. Their key names lie about their own semantics across providers, which
-    is exactly why `TokenUsage` owns them and why nothing on this side pre-sums them.
+    Each leaf is `{"model", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"}`:
+    the span's typed token columns, already disjoint at ingest, as `MetricSourceRepository.leafUsage`
+    reads them. A leaf carrying the old raw `usage` blob instead makes the bridge raise.
     """
 
     id: str
