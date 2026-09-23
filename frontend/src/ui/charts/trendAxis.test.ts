@@ -5,7 +5,6 @@ import { trendYAxisWidth } from "./trendAxis";
 const series = (...values: number[]) => values.map((value, i) => ({ label: `d${i}`, value }));
 
 const ms = (v: number) => `${v}ms`;
-const pct = (v: number) => `${v}%`;
 
 describe("trendYAxisWidth", () => {
   it("sizes an auto-domain axis to the data, not to the 40px floor", () => {
@@ -16,20 +15,22 @@ describe("trendYAxisWidth", () => {
     expect(width).toBeGreaterThanOrEqual(ms(1120).length * 7);
   });
 
+  // Width = widest tick's glyphs * 7px + 12px gutter, floored at 40px. Expected values below are
+  // hand-computed from that formula, and each is above the floor so the floor cannot satisfy them.
+
   it("covers the nice tick just past the data extent", () => {
-    // recharts' auto domain rounds outward, so a 990 max can render a 1000 tick.
-    expect(trendYAxisWidth(series(120, 990), undefined, ms)).toBeGreaterThanOrEqual(
-      ms(1000).length * 7,
-    );
+    // Bug: the gutter sized to 990 ("990ms", 47px) clips the leading glyph of the 1000 tick that
+    // recharts' outward-rounded auto domain renders. "1000ms" is 6 glyphs: 6 * 7 + 12 = 54.
+    expect(trendYAxisWidth(series(120, 990), undefined, ms)).toBe(54);
   });
 
-  it("keeps sizing off explicit numeric bounds alone", () => {
-    // Unchanged behaviour for the callers that pass a domain: [80,100] with "%".
-    // The 96.1 point is deliberately NOT measured — recharts scales strictly to
-    // the bounds, so it never becomes a tick and must not widen the gutter.
-    expect(trendYAxisWidth(series(96.1, 89.7), [80, 100], pct)).toBe(
-      Math.max(40, pct(100).length * 7 + 12),
-    );
+  it("sizes off explicit numeric bounds, not the data", () => {
+    // Bug: ignoring the bounds sizes to the 96.1 point ("96.1ms", 54px) and clips the 10000 tick.
+    // "10000ms" is 7 glyphs: 7 * 7 + 12 = 61.
+    expect(trendYAxisWidth(series(96.1), [0, 10000], ms)).toBe(61);
+    // Bug: measuring the data under an explicit domain widens the gutter for a point recharts never
+    // ticks. "100ms" is 5 glyphs: 5 * 7 + 12 = 47, not "96.125ms" at 68.
+    expect(trendYAxisWidth(series(96.125), [0, 100], ms)).toBe(47);
   });
 
   it("falls back to the data for a keyword bound", () => {

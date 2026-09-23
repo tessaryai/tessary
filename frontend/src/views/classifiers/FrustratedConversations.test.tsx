@@ -3,9 +3,11 @@
  * FrustratedConversations: the list shows each flagged message, selecting one reads its turns from the
  * real traces and draws the flagged user message in the flagged tint, the list reads the next page of
  * sessions when asked, and a session whose traces have aged out says so instead of drawing nothing.
+ * Switching to a filter whose read is still in flight keeps the last list up, and only a slow read swaps
+ * it for the skeleton, which then holds (#109).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { FrustratedConversation, FrustratedSessionPage, TraceDetailView } from "../../api/types";
@@ -30,6 +32,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   getTrace.mockReset();
   getFrustratedSessions.mockReset();
@@ -204,5 +207,57 @@ describe("FrustratedConversations", () => {
 
     expect(screen.getAllByText("conv-1").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Cleared/).length).toBeGreaterThan(0);
+  });
+
+  // Bug (#109): switching cause chips on a frustration case collapsed the list to a one-line loader
+  // and the page jumped. The last list must stand in for 200ms, then a skeleton that holds 400ms.
+  it("keeps the last list up while a switched filter loads, then shows a skeleton that holds", async () => {
+    vi.useFakeTimers();
+    getTrace.mockReturnValue(new Promise(() => {}));
+    let resolveCause!: (page: FrustratedSessionPage) => void;
+    getFrustratedSessions.mockReturnValue(new Promise((resolve) => (resolveCause = resolve)));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ui = (filter?: { rcaReport: string; index: number }) => (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <FrustratedConversations
+            findingId="f-1"
+            first={{ rows: [conversation()], nextCursor: "50", total: 80 }}
+            filter={filter}
+            basePath="/orgs/acme/projects/default"
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui());
+    screen.getByRole("button", { name: /Load more sessions/ });
+
+    rerender(ui({ rcaReport: "rca-1", index: 2 }));
+    const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+    // 0 to 199ms: the old rows stand in, with no loader and no way to page them.
+    await tick(199);
+    screen.getByRole("button", { name: /that cant be right/ });
+    expect(screen.queryByRole("status", { name: "Loading sessions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Load more sessions/ })).toBeNull();
+
+    // 200ms: the skeleton replaces the list.
+    await tick(1);
+    screen.getByRole("status", { name: "Loading sessions" });
+    expect(screen.queryByRole("button", { name: /that cant be right/ })).toBeNull();
+
+    // The read lands at 250ms, but the skeleton holds until 600ms (drawn at 200, held 400).
+    await tick(50);
+    resolveCause({
+      rows: [conversation({ conversationId: "conv-7", traceId: "t-7", contextTraceIds: ["t-7"], message: "caused" })],
+      total: 1,
+      nextCursor: null,
+    });
+    await tick(349);
+    screen.getByRole("status", { name: "Loading sessions" });
+
+    await tick(1);
+    expect(screen.queryByRole("status", { name: "Loading sessions" })).toBeNull();
+    screen.getByRole("button", { name: /caused/ });
   });
 });

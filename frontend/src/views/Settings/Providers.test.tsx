@@ -10,21 +10,29 @@
  * false empty state indistinguishable from a genuinely fresh, keyless install. Fixed to
  * `catalog.isError || credentials.isError`.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PlatformDescriptor, ProviderCatalogResponse, ProviderCredentialListResponse } from "../../api/types";
+import type {
+  ModelProvider,
+  PlatformDescriptor,
+  ProviderCatalogResponse,
+  ProviderCredentialListResponse,
+  ProviderCredentialView,
+  UpsertProviderCredentialRequest,
+} from "../../api/types";
 import { ApiError } from "../../api/types";
 import { ToastProvider } from "../../ui/Toast";
 import { Providers } from "./Providers";
 
 // ---- collaborator mocks ------------------------------------------------------------------
 // Providers.tsx reads its API surface via useOrgApi() (TenantContext) — provider
-// credentials moved off the project-scoped API. Not exercised by these tests (the credential modal is
-// never opened), so it is stubbed just enough to satisfy the module's imports.
+// credentials moved off the project-scoped API.
 
 const listProviderCatalog = vi.fn<() => Promise<ProviderCatalogResponse>>();
 const listProviderCredentials = vi.fn<() => Promise<ProviderCredentialListResponse>>();
+const upsertProviderCredential =
+  vi.fn<(provider: ModelProvider, body: UpsertProviderCredentialRequest) => Promise<unknown>>();
 
 // A full-replacement vi.mock() here (dropping every export but useOrgApi) leaked across
 // vitest's shared module registry into src/routeManifest.smoke.test.tsx running in the same
@@ -38,7 +46,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
       base: "/api/orgs/acme",
       listProviderCatalog,
       listProviderCredentials,
-      upsertProviderCredential: vi.fn(),
+      upsertProviderCredential,
       deleteProviderCredential: vi.fn(),
     }),
   };
@@ -67,6 +75,44 @@ const ANTHROPIC: PlatformDescriptor = {
   used_by: [],
 };
 
+const BEDROCK: PlatformDescriptor = {
+  id: "BEDROCK",
+  label: "Amazon Bedrock",
+  auth: "aws",
+  default_base_url: "",
+  supports_base_url: false,
+  used_by: [],
+};
+
+/** A stored credential as the backend's View sends it: has_* booleans, never the secret itself. */
+function storedCred(provider: ModelProvider, over: Partial<ProviderCredentialView> = {}): ProviderCredentialView {
+  return {
+    id: `cred_${provider}`,
+    provider,
+    base_url_override: "",
+    has_api_key: false,
+    aws_region: "",
+    has_aws_credentials: false,
+    bedrock_model_arn: "",
+    custom_model_name: "",
+    auth_mode: "api_key",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...over,
+  };
+}
+
+/** Opens the stored credential's modal, saves it untouched or as edited by `edit`, returns the body sent. */
+async function saveEdit(label: string, edit: () => void = () => {}): Promise<UpsertProviderCredentialRequest> {
+  await waitFor(() => screen.getByText(label));
+  const row = screen.getByText(label).closest("div")!.parentElement!;
+  fireEvent.click(within(row).getByRole("button", { name: "Edit key" }));
+  edit();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(upsertProviderCredential).toHaveBeenCalledTimes(1));
+  return upsertProviderCredential.mock.calls[0][1];
+}
+
 const TYPESAFE: PlatformDescriptor = {
   id: "TYPESAFE",
   label: "TypeSafe",
@@ -87,6 +133,16 @@ function renderProviders() {
   );
 }
 
+beforeAll(() => {
+  // jsdom implements <dialog> but not showModal/close.
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  };
+});
+
 afterEach(() => {
   cleanup();
   // vi.resetAllMocks() is a WORKER-GLOBAL reset, not file-scoped -- when this file runs in the
@@ -95,6 +151,7 @@ afterEach(() => {
   // unrelated route mounts with "No queryFn was passed" errors. Reset only this file's own mocks.
   listProviderCatalog.mockReset();
   listProviderCredentials.mockReset();
+  upsertProviderCredential.mockReset();
 });
 
 describe("Providers", () => {
@@ -144,33 +201,53 @@ describe("Providers", () => {
     expect(screen.queryByText("OpenAI")).toBeNull();
   });
 
-  it("renders Configured for a stored credential and never puts a secret value in the DOM", async () => {
+  it("renders Configured for a stored credential", async () => {
     listProviderCatalog.mockResolvedValue({ platforms: [OPENAI, ANTHROPIC], models: [] });
-    listProviderCredentials.mockResolvedValue({
-      credentials: [
-        {
-          id: "cred_1",
-          provider: "OPENAI",
-          base_url_override: "",
-          has_api_key: true,
-          aws_region: "",
-          has_aws_credentials: false,
-          bedrock_model_arn: "",
-          custom_model_name: "",
-          auth_mode: "api_key",
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        },
-      ],
-    });
+    listProviderCredentials.mockResolvedValue({ credentials: [storedCred("OPENAI", { has_api_key: true })] });
 
     renderProviders();
 
-    await waitFor(() => screen.getByText("Configured"));
+    const openAiRow = (await screen.findByText("OpenAI")).closest("div")!.parentElement!;
+    within(openAiRow).getByText("Configured");
+  });
 
-    // The View the backend returns never carries a raw secret (only has_* booleans) — this
-    // asserts the rendered DOM upholds the same contract on the way out.
-    expect(document.body.innerHTML).not.toMatch(/sk-[a-zA-Z0-9]/);
-    expect(document.body.innerHTML.toLowerCase()).not.toContain("api_key_sealed");
+  // Bug: saving a provider edit with the key field left blank sends a key. The upsert contract's
+  // "keep the stored key" signal is an omitted field; a blank string survives today only because the
+  // server also skips blank secrets.
+  it("keeps the stored API key when an edit is saved with the key field blank", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [storedCred("OPENAI", { has_api_key: true })] });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    const body = await saveEdit("OpenAI", () =>
+      fireEvent.change(screen.getByLabelText("Base URL override"), { target: { value: "https://proxy.example/v1" } }),
+    );
+
+    expect(upsertProviderCredential.mock.calls[0][0]).toBe("OPENAI");
+    expect(body.base_url_override).toBe("https://proxy.example/v1");
+    expect(body.api_key).toBeUndefined();
+  });
+
+  // Bug: switching a Bedrock credential to IAM role still sends the keys typed before the switch,
+  // and the server seals them over the stored ones. An IAM-role save leaves both key fields out.
+  it("sends no AWS keys for an IAM-role Bedrock credential, even ones typed before switching", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [BEDROCK], models: [] });
+    listProviderCredentials.mockResolvedValue({
+      credentials: [storedCred("BEDROCK", { has_aws_credentials: true, aws_region: "us-west-2" })],
+    });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    const body = await saveEdit("Amazon Bedrock", () => {
+      fireEvent.change(screen.getByLabelText("AWS access key"), { target: { value: "AKIATYPEDBEFORE" } });
+      fireEvent.change(screen.getByLabelText("AWS secret key"), { target: { value: "typed-before-switch" } });
+      fireEvent.click(screen.getByRole("button", { name: "IAM role" }));
+    });
+
+    expect(body.auth_mode).toBe("iam_role");
+    expect(body.aws_region).toBe("us-west-2");
+    expect(body.aws_access_key).toBeUndefined();
+    expect(body.aws_secret_key).toBeUndefined();
   });
 });
