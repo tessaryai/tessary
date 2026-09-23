@@ -332,9 +332,9 @@ export type SearchResults = S["GlobalSearchView"];
 /**
  * The cause kinds the findings surface carries. Behaviour drift's three (`novelty`/`omission` are
  * high confidence, `surprisal` is low), metric drift's `distribution_shift`, tool error's
- * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, and
- * `sop_conformance`: a conformance finding rendered in the same shape (its causeKey is the SOP
- * rule slug, its traceCount the tested window's activations).
+ * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, groundedness's
+ * `groundedness_rate`, and `sop_conformance`: a conformance finding rendered in the same shape (its
+ * causeKey is the SOP rule slug, its traceCount the tested window's activations).
  */
 export type BehaviorCauseKind =
   | "novelty"
@@ -344,6 +344,7 @@ export type BehaviorCauseKind =
   | "rate_shift"
   | "armed_window"
   | "malformed_rate"
+  | "groundedness_rate"
   | "sop_conformance";
 
 /** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */

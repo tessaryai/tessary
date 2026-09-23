@@ -41,6 +41,7 @@ import { DensityProvider } from "./ui/density";
 import { ApiError } from "./api/types";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
+import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
@@ -396,8 +397,11 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
         setup_ref: "main",
       }),
   },
+  // A groundedness finding, so the route renders a whole story (rate, pins, flagged answers with their
+  // marks) rather than only its not-found state, which every other detail route already covers.
   "classifiers/findings/:findingId": {
-    getBehaviorFinding: NOT_FOUND("behavior finding"),
+    getBehaviorFinding: () => Promise.resolve(GROUNDEDNESS_FINDING_DETAIL),
+    getFlaggedAnswers: () => Promise.resolve({ rows: [], total: 0, nextCursor: null }),
   },
   vitals: {
     getVitals: () => Promise.resolve(EMPTY_VITALS),

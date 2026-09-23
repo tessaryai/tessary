@@ -91,6 +91,13 @@ export function clockTime(iso: string, now: Date = new Date()): string {
     : `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${time}`;
 }
 
+/** "Sep 23, 2:41 PM" on any day, in local time: a finding's onset and its answers name their day. */
+export function dateTime(iso: string): string {
+  return new Date(iso)
+    .toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    .replace(/[\u202f\u00a0]/g, " ");
+}
+
 /**
  * The newest sign of scoring: the last score, or in production a later caught-up sweep, since a run
  * that found nothing new to score still ran.

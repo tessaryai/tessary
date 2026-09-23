@@ -36,6 +36,8 @@ import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
 import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
 import { FrustratedConversations } from "./FrustratedConversations";
+import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
+import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
 // This build's baseline renderer returns null by default.
 import { paid } from "@paid";
@@ -97,10 +99,11 @@ export function FindingPage() {
   const secretLeak = detail.secretLeak;
   const malformedOutput = detail.malformedOutput;
   const frustration = detail.frustration;
-  /* All five tell a before-and-after story with a figure, pins and a ruling. Four put their verbs
+  const groundedness = detail.groundedness;
+  /* All six tell a before-and-after story with a figure, pins and a ruling. Five put their verbs
      behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
      layout until they get a story of their own. */
-  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration;
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration ?? groundedness;
 
   return (
     <div style={CONTAINER}>
@@ -118,6 +121,15 @@ export function FindingPage() {
         />
       ) : frustration ? (
         <FrustrationHeader finding={finding} basePath={basePath} />
+      ) : groundedness ? (
+        <GroundednessHeader
+          finding={finding}
+          detail={groundedness}
+          basePath={basePath}
+          busy={busy}
+          onAnalyze={() => analyzeM.mutate()}
+          onResolve={(action) => resolveM.mutate(action)}
+        />
       ) : malformedOutput ? (
         <MalformedHeader
           rate={malformedOutput.rate}
@@ -307,6 +319,35 @@ export function FindingPage() {
         </>
       )}
 
+      {groundedness && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+              <span className="text-subtle text-small">Share of traces with a flagged answer</span>
+            </div>
+            <GroundednessRate detail={groundedness} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-2.75">
+              <h2 className="font-mono text-label uppercase text-muted">Flagged answers</h2>
+              <span className="text-subtle text-small">
+                Marked sentences scored {groundedness.flagThreshold} or higher
+              </span>
+            </div>
+            <FlaggedAnswers
+              findingId={findingId}
+              first={{ rows: groundedness.answers, nextCursor: groundedness.answersNextCursor }}
+              traces={groundedness.rate.failuresCur}
+              basePath={basePath}
+            />
+          </section>
+        </>
+      )}
+
       {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
           the two `!detail.baseline` siblings below decide what renders in its place when there
           isn't one. */}
@@ -320,9 +361,9 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      {/* A frustration finding's evidence is its sessions, drawn above; the raw witness rows
-          would list the same sessions again as bare ids. */}
-      {!frustration && (
+      {/* A frustration finding's evidence is its sessions, and a groundedness finding's its answers, drawn
+          above; the raw witness rows would list the same traces again as bare ids. */}
+      {!frustration && !groundedness && (
         <section className="mt-7">
           <h2 className="font-mono text-label uppercase text-muted mb-1.5">
             Evidence

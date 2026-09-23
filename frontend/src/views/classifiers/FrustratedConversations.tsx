@@ -360,13 +360,16 @@ export function ConversationFilter({
   options,
   value,
   onChange,
+  label = "Filter sessions",
 }: {
   options: { key: string; label: string }[];
   value: string;
   onChange: (key: string) => void;
+  /** What the group filters, for a screen reader: sessions here, answers on a groundedness case. */
+  label?: string;
 }) {
   return (
-    <div role="group" aria-label="Filter sessions" className="flex flex-wrap gap-1.5 mb-3">
+    <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 mb-3">
       {options.map((o) => (
         <Button
           key={o.key}

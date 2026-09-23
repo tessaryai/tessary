@@ -40,7 +40,15 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CaseDetail, CaseDisposition, EvidenceSpan, FrustrationDetail, RcaCause, RcaReport } from "../../api/types";
+import type {
+  CaseDetail,
+  CaseDisposition,
+  EvidenceSpan,
+  FrustrationDetail,
+  GroundednessDetail,
+  RcaCause,
+  RcaReport,
+} from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
@@ -52,6 +60,8 @@ import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
 import { FrustrationRate } from "../classifiers/frustrationStory";
 import { ConversationFilter, FrustratedConversations } from "../classifiers/FrustratedConversations";
+import { GroundednessRate } from "../classifiers/groundednessStory";
+import { FlaggedAnswers } from "../classifiers/FlaggedAnswers";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, timeAgo, truncateId } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
@@ -170,11 +180,15 @@ export function CasePage() {
 
   const live = c.state !== "resolved";
   const frustration = detail.frustration ?? null;
-  // A frustration case carries its cause in the card right under the header, so the header does not
-  // repeat it.
-  const cause = frustration ? null : causeLine(c);
+  const groundedness = detail.groundedness ?? null;
+  // A frustration or groundedness case carries its causes in the card right under the header, and is
+  // closed with the same verbs, so the header does not repeat them.
+  const ranked = frustration != null || groundedness != null;
+  const cause = ranked ? null : causeLine(c);
   const frustrationCauses =
     frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes ?? [] : [];
+  const groundednessCauses =
+    groundedness && report?.report_kind === "groundedness_causes" && !analysing ? report.causes ?? [] : [];
 
   // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
@@ -183,6 +197,7 @@ export function CasePage() {
     detail.malformed_output?.rate?.onsetAt ??
     detail.secret_leak?.firstAt ??
     detail.frustration?.rate.onsetAt ??
+    detail.groundedness?.rate.onsetAt ??
     c.onset_at;
   const closedAt =
     detail.tool_error?.windowClosedAt ??
@@ -335,6 +350,19 @@ export function CasePage() {
               document.getElementById("frustrated-sessions")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           />
+        ) : groundedness &&
+          report?.report_kind === "groundedness_causes" &&
+          !analysing &&
+          report.status !== "failed" ? (
+          <GroundednessCauses
+            report={report}
+            groundedness={groundedness}
+            basePath={basePath}
+            onShow={(i) => {
+              setCauseFilter(String(i));
+              document.getElementById("flagged-answers")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
         ) : (
           <Answer report={report} analysing={analysing} basePath={basePath} />
         )
@@ -372,6 +400,16 @@ export function CasePage() {
           onFilter={setCauseFilter}
           basePath={basePath}
         />
+      ) : groundedness && detail.latest_finding_id ? (
+        <GroundednessList
+          findingId={detail.latest_finding_id}
+          rcaReportId={report?.id ?? null}
+          groundedness={groundedness}
+          causes={groundednessCauses}
+          filter={causeFilter}
+          onFilter={setCauseFilter}
+          basePath={basePath}
+        />
       ) : (
         <Failures detail={detail} basePath={basePath} />
       )}
@@ -391,13 +429,13 @@ export function CasePage() {
                 Close this case
               </span>
             )}
-            {!analysed && frustration && (
+            {!analysed && ranked && (
               <span className="text-subtle text-small">Run RCA before resolving this case.</span>
             )}
             <div className="ml-auto flex items-center gap-2">
               {analysed && (
                 <Button size="sm" variant="ghost" onClick={() => setResolveOpen(true)}>
-                  {frustration ? "Resolve case" : "Resolve"}
+                  {ranked ? "Resolve case" : "Resolve"}
                 </Button>
               )}
               {analysed && detail.absorb_available && (
@@ -406,7 +444,7 @@ export function CasePage() {
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => muteM.mutate()} disabled={muteM.isPending}>
-                {c.state === "muted" ? (frustration ? "Unmute case" : "Unmute") : frustration ? "Mute case" : "Mute"}
+                {c.state === "muted" ? (ranked ? "Unmute case" : "Unmute") : ranked ? "Mute case" : "Mute"}
               </Button>
             </div>
           </div>
@@ -491,6 +529,13 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
     return (
       <Block label="What changed" note="Share of sessions with a user frustrated with the agent">
         <FrustrationRate detail={detail.frustration} />
+      </Block>
+    );
+  }
+  if (detail.groundedness) {
+    return (
+      <Block label="What changed" note="Share of traces with a flagged answer">
+        <GroundednessRate detail={detail.groundedness} opened="this case" />
       </Block>
     );
   }
@@ -1130,6 +1175,164 @@ function FrustrationList({
             nextCursor: frustration.conversationsNextCursor,
             total: frustration.rate.failuresCur,
           }}
+          filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          readAhead={
+            rcaReportId
+              ? options.filter((o) => o.key !== "all").map((o) => ({ rcaReport: rcaReportId, index: Number(o.key) }))
+              : []
+          }
+          basePath={basePath}
+        />
+      </Block>
+    </div>
+  );
+}
+
+/**
+ * A groundedness report's answer: {@link FrustrationCauses}'s card, counted in flagged answers. The answers
+ * behind a cause are one press away, filtered in the list below.
+ */
+function GroundednessCauses({
+  report,
+  groundedness,
+  basePath,
+  onShow,
+}: {
+  report: RcaReport;
+  groundedness: GroundednessDetail;
+  basePath: string;
+  onShow: (index: number) => void;
+}) {
+  const causes = report.causes ?? [];
+  const withRepo = report.repo_available === true;
+  if (causes.length === 0) {
+    return report.summary ? (
+      <Block label="Likely cause" note={report.verdict ? RCA_VERDICT_LABEL[report.verdict] : undefined}>
+        <Card className="border border-border p-5">
+          <p className="text-fg m-0 text-body" style={{ maxWidth: 700 }}>
+            {report.summary}
+          </p>
+        </Card>
+      </Block>
+    ) : null;
+  }
+  const n = groundedness.rate.failuresCur;
+  return (
+    <Block label="Likely cause">
+      <Card className="border border-border p-0">
+        <p className="m-0 border-b border-border py-4 px-5 text-body text-fg-secondary">
+          Tessary identified {causes.length} likely {causes.length === 1 ? "cause" : "causes"} from the{" "}
+          {n.toLocaleString()} flagged {n === 1 ? "answer" : "answers"}
+          {withRepo ? " and the agent's repository" : ""}.
+        </p>
+        {causes.map((k, i) => {
+          const shown = causeTraceCount(k);
+          const where = withRepo && k.attribution && k.attribution.kind !== "unknown" ? k.attribution : null;
+          return (
+            <div key={k.title} className={cn("flex flex-col gap-2.5 py-4 px-5", i > 0 && "border-t border-border")}>
+              <p className="m-0 flex flex-wrap items-center gap-2.25">
+                <span className="font-mono text-small text-muted">{i + 1}</span>
+                <span className="text-body font-medium text-fg">{k.title}</span>
+                <Confidence level={k.confidence} />
+              </p>
+              <p className="m-0 text-body text-fg-secondary">{k.what_the_agent_did}</p>
+              {where && (
+                <div className="rounded-control border border-border overflow-hidden">
+                  <div className="flex items-center gap-2.5 bg-raised py-1.75 px-3 font-mono text-small">
+                    <span className="text-muted capitalize">{where.kind}</span>
+                    {where.path && <span className="text-fg truncate">{where.path}</span>}
+                    {where.commit && <span className="ml-auto text-muted">{truncateId(where.commit)}</span>}
+                  </div>
+                  {where.excerpt && (
+                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap">
+                      {where.excerpt}
+                    </pre>
+                  )}
+                </div>
+              )}
+              <p className="m-0 text-body text-fg-secondary">
+                <span className="text-muted">Suggested fix: </span>
+                {k.fix_suggestion}
+              </p>
+              {shown > 0 && (
+                <div>
+                  <Button size="sm" variant="secondary" onClick={() => onShow(i)}>
+                    Show {shown} {shown === 1 ? "answer" : "answers"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!withRepo && (
+          <p className="m-0 border-t border-border py-3 px-5 text-small text-muted">
+            These causes describe what the agent did. They aren't linked to a prompt or code because no
+            repository was connected. Connect a repository and run RCA again to find them.
+          </p>
+        )}
+      </Card>
+      {report.id && (
+        <p className="mt-2.5 mb-0 text-small">
+          <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
+            View the full report
+          </Link>
+        </p>
+      )}
+    </Block>
+  );
+}
+
+/**
+ * How many flagged traces a groundedness cause names. Counted as answers on the page, as the rate is: a
+ * trace is flagged by its answer, and a trace with two flagged answers is still one.
+ */
+function causeTraceCount(cause: RcaCause) {
+  return new Set(cause.evidence_trace_ids).size;
+}
+
+/** The case's flagged answers, filtered to one cause when the reader asked for it. */
+function GroundednessList({
+  findingId,
+  rcaReportId,
+  groundedness,
+  causes,
+  filter,
+  onFilter,
+  basePath,
+}: {
+  findingId: string;
+  /** The report the causes come from, which the server reads a cause's answers off. */
+  rcaReportId: string | null;
+  groundedness: GroundednessDetail;
+  causes: RcaCause[];
+  filter: string;
+  onFilter: (key: string) => void;
+  basePath: string;
+}) {
+  const index = filter === "all" ? -1 : Number(filter);
+  const cause = index >= 0 ? causes[index] : undefined;
+  const all = groundedness.rate.failuresCur;
+  const options = [
+    { key: "all", label: `All · ${all.toLocaleString()}` },
+    ...causes
+      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeTraceCount(k)}` }))
+      .filter((o) => !o.label.endsWith(" · 0")),
+  ];
+  return (
+    <div id="flagged-answers">
+      <Block label="Flagged answers" note={`Marked sentences scored ${groundedness.flagThreshold} or higher`}>
+        {options.length > 1 && (
+          <ConversationFilter
+            options={options}
+            value={cause ? filter : "all"}
+            onChange={onFilter}
+            label="Filter answers"
+          />
+        )}
+        <FlaggedAnswers
+          findingId={findingId}
+          first={{ rows: groundedness.answers, nextCursor: groundedness.answersNextCursor }}
+          traces={cause ? causeTraceCount(cause) : all}
           filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
           readAhead={
             rcaReportId
