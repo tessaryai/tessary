@@ -647,6 +647,26 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     }
 
     /**
+     * The spans {@code spans} names, in no order: a finding page reading back the answers it cites. A span
+     * that is gone is absent. The two id halves are bound as sets and the pairs kept here, as {@link
+     * #groundingEvidence} does, so a span id that recurs in another listed trace is not read for it.
+     */
+    public List<SubstrateObservation> observationsByIds(
+            String projectId, java.util.Collection<GroundingEvidenceReads.SpanRef> spans) {
+        if (spans.isEmpty()) return List.of();
+        java.util.Set<GroundingEvidenceReads.SpanRef> wanted = new java.util.HashSet<>(spans);
+        return jdbc.sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id IN (:tids) AND s.id IN (:sids)")
+                .param("pid", projectId)
+                .param("tids", wanted.stream().map(GroundingEvidenceReads.SpanRef::traceId).distinct().toList())
+                .param("sids", wanted.stream().map(GroundingEvidenceReads.SpanRef::spanId).distinct().toList())
+                .query((rs, n) -> map(rs))
+                .list()
+                .stream()
+                .filter(o -> wanted.contains(new GroundingEvidenceReads.SpanRef(o.traceId(), o.observationId())))
+                .toList();
+    }
+
+    /**
      * The shared keyset-page builder for the two sweep windows. Branches on the cursor rather than
      * binding null parameters into the row-value comparison: Postgres cannot infer the type of untyped
      * null binds in that position ("could not determine data type of parameter"), so the keyset

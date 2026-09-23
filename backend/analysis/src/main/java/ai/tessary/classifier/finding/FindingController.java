@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -132,6 +133,26 @@ public class FindingController {
             @RequestParam(required = false) String cursor) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(service.frustratedSessions(
+                r.project().id(), id, rcaReport, cause, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
+    }
+
+    /**
+     * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
+     * finding and case pages' answer list loads as it scrolls past the first page. {@code rcaReport} and {@code
+     * cause} take the same RCA cause filter as {@link #frustratedSessions}.
+     */
+    @GetMapping("/{id}/flagged-answers")
+    public ApiResponse<GroundednessEvidence.FlaggedAnswerPage> flaggedAnswers(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @RequestParam(required = false) @Nullable String rcaReport,
+            @RequestParam(required = false) @Nullable Integer cause,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) String cursor) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(service.flaggedAnswers(
                 r.project().id(), id, rcaReport, cause, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
     }
 

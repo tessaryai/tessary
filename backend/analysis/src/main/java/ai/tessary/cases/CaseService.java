@@ -12,6 +12,7 @@ import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.detector.groundedness.GroundednessAnswerClearer;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.BehaviorTriageVerdict;
@@ -106,6 +107,8 @@ public class CaseService {
 
     private final FrustrationDetailService frustrationDetail;
 
+    private final GroundednessDetailService groundednessDetail;
+
     public CaseService(
             CaseRepository cases,
             CaseLedger ledger,
@@ -127,7 +130,8 @@ public class CaseService {
             GroundednessAnswerClearer groundednessAnswers,
             MalformedOutputDetailService malformedOutputDetail,
             SecretLeakDetailService secretLeakDetail,
-            FrustrationDetailService frustrationDetail) {
+            FrustrationDetailService frustrationDetail,
+            GroundednessDetailService groundednessDetail) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -149,6 +153,7 @@ public class CaseService {
         this.malformedOutputDetail = malformedOutputDetail;
         this.secretLeakDetail = secretLeakDetail;
         this.frustrationDetail = frustrationDetail;
+        this.groundednessDetail = groundednessDetail;
     }
 
     // ---- reads -------------------------------------------------------------------------------
@@ -286,6 +291,7 @@ public class CaseService {
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding == null ? null : frustrationDetail.detail(finding),
+                finding == null ? null : groundednessDetail.detail(finding),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);

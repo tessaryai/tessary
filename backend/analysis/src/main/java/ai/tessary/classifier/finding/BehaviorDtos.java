@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
@@ -207,9 +208,9 @@ public final class BehaviorDtos {
      * themselves rather than a prose summary of them.
      *
      * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code secretLeak},
-     * {@code armedWindow} and {@code frustration} is set, chosen by cause kind, and all six are null for a
-     * behaviour-drift cause (which carries no measured shift) or for any finding whose blob is missing
-     * or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
+     * {@code armedWindow}, {@code frustration} and {@code groundedness} is set, chosen by cause kind, and all
+     * seven are null for a behaviour-drift cause (which carries no measured shift) or for any finding whose blob
+     * is missing or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
      * on the evidence parsing, and a page that vanished because one column was malformed would be a
      * worse failure than a page with no chart on it.
      */
@@ -239,9 +240,9 @@ public final class BehaviorDtos {
             @Nullable SecretLeakDetail secretLeak,
             /**
              * Set exactly on an {@code armed_window} finding from a classifier with no richer detail of
-             * its own — frustration, groundedness, and any regex/threshold classifier. Null for Secret
-             * Leak, whose {@link #secretLeak} carries the same bar plus the per-key and per-leak
-             * breakdowns it enumerates from the detection table.
+             * its own: any regex/threshold classifier. Null for Secret Leak, whose {@link #secretLeak}
+             * carries the same bar plus the per-key and per-leak breakdowns it enumerates from the detection
+             * table.
              */
             @Nullable ArmedWindowDetail armedWindow,
             /**
@@ -249,7 +250,13 @@ public final class BehaviorDtos {
              * call site's learned rate, and the conversations the finding cites with the turn that fired in
              * each. DB-backed — see {@link ai.tessary.classifier.frustration.FrustrationDetailService#detail}.
              */
-            @Nullable FrustrationDetail frustration) {
+            @Nullable FrustrationDetail frustration,
+            /**
+             * Set exactly on a {@code groundedness_rate} finding: the flagged-answer rate against the call
+             * site's learned rate, and the flagged answers the finding cites with the sentences marked in each.
+             * DB-backed; see {@link ai.tessary.classifier.detector.groundedness.GroundednessDetailService#detail}.
+             */
+            @Nullable GroundednessDetail groundedness) {
 
         /** For a caller with no malformed-output or secret-leak detail to attach. */
         public static BehaviorFindingDetailView of(FindingRow row) {
@@ -267,15 +274,16 @@ public final class BehaviorDtos {
                 @Nullable MalformedDetail malformedOutput,
                 @Nullable SecretLeakDetail secretLeak,
                 @Nullable FailedTriage failed) {
-            return of(row, malformedOutput, secretLeak, null, failed);
+            return of(row, malformedOutput, secretLeak, null, null, failed);
         }
 
-        /** As above, with a frustration finding's own block. */
+        /** As above, with a frustration or groundedness finding's own block. */
         public static BehaviorFindingDetailView of(
                 FindingRow row,
                 @Nullable MalformedDetail malformedOutput,
                 @Nullable SecretLeakDetail secretLeak,
                 @Nullable FrustrationDetail frustration,
+                @Nullable GroundednessDetail groundedness,
                 @Nullable FailedTriage failed) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
@@ -290,7 +298,8 @@ public final class BehaviorDtos {
                     secretLeak == null && FindingRow.Cause.ARMED_WINDOW.equals(row.causeKind())
                             ? ArmedWindowEvidence.detail(evidence)
                             : null,
-                    frustration);
+                    frustration,
+                    groundedness);
         }
     }
 

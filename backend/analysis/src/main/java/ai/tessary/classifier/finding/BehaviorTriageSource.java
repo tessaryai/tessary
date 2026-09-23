@@ -6,6 +6,7 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -150,6 +151,9 @@ public class BehaviorTriageSource implements TriageSource {
      */
     private final GroundednessRateRepository groundednessRates;
 
+    /** The {@code groundedness_rate} branch of {@link #detail}; every other cause never touches it. */
+    private final GroundednessDetailService groundednessDetail;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -170,7 +174,8 @@ public class BehaviorTriageSource implements TriageSource {
             MalformedOutputDetailService malformedOutputs,
             SecretLeakDetailService secretLeaks,
             FrustrationDetailService frustrations,
-            GroundednessRateRepository groundednessRates) {
+            GroundednessRateRepository groundednessRates,
+            GroundednessDetailService groundednessDetail) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -195,6 +200,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.secretLeaks = secretLeaks;
         this.frustrations = frustrations;
         this.groundednessRates = groundednessRates;
+        this.groundednessDetail = groundednessDetail;
     }
 
     @Override
@@ -250,6 +256,7 @@ public class BehaviorTriageSource implements TriageSource {
                 malformedOutputs.detail(finding),
                 secretLeaks.detail(finding),
                 frustrations.detail(finding),
+                groundednessDetail.detail(finding),
                 failed));
     }
 

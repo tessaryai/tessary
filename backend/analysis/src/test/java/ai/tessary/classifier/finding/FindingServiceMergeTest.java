@@ -203,7 +203,7 @@ class FindingServiceMergeTest {
      */
     @SuppressWarnings("NullAway") // deliberate: the injected repositories are unreachable on these paths
     private static FindingService service(List<TriageSource> sources) {
-        return new FindingService(null, null, null, null, sources, null, null); // detail services unreached
+        return new FindingService(null, null, null, null, sources, null, null, null); // detail services unreached
     }
 
     private static BehaviorFindingView view(String id) {

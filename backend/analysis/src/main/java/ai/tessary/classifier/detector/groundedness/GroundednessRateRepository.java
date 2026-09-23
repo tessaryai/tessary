@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -92,8 +93,55 @@ public class GroundednessRateRepository {
              ORDER BY t.first_scored_at DESC, a.subject_trace_id DESC, a.observation_started_at, a.subject_span_id
             """;
 
+    /**
+     * One page of the flagged answers a finding cites, newest flag first: its span-grain witness rows, each read
+     * with the detection row that flagged it. The trace-grain witness rows beside them name the same traces and
+     * are not read, so a trace with two flagged answers is two rows here and one failure in the rate.
+     */
+    private static final String ANSWER_PAGE = """
+            SELECT e.trace_id, e.span_id, d.subject_session_id, d.subject_started_at, d.evidence::text AS evidence,
+                   d.cleared_at, COUNT(*) OVER () AS total
+              FROM finding_evidence e
+              LEFT JOIN LATERAL (
+                SELECT d.subject_session_id, d.subject_started_at, d.evidence, d.cleared_at
+                  FROM {detections} d
+                 WHERE d.project_id = e.project_id AND d.classifier_id = :cid
+                   AND d.subject_trace_id = e.trace_id AND d.subject_span_id = e.span_id
+                 ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
+                 LIMIT 1) d ON true
+             WHERE e.project_id = :pid AND e.finding_id = :fid AND e.role = 'witness'
+               AND e.trace_id IS NOT NULL AND e.span_id IS NOT NULL
+             ORDER BY d.subject_started_at DESC NULLS LAST, e.trace_id DESC, e.span_id DESC
+             LIMIT :limit OFFSET :offset
+            """;
+
     /** One flagged answer a finding cites: the trace it is a trial in and the span that was flagged. */
     public record FlaggedAnswer(String traceId, String spanId) {}
+
+    /**
+     * One cited answer as its detection row recorded it. Rows of any clear state, so an answer a resolve
+     * cleared still reads as what it was when the finding cited it.
+     *
+     * @param flaggedAt when the flagged span started; null once it and its trace aged out
+     * @param evidenceJson what the detector wrote, {@code flagged_sentences} among it; null when the detection
+     *     row is gone
+     * @param cleared true once a {@code false_alarm} resolve cleared the flag
+     */
+    public record CitedAnswer(
+            String traceId,
+            String spanId,
+            @Nullable String sessionId,
+            @Nullable String flaggedAt,
+            @Nullable String evidenceJson,
+            boolean cleared) {}
+
+    /** One page of cited answers and how many the finding cites in all. */
+    public record AnswerPage(List<CitedAnswer> rows, long total) {
+
+        public AnswerPage {
+            rows = List.copyOf(rows);
+        }
+    }
 
     private final JdbcClient jdbc;
     private final ClassifierDetectionWriteRepository detections;
@@ -196,6 +244,39 @@ public class GroundednessRateRepository {
                 .param("until", Timestamp.from(until))
                 .query((rs, n) -> new FlaggedAnswer(rs.getString("subject_trace_id"), rs.getString("subject_span_id")))
                 .list();
+    }
+
+    /**
+     * One page of the flagged answers {@code findingId} cites, newest flag first, and how many it cites in all.
+     * Empty while no groundedness detection table is registered.
+     */
+    public AnswerPage answerPage(String projectId, String classifierId, String findingId, int limit, int offset) {
+        String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
+        if (table == null || limit <= 0) return new AnswerPage(List.of(), 0);
+        long[] total = {0};
+        List<CitedAnswer> rows = jdbc.sql(ANSWER_PAGE.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("fid", findingId)
+                .param("limit", limit)
+                .param("offset", Math.max(0, offset))
+                .query((rs, n) -> {
+                    total[0] = rs.getLong("total");
+                    OffsetDateTime started = rs.getObject("subject_started_at", OffsetDateTime.class);
+                    return new CitedAnswer(
+                            rs.getString("trace_id"),
+                            rs.getString("span_id"),
+                            rs.getString("subject_session_id"),
+                            started == null ? null : started.toInstant().toString(),
+                            rs.getString("evidence"),
+                            rs.getString("cleared_at") != null);
+                })
+                .list();
+        if (rows.isEmpty() && offset > 0) {
+            // Past the end: the window count is on no row, so read it on its own.
+            return new AnswerPage(List.of(), answerPage(projectId, classifierId, findingId, 1, 0).total());
+        }
+        return new AnswerPage(rows, total[0]);
     }
 
     private JdbcClient.StatementSpec spell(String sql, String projectId, String classifierId, String scorerVersion) {

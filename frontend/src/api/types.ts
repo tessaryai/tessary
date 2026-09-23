@@ -443,6 +443,14 @@ export type FrustratedConversation = S["FrustratedConversationView"];
 export type FrustratedSessionPage = S["FrustratedSessionPage"];
 
 /**
+ * A `groundedness_rate` finding's block: the flagged-answer rate against the call site's learned rate, and
+ * the flagged answers the finding cites, each with the sentences the model marked in it.
+ */
+export type GroundednessDetail = S["GroundednessDetail"];
+export type FlaggedAnswer = S["FlaggedAnswerView"];
+export type FlaggedAnswerPage = S["FlaggedAnswerPage"];
+
+/**
  * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
  * two breakdowns the page renders — one masked key at a time, and one leak at a time.
  */

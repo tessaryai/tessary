@@ -3,6 +3,8 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -71,6 +73,8 @@ public class FindingService {
 
     private final FrustrationDetailService frustrations;
 
+    private final GroundednessDetailService groundedness;
+
     public FindingService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -78,7 +82,8 @@ public class FindingService {
             BehaviorBaselineEventRepository events,
             List<TriageSource> triageSources,
             MalformedOutputDetailService malformedOutputs,
-            FrustrationDetailService frustrations) {
+            FrustrationDetailService frustrations,
+            GroundednessDetailService groundedness) {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
@@ -86,6 +91,7 @@ public class FindingService {
         this.triageSources = triageSources;
         this.malformedOutputs = malformedOutputs;
         this.frustrations = frustrations;
+        this.groundedness = groundedness;
     }
 
     /**
@@ -234,6 +240,27 @@ public class FindingService {
         FrustrationRateRepository.CauseRef ref =
                 rcaReport == null || cause == null ? null : new FrustrationRateRepository.CauseRef(rcaReport, cause);
         return frustrations.page(finding, ref, limit, cursor);
+    }
+
+    /**
+     * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
+     * finding and case pages' answer list loads as it scrolls. Any other finding has none.
+     *
+     * <p>{@code rcaReport} and {@code cause} are the RCA cause filter frustration's list takes. They are accepted
+     * and not applied yet: no groundedness report names causes, so every page is the finding's whole set.
+     */
+    public GroundednessEvidence.FlaggedAnswerPage flaggedAnswers(
+            String projectId,
+            String findingId,
+            @Nullable String rcaReport,
+            @Nullable Integer cause,
+            int limit,
+            @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
+            return new GroundednessEvidence.FlaggedAnswerPage(List.of(), 0, null);
+        }
+        return groundedness.page(finding, limit, cursor);
     }
 
     /**
