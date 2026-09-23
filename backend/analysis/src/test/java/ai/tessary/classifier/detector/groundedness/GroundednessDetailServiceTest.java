@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,7 @@ import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedA
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.RetrievedDocumentView;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.AnswerPage;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CauseRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CitedAnswer;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.substrate.SubstrateObservation;
@@ -56,7 +58,7 @@ class GroundednessDetailServiceTest {
 
     @Test
     void theRateNumbersComeFromThePayload() {
-        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", GroundednessDetailService.PAGE_SIZE, 0))
+        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", null, GroundednessDetailService.PAGE_SIZE, 0))
                 .thenReturn(new AnswerPage(List.of(), 0));
 
         GroundednessDetail block = service.detail(finding(payload()));
@@ -84,13 +86,13 @@ class GroundednessDetailServiceTest {
         String evidence = "{\"unsupported\":0.991,\"flagged_sentences\":["
                 + "{\"start\":0,\"end\":" + FIRST.length() + ",\"unsupported\":0.981},"
                 + "{\"start\":" + secondStart + ",\"end\":" + ANSWER.length() + ",\"unsupported\":0.991}]}";
-        when(rates.answerPage(eq(PROJECT), eq(CLASSIFIER), eq("fnd_1"), anyInt(), eq(0)))
+        when(rates.answerPage(eq(PROJECT), eq(CLASSIFIER), eq("fnd_1"), isNull(), anyInt(), eq(0)))
                 .thenReturn(new AnswerPage(
                         List.of(new CitedAnswer("tr_1", "sp_1", "sess_1", "2026-09-23T14:41:00Z", evidence, false)),
                         1));
         storedAnswer("tr_1", "sp_1");
 
-        FlaggedAnswerPage page = service.page(finding(payload()), 50, null);
+        FlaggedAnswerPage page = service.page(finding(payload()), null, 50, null);
 
         assertEquals(1, page.total());
         assertNull(page.nextCursor());
@@ -119,7 +121,7 @@ class GroundednessDetailServiceTest {
 
     @Test
     void aTraceThatIsGoneIsNotStored() {
-        when(rates.answerPage(eq(PROJECT), eq(CLASSIFIER), eq("fnd_1"), anyInt(), eq(0)))
+        when(rates.answerPage(eq(PROJECT), eq(CLASSIFIER), eq("fnd_1"), isNull(), anyInt(), eq(0)))
                 .thenReturn(new AnswerPage(
                         List.of(new CitedAnswer(
                                 "tr_gone",
@@ -132,7 +134,7 @@ class GroundednessDetailServiceTest {
                         1));
         when(substrate.observationsByIds(eq(PROJECT), any())).thenReturn(List.of());
 
-        FlaggedAnswerView a = service.page(finding(payload()), 50, null).rows().getFirst();
+        FlaggedAnswerView a = service.page(finding(payload()), null, 50, null).rows().getFirst();
 
         assertFalse(a.stored());
         assertTrue(a.cleared());
@@ -146,20 +148,36 @@ class GroundednessDetailServiceTest {
     @Test
     void witnessesPageByOffset() {
         FindingRow finding = finding(payload());
-        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", 2, 0))
+        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", null, 2, 0))
                 .thenReturn(new AnswerPage(List.of(cited("tr_3"), cited("tr_2")), 3));
-        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", 2, 2))
+        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", null, 2, 2))
                 .thenReturn(new AnswerPage(List.of(cited("tr_1")), 3));
         when(substrate.observationsByIds(eq(PROJECT), any())).thenReturn(List.of());
 
-        FlaggedAnswerPage first = service.page(finding, 2, null);
-        FlaggedAnswerPage rest = service.page(finding, 2, first.nextCursor());
+        FlaggedAnswerPage first = service.page(finding, null, 2, null);
+        FlaggedAnswerPage rest = service.page(finding, null, 2, first.nextCursor());
 
         assertEquals(List.of("tr_3", "tr_2"), first.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertEquals("2", first.nextCursor());
         assertEquals(List.of("tr_1"), rest.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertNull(rest.nextCursor(), "the last page");
         assertEquals(3, rest.total());
+    }
+
+    /** An RCA cause filter reaches the read as it was asked for, so the page is that cause's share. */
+    @Test
+    void aCauseFilterNarrowsTheRead() {
+        FindingRow finding = finding(payload());
+        CauseRef cause = new CauseRef("rpt_1", 1);
+        when(rates.answerPage(PROJECT, CLASSIFIER, "fnd_1", cause, 50, 0))
+                .thenReturn(new AnswerPage(List.of(cited("tr_2")), 1));
+        when(substrate.observationsByIds(eq(PROJECT), any())).thenReturn(List.of());
+
+        FlaggedAnswerPage page = service.page(finding, cause, 50, null);
+
+        assertEquals(List.of("tr_2"), page.rows().stream().map(FlaggedAnswerView::traceId).toList());
+        assertEquals(1, page.total());
+        assertNull(page.nextCursor());
     }
 
     private void storedAnswer(String traceId, String spanId) {

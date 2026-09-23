@@ -4,6 +4,9 @@ package ai.tessary.rca;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -190,6 +193,72 @@ class AgenticRcaPromptTest {
                 AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 3, 3).contains("cap every cause"));
         assertFalse(AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 30, 30)
                 .contains("cap every cause"));
+    }
+
+    /** A groundedness finding asks for causes like frustration's, with traces as the receipts and the flagged
+     *  answers handed over in the dossier so each flag can be checked against its documents first. */
+    @Test
+    void aGroundednessPromptAsksForCausesCitingTraces() {
+        String prompt = AgenticRcaEngine.buildGroundednessPrompt(
+                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", true, 12);
+
+        assertFalse(prompt.contains("BURDEN OF PROOF"), "the metric-movement burden of proof does not apply");
+        assertFalse(prompt.contains("baseline-side"), "there is no baseline side to cite");
+        assertFalse(prompt.contains("serving_model"), "serving_model compares two sides and is not measured");
+        assertFalse(prompt.contains("evidence_session_ids"), "a groundedness cause cites traces, not sessions");
+        assertFalse(prompt.contains("frustrat"), "nothing of the frustration prompt leaks in");
+        assertTrue(prompt.contains("failing_cohort_shape"), "the one measured check is named");
+        assertTrue(prompt.contains("evidence_trace_ids"), "causes cite traces");
+        assertTrue(prompt.contains("dossier/detections.md"), "the flagged answers are in the dossier");
+        assertTrue(prompt.contains("causes_identified") && prompt.contains("no_cause_found"), "both verdicts named");
+        assertTrue(prompt.contains("Check each flag before grouping"), "the groundedness rules are in");
+        assertTrue(prompt.contains("retrieval"), "retrieval is a cause the rules name");
+        assertTrue(prompt.contains("fnd-1") && prompt.contains("2026-05-04"), "finding id and onset interpolated");
+        for (String tool : EXPECTED_TOOLS) {
+            assertTrue(prompt.contains(tool), "the groundedness prompt never names " + tool);
+        }
+    }
+
+    @Test
+    void aGroundednessPromptKeepsTheFirewall() {
+        for (boolean repoCloned : new boolean[] {true, false}) {
+            String prompt = AgenticRcaEngine.buildGroundednessPrompt(
+                            report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", repoCloned, 12)
+                    .toLowerCase(Locale.ROOT);
+            for (String word : TRIAGE_VOCABULARY) {
+                assertFalse(prompt.contains(word), "the groundedness prompt says '" + word + "'");
+            }
+        }
+    }
+
+    @Test
+    void aRepolessGroundednessRunAttributesNothing() {
+        String prompt = AgenticRcaEngine.buildGroundednessPrompt(
+                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", false, 12);
+
+        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
+        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
+        assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
+    }
+
+    @Test
+    void aFewFlaggedTracesCapConfidence() {
+        RcaReportRow r = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
+        assertTrue(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 3).contains("cap every cause"));
+        assertFalse(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 30).contains("cap every cause"));
+    }
+
+    /** The two resources the groundedness branch sends: a schema whose causes cite traces, and its own rules. */
+    @Test
+    void theGroundednessResourcesArePresent() throws Exception {
+        JsonNode schema = new ObjectMapper().readTree(AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA);
+        JsonNode cause = schema.path("properties").path("causes").path("items");
+        List<String> required = new ArrayList<>();
+        cause.path("required").forEach(n -> required.add(n.asText()));
+        assertTrue(required.contains("evidence_trace_ids"), required.toString());
+        assertTrue(required.contains("traces_affected"), required.toString());
+        assertFalse(cause.path("properties").has("evidence_session_ids"), "no session receipts");
+        assertFalse(AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA.contains("session"));
     }
 
     private static RcaReportRow report() {

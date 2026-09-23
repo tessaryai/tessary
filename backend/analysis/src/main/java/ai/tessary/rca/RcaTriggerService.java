@@ -67,9 +67,10 @@ public class RcaTriggerService {
         String reportKind = RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
         double current;
         double prior;
-        if (RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(reportKind)) {
-            // A frustration finding measured a rate against a learned one, so the header reads as that
-            // rate: frustrated conversations since onset over the rate the call site learned as normal.
+        if (RcaReportRow.ReportKind.namesCauses(reportKind)) {
+            // A frustration or groundedness finding measured a rate against a learned one, so the header
+            // reads as that rate: frustrated conversations, or traces with a flagged answer, since onset over
+            // the rate the call site learned as normal.
             current = finding.payloadNumber("current_rate");
             prior = finding.payloadNumber("baseline_rate");
         } else {

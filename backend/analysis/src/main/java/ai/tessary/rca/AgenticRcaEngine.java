@@ -95,6 +95,15 @@ public class AgenticRcaEngine {
     static final String FRUSTRATION_JSON_SCHEMA = PromptCraft.text(RCA, "frustration/response_schema.json");
 
     /**
+     * The rules of a groundedness investigation: frustration's, rewritten for "why did the answers go beyond
+     * their documents", with a first step that checks each flag, since the classifier's flags are not proof.
+     */
+    private static final String GROUNDEDNESS_RULES = PromptCraft.text(RCA, "groundedness/rules.md");
+
+    /** A groundedness run's output contract: frustration's, with trace receipts in place of sessions. */
+    static final String GROUNDEDNESS_JSON_SCHEMA = PromptCraft.text(RCA, "groundedness/response_schema.json");
+
+    /**
      * How the agent reaches the substrate. Names the tools it may actually call — a tool named here that
      * the surface does not register costs a turn on {@code unknown tool}, and one the surface has that is
      * not named here is one it will not think to use.
@@ -106,7 +115,7 @@ public class AgenticRcaEngine {
             String verdict,
             String summary,
             List<Hypothesis> hypotheses,
-            /** Ranked causes; empty unless the report is a frustration one. */
+            /** Ranked causes; empty unless the report is a frustration or groundedness one. */
             List<Cause> causes,
             List<ChecklistAssessment> checklist,
             String detailedReport,
@@ -182,7 +191,7 @@ public class AgenticRcaEngine {
             Set<String> flaggedTraceIds,
             Set<String> sessionIds,
             Set<String> measuredChecks) {
-        boolean frustration = RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(report.reportKind());
+        String kind = report.reportKind();
         Agentic cfg = props.getAgentic();
         String mcpBase = cfg.getMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
@@ -229,30 +238,45 @@ public class AgenticRcaEngine {
                     clone.map(Clone::url).orElse(null),
                     clone.map(Clone::headSha).orElse(null),
                     dossierFiles,
-                    frustration
-                            ? buildFrustrationPrompt(
-                                    report, findingId, clone.isPresent(), sessionIds.size(), flaggedTraceIds.size())
-                            : buildPrompt(
+                    switch (kind) {
+                        case RcaReportRow.ReportKind.FRUSTRATION_CAUSES ->
+                            buildFrustrationPrompt(
+                                    report, findingId, clone.isPresent(), sessionIds.size(), flaggedTraceIds.size());
+                        case RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES ->
+                            buildGroundednessPrompt(report, findingId, clone.isPresent(), flaggedTraceIds.size());
+                        default ->
+                            buildPrompt(
                                     report,
                                     findingId,
                                     clone.isPresent(),
                                     baselineTraceIds.size(),
-                                    flaggedTraceIds.size()),
-                    frustration ? FRUSTRATION_JSON_SCHEMA : JSON_SCHEMA,
+                                    flaggedTraceIds.size());
+                    },
+                    switch (kind) {
+                        case RcaReportRow.ReportKind.FRUSTRATION_CAUSES -> FRUSTRATION_JSON_SCHEMA;
+                        case RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES -> GROUNDEDNESS_JSON_SCHEMA;
+                        default -> JSON_SCHEMA;
+                    },
                     mcpBase.replaceAll("/+$", "") + "/mcp",
                     issued.plaintext(),
                     report.id()));
 
-            RcaSynthesisOutput.Parsed parsed = frustration
-                    ? RcaSynthesisOutput.parseFrustration(
-                            mapper, run.resultText(), flaggedTraceIds, sessionIds, measuredChecks, job.projectId())
-                    : RcaSynthesisOutput.parse(
+            RcaSynthesisOutput.Parsed parsed = switch (kind) {
+                case RcaReportRow.ReportKind.FRUSTRATION_CAUSES ->
+                    RcaSynthesisOutput.parseFrustration(
+                            mapper, run.resultText(), flaggedTraceIds, sessionIds, measuredChecks, job.projectId());
+                case RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES ->
+                    RcaSynthesisOutput.parseGroundedness(
+                            mapper, run.resultText(), flaggedTraceIds, measuredChecks, job.projectId());
+                default ->
+                    RcaSynthesisOutput.parse(
                             mapper,
                             run.resultText(),
                             baselineTraceIds,
                             flaggedTraceIds,
                             measuredChecks,
                             job.projectId());
+            };
             if (parsed.detailedReport() == null) {
                 // Schema-required, but a schema-ignoring model must not sink an otherwise-valid
                 // verdict — fall back to the summary so the report page never renders empty.
@@ -552,6 +576,84 @@ public class AgenticRcaEngine {
                 .append(" path/commit or query) and a \"## What would settle it\" section.\n\n");
 
         sb.append("Finish by returning the JSON object required by the schema, and nothing else — the harness")
+                .append(" collects it through the structured-output tool, so do not wrap it in prose.");
+        return sb.toString();
+    }
+
+    /**
+     * The prompt for a groundedness finding. Like frustration's it asks for causes rather than a change, and has
+     * no baseline side: the receipts are the traces with a flagged answer, and {@code dossier/detections.md}
+     * hands the agent those answers with their flagged sentences and documents so it can check each flag first.
+     */
+    static String buildGroundednessPrompt(
+            RcaReportRow report, String findingId, boolean repoCloned, int flaggedTraces) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are a root-cause analyst embedded in an LLM-evaluation platform. A classifier filed a")
+                .append(" FINDING: at one call site, the share of traces with an answer its retrieved documents")
+                .append(" do not support rose above the rate that call site learned as normal. Nobody has looked")
+                .append(" at it yet. Your job is to find out WHY the answers went beyond their documents, group")
+                .append(" the flagged answers into causes, and PROVE each cause with traces you can cite. A")
+                .append(" confident wrong cause is worse than an honest \"no cause found\": the engineer who")
+                .append(" reads it will act on it.\n\n");
+
+        sb.append("## What you have\n\n")
+                .append("`dossier/finding.md`: the claim and how many evidence refs it recorded per role.\n")
+                .append("`dossier/evidence.json`: its own numbers.\n")
+                .append("`dossier/detections.md`: the flagged answers, newest first, each with its question,")
+                .append(" flagged sentences and the documents it was checked against.\n")
+                .append("`dossier/checklist.md`: one structural check, MEASURED BUT NOT JUDGED.\n\n")
+                .append("The finding id is `")
+                .append(findingId)
+                .append("`. The rise began at ")
+                .append(report.windowSplit())
+                .append(" and was last seen at ")
+                .append(report.windowTo())
+                .append(".\n\n");
+
+        sb.append(MCP_DOOR).append('\n');
+
+        sb.append("## The repository\n\n");
+        if (repoCloned) {
+            sb.append("`./repo/` is a clone of the project's repository at its current HEAD (run git as")
+                    .append(" `git -C ./repo ...`). The .tessary/ bundle, when present, describes the call sites")
+                    .append(" (repo/.tessary/pipeline/call_sites/**/*.yaml: intent, prompts, surrounding code).")
+                    .append(" Read the call site's prompt and its retrieval code to find the line behind the")
+                    .append(" cause, and walk `git log` around ")
+                    .append(report.windowSplit())
+                    .append(". HEAD may postdate the finding.\n\n");
+        } else {
+            sb.append("There is none. This project has no repository connected, so there is no `./repo/`.")
+                    .append(" Establish the causes from the traces themselves, set every attribution kind to")
+                    .append(" `unknown`, and state plainly in the report that the code side is unread.\n\n");
+        }
+
+        sb.append("THE CHECKLIST IS YOURS TO JUDGE. dossier/checklist.md carries failing_cohort_shape: the")
+                .append(" facets the flagged traces share. A concentration is a lead, not a cause. Return")
+                .append(" exactly one `checklist` entry for it: `ruled_out`, `contributing`, `explains` or")
+                .append(" `unknown`.\n\n");
+
+        sb.append(GROUNDEDNESS_RULES).append('\n');
+
+        sb.append("EVIDENCE: this finding cites ")
+                .append(flaggedTraces)
+                .append(" trace(s) with a flagged answer. There is no baseline side: the learned rate is a count,")
+                .append(" not a set of rows.");
+        if (flaggedTraces < SMALL_SIDE) {
+            sb.append(" At that size, read and name each trace, cap every cause's confidence at \"medium\",")
+                    .append(" and state the sufficiency limit plainly in the report.");
+        }
+        sb.append("\n\n");
+
+        sb.append("OUTPUT: `causes`, most traces first. Each cites `evidence_trace_ids` from this finding's")
+                .append(" witness trace refs (unknown ids are dropped, and a cause left with none is dropped).")
+                .append(" `attribution` names the prompt, code, tool or model line behind the cause, with path,")
+                .append(" commit and excerpt, or kind `unknown`. Set verdict \"causes_identified\" when a cause")
+                .append(" stands and \"no_cause_found\" otherwise. The `detailed_report` field is your")
+                .append(" investigation as markdown, ending with an \"## Evidence audit\" table (every")
+                .append(" load-bearing claim to its trace id, repo path/commit or query) and a \"## What would")
+                .append(" settle it\" section.\n\n");
+
+        sb.append("Finish by returning the JSON object required by the schema, and nothing else. The harness")
                 .append(" collects it through the structured-output tool, so do not wrap it in prose.");
         return sb.toString();
     }

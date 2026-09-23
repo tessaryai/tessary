@@ -3681,6 +3681,10 @@
           "title" : {
             "type" : "string"
           },
+          "traces_affected" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "what_the_agent_did" : {
             "type" : "string"
           }
@@ -3693,6 +3697,7 @@
           "fix_suggestion",
           "sessions_affected",
           "title",
+          "traces_affected",
           "what_the_agent_did"
         ],
         "type" : "object"

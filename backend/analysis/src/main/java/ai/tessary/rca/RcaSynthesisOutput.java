@@ -39,6 +39,9 @@ import org.slf4j.LoggerFactory;
  *       cause's session ids are checked against the finding's session refs and its trace ids against
  *       the flagged turns; a cause left citing no session is dropped, and a {@code causes_identified}
  *       verdict with no cause left is downgraded to {@code no_cause_found}.</li>
+ *   <li>A groundedness report ({@link #parseGroundedness}) is the same with traces in place of sessions:
+ *       each cause's trace ids are checked against the finding's traces with a flagged answer, and a cause
+ *       left citing none is dropped.</li>
  * </ul>
  */
 final class RcaSynthesisOutput {
@@ -59,6 +62,7 @@ final class RcaSynthesisOutput {
             @Nullable String title,
             @Nullable String what_the_agent_did,
             @Nullable Integer sessions_affected,
+            @Nullable Integer traces_affected,
             @Nullable List<String> evidence_session_ids,
             @Nullable List<String> evidence_trace_ids,
             @Nullable AttributionBody attribution,
@@ -87,7 +91,7 @@ final class RcaSynthesisOutput {
 
     /** A validated run result. {@code detailedReport} is null when the agent ignored its schema;
      *  {@code verdictNote} is non-null when the verdict was downgraded and explains why. A metric-movement
-     *  run has no causes and a frustration run has no hypotheses. */
+     *  run has no causes, and a frustration or groundedness run has no hypotheses. */
     record Parsed(
             String summary,
             String verdict,
@@ -166,6 +170,66 @@ final class RcaSynthesisOutput {
             Set<String> sessionIds,
             Set<String> measuredChecks,
             String projectId) {
+        return parseCauses(
+                mapper,
+                text,
+                measuredChecks,
+                projectId,
+                (c, title) -> frustrationCause(c, title, flaggedTraceIds, sessionIds),
+                Comparator.comparingInt(Cause::sessionsAffected),
+                "session",
+                "frustrated session",
+                "`witness` session refs");
+    }
+
+    /**
+     * Parse and validate a groundedness run. Like a frustration run it has no baseline side; the receipts are
+     * the finding's traces with a flagged answer, and there are no sessions to cite.
+     *
+     * @param flaggedTraceIds the finding's witness trace refs, the traces with a flagged answer
+     */
+    static Parsed parseGroundedness(
+            ObjectMapper mapper,
+            String text,
+            Set<String> flaggedTraceIds,
+            Set<String> measuredChecks,
+            String projectId) {
+        return parseCauses(
+                mapper,
+                text,
+                measuredChecks,
+                projectId,
+                (c, title) -> groundednessCause(c, title, flaggedTraceIds),
+                Comparator.comparingInt(Cause::tracesAffected),
+                "trace",
+                "trace with a flagged answer",
+                "`witness` trace refs");
+    }
+
+    /** How one kind of causes report turns an agent's cause into a validated one, or null to drop it. */
+    @FunctionalInterface
+    private interface CauseValidator {
+        @Nullable Cause validate(CauseBody body, String title);
+    }
+
+    /**
+     * The shared half of the two causes reports: validate each cause, rank them by {@code rank}, highest
+     * first, and downgrade a {@code causes_identified} verdict that no cause survived.
+     *
+     * @param receipt what a cause must cite, for the log line
+     * @param receiptPhrase the same in the downgrade note
+     * @param refs the finding's refs the downgrade note points at
+     */
+    private static Parsed parseCauses(
+            ObjectMapper mapper,
+            String text,
+            Set<String> measuredChecks,
+            String projectId,
+            CauseValidator validator,
+            Comparator<Cause> rank,
+            String receipt,
+            String receiptPhrase,
+            String refs) {
         ReportBody body = body(mapper, text, projectId);
         List<Cause> causes = new ArrayList<>();
         int dropped = 0;
@@ -173,7 +237,7 @@ final class RcaSynthesisOutput {
         for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
             String title = c.title();
             if (title == null || title.isBlank()) continue;
-            Cause cause = validated(c, title, flaggedTraceIds, sessionIds);
+            Cause cause = validator.validate(c, title);
             if (cause == null) {
                 dropped++;
             } else {
@@ -182,20 +246,21 @@ final class RcaSynthesisOutput {
         }
         if (dropped > 0) {
             log.warn(
-                    "rca analysis project={} dropped {} cause(s) that cited no session of this finding",
+                    "rca analysis project={} dropped {} cause(s) that cited no {} of this finding",
                     projectId,
-                    dropped);
+                    dropped,
+                    receipt);
         }
         // Stable, so the agent's own order breaks ties.
-        causes.sort(Comparator.comparingInt(Cause::sessionsAffected).reversed());
+        causes.sort(rank.reversed());
         String verdict = RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(body.verdict())
                 ? RcaReportRow.Verdict.CAUSES_IDENTIFIED
                 : RcaReportRow.Verdict.NO_CAUSE_FOUND;
         String verdictNote = null;
         if (RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(verdict) && causes.isEmpty()) {
             verdictNote = "> **Verdict downgraded by the platform.** The analysis returned `causes_identified`,"
-                    + " but no cause cited a frustrated session from this finding's evidence, so none survived."
-                    + " Recorded as `no_cause_found`; the finding's `witness` session refs list what was"
+                    + " but no cause cited a " + receiptPhrase + " from this finding's evidence, so none survived."
+                    + " Recorded as `no_cause_found`; the finding's " + refs + " list what was"
                     + " available to cite.";
             log.warn("rca analysis project={} downgraded verdict causes_identified -> no_cause_found", projectId);
             verdict = RcaReportRow.Verdict.NO_CAUSE_FOUND;
@@ -208,8 +273,8 @@ final class RcaSynthesisOutput {
         return new Parsed(summary, verdict, List.of(), List.copyOf(causes), checklist, detailed, verdictNote);
     }
 
-    /** One cause with its receipts filtered to this finding's refs, or null when no session survives. */
-    private static @Nullable Cause validated(
+    /** One frustration cause with its receipts filtered to this finding's refs, or null when no session survives. */
+    private static @Nullable Cause frustrationCause(
             CauseBody c, String title, Set<String> flaggedTraceIds, Set<String> sessionIds) {
         List<String> sessions = distinct(c.evidence_session_ids()).stream()
                 .filter(sessionIds::contains)
@@ -224,7 +289,29 @@ final class RcaSynthesisOutput {
                 title,
                 c.what_the_agent_did() == null ? "" : c.what_the_agent_did(),
                 affected,
+                traces.size(),
                 sessions,
+                traces,
+                attribution(c.attribution()),
+                c.fix_suggestion() == null ? "" : c.fix_suggestion(),
+                confidence(c.confidence()));
+    }
+
+    /** One groundedness cause with its traces filtered to this finding's flagged ones, or null when none survives.
+     *  Session ids are not receipts here, so any the agent returned are dropped. */
+    private static @Nullable Cause groundednessCause(CauseBody c, String title, Set<String> flaggedTraceIds) {
+        List<String> traces = distinct(c.evidence_trace_ids()).stream()
+                .filter(flaggedTraceIds::contains)
+                .toList();
+        if (traces.isEmpty()) return null;
+        Integer claimed = c.traces_affected();
+        int affected = Math.max(claimed == null ? 0 : claimed, traces.size());
+        return new Cause(
+                title,
+                c.what_the_agent_did() == null ? "" : c.what_the_agent_did(),
+                0,
+                affected,
+                List.of(),
                 traces,
                 attribution(c.attribution()),
                 c.fix_suggestion() == null ? "" : c.fix_suggestion(),

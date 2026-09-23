@@ -8,6 +8,7 @@ import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedS
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.RetrievedDocumentView;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.AnswerPage;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CauseRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CitedAnswer;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.substrate.SubstrateObservation;
@@ -55,25 +56,42 @@ public class GroundednessDetailService {
     /** The block for a {@code groundedness_rate} finding, or null for any other finding. */
     public @Nullable GroundednessDetail detail(FindingRow finding) {
         if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return null;
-        FlaggedAnswerPage first = page(finding, PAGE_SIZE, null);
+        FlaggedAnswerPage first = page(finding, null, PAGE_SIZE, null);
         return GroundednessEvidence.detail(finding, first.rows(), first.nextCursor());
     }
 
     /**
-     * One page of the flagged answers {@code finding} cites, newest flag first.
+     * One page of the flagged answers {@code finding} cites, newest flag first. With {@code cause} set, only the
+     * answers in the traces that RCA cause names.
      *
      * @param cursor the {@code nextCursor} of the page before, or null for the first
      */
-    public FlaggedAnswerPage page(FindingRow finding, int limit, @Nullable String cursor) {
+    public FlaggedAnswerPage page(FindingRow finding, @Nullable CauseRef cause, int limit, @Nullable String cursor) {
+        return page(finding.projectId(), finding.subjectId(), finding.id(), cause, limit, cursor);
+    }
+
+    /**
+     * {@link #page(FindingRow, CauseRef, int, String)} by the finding's ids, for a reader that holds the claim
+     * rather than the finding row: RCA, which never reads the triage columns a {@link FindingRow} carries.
+     *
+     * @param classifierId the finding's subject, the classifier that filed it
+     */
+    public FlaggedAnswerPage page(
+            String projectId,
+            String classifierId,
+            String findingId,
+            @Nullable CauseRef cause,
+            int limit,
+            @Nullable String cursor) {
         int offset = decode(cursor);
-        AnswerPage cited = rates.answerPage(finding.projectId(), finding.subjectId(), finding.id(), limit, offset);
+        AnswerPage cited = rates.answerPage(projectId, classifierId, findingId, cause, limit, offset);
         Map<SpanRef, GroundednessInputs.Inputs> scored = new HashMap<>();
         Map<SpanRef, SubstrateObservation> spans = new HashMap<>();
         if (!cited.rows().isEmpty()) {
             List<SpanRef> refs = cited.rows().stream()
                     .map(a -> new SpanRef(a.traceId(), a.spanId()))
                     .toList();
-            List<SubstrateObservation> read = substrate.observationsByIds(finding.projectId(), refs);
+            List<SubstrateObservation> read = substrate.observationsByIds(projectId, refs);
             List<GroundednessInputs.@Nullable Inputs> in = read.isEmpty() ? List.of() : inputs.read(read);
             for (int i = 0; i < read.size(); i++) {
                 SubstrateObservation o = read.get(i);

@@ -5,6 +5,7 @@ import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -244,10 +245,9 @@ public class FindingService {
 
     /**
      * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
-     * finding and case pages' answer list loads as it scrolls. Any other finding has none.
-     *
-     * <p>{@code rcaReport} and {@code cause} are the RCA cause filter frustration's list takes. They are accepted
-     * and not applied yet: no groundedness report names causes, so every page is the finding's whole set.
+     * finding and case pages' answer list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
+     * position in that report's causes) narrow it to the answers in the traces that RCA cause names; both or
+     * neither. Any other finding has none.
      */
     public GroundednessEvidence.FlaggedAnswerPage flaggedAnswers(
             String projectId,
@@ -260,7 +260,9 @@ public class FindingService {
         if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
             return new GroundednessEvidence.FlaggedAnswerPage(List.of(), 0, null);
         }
-        return groundedness.page(finding, limit, cursor);
+        GroundednessRateRepository.CauseRef ref =
+                rcaReport == null || cause == null ? null : new GroundednessRateRepository.CauseRef(rcaReport, cause);
+        return groundedness.page(finding, ref, limit, cursor);
     }
 
     /**

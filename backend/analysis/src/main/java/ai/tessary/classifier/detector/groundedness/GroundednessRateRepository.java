@@ -96,7 +96,8 @@ public class GroundednessRateRepository {
     /**
      * One page of the flagged answers a finding cites, newest flag first: its span-grain witness rows, each read
      * with the detection row that flagged it. The trace-grain witness rows beside them name the same traces and
-     * are not read, so a trace with two flagged answers is two rows here and one failure in the rate.
+     * are not read, so a trace with two flagged answers is two rows here and one failure in the rate. {@code
+     * {filter}} is empty or {@link #CAUSE_FILTER}.
      */
     private static final String ANSWER_PAGE = """
             SELECT e.trace_id, e.span_id, d.subject_session_id, d.subject_started_at, d.evidence::text AS evidence,
@@ -110,10 +111,26 @@ public class GroundednessRateRepository {
                  ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
                  LIMIT 1) d ON true
              WHERE e.project_id = :pid AND e.finding_id = :fid AND e.role = 'witness'
-               AND e.trace_id IS NOT NULL AND e.span_id IS NOT NULL
+               AND e.trace_id IS NOT NULL AND e.span_id IS NOT NULL{filter}
              ORDER BY d.subject_started_at DESC NULLS LAST, e.trace_id DESC, e.span_id DESC
              LIMIT :limit OFFSET :offset
             """;
+
+    /**
+     * The filter that keeps one RCA cause's answers: every cited answer in a trace the cause names, from
+     * {@code :report} and its 0-based {@code :cause}. A groundedness cause cites traces, so both answers of a
+     * trace with two flagged ones are its share.
+     */
+    private static final String CAUSE_FILTER = """
+
+               AND EXISTS (
+                   SELECT 1 FROM rca_report r
+                    WHERE r.id = :report AND r.project_id = e.project_id AND r.finding_id = e.finding_id
+                      AND e.trace_id IN (SELECT jsonb_array_elements_text(
+                              r.causes -> CAST(:cause AS int) -> 'evidence_trace_ids')))""";
+
+    /** One RCA cause: the report that found it and its 0-based position in that report's causes. */
+    public record CauseRef(String reportId, int index) {}
 
     /** One flagged answer a finding cites: the trace it is a trial in and the span that was flagged. */
     public record FlaggedAnswer(String traceId, String spanId) {}
@@ -247,20 +264,27 @@ public class GroundednessRateRepository {
     }
 
     /**
-     * One page of the flagged answers {@code findingId} cites, newest flag first, and how many it cites in all.
+     * One page of the flagged answers {@code findingId} cites, newest flag first, and how many it cites in all
+     * under the same filter. With {@code cause} set, only the answers in the traces that cause names: its share.
      * Empty while no groundedness detection table is registered.
      */
-    public AnswerPage answerPage(String projectId, String classifierId, String findingId, int limit, int offset) {
+    public AnswerPage answerPage(
+            String projectId, String classifierId, String findingId, @Nullable CauseRef cause, int limit, int offset) {
         String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
         if (table == null || limit <= 0) return new AnswerPage(List.of(), 0);
         long[] total = {0};
-        List<CitedAnswer> rows = jdbc.sql(ANSWER_PAGE.replace("{detections}", table))
+        JdbcClient.StatementSpec spec = jdbc.sql(ANSWER_PAGE
+                        .replace("{detections}", table)
+                        .replace("{filter}", cause == null ? "" : CAUSE_FILTER))
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("fid", findingId)
                 .param("limit", limit)
-                .param("offset", Math.max(0, offset))
-                .query((rs, n) -> {
+                .param("offset", Math.max(0, offset));
+        if (cause != null) {
+            spec = spec.param("report", cause.reportId()).param("cause", cause.index());
+        }
+        List<CitedAnswer> rows = spec.query((rs, n) -> {
                     total[0] = rs.getLong("total");
                     OffsetDateTime started = rs.getObject("subject_started_at", OffsetDateTime.class);
                     return new CitedAnswer(
@@ -274,7 +298,7 @@ public class GroundednessRateRepository {
                 .list();
         if (rows.isEmpty() && offset > 0) {
             // Past the end: the window count is on no row, so read it on its own.
-            return new AnswerPage(List.of(), answerPage(projectId, classifierId, findingId, 1, 0).total());
+            return new AnswerPage(List.of(), answerPage(projectId, classifierId, findingId, cause, 1, 0).total());
         }
         return new AnswerPage(rows, total[0]);
     }

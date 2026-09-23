@@ -2771,6 +2771,8 @@ export interface components {
             /** Format: int32 */
             sessions_affected: number;
             title: string;
+            /** Format: int32 */
+            traces_affected: number;
             what_the_agent_did: string;
         };
         Chain: {

@@ -58,7 +58,8 @@ import org.springframework.web.context.WebApplicationContext;
  * {@code GET /findings/{id}/flagged-answers} against a finding the rate test really filed: every flagged answer it
  * cites comes back newest first, a page at a time; one whose span and retrieval are stored comes back with its
  * question, the exact answer, the documents it was compared against and flagged sentences that slice to their
- * text; one whose trace was never stored says so; and the finding page's block carries the first page.
+ * text; one whose trace was never stored says so; an RCA cause narrows the list to its traces; and the finding
+ * page's block carries the first page.
  */
 @SpringBootTest
 class GroundednessFlaggedAnswersIntegrationTest {
@@ -206,6 +207,16 @@ class GroundednessFlaggedAnswersIntegrationTest {
         assertEquals(1, last.path("rows").size());
         assertTrue(last.path("nextCursor").isNull(), "the last page");
 
+        // An RCA cause narrows the list to the answers in the traces it names; an index past its causes is none.
+        String report = rcaReport(pid, finding.id(), "[{\"title\":\"One document\",\"evidence_trace_ids\":[\""
+                + trace + "\",\"not-a-cited-trace\"],\"evidence_session_ids\":[]}]");
+        JsonNode share = page(session, base + "?limit=50&rcaReport=" + report + "&cause=0");
+        assertEquals(1, share.path("total").asLong(), "only the cause's trace");
+        assertEquals(span, share.path("rows").get(0).path("spanId").asText());
+        assertTrue(share.path("nextCursor").isNull());
+        assertEquals(0, page(session, base + "?rcaReport=" + report + "&cause=1").path("total").asLong());
+        assertEquals(cited, page(session, base + "?rcaReport=" + report).path("total").asLong(), "both or neither");
+
         GroundednessEvidence.GroundednessDetail block = detail.detail(finding);
         assertNotNull(block);
         assertEquals(Math.min(cited, GroundednessDetailService.PAGE_SIZE), block.answers().size());
@@ -220,6 +231,33 @@ class GroundednessFlaggedAnswersIntegrationTest {
                 .getResponse()
                 .getContentAsString();
         return mapper.readTree(body).path("data");
+    }
+
+    /** A finished groundedness RCA report on {@code findingId} carrying {@code causes}, and its job. */
+    private String rcaReport(String pid, String findingId, String causes) {
+        String job = Ids.ulid();
+        String report = Ids.ulid();
+        String now = Instant.now().toString();
+        jdbc.sql("INSERT INTO job (id, project_id, kind, status, payload, created_at, updated_at)"
+                        + " VALUES (:id, :pid, 'rca', 'done', CAST('{}' AS jsonb), :now, :now)")
+                .param("id", job)
+                .param("pid", pid)
+                .param("now", now)
+                .update();
+        jdbc.sql("INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label, metric,"
+                        + " window_from, window_split, window_to, current_value, prior_value, delta, status,"
+                        + " created_at, engine, finding_id, report_kind, causes)"
+                        + " VALUES (:id, :pid, :job, 'classifier', 'groundedness', 'Groundedness', 'groundedness',"
+                        + " :now, :now, :now, 0, 0, 0, 'done', :now, 'agentic', :fid, 'groundedness_causes',"
+                        + " CAST(:causes AS jsonb))")
+                .param("id", report)
+                .param("pid", pid)
+                .param("job", job)
+                .param("now", now)
+                .param("fid", findingId)
+                .param("causes", causes)
+                .update();
+        return report;
     }
 
     private void storeAnswer(String pid, ClassifierRow signal, String trace, String span, Instant at) {

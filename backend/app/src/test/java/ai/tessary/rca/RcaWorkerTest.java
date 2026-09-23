@@ -360,6 +360,7 @@ class RcaWorkerTest {
                 "Ignores the attached file",
                 "Answers from memory when the user attaches a file.",
                 2,
+                1,
                 List.of(sessionA, sessionB),
                 List.of(turnA),
                 new RcaDtos.Attribution("prompt", "agent/system.md", "abc123", "Answer briefly."),
@@ -397,6 +398,96 @@ class RcaWorkerTest {
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
         assertEquals(RcaReportRow.ReportKind.FRUSTRATION_CAUSES, report.reportKind());
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
+        assertEquals(Set.of("failing_cohort_shape"), storedChecks(report).keySet());
+
+        RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
+        assertEquals(List.of(cause), view.causes());
+        assertTrue(view.hypotheses().isEmpty());
+    }
+
+    /**
+     * A groundedness finding cites every scored trace as a member, each trace with a flagged answer as a witness,
+     * and each flagged answer as a witness span beside it. The run gets the traces with a flagged answer as its
+     * only receipts, measures only the cohort shape, is handed the flagged answers as {@code detections.md}, and
+     * its ranked causes persist on a groundedness_causes report.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aGroundednessReportPersistsItsCausesAndHandsOverTheFlaggedAnswers() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-groundedness");
+        String pid = fix.project().id();
+        String flaggedA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
+        String flaggedB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
+        String clean = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
+        String findingId = seedFinding(pid, List.of(), List.of());
+        String now = Instant.now().toString();
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(
+                        FindingEvidenceRepository.Ref.trace(flaggedA),
+                        FindingEvidenceRepository.Ref.trace(clean),
+                        FindingEvidenceRepository.Ref.trace(flaggedB)),
+                now);
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(
+                        FindingEvidenceRepository.Ref.trace(flaggedA),
+                        FindingEvidenceRepository.Ref.trace(flaggedB),
+                        FindingEvidenceRepository.Ref.span(flaggedA, "answer-a"),
+                        FindingEvidenceRepository.Ref.span(flaggedB, "answer-b")),
+                now);
+
+        RcaDtos.Cause cause = new RcaDtos.Cause(
+                "Retrieval returns one document",
+                "Answers past what the single retrieved document says.",
+                0,
+                2,
+                List.of(),
+                List.of(flaggedA, flaggedB),
+                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                "Retrieve more documents.",
+                "medium");
+        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+                .thenReturn(new AgenticRcaEngine.Result(
+                        RcaReportRow.Verdict.CAUSES_IDENTIFIED,
+                        "Retrieval returns one document.",
+                        List.of(),
+                        List.of(cause),
+                        List.of(new ChecklistAssessment("failing_cohort_shape", "ruled_out", "no concentration")),
+                        "## Investigation",
+                        true));
+
+        RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
+        worker.runForTest(job);
+
+        ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
+        ArgumentCaptor<Set<String>> citableSessions = ArgumentCaptor.forClass(Set.class);
+        verify(engine)
+                .run(
+                        any(),
+                        any(),
+                        anyString(),
+                        files.capture(),
+                        anySet(),
+                        flagged.capture(),
+                        citableSessions.capture(),
+                        anySet());
+        assertEquals(Set.of(flaggedA, flaggedB), flagged.getValue(), "the flagged traces, not the clean member");
+        assertTrue(citableSessions.getValue().isEmpty(), "a groundedness finding cites no sessions");
+        String answers = files.getValue().get("detections.md");
+        assertNotNull(answers, "the flagged answers ride in the dossier");
+        assertTrue(answers.contains("trace `" + flaggedA + "` span `answer-a`"), answers);
+        assertTrue(answers.contains("All 2 flagged answer(s) are shown."), answers);
+
+        RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
+        assertEquals("done", report.status());
+        assertEquals(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES, report.reportKind());
         assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
         assertEquals(Set.of("failing_cohort_shape"), storedChecks(report).keySet());
 

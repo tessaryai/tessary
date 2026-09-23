@@ -10,10 +10,11 @@ import org.jspecify.annotations.Nullable;
  * still reads correctly after the finding it analysed has been resolved (and reports written before
  * {@code finding_id} existed analysed a CUSUM mover, which is why that column is nullable).
  * {@code ruledOut}/{@code hypotheses}/{@code causes} are jsonb blobs of {@link RcaDtos.RuledOutCheck}/
- * {@link RcaDtos.Hypothesis}/{@link RcaDtos.Cause}; {@code causes} is set only on a
- * {@link ReportKind#FRUSTRATION_CAUSES} report, which writes no hypotheses. {@code status} is stamped by the worker at completion; the wire view
- * reads the live queue status off the joined {@code job} row (see {@link RcaReportRepository}), so an
- * exhaustion-swept job can never leave a report reading "claimed" forever.
+ * {@link RcaDtos.Hypothesis}/{@link RcaDtos.Cause}; {@code causes} is set only on a report that
+ * {@linkplain ReportKind#namesCauses names causes}, which writes no hypotheses. {@code status} is stamped
+ * by the worker at completion; the wire view reads the live queue status off the joined {@code job} row
+ * (see {@link RcaReportRepository}), so an exhaustion-swept job can never leave a report reading
+ * "claimed" forever.
  */
 public record RcaReportRow(
         String id,
@@ -52,10 +53,11 @@ public record RcaReportRow(
         public static final String TRAFFIC_SHIFT = "traffic_shift";
         public static final String BEHAVIOR_CHANGE = "behavior_change";
         public static final String INCONCLUSIVE = "inconclusive";
-        /** A {@link ReportKind#FRUSTRATION_CAUSES} report that grouped the frustrated sessions into at
-         *  least one cause citing them. */
+        /** A report that {@linkplain ReportKind#namesCauses names causes} and grouped the flagged sessions or
+         *  answers into at least one cause citing them. */
         public static final String CAUSES_IDENTIFIED = "causes_identified";
-        /** A {@link ReportKind#FRUSTRATION_CAUSES} report that found no agent behaviour the sessions share. */
+        /** A report that {@linkplain ReportKind#namesCauses names causes} and found no agent behaviour the
+         *  flagged sessions or answers share. */
         public static final String NO_CAUSE_FOUND = "no_cause_found";
     }
 
@@ -63,14 +65,25 @@ public record RcaReportRow(
     public static final class ReportKind {
         private ReportKind() {}
 
-        /** What change moved a measured number. Every classifier but Frustration. */
+        /** What change moved a measured number. Every classifier but Frustration and Groundedness. */
         public static final String METRIC_MOVEMENT = "metric_movement";
         /** What the agent did that frustrated the users of one call site. There is no baseline side. */
         public static final String FRUSTRATION_CAUSES = "frustration_causes";
+        /** Why one call site's answers stopped being supported by the documents it retrieved. There is no
+         *  baseline side either: the receipts are the traces with a flagged answer. */
+        public static final String GROUNDEDNESS_CAUSES = "groundedness_causes";
 
         /** The kind of report a finding filed by {@code classifierKey} gets. */
         public static String forClassifier(String classifierKey) {
-            return BuiltInDetector.Kind.FRUSTRATION.equals(classifierKey) ? FRUSTRATION_CAUSES : METRIC_MOVEMENT;
+            if (BuiltInDetector.Kind.FRUSTRATION.equals(classifierKey)) return FRUSTRATION_CAUSES;
+            if (BuiltInDetector.Kind.GROUNDEDNESS.equals(classifierKey)) return GROUNDEDNESS_CAUSES;
+            return METRIC_MOVEMENT;
+        }
+
+        /** True for the kinds that rank causes against a learned rate rather than explain a movement: no
+         *  baseline side, no two-sided checklist, and no hypotheses. */
+        public static boolean namesCauses(String reportKind) {
+            return FRUSTRATION_CAUSES.equals(reportKind) || GROUNDEDNESS_CAUSES.equals(reportKind);
         }
     }
 

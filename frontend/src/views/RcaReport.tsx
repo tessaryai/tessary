@@ -18,12 +18,14 @@ import type { RcaCause, RcaHypothesis, RcaRuledOutCheck } from "../api/types";
  * eliminated boring causes are what make the hypotheses trustworthy), then ranked hypotheses whose
  * evidence links open the real traces, then the agent's full write-up. A frustration report has no
  * hypotheses: it ranks causes, what the agent did that frustrated users, with the sessions that show it.
+ * A groundedness report ranks causes the same way, with the traces whose answers were flagged.
  */
 
 const METRIC_LABEL: Record<string, string> = {
   pass_rate: "Pass rate",
   score: "Score",
   frustration: "Frustrated sessions",
+  groundedness: "Flagged answers",
 };
 
 const SUBJECT_LABEL: Record<string, string> = {
@@ -38,7 +40,7 @@ const CONFIDENCE_TONE: Record<string, BadgeTone> = {
 };
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
-/** Frustration rates sit at a few percent, where a whole-percent round hides the rise. */
+/** Frustration and groundedness rates sit at a few percent, where a whole-percent round hides the rise. */
 const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 function windowLabel(iso: string): string {
@@ -156,9 +158,9 @@ function AttributionLine({ cause }: { cause: RcaCause }) {
   );
 }
 
-/** The ranked causes of a frustration report: what the agent did, how many sessions show it, where it
- *  comes from, and the conversations to read. */
-function CausesTable({ causes, base }: { causes: RcaCause[]; base: string }) {
+/** The ranked causes of a frustration or groundedness report: what the agent did, how many sessions (or
+ *  traces with a flagged answer) show it, where it comes from, and the sessions and traces to read. */
+function CausesTable({ causes, base, byTrace }: { causes: RcaCause[]; base: string; byTrace: boolean }) {
   return (
     <div>
       <div className="text-h3 text-fg mb-2">Causes</div>
@@ -171,7 +173,9 @@ function CausesTable({ causes, base }: { causes: RcaCause[]; base: string }) {
                 <span className="text-body font-medium text-fg">{c.title}</span>
                 <Badge tone={CONFIDENCE_TONE[c.confidence] ?? "neutral"}>{c.confidence} confidence</Badge>
                 <span className="text-small text-muted tabular-nums">
-                  {c.sessions_affected} {c.sessions_affected === 1 ? "session" : "sessions"}
+                  {byTrace
+                    ? `${c.traces_affected} ${c.traces_affected === 1 ? "trace" : "traces"}`
+                    : `${c.sessions_affected} ${c.sessions_affected === 1 ? "session" : "sessions"}`}
                 </span>
               </div>
               <p className="text-small text-muted m-0">{c.what_the_agent_did}</p>
@@ -203,7 +207,7 @@ function CausesTable({ causes, base }: { causes: RcaCause[]; base: string }) {
                       className="font-mono text-label text-link hover:text-link-hover hover:underline"
                       title={id}
                     >
-                      turn …{id.slice(-8)}
+                      {byTrace ? "trace" : "turn"} …{id.slice(-8)}
                     </Link>
                   ))}
                 </div>
@@ -265,10 +269,11 @@ export function RcaReport() {
   const running = rcaRunning(r.status);
   const worse = r.delta < 0;
   const frustration = r.report_kind === "frustration_causes";
-  const subtitle = frustration
-    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}Frustrated sessions rose to ${pct1(
-        r.current_value,
-      )} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
+  const groundedness = r.report_kind === "groundedness_causes";
+  const subtitle = frustration || groundedness
+    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
+        groundedness ? "Flagged answers" : "Frustrated sessions"
+      } rose to ${pct1(r.current_value)} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
     : `${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
         worse ? "fell" : "moved"
       } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`;
@@ -379,7 +384,7 @@ export function RcaReport() {
 
           {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
 
-          {r.causes.length > 0 && <CausesTable causes={r.causes} base={base} />}
+          {r.causes.length > 0 && <CausesTable causes={r.causes} base={base} byTrace={groundedness} />}
 
           {r.hypotheses.length > 0 && (
             <div>
