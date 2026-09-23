@@ -32,7 +32,7 @@ class ApiKeyServiceTest {
     ApiKeyRepository repo;
 
     @Test
-    void issuedToken_verifies_andUpdatesLastUsedAt() throws Exception {
+    void issuedToken_verifies_andUpdatesLastUsedAt() {
         var fix = TenantFixture.bootstrap(tenants, "tok-verify");
         var issued = tokens.issue(fix.project().id(), fix.user().id(), "laptop");
 
@@ -45,8 +45,6 @@ class ApiKeyServiceTest {
         assertTrue(v.isPresent());
         assertEquals(issued.token().id(), v.get().id());
 
-        // Give the async write a beat — currently synchronous but be defensive.
-        Thread.sleep(20);
         ApiKey refreshed = repo.findById(issued.token().id()).orElseThrow();
         assertNotNull(refreshed.lastUsedAt(), "verify() must tick last_used_at on success");
     }

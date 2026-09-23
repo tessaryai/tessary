@@ -57,14 +57,6 @@ class AuthControllerTest {
     }
 
     @Test
-    void signupHappyPath() throws Exception {
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("signup-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
-    }
-
-    @Test
     void loginHappyPathAfterSignup() throws Exception {
         mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)

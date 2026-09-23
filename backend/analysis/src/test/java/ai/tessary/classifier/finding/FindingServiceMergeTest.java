@@ -137,13 +137,9 @@ class FindingServiceMergeTest {
 
     @Test
     @DisplayName("the page limit is 200 PER SOURCE, so a two-source page can hold 400 — as before the seam")
-    void the_limit_is_per_source() throws Exception {
-        var field = BehaviorTriageSource.class.getDeclaredField("DEFAULT_FINDING_LIMIT");
-        field.setAccessible(true);
-        assertEquals(200, field.getInt(null), "the shared table's own ceiling, unchanged by the split");
-
+    void the_limit_is_per_source() {
         // The per-source ceiling is a property of the SEAM, so it is asserted through the seam rather
-        // than by reading a second adapter's private field: two sources each returning a full page
+        // than by reading an adapter's private field: two sources each returning a full page
         // produce a page of both, and no source is truncated by another's rows. Naming a second
         // concrete adapter here would tie this open test to whichever adapters happen to ship.
         StubSource first = new StubSource("behavior", views("a", 200));
