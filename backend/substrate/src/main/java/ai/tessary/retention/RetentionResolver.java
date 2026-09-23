@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -53,10 +54,17 @@ public class RetentionResolver {
 
     private final RetentionPolicyRepository policies;
     private final RetentionProperties props;
+    private final RetentionCeiling ceiling;
 
     public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props) {
+        this(policies, props, RetentionCeiling.none());
+    }
+
+    @Autowired
+    public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props, RetentionCeiling ceiling) {
         this.policies = policies;
         this.props = props;
+        this.ceiling = ceiling;
     }
 
     /** Every data class's effective retention for one project, in declaration order. */
@@ -68,10 +76,21 @@ public class RetentionResolver {
         List<EffectiveRetention> out = new ArrayList<>(DataClass.values().length);
         for (DataClass dataClass : DataClass.values()) {
             Integer override = overrides.get(dataClass.wire());
-            out.add(new EffectiveRetention(
-                    dataClass, override != null ? override : platformDefault(dataClass), override != null));
+            int ttlDays = override != null ? override : platformDefault(dataClass);
+            out.add(new EffectiveRetention(dataClass, clamp(projectId, dataClass, ttlDays), override != null));
         }
         return out;
+    }
+
+    /** The ceiling for one class, or {@code 0} when this project has none. */
+    public int maxTtlDays(String projectId, DataClass dataClass) {
+        return Math.max(0, ceiling.maxTtlDays(projectId, dataClass));
+    }
+
+    private int clamp(String projectId, DataClass dataClass, int ttlDays) {
+        int max = maxTtlDays(projectId, dataClass);
+        if (max == 0) return ttlDays;
+        return ttlDays == 0 ? max : Math.min(ttlDays, max);
     }
 
     /** The same answer keyed for a caller that wants one class. */

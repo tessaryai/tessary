@@ -3848,6 +3848,8 @@ export interface components {
             data_class: string;
             from_policy: boolean;
             /** Format: int32 */
+            max_ttl_days: number;
+            /** Format: int32 */
             platform_default_days: number;
             /** Format: int32 */
             ttl_days: number;

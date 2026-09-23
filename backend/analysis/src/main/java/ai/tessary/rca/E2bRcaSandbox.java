@@ -14,6 +14,7 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -121,7 +122,8 @@ public class E2bRcaSandbox implements RcaSandbox {
      * rca_report} row this run investigated (see that field's javadoc), so the ledger can now say what
      * an RCA run cost the same way {@code E2bTriageSandbox} already says it for a triage ruling.
      */
-    private void bookUsage(@Nullable String projectId, @Nullable String reportId, String envelopeJson) {
+    private void bookUsage(
+            @Nullable String projectId, @Nullable String reportId, String envelopeJson, boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
         if (projectId == null || u == null) return;
         usage.recordSandboxRun(
@@ -129,10 +131,8 @@ public class E2bRcaSandbox implements RcaSandbox {
                 ModelLane.RCA.wire(),
                 model(projectId),
                 pricingId(projectId),
-                // Never platform-funded any more — the run carries the org's own injected
-                // credential (AgenticCredentialResolver), so this lane's spend belongs to the org's
-                // bill, not the platform's.
-                false,
+                // Whose bill: the credential the run carried says so (AgenticCredentialResolver).
+                platformFunded,
                 u.inputTokens(),
                 u.outputTokens(),
                 u.cacheReadTokens(),
@@ -251,7 +251,8 @@ public class E2bRcaSandbox implements RcaSandbox {
             // still key off it to pick which OpenCode provider block to build.
             ModelProvider provider = providerFor(req.projectId());
             body.put("provider", provider.name());
-            body.set("credential", mapper.valueToTree(credentials.resolve(req.projectId(), provider)));
+            AgenticCredentialResolver.Credential credential = credentials.resolve(req.projectId(), provider);
+            body.set("credential", mapper.valueToTree(credential));
             if (req.mcpUrl() != null && req.mcpToken() != null) {
                 ObjectNode mcp = body.putObject("mcp");
                 mcp.put("url", req.mcpUrl());
@@ -268,7 +269,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             JsonNode node = mapper.readTree(respBody);
             String raw = node.path("raw").asText("");
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
-            bookUsage(req.projectId(), req.reportId(), raw);
+            bookUsage(req.projectId(), req.reportId(), raw, credential.platformFunded());
             // `structured_output` is the schema-constrained object the sandbox ALREADY extracted and
             // validated: agent-stream.js's runAgent refuses to exit 0 under `rejectOn: 'error'` unless
             // every key the response schema requires is present in it. `result` is the SAME answer in
@@ -316,6 +317,17 @@ public class E2bRcaSandbox implements RcaSandbox {
      * buildErrorBody} carries a {@code usage} object whenever rca.js's failure envelope reached it,
      * and {@code bookUsage} already no-ops on a body with nothing usable.
      */
+    private boolean platformFunded(String bodyJson) {
+        try {
+            return mapper.readTree(bodyJson)
+                    .path("credential")
+                    .path("platform_funded")
+                    .asBoolean(false);
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
     String postLauncher(String bodyJson, Agentic cfg, @Nullable String projectId, @Nullable String reportId) {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/rca"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -369,7 +381,9 @@ public class E2bRcaSandbox implements RcaSandbox {
             // F1: book what the run spent before it failed (a launcher outage carries no usage —
             // bookUsage no-ops on a body with nothing parseable — but today's always-502 run failure
             // does, whenever rca.js reached its catch block).
-            bookUsage(projectId, reportId, resp.body());
+            // postLauncher's signature is pinned by its test overrides, so the funding flag is read
+            // back from the body this run actually sent rather than threaded as a parameter.
+            bookUsage(projectId, reportId, resp.body(), platformFunded(bodyJson));
             throw new TessaryException(
                     RcaError.UPSTREAM_FAILED,
                     "agentic RCA launcher HTTP " + resp.statusCode() + (diag.isBlank() ? "" : " (" + diag + ")"));

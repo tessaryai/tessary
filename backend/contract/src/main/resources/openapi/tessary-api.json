@@ -8293,6 +8293,10 @@
           "from_policy" : {
             "type" : "boolean"
           },
+          "max_ttl_days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "platform_default_days" : {
             "format" : "int32",
             "type" : "integer"
@@ -8305,6 +8309,7 @@
         "required" : [
           "data_class",
           "from_policy",
+          "max_ttl_days",
           "platform_default_days",
           "ttl_days"
         ],
