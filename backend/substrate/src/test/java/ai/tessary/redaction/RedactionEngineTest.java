@@ -424,6 +424,27 @@ class RedactionEngineTest {
         assertEquals(1, found.size(), "one credential, reported once");
     }
 
+    /**
+     * Tool-call arguments arrive as a JSON document inside a string. The credential in them is replaced,
+     * and every other field comes back as it went in: the leaf is not emptied (trace content silently lost)
+     * and not regexed as flat text, which would leave the ten-digit {@code tabId} as a bare
+     * {@code [REDACTED_PHONE]} token that is no longer JSON.
+     */
+    @Test
+    void corpusRule_redactsACredentialInsideToolCallArguments_andKeepsEveryOtherField() {
+        String json = "{\"name\":\"deploy\",\"arguments\":\"{\\\"region\\\":\\\"us-east-1\\\","
+                + "\\\"key\\\":\\\"AKIA" + "QYLPMN5HHHFPZAM2\\\",\\\"tabId\\\":1234567890,"
+                + "\\\"dry_run\\\":false}\"}";
+
+        String out = RedactionEngine.applyToJson(json, builtInChain());
+
+        assertEquals(
+                "{\"name\":\"deploy\",\"arguments\":\"{\\\"region\\\":\\\"us-east-1\\\","
+                        + "\\\"key\\\":\\\"[REDACTED_SECRET]\\\",\\\"tabId\\\":1234567890,"
+                        + "\\\"dry_run\\\":false}\"}",
+                out);
+    }
+
     @Test
     void corpusRule_returnsTheSameReferenceAndReportsNothingWhenThereIsNoCredential() {
         List<GitleaksCorpus.Finding> found = new ArrayList<>();

@@ -107,6 +107,43 @@ class OtlpIngestServiceTest {
         assertEquals(1, captor.getValue().size(), "only the clamped span count is enqueued");
     }
 
+    /**
+     * The edge gate: with the write buffer past the configured fraction, a push is refused before its body
+     * is decoded, and the refusal is counted. If it never fires, a full buffer keeps decoding batches into
+     * the heap only to shed them.
+     */
+    @Test
+    void aWriteBufferPastTheRefuseFractionRefusesThePushAndCountsIt() {
+        SubstrateProperties substrate = new SubstrateProperties();
+        substrate.setRefuseAboveQueueFraction(0.8);
+        OtlpIngestService svc = new OtlpIngestService(
+                new OtlpReceiverProperties(),
+                substrate,
+                substrateWriter,
+                new OtlpSpanMapper(new ObjectMapper()),
+                projectId -> {});
+        Mockito.when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.9);
+
+        assertTrue(svc.shouldRefuse(), "0.9 full is past a 0.8 bar");
+        assertEquals(1, svc.refusedBatches());
+    }
+
+    @Test
+    void aWriteBufferBelowTheRefuseFractionAdmitsThePush() {
+        SubstrateProperties substrate = new SubstrateProperties();
+        substrate.setRefuseAboveQueueFraction(0.8);
+        OtlpIngestService svc = new OtlpIngestService(
+                new OtlpReceiverProperties(),
+                substrate,
+                substrateWriter,
+                new OtlpSpanMapper(new ObjectMapper()),
+                projectId -> {});
+        Mockito.when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.5);
+
+        assertFalse(svc.shouldRefuse(), "0.5 full is under a 0.8 bar");
+        assertEquals(0, svc.refusedBatches());
+    }
+
     @Test
     void exceededQuota_refusesTheWholeBatch_andNeverReachesTheSubstrate() {
         TessaryException exceeded =
