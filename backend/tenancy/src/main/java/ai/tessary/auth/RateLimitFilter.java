@@ -12,8 +12,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -99,12 +101,23 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final ConcurrentMap<String, Bucket> buckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> credentialRouteBuckets = new ConcurrentHashMap<>();
-    private final AtomicLong lastUserSweepNanos = new AtomicLong(System.nanoTime());
-    private final AtomicLong lastCredentialSweepNanos = new AtomicLong(System.nanoTime());
+    private final AtomicLong lastUserSweepNanos;
+    private final AtomicLong lastCredentialSweepNanos;
     private final ObjectMapper mapper;
 
+    /** The monotonic clock refill and reclaim read: {@link System#nanoTime} outside tests. */
+    private final LongSupplier nanoTime;
+
+    @Autowired
     public RateLimitFilter(ObjectMapper mapper) {
+        this(mapper, System::nanoTime);
+    }
+
+    RateLimitFilter(ObjectMapper mapper, LongSupplier nanoTime) {
         this.mapper = mapper;
+        this.nanoTime = nanoTime;
+        this.lastUserSweepNanos = new AtomicLong(nanoTime.getAsLong());
+        this.lastCredentialSweepNanos = new AtomicLong(nanoTime.getAsLong());
     }
 
     @Override
@@ -151,7 +164,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                         credentialRouteBuckets,
                         lastCredentialSweepNanos,
                         "ip:" + req.getRemoteAddr(),
-                        () -> new Bucket(CREDENTIAL_BURST, CREDENTIAL_REFILL_PER_SEC))) {
+                        () -> new Bucket(CREDENTIAL_BURST, CREDENTIAL_REFILL_PER_SEC, nanoTime))) {
                     return;
                 }
                 chain.doFilter(req, res);
@@ -168,7 +181,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // resolves to a user via ApiKey.principalId, so this keeps
         // automated callers tied to the human who issued the token.
         if (!rejectIfExhausted(
-                req, res, buckets, lastUserSweepNanos, ctx.userId(), () -> new Bucket(BURST, REFILL_PER_SEC))) {
+                req,
+                res,
+                buckets,
+                lastUserSweepNanos,
+                ctx.userId(),
+                () -> new Bucket(BURST, REFILL_PER_SEC, nanoTime))) {
             return;
         }
         chain.doFilter(req, res);
@@ -194,7 +212,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // who goes without it.
         Bucket b = pool.get(key);
         if (b == null) {
-            if (pool.size() >= MAX_BUCKETS) reclaim(pool, sweepClock);
+            if (pool.size() >= MAX_BUCKETS) reclaim(pool, sweepClock, nanoTime.getAsLong());
             b = pool.computeIfAbsent(key, k -> newBucket.get());
         }
         return b.tryConsume(1.0) || reject429(res, b);
@@ -229,8 +247,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * currently being throttled has the freshest stamp of all and cannot be evicted out of its own
      * limit, while the coldest tenth, the ones nobody is spending hardest, make way.
      */
-    private static void reclaim(ConcurrentMap<String, Bucket> pool, AtomicLong sweepClock) {
-        long now = System.nanoTime();
+    private static void reclaim(ConcurrentMap<String, Bucket> pool, AtomicLong sweepClock, long now) {
         long last = sweepClock.get();
         if (now - last < SWEEP_INTERVAL_NANOS || !sweepClock.compareAndSet(last, now)) return;
         pool.values().removeIf(b -> b.refilledBy(now));
@@ -254,12 +271,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final class Bucket {
         private final double burst;
         private final double refillPerSec;
-        private final AtomicLong stateNanos = new AtomicLong(System.nanoTime());
+        private final LongSupplier nanoTime;
+        private final AtomicLong stateNanos;
         private volatile double tokens;
 
-        Bucket(double burst, double refillPerSec) {
+        Bucket(double burst, double refillPerSec, LongSupplier nanoTime) {
             this.burst = burst;
             this.refillPerSec = refillPerSec;
+            this.nanoTime = nanoTime;
+            this.stateNanos = new AtomicLong(nanoTime.getAsLong());
             this.tokens = burst;
         }
 
@@ -284,7 +304,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         synchronized boolean tryConsume(double n) {
-            long now = System.nanoTime();
+            long now = nanoTime.getAsLong();
             long prev = stateNanos.getAndSet(now);
             double elapsedSec = (now - prev) / 1_000_000_000.0;
             tokens = Math.min(burst, tokens + elapsedSec * refillPerSec);

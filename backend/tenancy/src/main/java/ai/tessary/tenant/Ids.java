@@ -18,7 +18,12 @@ public final class Ids {
 
     /** Generate a ULID-shaped ID (26 chars, time-prefixed Crockford base32). */
     public static String ulid() {
-        long ts = Instant.now().toEpochMilli();
+        return ulid(Instant.now());
+    }
+
+    /** {@link #ulid()} minted at {@code at}: the seam that lets the time prefix be pinned. */
+    static String ulid(Instant at) {
+        long ts = at.toEpochMilli();
         char[] out = new char[26];
         for (int i = 9; i >= 0; i--) {
             out[i] = CROCKFORD[(int) (ts & 0x1F)];

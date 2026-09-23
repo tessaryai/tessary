@@ -62,15 +62,22 @@ class CachingMediaStoreTest {
     }
 
     @Test
-    void evictionRespectsTheByteBudget() {
+    void overfillingTheBudgetEvictsTheLeastRecentlyUsed() {
         PostgresMediaStore delegate = mock(PostgresMediaStore.class);
+        when(delegate.get(any(), any()))
+                .thenAnswer(
+                        inv -> Optional.of(media(inv.<MediaRef>getArgument(1).id(), 400)));
         CachingMediaStore store = new CachingMediaStore(delegate, 1000);
 
+        // Five 400-byte objects through a 1000-byte budget: only the last two can still be held.
         for (int i = 0; i < 5; i++) {
-            when(delegate.get(any(), any())).thenReturn(Optional.of(media("m" + i, 400)));
             store.get("proj", new MediaRef("m" + i));
         }
-        assertTrue(store.retainedBytesForTest() <= 1000, "retained bytes must stay within the budget");
+        store.get("proj", new MediaRef("m4"));
+        store.get("proj", new MediaRef("m0"));
+
+        verify(delegate, times(1)).get("proj", new MediaRef("m4"));
+        verify(delegate, times(2)).get("proj", new MediaRef("m0"));
     }
 
     @Test

@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,8 @@ class AuthControllerTest {
         r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("workos.api-key", () -> "");
         r.add("workos.client-id", () -> "");
+        // The suite runs with auth off; the login test reads its session back through AuthFilter.
+        r.add("tessary.auth.disabled", () -> "false");
     }
 
     @Autowired
@@ -44,12 +47,15 @@ class AuthControllerTest {
     @Autowired
     AuthProvider provider;
 
+    @Autowired
+    AuthFilter authFilter;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).build();
+        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
     }
 
     private String body(String email, String password) throws Exception {
@@ -63,10 +69,19 @@ class AuthControllerTest {
                         .content(body("login-happy@example.com", "a-good-password")))
                 .andExpect(status().isOk());
 
-        mvc.perform(post("/auth/login")
+        Cookie session = mvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body("login-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getCookie("tessary-session");
+        org.junit.jupiter.api.Assertions.assertNotNull(session, "a successful login sets the session cookie");
+
+        // The cookie is the sign-in: it must resolve to the account that just logged in.
+        mvc.perform(get("/auth/me").cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value("login-happy@example.com"));
     }
 
     @Test

@@ -4,11 +4,13 @@ package ai.tessary.tenant;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -110,6 +112,7 @@ public final class VerifiedTokenCache {
     private record Entry(ApiKey key, long expiresAtMillis, long lastUsedWrittenAtMillis) {}
 
     private final TokenCacheProperties props;
+    private final Clock clock;
 
     private final Map<String, Entry> verified;
     private final Map<String, Long> rejected;
@@ -121,8 +124,14 @@ public final class VerifiedTokenCache {
      */
     private final AtomicLong generation = new AtomicLong();
 
+    @Autowired
     public VerifiedTokenCache(TokenCacheProperties props) {
+        this(props, Clock.systemUTC());
+    }
+
+    VerifiedTokenCache(TokenCacheProperties props, Clock clock) {
         this.props = props;
+        this.clock = clock;
         this.verified = boundedLru(props.getMaxEntries());
         this.rejected = boundedLru(props.getMaxRejections());
     }
@@ -148,7 +157,7 @@ public final class VerifiedTokenCache {
     public Lookup lookup(String presented) {
         if (!props.isEnabled()) return UNKNOWN;
         String k = digest(presented);
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         synchronized (this) {
             Entry hit = verified.get(k);
             if (hit != null) {
@@ -178,7 +187,7 @@ public final class VerifiedTokenCache {
      */
     public void rememberVerified(String presented, ApiKey key, long observedGeneration) {
         if (!props.isEnabled()) return;
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         Entry e = new Entry(key, now + props.getTtlSeconds() * 1000L, now);
         synchronized (this) {
             if (generation.get() != observedGeneration) return;
@@ -189,7 +198,7 @@ public final class VerifiedTokenCache {
     /** Record that {@code presented} did not verify, so an immediate repeat need not pay bcrypt again. */
     public void rememberRejected(String presented) {
         if (!props.isEnabled() || props.getNegativeTtlSeconds() <= 0) return;
-        long until = System.currentTimeMillis() + props.getNegativeTtlSeconds() * 1000L;
+        long until = clock.millis() + props.getNegativeTtlSeconds() * 1000L;
         synchronized (this) {
             rejected.put(digest(presented), until);
         }

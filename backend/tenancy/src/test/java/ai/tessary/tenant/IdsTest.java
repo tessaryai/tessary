@@ -3,9 +3,9 @@ package ai.tessary.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -75,13 +75,25 @@ class IdsTest {
         assertEquals(1000, seen.size(), "1000 IDs must all be distinct");
     }
 
+    /**
+     * The ULID spec's own example: 1469922850259 ms (2016-07-30T23:54:10.259Z) is the 48-bit big-endian
+     * time prefix {@code 01ARZ3NDEK} in Crockford base32. The largest 48-bit time, 2^48 - 1, is
+     * {@code 7ZZZZZZZZZ}: the first character carries only the top three bits.
+     */
     @Test
-    void ulid_timePrefixIsSortableByCreationOrder() throws InterruptedException {
-        String a = Ids.ulid();
-        Thread.sleep(5);
-        String b = Ids.ulid();
-        // Prefix is the time portion (10 chars). Compare lexicographically.
-        assertNotEquals(a.substring(0, 10), b.substring(0, 10), "5ms gap must produce distinct time prefixes");
-        assertTrue(a.substring(0, 10).compareTo(b.substring(0, 10)) < 0, "earlier ULID must lex-sort before later one");
+    void ulid_timePrefixIsTheSpecEncodingOfItsInstant() {
+        assertEquals(
+                "01ARZ3NDEK", Ids.ulid(Instant.ofEpochMilli(1_469_922_850_259L)).substring(0, 10));
+        assertEquals(
+                "7ZZZZZZZZZ", Ids.ulid(Instant.ofEpochMilli((1L << 48) - 1)).substring(0, 10));
+    }
+
+    @Test
+    void ulid_timePrefixIsSortableByCreationOrder() {
+        String a = Ids.ulid(Instant.ofEpochMilli(1_469_922_850_259L));
+        String b = Ids.ulid(Instant.ofEpochMilli(1_469_922_850_260L));
+        // One millisecond later is the next Crockford digit in the last prefix place (K, then M).
+        assertEquals("01ARZ3NDEM", b.substring(0, 10));
+        assertTrue(a.compareTo(b) < 0, "earlier ULID must lex-sort before later one");
     }
 }

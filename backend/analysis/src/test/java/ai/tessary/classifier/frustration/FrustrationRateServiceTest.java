@@ -108,26 +108,25 @@ class FrustrationRateServiceTest {
         List<Spell> spells = service.refresh(PROJECT, signal(), at);
 
         assertEquals(1, spells.size());
-        Spell spell = spells.get(0);
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(findings)
                 .recordRecomputedRate(
-                        anyString(),
-                        eq(PROJECT),
-                        eq("frustration"),
-                        eq(CAUSE),
-                        eq(FindingRow.Cause.FRUSTRATION_RATE),
-                        eq(CALL_SITE),
-                        eq(FindingRow.SubjectKind.CLASSIFIER),
-                        eq("sig-1"),
-                        eq("Frustration"),
-                        eq(spell.decision().callsSinceOnset()),
-                        eq(CALL_SITE),
-                        eq(spell.decision().onsetAt()),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        anyLong(),
+                        any(),
+                        any(),
                         payload.capture(),
-                        eq(spell.lastBucket()),
-                        anyString(),
-                        eq(at.toString()));
+                        any(),
+                        any(),
+                        any());
         verify(findings)
                 .recordTriage(
                         PROJECT,

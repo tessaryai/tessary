@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -143,7 +145,7 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void deadLetteredJob_revivesOnceTheCooldownElapses() throws InterruptedException {
+    void deadLetteredJob_revivesOnceTheCooldownElapses() {
         String pid = project("signal-deadletter-revive");
         String classifierId = Ids.ulid();
         jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
@@ -151,7 +153,7 @@ class ClassifierJobRepositoryTest {
         driveToDeadLetter(pid, classifierId);
         assertFalse(isClaimable(classifierId, "w"), "still dead under the long cooldown");
 
-        Thread.sleep(20); // ensure updated_at (set at dead-letter time) is strictly before the revival floor
+        backdateDeadLetter(classifierId);
         jobs.enqueue(pid, classifierId, 0); // cooldown has fully elapsed
         assertTrue(
                 isClaimable(classifierId, "w2"),
@@ -182,7 +184,7 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void leaseExpiryExhaustion_deadLettersWithTheSameCooldownAsFastFail() throws InterruptedException {
+    void leaseExpiryExhaustion_deadLettersWithTheSameCooldownAsFastFail() {
         String pid = project("signal-reclaim-cap");
         String classifierId = Ids.ulid();
         jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
@@ -212,7 +214,7 @@ class ClassifierJobRepositoryTest {
                 isClaimable(classifierId, "w2"),
                 "the routine heartbeat enqueue must not resurrect a crash-reclaimed dead job under cooldown");
 
-        Thread.sleep(20); // ensure updated_at (set at dead-letter time) is strictly before the revival floor
+        backdateDeadLetter(classifierId);
         jobs.enqueue(pid, classifierId, 0); // cooldown elapsed — same automatic recovery as the fast-fail leg
         ClassifierJobRow revived = claimOne(classifierId, "w3");
         assertEquals(
@@ -326,6 +328,14 @@ class ClassifierJobRepositoryTest {
                 .toList();
         assertEquals(1, batch.size(), "exactly one due job for this signal");
         return batch.get(0);
+    }
+
+    /** Move the dead-letter moment an hour back, so it is unambiguously before any revival floor. */
+    private void backdateDeadLetter(String classifierId) {
+        jdbc.sql("UPDATE job SET updated_at = :at WHERE kind = 'classifier' AND dedupe_key = :sid")
+                .param("at", Instant.now().minus(Duration.ofHours(1)).toString())
+                .param("sid", classifierId)
+                .update();
     }
 
     private String status(String jobId) {
