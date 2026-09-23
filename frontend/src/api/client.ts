@@ -38,6 +38,7 @@ import {
   type ClassifierDebug,
   type ClassifierEvent,
   type ClassifierHealth,
+  type GroundednessStatus,
   type ClassifierTuning,
   type SetClassifierTuningRequest,
   type BehaviorBaselineEvent,
@@ -564,6 +565,9 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      * drift). Not part of the product surface; see `views/classifiers/debug`.
      */
     getClassifierDebug: (id: string) => http<ClassifierDebug>(`${base}/classifiers/${enc(id)}/debug`),
+    /** The Groundedness row's status: the model's health, the mode, and when it last scored. 422s for any other classifier. */
+    getGroundednessStatus: (id: string) =>
+      http<GroundednessStatus>(`${base}/classifiers/${enc(id)}/groundedness-status`),
     /** The window/threshold operating point for a metric-drift classifier (cost_drift, duration_drift). */
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>

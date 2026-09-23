@@ -147,6 +147,16 @@ export type OnboardingStage = OnboardingProgress["stage"];
 export type Classifier = S["ClassifierView"];
 export type ClassifierEvent = S["ClassifierEventView"];
 export type ClassifierHealth = S["ClassifierHealthView"];
+/**
+ * The Groundedness row's status: whether the model is scoring, and if not, whether it ever was. `state`
+ * is computed on the server; a disabled row is `off` whatever the model does.
+ */
+export type GroundednessStatus = Omit<S["GroundednessStatusView"], "state" | "mode"> & {
+  state: "off" | "on" | "not_scoring" | "not_set_up";
+  mode: GroundednessMode;
+};
+/** `TESSARY_GROUNDEDNESS_CLASSIFIER_MODE`: where the model runs, which picks the setup and restart prompts. */
+export type GroundednessMode = "dev" | "production";
 export type ClassifierDailyVolume = S["ClassifierDailyVolumeView"];
 export type ClassifierDebug = S["ClassifierDebugView"];
 export type ClassifierTuning = S["TuningView"];

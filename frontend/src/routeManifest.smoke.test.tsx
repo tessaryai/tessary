@@ -381,6 +381,20 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     listClassifiers: EMPTY,
     getClassifierDailyVolume: EMPTY,
     listClassifierHealth: EMPTY,
+    // Read only for a listed Groundedness row: a new project's, off and never set up.
+    getGroundednessStatus: () =>
+      Promise.resolve({
+        state: "off",
+        mode: "dev",
+        configured: false,
+        available: false,
+        reason: "no encoder URL configured",
+        checked_at: null,
+        ever_swept: false,
+        last_scored_at: null,
+        last_caught_up_at: null,
+        setup_ref: "main",
+      }),
   },
   "classifiers/findings/:findingId": {
     getBehaviorFinding: NOT_FOUND("behavior finding"),

@@ -17,7 +17,7 @@
  * from a person who has looked. (`triage_automatic_enabled` presses the second button unattended,
  * off by default and bounded when on; nothing on this page changes when it is.)
  */
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertCircle } from "lucide-react";
@@ -27,10 +27,27 @@ import type {
   ClassifierDailyVolume,
   ClassifierEvent,
   ClassifierHealth,
+  GroundednessStatus,
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Toggle, cn } from "../../ui";
+import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Spinner, Toggle, cn } from "../../ui";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
+import { GroundednessEnableModal } from "./GroundednessEnableModal";
+import { GroundednessRestartModal } from "./GroundednessRestartModal";
+import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
+import {
+  GROUNDEDNESS_DETECTOR,
+  GROUNDEDNESS_MODEL,
+  MODE_LABEL,
+  clearSetupFlag,
+  clockTime,
+  groundednessStatusKey,
+  neverSetUp,
+  notScoringLabel,
+  readSetupFlag,
+  rowState,
+  writeSetupFlag,
+} from "./groundedness";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
   BEHAVIOR_DETECTOR,
@@ -87,6 +104,9 @@ const FINDING_DETECTORS: ReadonlySet<string> = new Set([
 /** Detections shown in the rail. Enough to read a pattern, short of a second page. */
 const DETECTION_LIMIT = 25;
 
+/** How often the catalog rereads Groundedness's status: a model going down shows within a minute. */
+const GROUNDEDNESS_STATUS_POLL_MS = 30_000;
+
 
 export function DetectorsPage() {
   // Slugs are for the breadcrumb: `..` resolves against the ROUTE, and `classifiers/detectors` is one
@@ -113,6 +133,33 @@ export function DetectorsPage() {
 
   const classifiers = classifiersQ.data ?? [];
   const selected = classifiers.find((c) => c.id === selectedId) ?? null;
+
+  // Groundedness's model runs outside Tessary, so its row reads whether that model is answering.
+  const groundednessRow = classifiers.find((c) => c.detector === GROUNDEDNESS_DETECTOR);
+  const groundednessQ = useQuery({
+    queryKey: groundednessStatusKey(api.base, groundednessRow?.id),
+    queryFn: () => api.getGroundednessStatus(groundednessRow!.id),
+    enabled: groundednessRow != null,
+    refetchInterval: GROUNDEDNESS_STATUS_POLL_MS,
+  });
+  const groundedness = groundednessQ.data;
+  const [groundednessModal, setGroundednessModal] = useState<"enable" | "turn-off" | null>(null);
+  const [settingUp, setSettingUp] = useState(() => readSetupFlag(orgSlug, projectSlug));
+  useEffect(() => {
+    if (groundedness?.state !== "on") return;
+    clearSetupFlag(orgSlug, projectSlug);
+    setSettingUp(false);
+  }, [groundedness?.state, orgSlug, projectSlug]);
+
+  const toggle = (c: Classifier, enabled: boolean) => {
+    if (enabled && c.detector === FRUSTRATION_DETECTOR) return setEnabling(c);
+    if (c.detector === GROUNDEDNESS_DETECTOR) {
+      if (!enabled) return setGroundednessModal("turn-off");
+      // A model that has never answered needs setting up first; one that has scored before just resumes.
+      if (!groundedness || neverSetUp(groundedness)) return setGroundednessModal("enable");
+    }
+    toggleM.mutate({ id: c.id, enabled });
+  };
 
   /** 7d detection counts per classifier: the status label's only source. */
   const counts = useMemo(() => sevenDayCounts(volumeQ.data), [volumeQ.data]);
@@ -161,13 +208,11 @@ export function DetectorsPage() {
                   count={counts.get(c.id) ?? 0}
                   volumeKnown={volumeQ.data != null}
                   health={(healthQ.data ?? []).find((h) => h.classifier_id === c.id)}
+                  groundedness={c.detector === GROUNDEDNESS_DETECTOR ? groundedness : undefined}
+                  settingUp={settingUp}
                   providersPath={providersPath}
                   onOpen={() => openRail(c.id)}
-                  onToggle={(enabled) =>
-                    enabled && c.detector === FRUSTRATION_DETECTOR
-                      ? setEnabling(c)
-                      : toggleM.mutate({ id: c.id, enabled })
-                  }
+                  onToggle={(enabled) => toggle(c, enabled)}
                 />
               ))}
             </div>
@@ -183,6 +228,7 @@ export function DetectorsPage() {
       <ClassifierRail
         classifier={selected}
         health={(healthQ.data ?? []).find((h) => h.classifier_id === selected?.id)}
+        groundedness={selected?.detector === GROUNDEDNESS_DETECTOR ? groundedness : undefined}
         providersPath={providersPath}
         onClose={closeRail}
       />
@@ -192,6 +238,28 @@ export function DetectorsPage() {
           classifierId={enabling.id}
           onClose={() => setEnabling(null)}
           onEnabled={() => setEnabling(null)}
+        />
+      )}
+
+      {groundednessRow && groundednessModal === "enable" && (
+        <GroundednessEnableModal
+          classifierId={groundednessRow.id}
+          onClose={() => setGroundednessModal(null)}
+          onEnabled={() => {
+            clearSetupFlag(orgSlug, projectSlug);
+            setSettingUp(false);
+          }}
+          onPromptCopied={() => {
+            writeSetupFlag(orgSlug, projectSlug);
+            setSettingUp(true);
+          }}
+        />
+      )}
+      {groundednessRow && groundednessModal === "turn-off" && (
+        <GroundednessTurnOffModal
+          classifierId={groundednessRow.id}
+          mode={groundedness?.mode}
+          onClose={() => setGroundednessModal(null)}
         />
       )}
     </div>
@@ -212,6 +280,8 @@ function DetectorRow({
   count,
   volumeKnown,
   health,
+  groundedness,
+  settingUp,
   providersPath,
   onOpen,
   onToggle,
@@ -220,6 +290,10 @@ function DetectorRow({
   count: number;
   volumeKnown: boolean;
   health: ClassifierHealth | undefined;
+  /** Groundedness's status, on its row only: it replaces the detection count when the model is the news. */
+  groundedness?: GroundednessStatus;
+  /** A setup prompt was copied in this browser and the model hasn't answered yet. */
+  settingUp: boolean;
   providersPath: string;
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
@@ -255,7 +329,9 @@ function DetectorRow({
         </span>
       )}
 
-      {paused ? (
+      {groundedness && groundednessRowStatus(groundedness, settingUp) ? (
+        <GroundednessRowStatus status={groundednessRowStatus(groundedness, settingUp)!} />
+      ) : paused ? (
         <Link
           to={providersPath}
           className="shrink-0 flex items-center gap-1.5 text-muted hover:text-fg transition-colors text-small"
@@ -282,6 +358,45 @@ function DetectorRow({
   );
 }
 
+/** What Groundedness's row says in place of the detection count, or null to keep the count. */
+type GroundednessRowWords = { text: string; kind: "plain" | "faint" | "setting-up" | "alert" };
+
+function groundednessRowStatus(status: GroundednessStatus, settingUp: boolean): GroundednessRowWords | null {
+  switch (rowState(status)) {
+    case "not_set_up":
+      return settingUp ? { text: "Setting up...", kind: "setting-up" } : { text: "needs setup", kind: "faint" };
+    case "not_scoring":
+      return { text: notScoringLabel(status), kind: "alert" };
+    case "off":
+      return { text: "off", kind: "faint" };
+    case "on":
+      // Dev scores continuously, so the detections say it all. Production runs on a schedule, and the
+      // last run is what tells you the schedule is holding.
+      return status.mode === "production" && status.last_caught_up_at
+        ? { text: `last run ${clockTime(status.last_caught_up_at)}`, kind: "plain" }
+        : null;
+  }
+}
+
+function GroundednessRowStatus({ status }: { status: GroundednessRowWords }) {
+  if (status.kind === "setting-up" || status.kind === "alert") {
+    return (
+      <span className="shrink-0 flex items-center gap-1.5 text-muted text-small">
+        {status.kind === "alert" ? (
+          <AlertCircle size={13} strokeWidth={1.75} className="text-error" aria-hidden="true" />
+        ) : (
+          <Spinner size="sm" className="text-fg" />
+        )}
+        {status.text}
+      </span>
+    );
+  }
+  return (
+    <span className={cn("shrink-0 font-mono text-small", status.kind === "faint" ? "text-subtle" : "text-muted")}>
+      {status.text}
+    </span>
+  );
+}
 
 /**
  * This classifier's findings: everything it has opened, with its ruling.
@@ -545,18 +660,44 @@ function ProviderPauseCallout({
   );
 }
 
+/**
+ * Groundedness's model stopped answering: since when, and the way back, which is the setup guide's
+ * restart section run by a coding agent where the model lives.
+ */
+function NotScoringCallout({ label, onRestart }: { label: string; onRestart: () => void }) {
+  return (
+    <div className="border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small">
+      <div className="flex items-start gap-2">
+        <AlertCircle size={14} strokeWidth={1.75} className="text-error mt-0.5 shrink-0" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="text-fg">{label}</div>
+          <p className="text-muted m-0 mt-0.5">The model isn't responding. Restart it to resume scoring.</p>
+        </div>
+      </div>
+      <div className="mt-2.25">
+        <Button size="sm" variant="secondary" onClick={onRestart}>
+          Restart model
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ClassifierRail({
   classifier,
   health,
+  groundedness,
   providersPath,
   onClose,
 }: {
   classifier: Classifier | null;
   health: ClassifierHealth | undefined;
+  groundedness: GroundednessStatus | undefined;
   providersPath: string;
   onClose: () => void;
 }) {
   const { api } = useTenant();
+  const [restarting, setRestarting] = useState(false);
   const isBehavior = classifier?.detector === BEHAVIOR_DETECTOR;
   const isConformance = classifier?.detector === SOP_CONFORMANCE_DETECTOR;
   const isMetricDrift = classifier != null && METRIC_DRIFT_DETECTORS.has(classifier.detector);
@@ -579,6 +720,9 @@ function ClassifierRail({
   if (!classifier) return null;
 
   const detections = detectionsQ.data ?? [];
+  const groundednessState = groundedness ? rowState(groundedness) : null;
+  // The model's facts once it has run; before that, or while off, the generic ones.
+  const modelFacts = groundedness != null && (groundednessState === "on" || groundednessState === "not_scoring");
 
   return (
     <Rail
@@ -613,20 +757,38 @@ function ClassifierRail({
             providersPath={providersPath}
           />
         )}
+        {groundedness && groundednessState === "not_scoring" && (
+          <NotScoringCallout label={notScoringLabel(groundedness)} onRestart={() => setRestarting(true)} />
+        )}
         <dl
       className="gap-y-1.75 gap-x-3.5 m-0"
       style={{ display: "grid", gridTemplateColumns: "94px minmax(0, 1fr)" }}
         >
-          <Fact label="Type">
-            <span className="font-mono">{classifier.detector}</span>
-            <span className="text-subtle"> · {classifier.built_in ? "built in" : "custom"}</span>
-          </Fact>
-          <Fact label="Version">
-            <span className="font-mono">{classifier.version}</span>
-          </Fact>
-          <Fact label="Last swept">
-            {health?.last_swept_at ? new Date(health.last_swept_at).toLocaleString() : "never"}
-          </Fact>
+          {modelFacts ? (
+            <>
+              <Fact label="Runs on">{MODE_LABEL[groundedness.mode]}</Fact>
+              <Fact label="Model">
+                <span className="font-mono">{GROUNDEDNESS_MODEL}</span>
+              </Fact>
+              {groundedness.mode === "production" && <Fact label="Schedule">Hourly</Fact>}
+              <Fact label="Last scored">
+                {groundedness.last_scored_at ? clockTime(groundedness.last_scored_at) : "never"}
+              </Fact>
+            </>
+          ) : (
+            <>
+              <Fact label="Type">
+                <span className="font-mono">{classifier.detector}</span>
+                <span className="text-subtle"> · {classifier.built_in ? "built in" : "custom"}</span>
+              </Fact>
+              <Fact label="Version">
+                <span className="font-mono">{classifier.version}</span>
+              </Fact>
+              <Fact label="Last swept">
+                {health?.last_swept_at ? new Date(health.last_swept_at).toLocaleString() : "never"}
+              </Fact>
+            </>
+          )}
         </dl>
       </RailBlock>
 
@@ -720,6 +882,15 @@ function ClassifierRail({
           <DebugSection classifier={classifier} />
         </Suspense>
       </div>
+
+      {groundedness && restarting && (
+        <GroundednessRestartModal
+          classifierId={classifier.id}
+          mode={groundedness.mode}
+          setupRef={groundedness.setup_ref}
+          onClose={() => setRestarting(false)}
+        />
+      )}
     </Rail>
   );
 }
