@@ -68,7 +68,6 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
 - **User-visible copy follows [`handbook/voice-and-tone.md`](./handbook/voice-and-tone.md).**
   Plain words, active voice, no em-dashes, no hedging. Applies to UI strings, errors, Slack, CLI
   output and docs prose; not to code comments.
-- **Do not add or modify tests** unless explicitly requested.
 - **The schema is the source of truth.** The evals plugin owns the bundle schema; absorb changes
   in order: `contract/` → backend records → frontend types → views. The plugin still emits grader
   and quality-dimension shards this tree has nothing to run; `BundleAssembler` routes them to
@@ -82,6 +81,21 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
   `pnpm` field in `package.json` (which it ignores silently), and dependency build scripts are
   blocked unless allowlisted there under `allowBuilds`. The single exception is the in-sandbox
   `npm install` in `sandbox-runner/agent-sandbox/template.ts`, which is intentional.
+
+## Tests
+
+- **Expected values come from the requirement, never from running the code.** Derive them from
+  the issue, spec, or a hand calculation before implementing.
+- **Test first, watch it fail.** Run the test red for the right reason, then implement. A bug
+  fix's test goes red again when the fix is reverted; a test on a helper the fix didn't touch
+  doesn't count.
+- **Every test names the bug it catches.** If you can't name one, don't write it. Don't add tests
+  to code you didn't change unless asked.
+- **Never weaken a test to get green**: no deleting, skipping, loosening, or re-baselining. If a
+  test looks wrong, or breaks on a pure refactor, stop and ask.
+- **Report each new test** in your summary: the bug it catches and its red output.
+- How to write them: [`backend/AGENTS.md`](./backend/AGENTS.md#testing),
+  [`frontend/AGENTS.md`](./frontend/AGENTS.md#tests).
 
 ## Working loop
 

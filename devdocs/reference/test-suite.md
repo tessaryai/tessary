@@ -155,12 +155,12 @@ inner-loop speed is not.
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
 (`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build) — a handful of
 unit tests plus a route-render smoke test that mounts every view in the route manifest
-and fails on a render error or un-allowlisted console.error. Coverage is thin (7 test files); the
+and fails on a render error or un-allowlisted console.error. Coverage is thin (14 test files); the
 gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
-near-zero tests are thin wrappers or UI-facing glue —
-do not add tests unless explicitly asked (root `AGENTS.md`).
+near-zero tests are thin wrappers or UI-facing glue; a test there has to name the bug it catches
+(root `AGENTS.md` § Tests).
 
 ### JaCoCo baseline
 

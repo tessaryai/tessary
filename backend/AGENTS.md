@@ -125,19 +125,29 @@ The conventions above are **machine-enforced** — `mvn -B verify` (and CI) hard
 
 ## Testing
 
-Two tiers. Keep them clean — don't mix. **Do not add or modify tests unless explicitly requested** (root rule; recap because it bites here most).
+Two tiers. Keep them clean — don't mix. When to add or change a test: root [`AGENTS.md`](../AGENTS.md#tests).
 
 ### Tier 1 — unit tests
 
-`*Test.java` colocated with the class under test, no Spring context, milliseconds. Use for pure logic with non-trivial branching: cipher round-trips, slug/ULID generators, JSON-RPC dispatch, overlay merging, content-block parsing. JUnit 5 + plain `assertX`.
+`*Test.java` colocated with the class under test, no Spring context, milliseconds. **The default:** pure logic never boots Spring; build the class with `new` and hand it its collaborators. Use for pure logic with non-trivial branching: cipher round-trips, slug/ULID generators, JSON-RPC dispatch, overlay merging, content-block parsing. JUnit 5 + plain `assertX`.
 
 ### Tier 2 — integration tests
 
-`@SpringBootTest`-driven; each Spring context gets a uniquely-named database in the JVM-singleton pgvector Testcontainers Postgres (`db/TestPostgres`, wired by `TestcontainersPostgresInitializer` via `META-INF/spring.factories`); Liquibase applies per context boot. **Requires Docker.** Prefer two classes with distinct concerns over one giant fixture. Bootstrap tenants via `testsupport.TenantFixture.bootstrap(...)` — widen the helper rather than fork it.
+`@SpringBootTest`-driven, and only when the behavior needs the database, the filter chain, or bean wiring. Each Spring context gets a uniquely-named database in the JVM-singleton pgvector Testcontainers Postgres (`db/TestPostgres`, wired by `TestcontainersPostgresInitializer` via `META-INF/spring.factories`); Liquibase applies per context boot. **Requires Docker.** Prefer two classes with distinct concerns over one giant fixture. Bootstrap tenants via `testsupport.TenantFixture.bootstrap(...)` — widen the helper rather than fork it.
 
 **A distinct `@SpringBootTest(properties = …)` or unique `@DynamicPropertySource` fingerprint is a distinct Spring context, and each one costs a fresh database plus a full Liquibase run (~15s).** Reuse the shared fingerprint unless the properties are the point of the test — that single decision dominates how long the suite takes. Cost model: [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).
 
 MockMvc in Boot 4: build manually (`MockMvcBuilders.webAppContextSetup(wac)`) and **explicitly add filters** (`addFilters(authFilter)`) — Boot 4 dropped `@AutoConfigureMockMvc`.
+
+### Writing the test
+
+- **Assert state, not calls.** Assert the return value, the row read back, or the response body. Use `verify(...)` only when the call is the outcome (a notification sent, an upstream call skipped), and match only the arguments that rule is about.
+- **Doubles, in order: real object, fake, mock.** Real when it is in-process and fast; a hand-written fake for a port we own; Mockito last. Mock a type we don't own (`HttpClient`, provider SDKs) only to feed canned responses, then assert what our code does with them.
+- **Mocks are strict and local.** `@ExtendWith(MockitoExtension.class)`, no `lenient()`. Declare only the mocks this class drives; don't copy another test's `@Mock` block.
+- **Public API only.** No reflection, `setAccessible`, or visibility widened for a test. If the outcome is invisible to a caller, the design lacks a seam: raise it.
+- **Time is injected.** Code that reads time takes a `java.time.Clock`; tests pass `Clock.fixed(...)`. No `Thread.sleep`: wait on the condition with a deadline.
+- **Assert exact values.** Compare whole records with `assertEquals`. No `assertTrue(s.contains(..))` on log lines, exception text, or prompt prose: assert the `ErrorCode`, the structured field, the parsed value.
+- **Setup lives in the test.** A reader sees the inputs that matter in the method. Share builders, not hidden state. Use `@ParameterizedTest` for input tables; loops belong only in seeded simulations.
 
 ### What to test
 
@@ -145,12 +155,12 @@ Anything that could silently break a pipeline: identifiers/slugs (collisions, tr
 
 ### What NOT to test
 
-Record constructors/getters; controllers that are pure glue; framework wiring (`ContextLoadsTest` covers it once); external HTTP clients (mocking `HttpClient` to test our own JSON proves nothing); negative paths already guarded by the type system.
+Record constructors/getters; constants, enum values, or config defaults restated as asserts; log wording; controllers that are pure glue; framework wiring (`ContextLoadsTest` covers it once); negative paths already guarded by the type system.
 
 ### Conventions
 
 - One class per test class, `<ClassUnderTest>Test` (no `*Tests`); `@Nested` only when it maps to nested behaviour.
-- Method names read as sentences: `verify_rejectsRevokedToken`. No `testX` prefixes.
+- Method names read as sentences and state the rule, not the change: `verify_rejectsRevokedToken`, never `…NowIncludesX`. No `testX` prefixes.
 - Assertion messages whenever the failure mode isn't obvious from the line.
 - Shared state only via `TenantFixture` or `@TempDir` — never static mutable fields.
 - A new repository write method gets at least one full-column round-trip test.
@@ -173,4 +183,4 @@ Record constructors/getters; controllers that are pure glue; framework wiring (`
 
 ## Before you commit
 
-Run `task check -- <areas>` from the repo root for the packages you touched — `task check -- rca,metering` runs both their unit and integration tests. Nothing enforces this automatically, and CI only runs the full gate on a weekly cron (plus manual dispatch) — **your local run is the per-change gate**. Bare `task check` runs the same scripts CI does, and `backend:check` alone is `mvn -B verify` (tests + the full static-analysis gate). Docker must be reachable (Testcontainers). See [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).
+Run `task check -- <areas>` from the repo root for the packages you touched — `task check -- rca,metering` runs both their unit and integration tests. CI runs the same gate on every ready PR, but nothing blocks a merge, so **your local run comes first**. Bare `task check` runs the same scripts CI does, and `backend:check` alone is `mvn -B verify` (tests + the full static-analysis gate). Docker must be reachable (Testcontainers). See [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).
