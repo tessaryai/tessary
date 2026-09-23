@@ -178,6 +178,7 @@ public class MeteringWorker {
         String to = bucketEnd(job.bucketStart(), job.granularity());
         String createdAt = Instant.now().toString();
         upsertUnit(job, UsageUnit.INGESTED_SPANS, rollups.countIngestedSpans(job.projectId(), from, to), createdAt);
+        upsertUnit(job, UsageUnit.INGESTED_TRACES, rollups.countIngestedTraces(job.projectId(), from, to), createdAt);
         upsertUnit(job, UsageUnit.L1_EVALS, rollups.countL1Evals(job.projectId(), from, to), createdAt);
         meterStorage(job, to, createdAt);
         jobs.markDone(job.id());
