@@ -310,9 +310,12 @@ open class to implement a paid type, which the `enforce-open-to-paid-direction` 
 outright. So the catalog entry stayed in-tree (metadata only, `detectorFactory: null`), the port
 stayed open, and only the detector object crossed the boundary — through `DetectorSupplier`, §2's
 seam, not `ClassifierSweepRegistry`, which only covers trace/window-grain `ClassifierSweep` and never
-touches observation-grain dispatch. With the model public (`tessaryai/groundedness-token-v1`, MIT)
-the detector, its table (`groundedness_detection`, migration 0024) and its manifest pin all live in
-the open tree and the capability left `UNAVAILABLE_IN_OPEN_EDITION`.
+touches observation-grain dispatch. With the model public (`tessaryai/groundedness-classifier-v1`,
+MIT) the detector, its tables (`groundedness_detection`, migration 0024; `groundedness_assessment`
+and `groundedness_state`, 0025) and its revision pin all live in the open tree and the capability
+left `UNAVAILABLE_IN_OPEN_EDITION`. The model is not a classify-service head: it runs on a GPU in
+`classifiers/groundedness/serve.py`, outside Tessary's containers, at
+`tessary.observer.encoder.url`.
 
 **SOP conformance** (package `ai.tessary.paid.classifier.conformance`, with `intent/`, `scoring/` and `store/` subpackages):
 

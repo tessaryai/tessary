@@ -45,7 +45,7 @@ Two classifiers exist in the product and cannot run in the open edition. They ar
 | `behavior_drift` | The detector code behind it is not on this build's classpath. |
 | `sop_conformance` | The detector code is not in this build, and the classifier is not in service in any edition. See [Not in service yet](#not-in-service-yet). |
 
-`groundedness` is in this build: its model is public (`tessaryai/groundedness-token-v1`, MIT), and it scores through the separate `classify-service`, so it is listed under [Capabilities that require configuration](#capabilities-that-require-configuration) rather than here. [Configuration](/self-hosting/configuration#classifier-encoder-service) covers the variables it needs.
+`groundedness` is in this build: its model is public (`tessaryai/groundedness-classifier-v1`, MIT) and needs a GPU, so it is listed under [Capabilities that require configuration](#capabilities-that-require-configuration) rather than here.
 
 <Note>
   You will not find these two in the **Classifiers** list. A withheld built-in is filtered out of the listing and returns a 404 if you address it directly, and the capability API refuses an override for one rather than accepting it and doing nothing. The product does not offer a switch that would produce no findings.
@@ -59,7 +59,7 @@ These are in this build and waiting on something from you.
 | --- | --- |
 | Triage, and everything downstream of it | A model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. |
 | `frustration` | An OpenRouter or TypeSafe key. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. See [Watch for frustrated users](/classifiers/frustration). |
-| The `groundedness` classifier | The bundled `classify-service`, started with `docker compose --profile classify up -d` (it bakes the public model on first build and holds about 5 GB of memory), and `TESSARY_OBSERVER_ENCODER_URL` plus `TESSARY_OBSERVER_ENCODER_API_KEY` pointing the backend at it. The backend probes the service's health check every minute; within a minute of its first `200` the classifier is on for every org (an org can turn it off), and until then it is unavailable on the instance. [Configuration](/self-hosting/configuration#classifier-encoder-service); on a Mac, [the GPU path](/self-hosting/groundedness-on-a-mac). |
+| The `groundedness` classifier | A GPU for its model: a Mac with Apple silicon for development, or a GPU instance on AWS for production. It is present on every project and starts switched off. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). |
 | Automatic triage | An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
 | Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
 | A case reaching you | An alert rule and a notification destination. Nothing is sent until you add both. |

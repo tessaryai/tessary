@@ -35,7 +35,9 @@ A flagged message is not a finding on its own. Each call site learns its normal 
 
 ### Groundedness, on a separate model service
 
-`groundedness` is in this build and on for every org once the instance's encoder answers its health check (an org can turn it off), but it scores through a separate encoder service that the default configuration does not start: it reads every retrieved document and the whole answer in one pass of a public token-classification model (`tessaryai/groundedness-token-v1`) and fires on anything the evidence does not support. Start the service with `docker compose --profile classify up -d` and point the backend at it; see [Configuration](/self-hosting/configuration#classifier-encoder-service). Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
+`groundedness` is in this build and starts switched off on every project. It checks whether an answer is supported by the documents the call retrieved: a public model (`tessaryai/groundedness-classifier-v1`) reads the documents and the whole answer in one pass and flags the sentences they don't support. The model needs a GPU and runs outside Tessary's containers, on a Mac with Apple silicon for development or on a GPU instance on AWS for production. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md).
+
+A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
 
 ### What is not available in the open edition
 
@@ -43,7 +45,7 @@ Two classifiers exist in the product and cannot run here:
 
 - `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
 
-The capability API refuses an override for either rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#encoder-based-classifiers-need-a-second-service) states the same boundary from the install side.
+The capability API refuses an override for either rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear.
 
 ## Fitting a baseline, and why a new project waits
 
@@ -72,7 +74,7 @@ A finding is a change detected in production behavior. It records what changed a
 
 The record has four properties worth understanding, because they shape what you see.
 
-**One row per cause, not per firing.** A classifier that keeps detecting the same cause refreshes the finding it already filed rather than filing another. A classifier that judges single spans, such as `groundedness`, files a finding only when its detections cross a bar inside a window (three in a day by default); the finding's cause is the classifier, and the spans that fired are its evidence. A tool that has been failing at a raised rate all week is one finding, not a week of them.
+**One row per cause, not per firing.** A classifier that keeps detecting the same cause refreshes the finding it already filed rather than filing another. A tool that has been failing at a raised rate all week is one finding, not a week of them.
 
 **Evidence is references, never copies.** A finding points at the sessions, traces, and spans it was seen in, tagged by the role each one plays: the flagged population, the baseline side it was compared against, exemplars, witnesses. The set is capped, so no finding can pin unbounded traffic, and retention keeps referenced traces alive past their normal period while the finding is still live.
 

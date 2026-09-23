@@ -75,7 +75,6 @@
         "pages": [
           "self-hosting/setup",
           "self-hosting/configuration",
-              "self-hosting/groundedness-on-a-mac",
           "self-hosting/custom-domain",
           "self-hosting/deployment",
           "self-hosting/upgrading",
