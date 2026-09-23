@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.auth;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -76,7 +78,7 @@ class AuthControllerTest {
                 .andReturn()
                 .getResponse()
                 .getCookie("tessary-session");
-        org.junit.jupiter.api.Assertions.assertNotNull(session, "a successful login sets the session cookie");
+        assertNotNull(session, "a successful login sets the session cookie");
 
         // The cookie is the sign-in: it must resolve to the account that just logged in.
         mvc.perform(get("/auth/me").cookie(session))
@@ -128,8 +130,8 @@ class AuthControllerTest {
 
         mvc.perform(get("/auth/login")).andExpect(status().is3xxRedirection()).andExpect(result -> {
             String location = result.getResponse().getRedirectedUrl();
-            org.junit.jupiter.api.Assertions.assertNotNull(location);
-            org.junit.jupiter.api.Assertions.assertTrue(
+            assertNotNull(location);
+            assertTrue(
                     location.endsWith("/login"),
                     "expected the redirect to land on the frontend's own /login screen, got: " + location);
         });

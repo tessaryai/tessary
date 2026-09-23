@@ -111,22 +111,22 @@ class FrustrationRateServiceTest {
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(findings)
                 .recordRecomputedRate(
-                        any(),
-                        any(),
-                        any(),
-                        any(),
-                        any(),
-                        any(),
-                        any(),
-                        any(),
-                        any(),
+                        anyString(),
+                        eq(PROJECT),
+                        eq("frustration"),
+                        eq(CAUSE),
+                        eq(FindingRow.Cause.FRUSTRATION_RATE),
+                        eq(CALL_SITE),
+                        eq(FindingRow.SubjectKind.CLASSIFIER),
+                        eq("sig-1"),
+                        eq("Frustration"),
                         anyLong(),
-                        any(),
+                        eq(CALL_SITE),
                         any(),
                         payload.capture(),
-                        any(),
-                        any(),
-                        any());
+                        anyString(),
+                        anyString(),
+                        eq(at.toString()));
         verify(findings)
                 .recordTriage(
                         PROJECT,

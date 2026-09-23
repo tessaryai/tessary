@@ -69,15 +69,17 @@ class CachingMediaStoreTest {
                         inv -> Optional.of(media(inv.<MediaRef>getArgument(1).id(), 400)));
         CachingMediaStore store = new CachingMediaStore(delegate, 1000);
 
-        // Five 400-byte objects through a 1000-byte budget: only the last two can still be held.
-        for (int i = 0; i < 5; i++) {
-            store.get("proj", new MediaRef("m" + i));
-        }
-        store.get("proj", new MediaRef("m4"));
+        // A 1000-byte budget holds two 400-byte objects. m0 is loaded first but read again after m1,
+        // so admitting m2 must evict m1 (least recently used), not m0 (first inserted).
         store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m1"));
+        store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m2"));
+        store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m1"));
 
-        verify(delegate, times(1)).get("proj", new MediaRef("m4"));
-        verify(delegate, times(2)).get("proj", new MediaRef("m0"));
+        verify(delegate, times(1)).get("proj", new MediaRef("m0"));
+        verify(delegate, times(2)).get("proj", new MediaRef("m1"));
     }
 
     @Test
