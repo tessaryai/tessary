@@ -798,6 +798,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseGroundednessStatusView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/GroundednessStatusView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseImportResult" : {
         "properties" : {
           "data" : {
@@ -5504,6 +5525,62 @@
         },
         "required" : [
           "hits"
+        ],
+        "type" : "object"
+      },
+      "GroundednessStatusView" : {
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "checked_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "configured" : {
+            "type" : "boolean"
+          },
+          "ever_swept" : {
+            "type" : "boolean"
+          },
+          "last_caught_up_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "last_scored_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "mode" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "setup_ref" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "available",
+          "checked_at",
+          "configured",
+          "ever_swept",
+          "last_caught_up_at",
+          "last_scored_at",
+          "mode",
+          "reason",
+          "setup_ref",
+          "state"
         ],
         "type" : "object"
       },
@@ -13954,6 +14031,60 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseFrustrationTuningView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status" : {
+      "get" : {
+        "operationId" : "ClassifierController_getGroundednessStatus",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseGroundednessStatusView"
                 }
               }
             },

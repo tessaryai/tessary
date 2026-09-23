@@ -78,9 +78,8 @@ public class ObserverProperties {
 
         /**
          * How often the backend asks the encoder's {@code /healthz} whether it is there. The answer
-         * is the instance-level switch on the encoder-backed classifiers ({@code EncoderAvailability});
-         * the catalog reconcile that reveals or withholds them runs on its own minute, so a faster
-         * probe buys little.
+         * gates sweeping the encoder-backed classifiers ({@code EncoderAvailability}); sweeps are
+         * enqueued on their own minute, so a faster probe buys little.
          */
         private long probeIntervalMs = 60_000;
 

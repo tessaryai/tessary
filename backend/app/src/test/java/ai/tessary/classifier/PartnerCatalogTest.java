@@ -15,13 +15,10 @@ import ai.tessary.featureflags.OrgFeatureFlagRepository;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.EncoderFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -93,24 +90,6 @@ class PartnerCatalogTest {
     SubstrateReadRepository substrate;
 
     /** Pin one capability ON for one org. */
-    @Autowired
-    EncoderFixture encoder;
-
-    /**
-     * Every case here narrows or widens an org's view of a catalog that includes {@code groundedness},
-     * which exists on the instance only while its encoder answers; the stub goes up for the class so
-     * the override layer, not the instance ceiling, is what each case exercises.
-     */
-    @BeforeEach
-    void encoderUp() {
-        encoder.up();
-    }
-
-    @AfterEach
-    void encoderDown() {
-        encoder.down();
-    }
-
     private void grant(String orgId, Capability capability) {
         overrides.upsert(orgId, capability.wire(), true);
         flags.invalidate(orgId);

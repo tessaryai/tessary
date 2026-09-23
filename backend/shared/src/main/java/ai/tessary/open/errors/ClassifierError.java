@@ -21,6 +21,9 @@ public enum ClassifierError implements ErrorCode {
     NOT_FRUSTRATION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
+    NOT_GROUNDEDNESS(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' has no groundedness status — only the groundedness classifier does"),
     /** Enabling a classifier that calls a provider on the org's own key, while no such key is configured. */
     PROVIDER_REQUIRED(
             HttpStatus.UNPROCESSABLE_ENTITY,

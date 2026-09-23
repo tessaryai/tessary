@@ -16,18 +16,21 @@ import org.springframework.stereotype.Component;
 /**
  * Makes the instance's encoder answer, for tests whose subject is an encoder-backed classifier.
  *
- * <p>{@code groundedness} is unavailable on an instance whose encoder does not answer its health
- * probe ({@link EncoderAvailability}), and no org override can lift that. A test that grants it
- * and expects it to seed, sweep or list is therefore testing the
- * instance default unless the encoder is up first. This stands a loopback listener up that answers
- * {@code 200} to everything, points the shared {@link ObserverProperties} at it and re-probes, so
- * the real probe, the real capability layer and the real seed path are what run.
+ * <p>{@code groundedness} sweeps only while its model answers the health probe ({@link
+ * EncoderAvailability}): with it down, nothing is enqueued and a claimed job goes back to pending. A
+ * test that expects the classifier to sweep is therefore testing the pause unless the encoder is up
+ * first. This stands a loopback listener up that answers {@code 200} with the {@code groundedness}
+ * head to everything, points the shared {@link ObserverProperties} at it and re-probes, so the real
+ * probe and the real sweep gate are what run.
  *
  * <p>The properties bean is shared by the whole context: every {@link #up()} must be paired with a
  * {@link #down()} in {@code @AfterEach}, or the next test class inherits an answering encoder.
  */
 @Component
 public class EncoderFixture {
+
+    /** The shape {@code serve.py} answers {@code /healthz} with. */
+    private static final String HEALTHY = "{\"ok\":true,\"heads\":[\"groundedness\"]}";
 
     private final ObserverProperties props;
     private final EncoderAvailability encoder;
@@ -82,9 +85,11 @@ public class EncoderFixture {
                     if (head.toString().endsWith("\r\n\r\n")) break;
                 }
                 OutputStream out = client.getOutputStream();
+                byte[] body = HEALTHY.getBytes(StandardCharsets.UTF_8);
                 out.write(("HTTP/1.1 200 Stub\r\nContent-Type: application/json\r\n"
-                                + "Content-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}")
+                                + "Content-Length: " + body.length + "\r\nConnection: close\r\n\r\n")
                         .getBytes(StandardCharsets.UTF_8));
+                out.write(body);
                 out.flush();
             } catch (IOException e) {
                 return;

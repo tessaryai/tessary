@@ -54,6 +54,15 @@ tessary:
   # staff as admin, then upgrade.
   platform:
     staff-emails: ${TESSARY_PLATFORM_STAFF_EMAILS:}
+  # How this instance runs the groundedness model (GroundednessProperties). The model's URL and key
+  # are tessary.observer.encoder.*. dev: a model on a developer's machine, swept whenever it answers.
+  # production: a GPU instance that wakes on a schedule; after a sweep catches up, groundedness is not
+  # enqueued again for the sleep, so the instance can go idle and stop. Unset or blank is dev; any
+  # other value fails startup. The setup writes the mode into .env.
+  groundedness:
+    classifier-mode: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:dev}
+    production-sleep-minutes: 30
+    production-missed-run-minutes: 120
 
 spring:
   # Project Loom: run Tomcat request handling and Boot-managed task/scheduling executors on
@@ -119,11 +128,11 @@ management:
           include: ingestSpool
           show-details: always
           show-components: always
-        # /actuator/health/encoder: whether classify-service answered its last health probe, which
-        # is what decides if the groundedness classifier is available on this
-        # instance at all (EncoderAvailability). UNKNOWN, never DOWN, when it did not: the
-        # classifier is optional and the top-level document is what a container health check
-        # reads. The detail carries the reason: unset URL, unreachable, or a non-200 answer.
+        # /actuator/health/encoder: whether the groundedness model answered its last health probe
+        # with the groundedness head, which is what decides if groundedness sweeps run right now
+        # (EncoderAvailability). UNKNOWN, never DOWN, when it did not: the classifier is optional
+        # and the top-level document is what a container health check reads. The detail carries
+        # the reason: unset URL, unreachable, a non-200 answer, or a 200 without the head.
         encoder:
           include: classifyService
           show-details: always

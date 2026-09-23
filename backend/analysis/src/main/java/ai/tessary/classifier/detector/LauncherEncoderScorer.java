@@ -4,16 +4,21 @@ package ai.tessary.classifier.detector;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
+import ai.tessary.plan.EncoderAvailability;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,8 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Semaphore;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -42,7 +49,9 @@ import org.springframework.stereotype.Service;
  * <p>Fails loudly by contract: unconfigured launcher, transport failure, non-2xx, a response
  * whose score count doesn't match the request, or a non-numeric score entry all throw, so the
  * encoder sweep fails loudly and is retried on subsequent heartbeats instead of silently scoring
- * everything clean.
+ * everything clean. A connection that never opens is the one transport failure that is not a fault:
+ * it throws {@link EncoderUnreachableException} and marks {@link EncoderAvailability} down, so the
+ * sweep pauses until the model answers again rather than spending its attempts.
  */
 @Service
 public class LauncherEncoderScorer implements EncoderScorer {
@@ -83,6 +92,8 @@ public class LauncherEncoderScorer implements EncoderScorer {
 
     private final ObserverProperties props;
     private final ObjectMapper mapper;
+    /** Told the reason when a send finds the encoder unreachable; {@link EncoderAvailability#markUnreachable}. */
+    private final Consumer<String> onUnreachable;
     private final HttpClient client =
             HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     /**
@@ -92,9 +103,15 @@ public class LauncherEncoderScorer implements EncoderScorer {
      */
     private final Semaphore inflight;
 
-    public LauncherEncoderScorer(ObserverProperties props, ObjectMapper mapper) {
+    @Autowired
+    public LauncherEncoderScorer(ObserverProperties props, ObjectMapper mapper, EncoderAvailability availability) {
+        this(props, mapper, availability::markUnreachable);
+    }
+
+    LauncherEncoderScorer(ObserverProperties props, ObjectMapper mapper, Consumer<String> onUnreachable) {
         this.props = props;
         this.mapper = mapper;
+        this.onUnreachable = onUnreachable;
         this.inflight = new Semaphore(Math.max(1, props.getEncoder().getMaxInflight()), true);
     }
 
@@ -475,20 +492,74 @@ public class LauncherEncoderScorer implements EncoderScorer {
             log.debug("encoder.classify parse failure detail head={} host={}", head, host, e);
             throw new IllegalStateException("launcher /classify parse failure"); // NOPMD PreserveStackTrace
         } catch (IOException e) {
-            StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+            throw transportFailure(e, head, mode, count, bytes, chunk, chunks, host, start);
+        }
+    }
+
+    /**
+     * The exception for a failed send. A connection that never opened ({@link #isUnreachable}) means
+     * the model is not running: the availability is marked down at once, so the next sweep skips
+     * instead of trying again, and the throw is an {@link EncoderUnreachableException} that the worker
+     * hands back without spending an attempt. Any other transport failure is a fault and fails the
+     * sweep as before.
+     */
+    private IllegalStateException transportFailure(
+            IOException e,
+            String head,
+            String mode,
+            int count,
+            long bytes,
+            int chunk,
+            int chunks,
+            String host,
+            Instant start) {
+        if (isUnreachable(e)) {
+            String reason = "unreachable: " + e.getClass().getSimpleName();
+            onUnreachable.accept(reason);
+            StructuredLog.info(log, Markers.OPS, "encoder.classify.unreachable")
+                    .message("encoder at %s is not answering (%s); pausing until it does", host, reason)
                     .field("head", head)
                     .field("mode", mode)
                     .field("count", count)
-                    .field("bytes", bytes)
                     .field("chunk", chunk)
                     .field("chunks", chunks)
                     .field("host", host)
-                    .field("reason", "transport")
+                    .field("reason", reason)
                     .durationMs(start)
-                    .cause(e)
                     .log();
-            throw new IllegalStateException("launcher /classify transport failure", e);
+            return new EncoderUnreachableException("launcher /classify unreachable", e);
         }
+        StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
+                .field("head", head)
+                .field("mode", mode)
+                .field("count", count)
+                .field("bytes", bytes)
+                .field("chunk", chunk)
+                .field("chunks", chunks)
+                .field("host", host)
+                .field("reason", "transport")
+                .durationMs(start)
+                .cause(e)
+                .log();
+        return new IllegalStateException("launcher /classify transport failure", e);
+    }
+
+    /**
+     * Whether a send failed before a connection existed: refused, connect timeout, closed channel, or
+     * an unresolvable host. The JDK client sometimes reports a refusal as a {@code ConnectException}
+     * whose cause is the channel's, so the causes are checked too.
+     */
+    static boolean isUnreachable(Throwable e) {
+        Throwable t = e;
+        for (int depth = 0; t != null && depth < 8; depth++, t = t.getCause()) {
+            if (t instanceof ConnectException
+                    || t instanceof HttpConnectTimeoutException
+                    || t instanceof ClosedChannelException
+                    || t instanceof UnknownHostException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -679,19 +750,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
             log.debug("encoder.classify parse failure detail head={} host={}", head, host, e);
             throw new IllegalStateException("launcher /classify parse failure"); // NOPMD PreserveStackTrace
         } catch (IOException e) {
-            StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
-                    .field("head", head)
-                    .field("mode", mode)
-                    .field("count", count)
-                    .field("bytes", bytes)
-                    .field("chunk", chunk)
-                    .field("chunks", chunks)
-                    .field("host", host)
-                    .field("reason", "transport")
-                    .durationMs(start)
-                    .cause(e)
-                    .log();
-            throw new IllegalStateException("launcher /classify transport failure", e);
+            throw transportFailure(e, head, mode, count, bytes, chunk, chunks, host, start);
         }
     }
 }

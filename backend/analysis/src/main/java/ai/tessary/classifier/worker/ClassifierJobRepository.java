@@ -10,6 +10,8 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -146,24 +148,6 @@ public class ClassifierJobRepository {
      * consistent. {@code attempts} resets to 0 on a genuine success so {@link #markFailed}'s cap always
      * measures <em>consecutive</em> failures since the last healthy sweep, not a lifetime total.
      */
-    /**
-     * Persist a sweep's progress WITHOUT releasing the job: the cursor moves, the lease and the
-     * {@code claimed} status stay, so an encoder-backed sweep paging within its drain budget cannot
-     * be re-claimed by another worker mid-drain, and a failure after this write re-scores only the
-     * pages after it.
-     */
-    public void advanceCursor(String id, String cursorAt, String cursorId) {
-        jdbc.sql("""
-            UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId, updated_at = :now
-            WHERE id = :id AND status = 'claimed'
-            """)
-                .param("id", id)
-                .param("cursorAt", cursorAt)
-                .param("cursorId", cursorId)
-                .param("now", Instant.now().toString())
-                .update();
-    }
-
     public void markSwept(String id, @Nullable String cursorAt, @Nullable String cursorId) {
         jdbc.sql("""
             UPDATE job SET status = 'done',
@@ -218,6 +202,74 @@ public class ClassifierJobRepository {
                 .query(String.class)
                 .optional()
                 .isPresent();
+    }
+
+    /**
+     * Hand a claimed job back without spending the attempt its claim took: the encoder-backed sweep
+     * found the model down, which is the model asleep or stopped rather than the sweep failing, so
+     * {@link #markFailed}'s cap must not count it. The cursor stays where the last page landed.
+     *
+     * <p>The job finishes {@code done} rather than {@code pending}, as {@link #holdPage} does: a
+     * pending job would be claimed again by the same tick's claim loop and handed straight back, over
+     * and over. {@link ClassifierService#enqueueEnabled} re-pends it once the model answers.
+     *
+     * <p>Guarded on {@code lease_owner}: a worker that no longer holds the job changes nothing.
+     */
+    public void releaseWithoutAttempt(String id, String leaseOwner) {
+        jdbc.sql("""
+            UPDATE job SET status = 'done', lease_owner = NULL, lease_expires_at = NULL,
+                           attempts = GREATEST(attempts - 1, 0), updated_at = :now
+            WHERE id = :id AND lease_owner = :owner
+            """)
+                .param("now", Instant.now().toString())
+                .param("id", id)
+                .param("owner", leaseOwner)
+                .update();
+    }
+
+    /**
+     * Record that this sweep reached the head of the stream at {@code at}, as {@code caught_up_at} in
+     * the job's {@code payload}. Merged into the payload, so {@code classifier_id} stays. In production
+     * mode an encoder-backed classifier is not enqueued again until the sleep after this has passed,
+     * and the groundedness status reads it as the last run. Guarded on {@code lease_owner}, like every
+     * write a sweep makes to its own job.
+     */
+    public void recordCaughtUp(String id, String leaseOwner, Instant at) {
+        jdbc.sql("""
+            UPDATE job SET payload = COALESCE(payload, '{}'::jsonb)
+                                     || jsonb_build_object('caught_up_at', CAST(:at AS text))
+            WHERE id = :id AND lease_owner = :owner
+            """)
+                .param("at", at.toString())
+                .param("id", id)
+                .param("owner", leaseOwner)
+                .update();
+    }
+
+    /** The {@code caught_up_at} {@link #recordCaughtUp} last wrote for this classifier's job, if any. */
+    public Optional<Instant> caughtUpAt(String projectId, String classifierId) {
+        return jdbc.sql("""
+            SELECT payload->>'caught_up_at' FROM job
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            """)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .query(String.class)
+                .list()
+                .stream()
+                .filter(Objects::nonNull)
+                .findFirst()
+                .map(Instant::parse);
+    }
+
+    /** This classifier's sweep job, if it has ever been enqueued. */
+    public Optional<ClassifierJobRow> findByClassifier(String projectId, String classifierId) {
+        return jdbc.sql("SELECT " + COLS + " FROM job WHERE kind = :kind AND project_id = :pid AND dedupe_key = :sid")
+                .param("kind", JobRow.Kind.CLASSIFIER)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .query((rs, n) -> map(rs))
+                .optional();
     }
 
     /**

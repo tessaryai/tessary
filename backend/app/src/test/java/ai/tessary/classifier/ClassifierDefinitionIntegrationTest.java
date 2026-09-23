@@ -11,10 +11,8 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.EncoderFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,14 +39,6 @@ class ClassifierDefinitionIntegrationTest {
 
     @Autowired
     CapabilityFixture capabilities;
-
-    @Autowired
-    EncoderFixture encoder;
-
-    @AfterEach
-    void encoderDown() {
-        encoder.down();
-    }
 
     @Autowired
     org.springframework.jdbc.core.simple.JdbcClient jdbc;
@@ -233,18 +223,15 @@ class ClassifierDefinitionIntegrationTest {
      * Bootstrap a tenant whose org has all four capability-gated classifiers switched on before its
      * project is created.
      *
-     * <p>Two things make this necessary. {@code behavior_drift}, {@code sop_conformance} and {@code
-     * groundedness} are unavailable in this build, so without a grant these cases would assert the
-     * capability default rather than the behavior they name ({@code frustration} is granted too, so the
-     * set does not depend on which edition's default it has). And the grant has to
+     * <p>Two things make this necessary. {@code behavior_drift} and {@code sop_conformance} are
+     * unavailable in this build, so without a grant these cases would assert the capability default
+     * rather than the behavior they name ({@code frustration} and {@code groundedness} are granted too,
+     * so the set does not depend on which edition's default it has). And the grant has to
      * precede the project, because project creation is what seeds the built-in classifiers: grant
      * afterwards and the classifier row is never inserted, leaving the test hunting findings from a
-     * classifier the project doesn't have. {@code groundedness} additionally needs the instance's
-     * encoder answering, which no grant can substitute for; {@code encoder.up()} brings it up before
-     * the project is created and {@link #encoderDown} takes it away after every case.
+     * classifier the project doesn't have.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
-        encoder.up();
         return TenantFixture.bootstrap(tenants, name, org -> {
             capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT);
             capabilities.grant(org.id(), Capability.SOP_CONFORMANCE);

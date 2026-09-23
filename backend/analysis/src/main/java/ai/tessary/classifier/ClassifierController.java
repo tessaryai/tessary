@@ -9,11 +9,13 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierMetricsView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
 import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
+import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
 import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
 import ai.tessary.classifier.ClassifierDtos.ToolErrorRateView;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
+import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
 import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
@@ -43,12 +45,17 @@ public class ClassifierController {
 
     private final ClassifierService service;
     private final FrustrationTuning frustrationTuning;
+    private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
 
     public ClassifierController(
-            ClassifierService service, FrustrationTuning frustrationTuning, TenantPathResolver resolver) {
+            ClassifierService service,
+            FrustrationTuning frustrationTuning,
+            GroundednessStatus groundednessStatus,
+            TenantPathResolver resolver) {
         this.service = service;
         this.frustrationTuning = frustrationTuning;
+        this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
     }
 
@@ -167,6 +174,21 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         String projectId = r.project().id();
         return ApiResponse.ok(frustrationTuning.view(projectId, service.get(projectId, id)));
+    }
+
+    /**
+     * Whether the groundedness model is scoring: the row's state, the instance's mode, the last health
+     * check, and the git ref its setup prompts link to. Read-only. 422s for any other classifier.
+     */
+    @GetMapping("/{id}/groundedness-status")
+    public ApiResponse<GroundednessStatusView> getGroundednessStatus(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        String projectId = r.project().id();
+        return ApiResponse.ok(groundednessStatus.view(projectId, service.get(projectId, id)));
     }
 
     @GetMapping("/events")

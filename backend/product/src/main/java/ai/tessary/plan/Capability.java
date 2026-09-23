@@ -15,9 +15,8 @@ import java.util.Optional;
  * for the same thing is how an override ends up pointing at a flag nobody is reading.
  *
  * <p>This build's {@code CapabilityService} serves every capability on except {@code
- * TRIAGE_AUTOMATIC}, the classifiers this tree does not ship, and the encoder-backed classifiers
- * while the instance has no answering encoder ({@code EncoderAvailability}), regardless of the
- * default declared here.
+ * TRIAGE_AUTOMATIC} and the classifiers this tree does not ship, regardless of the default declared
+ * here.
  *
  * <p>Adding a capability is adding a constant here with a stated default. Nothing else in the
  * codebase learns a capability's name; surfaces ask this enum.
@@ -103,10 +102,7 @@ public enum Capability {
     TOOL_ERROR("tool_error_enabled", true),
     /** The {@code frustration} built-in classifier. */
     FRUSTRATION("frustration_enabled", false),
-    /**
-     * The {@code groundedness} built-in classifier. On only while the instance's encoder answers its
-     * health check; an org may then turn it off. See {@code CapabilityService#ENCODER_BACKED}.
-     */
+    /** The {@code groundedness} built-in classifier. */
     GROUNDEDNESS("groundedness_enabled", false),
     /** The {@code secret_leak} built-in classifier. */
     SECRET_LEAK("secret_leak_enabled", false),

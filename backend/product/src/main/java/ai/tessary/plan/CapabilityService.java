@@ -6,7 +6,6 @@ import ai.tessary.featureflags.FeatureFlags;
 import ai.tessary.featureflags.FlagContext;
 import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.TessaryException;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
@@ -63,22 +62,12 @@ public class CapabilityService {
      */
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC);
 
-    /**
-     * The classifiers that score through classify-service, and so exist on this instance only while
-     * {@link EncoderAvailability} says the service answers. Two levels of switch, in this order: the
-     * instance (is there an encoder to send to?) and then the org (does it want the classifier?). An
-     * org can turn one of these off; it cannot turn one on that the instance has nowhere to run.
-     */
-    static final Set<Capability> ENCODER_BACKED = EnumSet.of(Capability.GROUNDEDNESS);
-
     private final FeatureFlags featureFlags;
     private final Edition edition;
-    private final EncoderAvailability encoder;
 
-    public CapabilityService(FeatureFlags featureFlags, Edition edition, EncoderAvailability encoder) {
+    public CapabilityService(FeatureFlags featureFlags, Edition edition) {
         this.featureFlags = featureFlags;
         this.edition = edition;
-        this.encoder = encoder;
     }
 
     // ---- capability resolution --------------------------------------------------------------
@@ -112,18 +101,11 @@ public class CapabilityService {
     }
 
     /**
-     * The capabilities this instance cannot honour whatever an org asks for: the "not available" half
-     * of the capability payload, and the set the override write path refuses. Two reasons land here
-     * and the payload does not distinguish them: the build does not carry the code
-     * ({@link #UNAVAILABLE_IN_OPEN_EDITION}), or the code is here but the encoder it needs is not
-     * answering ({@link #ENCODER_BACKED}, per {@link EncoderAvailability}). The health endpoint says
-     * which.
+     * The capabilities this build cannot honour whatever an org asks for: the "not available" half
+     * of the capability payload, and the set the override write path refuses.
      */
     public Set<Capability> unavailable() {
-        Set<Capability> out = EnumSet.noneOf(Capability.class);
-        if (!edition.paid()) out.addAll(UNAVAILABLE_IN_OPEN_EDITION);
-        if (!encoder.available()) out.addAll(ENCODER_BACKED);
-        return Collections.unmodifiableSet(out);
+        return edition.paid() ? Set.of() : UNAVAILABLE_IN_OPEN_EDITION;
     }
 
     /**
@@ -137,21 +119,15 @@ public class CapabilityService {
     }
 
     /**
-     * The org's override of the default, under the instance's own ceiling.
+     * The org's override of the default.
      *
-     * <p>An override still wins for an edition-unavailable capability, and that is deliberate rather
-     * than an oversight: unavailability is enforced where overrides are written (the override
-     * endpoint 422s on {@code behavior_drift} / {@code sop_conformance}) and reported where the
-     * payload is read. Hard-falsing it here too would refuse the write path its own 422 already
-     * covers, in two places that would then have to agree.
-     *
-     * <p>An encoder-backed classifier is the exception, and the reason is operational rather than a
-     * matter of who decides: its availability changes at runtime, so an org that turned it on while
-     * the encoder answered would otherwise keep a sweep running against a service that has gone.
-     * The instance's answer is a ceiling on the org's, in both directions of time.
+     * <p>An override still wins for an unavailable capability, and that is deliberate rather than an
+     * oversight: unavailability is enforced where overrides are written (the override endpoint 422s
+     * on {@code behavior_drift} / {@code sop_conformance}) and reported where the payload is read.
+     * Hard-falsing it here too would refuse the write path its own 422 already covers, in two places
+     * that would then have to agree.
      */
     private boolean resolveOne(FlagContext ctx, Capability capability) {
-        if (ENCODER_BACKED.contains(capability) && !encoder.available()) return false;
         return featureFlags.override(capability.wire(), ctx).orElseGet(() -> defaultFor(capability));
     }
 

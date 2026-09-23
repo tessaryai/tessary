@@ -708,6 +708,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getGroundednessStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics": {
         parameters: {
             query?: never;
@@ -2148,6 +2164,10 @@ export interface components {
             data?: components["schemas"]["GlobalSearchView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseGroundednessStatusView: {
+            data?: components["schemas"]["GroundednessStatusView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseImportResult: {
             data?: components["schemas"]["ImportResult"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -3183,6 +3203,18 @@ export interface components {
         };
         GlobalSearchView: {
             hits: components["schemas"]["SearchHit"][];
+        };
+        GroundednessStatusView: {
+            available: boolean;
+            checked_at: string | null;
+            configured: boolean;
+            ever_swept: boolean;
+            last_caught_up_at: string | null;
+            last_scored_at: string | null;
+            mode: string;
+            reason: string;
+            setup_ref: string;
+            state: string;
         };
         Group: {
             cost: components["schemas"]["Cost"];
@@ -5999,6 +6031,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFrustrationTuningView"];
+                };
+            };
+        };
+    };
+    ClassifierController_getGroundednessStatus: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGroundednessStatusView"];
                 };
             };
         };

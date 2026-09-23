@@ -21,6 +21,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,8 +32,9 @@ import org.junit.jupiter.api.Test;
  * ServerSocket} HTTP responder (forbidden-apis bans {@code com.sun.net.httpserver}, the same reason
  * {@code HttpConformanceEncoderTest} rolls its own): a throttled request (429) is retried with
  * backoff and then succeeds; a refused one (400) is bisected down to the single offending response,
- * which comes back UNSCORED while the rest are scored; and requests are sized by estimated tokens,
- * so a long response travels alone.
+ * which comes back UNSCORED while the rest are scored; requests are sized by estimated tokens, so a
+ * long response travels alone; and a connection that never opens is unreachable, while a 500 or a
+ * 401 is a fault.
  */
 class LauncherEncoderScorerBackpressureTest {
 
@@ -43,6 +45,8 @@ class LauncherEncoderScorerBackpressureTest {
     private final AtomicInteger requests = new AtomicInteger();
     private volatile int throttleFirst = 0;
     private volatile int rejectAnswersLongerThan = Integer.MAX_VALUE;
+    private volatile int failWith = 0;
+    private final List<String> unreachable = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void start() throws IOException {
@@ -53,7 +57,7 @@ class LauncherEncoderScorerBackpressureTest {
         ObserverProperties props = new ObserverProperties();
         props.getEncoder().setUrl("http://127.0.0.1:" + socket.getLocalPort());
         props.getEncoder().setApiKey("k");
-        scorer = new LauncherEncoderScorer(props, MAPPER);
+        scorer = new LauncherEncoderScorer(props, MAPPER, unreachable::add);
     }
 
     @AfterEach
@@ -89,7 +93,10 @@ class LauncherEncoderScorerBackpressureTest {
         int status;
         String extraHeader = "";
         String payload;
-        if (n <= throttleFirst) {
+        if (failWith != 0) {
+            status = failWith;
+            payload = "{\"error\":\"stub failure\"}";
+        } else if (n <= throttleFirst) {
             status = 429;
             extraHeader = "Retry-After: 0\r\n";
             payload = "{\"error\":\"at capacity\"}";
@@ -167,6 +174,40 @@ class LauncherEncoderScorerBackpressureTest {
         assertTrue(out.get(2).scored());
         assertTrue(out.get(3).scored());
         assertTrue(Double.isNaN(out.get(1).unsupported()));
+    }
+
+    @Test
+    void aRefusedConnectionIsUnreachableAndMarksTheModelDown() throws IOException {
+        socket.close();
+
+        EncoderUnreachableException e = assertThrows(
+                EncoderUnreachableException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertTrue(LauncherEncoderScorer.isUnreachable(e), String.valueOf(e.getCause()));
+        assertEquals(1, unreachable.size(), "the availability is told at once");
+        assertTrue(unreachable.getFirst().startsWith("unreachable: "), unreachable.getFirst());
+    }
+
+    @Test
+    void aServerErrorIsAFaultNotUnreachable() {
+        failWith = 500;
+
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertFalse(e instanceof EncoderUnreachableException, "a model that answers 500 is broken, not asleep");
+        assertTrue(unreachable.isEmpty());
+    }
+
+    @Test
+    void anUnauthorisedAnswerIsAFaultNotUnreachable() {
+        failWith = 401;
+
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertFalse(e instanceof EncoderUnreachableException, "a wrong key is a fault the attempts should count");
+        assertTrue(unreachable.isEmpty());
     }
 
     @Test

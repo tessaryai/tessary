@@ -16,6 +16,7 @@ import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
 import ai.tessary.llm.decisions.DecisionTarget;
@@ -23,12 +24,15 @@ import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
+import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.CapabilityService;
+import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -40,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -69,6 +74,14 @@ public class ClassifierService {
     private final CapabilityService capabilities;
     private final ProjectRepository projects;
     private final DecisionProviderResolver decisionProviders;
+    private final EncoderAvailability encoder;
+    private final GroundednessProperties groundedness;
+
+    /**
+     * The last reason each encoder-backed classifier's enqueue was skipped, so the DEBUG line is
+     * written when the reason changes rather than once a minute for as long as the model is down.
+     */
+    private final Map<String, String> lastEncoderSkip = new ConcurrentHashMap<>();
 
     public ClassifierService(
             ClassifierRepository signals,
@@ -81,7 +94,11 @@ public class ClassifierService {
             CapabilityService capabilities,
             ProjectRepository projects,
             MetricBaselineRepository baselines,
-            DecisionProviderResolver decisionProviders) {
+            DecisionProviderResolver decisionProviders,
+            EncoderAvailability encoder,
+            GroundednessProperties groundedness) {
+        this.encoder = encoder;
+        this.groundedness = groundedness;
         this.baselines = baselines;
         this.decisionProviders = decisionProviders;
         this.signals = signals;
@@ -704,12 +721,65 @@ public class ClassifierService {
      * the flag flipping, on existing projects and not only newly created ones. Its
      * {@code enabled} column is untouched, so the flag coming back on resumes exactly the sweep
      * the project had configured.
+     *
+     * <p>An encoder-backed classifier is also skipped while {@link #encoderSkipReason} gives a
+     * reason: its model is down, or it is sleeping after a caught-up sweep in production mode. A skip
+     * is not a failure and touches nothing; the next tick asks again, and the sweep resumes from its
+     * cursor once the model answers.
      */
     public void enqueueEnabled(String projectId) {
         Set<String> withheld = withheldBuiltInKeys(projectId);
+        Instant now = Instant.now();
         for (ClassifierRow s : signals.listEnabled(projectId)) {
             if (!reaches(s, withheld)) continue;
+            if (BuiltInDetector.Kind.ENCODER_BACKED.contains(s.detector())) {
+                Optional<String> skip = encoderSkipReason(projectId, s.id(), now);
+                if (skip.isPresent()) {
+                    logEncoderSkip(projectId, s, skip.get());
+                    continue;
+                }
+                lastEncoderSkip.remove(s.id());
+            }
             jobs.enqueue(projectId, s.id(), props.getDeadLetterCooldownSeconds());
         }
+    }
+
+    /**
+     * Why an encoder-backed classifier should not be swept right now, or empty when it should. Two
+     * reasons: the model does not answer ({@link EncoderAvailability}), or the instance runs in
+     * production mode and this classifier's last sweep reached the head less than {@code
+     * tessary.groundedness.production-sleep-minutes} ago, which is what lets the GPU instance go idle
+     * and stop between scheduled runs. Dev mode never sleeps.
+     */
+    Optional<String> encoderSkipReason(String projectId, String classifierId, Instant now) {
+        if (!encoder.available()) return Optional.of("model down: " + encoder.snapshot().reason());
+        if (groundedness.mode() != GroundednessProperties.Mode.PRODUCTION) return Optional.empty();
+        Optional<Instant> caughtUp = jobs.caughtUpAt(projectId, classifierId);
+        if (caughtUp.isPresent()
+                && now.isBefore(caughtUp.get().plus(Duration.ofMinutes(groundedness.getProductionSleepMinutes())))) {
+            return Optional.of("sleeping after the sweep that caught up at " + caughtUp.get());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Whether a claimed sweep of {@code row} should be handed back unrun because its model is down.
+     * The worker asks this after the enqueue gate, for a job that was pending before the model went
+     * away.
+     */
+    public boolean encoderDown(ClassifierRow row) {
+        return BuiltInDetector.Kind.ENCODER_BACKED.contains(row.detector()) && !encoder.available();
+    }
+
+    private void logEncoderSkip(String projectId, ClassifierRow row, String reason) {
+        if (reason.equals(lastEncoderSkip.put(row.id(), reason))) return;
+        StructuredLog.debug(log, "groundedness.sweep.skipped")
+                .message("not sweeping %s: %s", row.classifierKey(), reason)
+                .field("project", projectId)
+                .field("signal", row.classifierKey())
+                .field("classifierId", row.id())
+                .field("mode", groundedness.getClassifierMode())
+                .field("reason", reason)
+                .log();
     }
 }

@@ -19,18 +19,20 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Answers one operational question, on every boot and once a day: <b>can classify-service be turned off?</b>
+ * Answers one operational question, on every boot and once a day: <b>can the encoder be turned off?</b>
  *
- * <p>The encoder service must stay running while any org still uses an encoder classifier, and the
- * hazard is specific rather than hypothetical. {@code groundedness} is off for every partner, so the
- * classify-service task serves nothing but our own orgs — an ECS task with no visible traffic, on a
- * bill somebody will eventually read. The encoder classifier does not fail loudly when it goes: the
- * sweep throws, retries, and the signal simply stops producing, which reads like a quiet week.
+ * <p>The groundedness model must stay running while any org still uses an encoder classifier, and the
+ * hazard is specific rather than hypothetical. {@code groundedness} seeds off, so the model can serve
+ * nothing at all: a GPU instance with no visible traffic, on a bill somebody will eventually read. The
+ * encoder classifier does not fail loudly when the model goes either: its sweeps pause until it answers
+ * again, which reads like a quiet week.
  *
- * <p>So this counts what actually depends on the service — a project with an <em>enabled</em> encoder-backed
+ * <p>So this counts what actually depends on the model — a project with an <em>enabled</em> encoder-backed
  * classifier row <em>and</em> the org capability to run it, since either one being off is enough to make the
- * row inert — and prints the number where an operator will find it. Zero is the only value at which the
- * service may be scaled down, and that answer is a log query rather than a guess about who uses what.
+ * row inert — and prints the number where an operator will find it. Whether the model answers right now
+ * is deliberately not part of the count: a model that is down is still depended on. Zero is the only
+ * value at which the model may be turned off, and that answer is a log query rather than a guess about
+ * who uses what.
  *
  * <p>It reports; it never enforces. The decision to run or not run a deployment is not one a request handler
  * should be taking, and the same posture is why {@code PlatformSpendReporter} prints rather than throttles.
@@ -74,7 +76,14 @@ public class EncoderDependencyReporter {
         report();
     }
 
-    private void report() {
+    /** What the report counted: the projects and orgs that depend on the encoder, and through which classifiers. */
+    record Dependency(int projects, int orgs, Set<String> classifiers) {
+        boolean decommissionable() {
+            return projects == 0;
+        }
+    }
+
+    Dependency report() {
         Set<String> orgs = new LinkedHashSet<>();
         Set<String> keys = new LinkedHashSet<>();
         int dependentProjects = 0;
@@ -85,12 +94,14 @@ public class EncoderDependencyReporter {
             orgs.add(project.orgId());
             keys.addAll(live);
         }
+        Dependency d = new Dependency(dependentProjects, orgs.size(), keys);
         StructuredLog.info(log, Markers.OPS, "encoder.dependency")
-                .field("projects", dependentProjects)
-                .field("orgs", orgs.size())
-                .field("classifiers", keys)
-                .field("decommissionable", dependentProjects == 0)
+                .field("projects", d.projects())
+                .field("orgs", d.orgs())
+                .field("classifiers", d.classifiers())
+                .field("decommissionable", d.decommissionable())
                 .log();
+        return d;
     }
 
     /** The encoder-backed classifiers this project would actually run: row enabled AND capability held. */
