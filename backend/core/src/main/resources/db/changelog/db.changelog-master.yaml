@@ -100,3 +100,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0024-groundedness-detection.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0025-groundedness-rate.sql
+      relativeToChangelogFile: false

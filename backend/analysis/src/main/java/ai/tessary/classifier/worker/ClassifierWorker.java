@@ -698,7 +698,7 @@ public class ClassifierWorker {
             // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier
             // scores the whole batch in one serving call. Inert/unknown kinds (detector == null)
             // advance the cursor only.
-            List<Detection> scored = detector.detectBatch(obs, detectorConfig);
+            List<Detection> scored = detector.sweepBatch(signal, obs, detectorConfig);
             StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
                     .field("job", job.id())
                     .field("signal", signal.classifierKey())

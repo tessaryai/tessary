@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.catalog;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
@@ -41,6 +42,17 @@ public interface BuiltInDetector {
         List<Detection> out = new ArrayList<>(batch.size());
         for (SubstrateObservation obs : batch) out.add(detect(obs, config));
         return out;
+    }
+
+    /**
+     * {@link #detectBatch} as {@code signal}'s sweep runs it: the one call the {@link ClassifierWorker}
+     * makes per page. The default is {@link #detectBatch}. A detector that records every item it scored,
+     * not only the ones that fire, overrides this to write those rows under {@code signal}'s id, which
+     * is why the signal is passed; {@link #detect} and {@link #detectBatch} stay side-effect-free.
+     */
+    default List<Detection> sweepBatch(
+            ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+        return detectBatch(batch, config);
     }
 
     /**

@@ -216,8 +216,8 @@ class ClassifierWorkerDrainTest {
         when(detections.writesDetections(kind)).thenReturn(true);
         when(catalog.detectorFor(kind)).thenReturn(detector);
         org.mockito.Mockito.lenient().when(catchUp.kinds()).thenReturn(java.util.Set.of(kind));
-        when(detector.detectBatch(any(), any())).thenAnswer(inv -> {
-            List<?> batch = inv.getArgument(0);
+        when(detector.sweepBatch(any(), any(), any())).thenAnswer(inv -> {
+            List<?> batch = inv.getArgument(1);
             List<Detection> none = new ArrayList<>();
             for (int i = 0; i < batch.size(); i++) none.add(Detection.none());
             return none;

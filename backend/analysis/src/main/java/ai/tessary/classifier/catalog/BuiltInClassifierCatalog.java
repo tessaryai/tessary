@@ -252,12 +252,10 @@ public class BuiltInClassifierCatalog {
                     // pays for one ruling per window, not one per turn. Owners raise it per project.
                     "{\"threshold_high\":0.975,\"threshold_low\":0.5,"
                             + "\"arming\":{\"basis\":\"event_count\",\"threshold\":3,\"window_seconds\":86400}}",
-                    // In-tree since 2026-09-21, when the model (tessaryai/groundedness-token-v1) went
-                    // public and the detector moved out of the paid overlay: closed over here like the
-                    // other observation-grain detectors, two substrate ports read off the one repository. Until then this
-                    // slot was null and the detector arrived through the DetectorSupplier seam below;
-                    // that seam stays for detectors that live outside this tree.
-                    d -> new GroundednessDetector(d.encoderScorer(), d.substrate(), d.substrate(), d.mapper())),
+                    // null: the detector writes its own groundedness_assessment rows, one per scored
+                    // answer, so it arrives through the DetectorSupplier seam with its repository
+                    // (GroundednessDetectorSupplier), as Frustration's does.
+                    null),
             new ClassifierModelModule(
                     "behavior_drift",
                     "Behaviour Drift",
@@ -541,7 +539,8 @@ public class BuiltInClassifierCatalog {
         // fail-loud invariant kept via the collector framework rather than an explicit constructor
         // throw, which SpotBugs forbids (CT_CONSTRUCTOR_THROW). A module with no factory is one of
         // the five fitting-tier classifiers, dispatched by the ClassifierSweep registered for their
-        // kind, or frustration, whose detector is instead supplied through `discovered` below.
+        // kind, or frustration or groundedness, whose detectors are instead supplied through
+        // `discovered` below.
         //
         // `discovered` is the generic source: any DetectorSupplier bean on the classpath is folded in
         // for the kind it claims, with no check against MODULES membership; see DetectorSupplier's

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.config.GroundednessProperties;
@@ -57,6 +58,9 @@ class GroundednessStatusIntegrationTest {
 
     @Autowired
     GroundednessProperties groundedness;
+
+    @Autowired
+    GroundednessAssessmentRepository assessments;
 
     @AfterEach
     void reset() {
@@ -138,6 +142,29 @@ class GroundednessStatusIntegrationTest {
         sweptJob(f, Instant.now());
 
         assertEquals("off", status.view(f.pid(), f.row()).state());
+    }
+
+    @Test
+    void lastScoredAtIsTheNewestAssessment() {
+        Fixture f = fixture("gs-last-scored", true);
+        encoder.up();
+        assessments.insert(new GroundednessAssessmentRepository.Assessment(
+                Ids.ulid(),
+                f.pid(),
+                f.row().id(),
+                null,
+                "trace-1",
+                "span-1",
+                "cs-1",
+                0.2,
+                false,
+                "gnd-test",
+                Instant.now().toString()));
+
+        GroundednessStatusView v = status.view(f.pid(), f.row());
+
+        assertNotNull(v.lastScoredAt(), "a clean answer is a scored answer too");
+        assertTrue(Instant.parse(v.lastScoredAt()).isAfter(Instant.now().minusSeconds(60)));
     }
 
     @Test

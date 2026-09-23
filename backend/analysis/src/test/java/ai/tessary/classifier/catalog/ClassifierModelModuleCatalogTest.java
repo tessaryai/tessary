@@ -12,6 +12,8 @@ import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.EncoderScorer;
+import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetectorSupplier;
 import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
@@ -33,24 +35,26 @@ import org.mockito.Mockito;
 class ClassifierModelModuleCatalogTest {
 
     /**
-     * The catalog every other test in this file builds against, with a discovered {@link
-     * DetectorSupplier} stubbed in for {@code frustration}, standing in for the bean that supplies the
-     * real detector in a running backend. Stubbed rather than real: frustration's detector is a Spring
-     * bean with its own collaborators, and this file's job is to pin the catalog's wiring, not re-prove
-     * the detector's own behavior. Every other observation-grain detector, groundedness included, is
+     * The catalog every other test in this file builds against, with the two discovered {@link
+     * DetectorSupplier}s a running backend has. Frustration's is a stub: its detector is a Spring bean
+     * with its own collaborators, and this file's job is to pin the catalog's wiring, not re-prove the
+     * detector's own behavior. Groundedness's is the real supplier over a mocked repository, so the
+     * call-site facts it declares are the shipped detector's. Every other observation-grain detector is
      * closed over in {@code MODULES}.
      */
     private BuiltInClassifierCatalog catalog() {
         BuiltInDetector frustrationStub = Mockito.mock(BuiltInDetector.class);
         Mockito.when(frustrationStub.kind()).thenReturn(BuiltInDetector.Kind.FRUSTRATION);
         Mockito.when(frustrationStub.callSiteFactsRead()).thenReturn(Set.of());
-        return catalogWithDiscovered(deps -> frustrationStub);
+        return catalogWithDiscovered(
+                deps -> frustrationStub,
+                new GroundednessDetectorSupplier(Mockito.mock(GroundednessAssessmentRepository.class)));
     }
 
     /**
      * A catalog built with whatever {@link DetectorSupplier}s the test wants to prove something about
      * the discovery seam itself. The two tests below construct one directly rather than going through
-     * {@link #catalog()}'s groundedness stub, since they are pinning the seam's own contract (no
+     * {@link #catalog()}'s two suppliers, since they are pinning the seam's own contract (no
      * membership guard, fail-loud on a duplicate kind) rather than the shipped catalog's shape.
      */
     private BuiltInClassifierCatalog catalogWithDiscovered(DetectorSupplier... discovered) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.detector.groundedness;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.EncoderScorer;
@@ -8,11 +9,18 @@ import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.CallSiteShapeReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.pipeline.CallSiteFact;
+import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -46,55 +54,54 @@ import org.jspecify.annotations.Nullable;
  * its summary layout rather than a question it would otherwise duplicate.
  *
  * <p><b>Tool-backed turns.</b> A tool result is not collected as evidence (it is JSON, not prose), so
- * a tool-backed {@code rag_answer} lands in the BLIND branch below and is abstained — an
- * {@code extract}/{@code summarize} turn keeps its prompt premise (see {@link
- * #EVIDENCE_EXPECTED_SHAPES}). Under the "unsupported" contract a true fact from a tool call that is
- * absent from the retrieved documents IS a finding when the turn also retrieved something; the
- * remedy is to pass tool output through as evidence, not to exempt it here.
+ * a tool-backed {@code rag_answer} lands in {@link GroundednessInputs}' BLIND branch and is abstained —
+ * an {@code extract}/{@code summarize} turn keeps its prompt premise. Under the "unsupported"
+ * contract a true fact from a tool call that is absent from the retrieved documents IS a finding when
+ * the turn also retrieved something; the remedy is to pass tool output through as evidence, not to
+ * exempt it here.
+ *
+ * <p><b>One threshold, and every score counted (v7).</b> An answer is flagged when its strongest
+ * sentence reaches {@code threshold}; there is no review band. The sweep writes one {@code
+ * groundedness_assessment} row for every answer the model scored, flagged or not, because the rate
+ * test that files findings needs the answers that passed as much as the ones that did not. A flagged
+ * answer's detection lists every sentence at or above the threshold, with its offsets.
  */
 public final class GroundednessDetector implements BuiltInDetector {
-
-    /**
-     * Call-site shapes where the input plausibly carries verifiable source content (see
-     * {@code CallSite}'s {@code shape} enum). Deliberately excludes {@code draft}/{@code agent_step}/
-     * {@code conversational_turn}/etc. — open generation, no source to be ungrounded from.
-     */
-    static final Set<String> GROUNDED_SHAPES = Set.of("summarize", "extract", "rag_answer");
-
-    /**
-     * The shapes whose source material lives OUTSIDE the prompt, and which therefore have nothing to
-     * fall back on when a trace reached outside and captured nothing readable.
-     *
-     * <p>{@code extract} and {@code summarize} are deliberately absent: for those the prompt IS the
-     * document by definition of the shape, so a tool span elsewhere in the trace must not cost them
-     * the premise they already had. Abstaining on every grounded shape would silence a
-     * document-in-prompt turn merely for sharing a trace with a tool call.
-     */
-    private static final Set<String> EVIDENCE_EXPECTED_SHAPES = Set.of("rag_answer");
 
     /** Cap on the claim echoed into {@code evidence_json} — a detection is a pointer, not a payload. */
     private static final int CLAIM_ECHO_CHARS = 300;
 
-    // P(unsupported) bands: HIGH confidence at or above threshold_high, LOW between the two, quiet
-    // below threshold_low. The defaults are the catalog's v5 band — 0.975 is the 2% false-alarm point
-    // on RAGTruth test (recall 0.41, precision 0.83), 0.5 the F1-optimal point (F1 0.66) — read with
-    // thresholds cross-validated by response, never fitted to the scored set.
-    private static final double DEFAULT_THRESHOLD_HIGH = 0.975;
-    private static final double DEFAULT_THRESHOLD_LOW = 0.5;
+    /**
+     * The flag cutoff on P(unsupported): the 2% false-alarm point on RAGTruth test (recall 0.41,
+     * precision 0.83), read with thresholds cross-validated by response, never fitted to the scored
+     * set. One band: an answer at or above it is flagged, one below is scored clean.
+     */
+    static final double DEFAULT_THRESHOLD = 0.975;
+
+    /** The served model, and the revision {@code classifiers/groundedness/serve.py} pins by default. */
+    static final String MODEL = "tessaryai/groundedness-classifier-v1@6746fa25f4f6cdb60f994f056c1919300e6c2b12";
+
+    /**
+     * What the model is sent, as {@link GroundednessInputs} builds it: retrieved documents as numbered
+     * passages with the question, else the prompt as one passage. A change to that layout is a change
+     * to what a score means, so it is part of {@link #scorerVersion}.
+     */
+    static final String ENCODING = "passages-question-answer-v1";
 
     private final EncoderScorer scorer;
-    private final CallSiteShapeReads shapes;
-    private final GroundingEvidenceReads evidenceReads;
+    private final GroundednessInputs inputs;
+    private final GroundednessAssessmentRepository assessments;
     private final ObjectMapper mapper;
 
     public GroundednessDetector(
             EncoderScorer scorer,
             CallSiteShapeReads shapes,
             GroundingEvidenceReads evidenceReads,
+            GroundednessAssessmentRepository assessments,
             ObjectMapper mapper) {
         this.scorer = scorer;
-        this.shapes = shapes;
-        this.evidenceReads = evidenceReads;
+        this.inputs = new GroundednessInputs(shapes, evidenceReads);
+        this.assessments = assessments;
         this.mapper = mapper;
     }
 
@@ -104,9 +111,10 @@ public final class GroundednessDetector implements BuiltInDetector {
     }
 
     /**
-     * Gated on the call site's declared shape: outside {@link #GROUNDED_SHAPES} — and on a call site
-     * with no shape at all — every observation is skipped. A shape arriving (or moving into the set)
-     * therefore invalidates everything already swept — see {@link BuiltInDetector#callSiteFactsRead}.
+     * Gated on the call site's declared shape: outside {@link GroundednessInputs#GROUNDED_SHAPES} — and
+     * on a call site with no shape at all — every observation is skipped. A shape arriving (or moving
+     * into the set) therefore invalidates everything already swept — see {@link
+     * BuiltInDetector#callSiteFactsRead}.
      */
     @Override
     public Set<CallSiteFact> callSiteFactsRead() {
@@ -120,133 +128,150 @@ public final class GroundednessDetector implements BuiltInDetector {
 
     @Override
     public List<Detection> detectBatch(List<SubstrateObservation> batch, @Nullable String config) {
-        List<Detection> out = new ArrayList<>(batch.size());
-        Set<String> siteIds = new HashSet<>();
-        for (SubstrateObservation o : batch) {
-            out.add(Detection.none());
-            if (o.callSiteId() != null) siteIds.add(o.callSiteId());
+        return score(null, batch, config);
+    }
+
+    /**
+     * {@link #detectBatch}, and one {@code groundedness_assessment} row per answer the model scored,
+     * flagged or not: the trials the rate test counts. An answer the inputs skip, or the encoder
+     * refused, writes nothing, because it is not a trial.
+     */
+    @Override
+    public List<Detection> sweepBatch(
+            ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+        return score(signal, batch, config);
+    }
+
+    /**
+     * What produced an assessment: a hash of the model and its revision, the input layout and the
+     * threshold, since a flag under one of them and under another are different events. A change to
+     * any of them starts a new set of assessment rows beside the old ones.
+     */
+    public static String scorerVersion(double threshold) {
+        String material = MODEL + "|" + ENCODING + "|" + String.format(Locale.ROOT, "%.4f", threshold);
+        try {
+            byte[] digest =
+                    MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8));
+            return "gnd-v1-" + HexFormat.of().formatHex(digest, 0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("cannot hash the groundedness scorer", e);
         }
-        if (siteIds.isEmpty()) return out;
+    }
 
-        Map<String, String> shapeBySite = shapes.callSiteShapes(batch.get(0).projectId(), siteIds);
-        if (shapeBySite.isEmpty()) return out;
-
+    /**
+     * The flag cutoff {@code config} sets: {@code threshold}, else an older blob's {@code
+     * threshold_high}, else {@link #DEFAULT_THRESHOLD}.
+     */
+    double threshold(@Nullable String config) {
         ConfigShape shape = parse(config);
-        Double hi = shape == null ? null : shape.thresholdHigh();
-        Double lo = shape == null ? null : shape.thresholdLow();
-        double high = hi != null ? hi : DEFAULT_THRESHOLD_HIGH;
-        double low = lo != null ? lo : DEFAULT_THRESHOLD_LOW;
+        if (shape == null) return DEFAULT_THRESHOLD;
+        if (shape.threshold() != null) return shape.threshold();
+        if (shape.thresholdHigh() != null) return shape.thresholdHigh();
+        return DEFAULT_THRESHOLD;
+    }
 
-        // Paired (trace, span) subjects: a v2 span id addresses a row only alongside its trace.
-        Set<GroundingEvidenceReads.SpanRef> scorable = new HashSet<>();
-        for (SubstrateObservation o : batch) {
-            String sh = o.callSiteId() == null ? null : shapeBySite.get(o.callSiteId());
-            if (sh != null && GROUNDED_SHAPES.contains(sh)) {
-                scorable.add(new GroundingEvidenceReads.SpanRef(o.traceId(), o.observationId()));
-            }
-        }
-        Map<String, GroundingEvidenceReads.Evidence> evidenceById = scorable.isEmpty()
-                ? Map.of()
-                : evidenceReads.groundingEvidence(batch.get(0).projectId(), scorable);
+    private List<Detection> score(
+            @Nullable ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+        List<Detection> out = new ArrayList<>(batch.size());
+        for (int i = 0; i < batch.size(); i++) out.add(Detection.none());
+        List<GroundednessInputs.@Nullable Inputs> read = inputs.read(batch);
 
+        List<GroundednessInputs.Inputs> sent = new ArrayList<>();
         List<EncoderScorer.Response> responses = new ArrayList<>();
         List<Integer> responseIndex = new ArrayList<>();
         for (int i = 0; i < batch.size(); i++) {
-            SubstrateObservation o = batch.get(i);
-            String siteShape = o.callSiteId() == null ? null : shapeBySite.get(o.callSiteId());
-            if (siteShape == null || !GROUNDED_SHAPES.contains(siteShape)) continue;
-            String answer = o.outputText();
-            if (answer.isBlank()) continue;
-            // An answer that asserts nothing checkable never reaches the head: measured on real
-            // turns with no evidence, greetings and questions were 48 of 54 false firings. See
-            // VerifiableClaims. The head scores the WHOLE answer; this is a gate, not a splitter.
-            if (VerifiableClaims.of(answer).isEmpty()) continue;
-            GroundingEvidenceReads.Evidence ev =
-                    evidenceById.getOrDefault(o.observationId(), new GroundingEvidenceReads.Evidence(List.of(), false));
-            List<String> documents = ev.documents();
-            // ABSTAIN only when BLIND on a shape that HAS no prompt fallback — the conversation reached
-            // outside and captured nothing readable, so the answer's source is not ours to judge.
-            // Not abstained: a conversation that reached outside for nothing (the prompt is the whole
-            // world), and extract/summarize, whose document is in the prompt.
-            if (documents.isEmpty()
-                    && ev.conversationDidExternalWork()
-                    && EVIDENCE_EXPECTED_SHAPES.contains(siteShape)) {
-                continue;
-            }
-            List<String> passages;
-            String question;
-            if (!documents.isEmpty()) {
-                passages = documents;
-                String q = o.inputText();
-                question = q.isBlank() ? null : q;
-            } else {
-                String premise = o.groundingPremiseText();
-                if (premise.isBlank()) continue;
-                passages = List.of(premise);
-                question = null;
-            }
-            responses.add(new EncoderScorer.Response(passages, question, answer));
+            GroundednessInputs.Inputs in = read.get(i);
+            if (in == null) continue;
+            sent.add(in);
+            responses.add(new EncoderScorer.Response(in.passages(), in.question(), in.answer()));
             responseIndex.add(i);
         }
         if (responses.isEmpty()) return out;
 
+        double threshold = threshold(config);
+        String scorerVersion = scorerVersion(threshold);
         List<EncoderScorer.ResponseScore> scores = scorer.scoreResponses("groundedness", responses);
         for (int r = 0; r < scores.size(); r++) {
             EncoderScorer.ResponseScore rs = scores.get(r);
             if (!rs.scored()) continue; // refused by the encoder (too long): no verdict, not "clean"
-            double unsupported = rs.unsupported();
-            if (unsupported < low) continue;
-            String confidence = unsupported >= high ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
             int obsIndex = responseIndex.get(r);
             SubstrateObservation scored = batch.get(obsIndex);
-            boolean hadEvidence = !evidenceById
-                    .getOrDefault(scored.observationId(), new GroundingEvidenceReads.Evidence(List.of(), false))
-                    .documents()
-                    .isEmpty();
+            boolean flagged = rs.unsupported() >= threshold;
+            if (signal != null) {
+                assessments.insert(new GroundednessAssessmentRepository.Assessment(
+                        Ids.ulid(),
+                        scored.projectId(),
+                        signal.id(),
+                        scored.sessionId(),
+                        scored.traceId(),
+                        scored.observationId(),
+                        scored.callSiteId() == null ? "" : scored.callSiteId(),
+                        rs.unsupported(),
+                        flagged,
+                        scorerVersion,
+                        scored.createdAt()));
+            }
+            if (!flagged) continue;
+            GroundednessInputs.Inputs in = sent.get(r);
             out.set(
                     obsIndex,
                     Detection.fired(
                             Detection.Severity.WARN,
-                            evidence(rs, hadEvidence, responses.get(r).answer()),
-                            confidence));
+                            evidence(rs, in.premiseHadEvidence(), in.answer(), threshold),
+                            Detection.Confidence.HIGH));
         }
         return out;
     }
 
     /**
-     * {@code premise_had_evidence} is on every firing so a reader can tell what was actually compared;
-     * {@code claim} is the worst-scoring sentence, cut from the answer by the head's own offsets, which
-     * is the difference between "this answer is 0.98 unsupported" and a finding someone can act on.
-     * {@code conflict} is the narrower question's score, so a consumer that only cares about outright
+     * {@code flagged_sentences} is every sentence at or above the threshold, by start, with offsets into
+     * the answer that was scored; the page marks them in the answer. The offsets are UTF-16 code units,
+     * the unit Java and the browser index strings by; the model returns code points and they are
+     * converted here. {@code claim} is the worst sentence's text, kept for readers of the older shape.
+     * {@code premise_had_evidence} says what the answer was actually compared against, and {@code
+     * conflict} is the narrower question's score, so a consumer that only cares about outright
      * contradiction can filter on it without a second model.
      */
-    private String evidence(EncoderScorer.ResponseScore rs, boolean premiseHadEvidence, String answer) {
+    private String evidence(
+            EncoderScorer.ResponseScore rs, boolean premiseHadEvidence, String answer, double threshold) {
         EncoderScorer.Span worst = null;
+        List<EncoderScorer.Span> flagged = new ArrayList<>();
         for (EncoderScorer.Span sp : rs.spans()) {
             if (worst == null || sp.unsupported() > worst.unsupported()) worst = sp;
+            if (sp.unsupported() >= threshold) flagged.add(sp);
         }
-        String claim = worst == null
-                ? answer
-                : answer.substring(
-                        Math.max(0, Math.min(worst.start(), answer.length())),
-                        Math.max(0, Math.min(worst.end(), answer.length())));
+        flagged.sort(Comparator.comparingInt(EncoderScorer.Span::start));
+        List<Map<String, Object>> sentences = new ArrayList<>(flagged.size());
+        for (EncoderScorer.Span sp : flagged) {
+            Map<String, Object> sentence = new LinkedHashMap<>();
+            sentence.put("start", utf16(answer, sp.start()));
+            sentence.put("end", utf16(answer, sp.end()));
+            sentence.put("unsupported", round(sp.unsupported()));
+            sentences.add(sentence);
+        }
+        String claim = answer;
+        if (worst != null) {
+            int start = utf16(answer, worst.start());
+            claim = answer.substring(start, Math.max(start, utf16(answer, worst.end())));
+        }
+        Map<String, Object> ev = new LinkedHashMap<>();
+        ev.put("head", "groundedness");
+        ev.put("unsupported", round(rs.unsupported()));
+        ev.put("conflict", round(rs.conflict()));
+        ev.put("premise_had_evidence", premiseHadEvidence);
+        ev.put("flagged_sentences", sentences);
+        ev.put("claim", claim.length() > CLAIM_ECHO_CHARS ? claim.substring(0, CLAIM_ECHO_CHARS) : claim);
         try {
-            return mapper.writeValueAsString(Map.of(
-                    "head",
-                    "groundedness",
-                    "unsupported",
-                    round(rs.unsupported()),
-                    "conflict",
-                    round(rs.conflict()),
-                    "premise_had_evidence",
-                    premiseHadEvidence,
-                    "sentences",
-                    rs.spans().size(),
-                    "claim",
-                    claim.length() > CLAIM_ECHO_CHARS ? claim.substring(0, CLAIM_ECHO_CHARS) : claim));
+            return mapper.writeValueAsString(ev);
         } catch (JsonProcessingException e) {
             return "{\"head\":\"groundedness\"}";
         }
+    }
+
+    /** The UTF-16 index of the {@code codePoints}-th code point of {@code s}, clamped to the string. */
+    static int utf16(String s, int codePoints) {
+        int cp = Math.max(0, Math.min(codePoints, s.codePointCount(0, s.length())));
+        return s.offsetByCodePoints(0, cp);
     }
 
     private static double round(double v) {
@@ -266,16 +291,17 @@ public final class GroundednessDetector implements BuiltInDetector {
     /**
      * The keys this detector owns. {@code ignoreUnknown} is load-bearing, not politeness: a classifier's
      * {@code config_json} is one blob shared with features that key off it too (the pre-deploy loop
-     * reads {@code surfaces} from it), and the platform mapper is a bare {@code new ObjectMapper()}
-     * with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one foreign key makes {@link
-     * #parse} throw, the catch returns null, and the detector silently falls back to its baked
-     * defaults — a signal that reads as configured while ignoring its configuration.
+     * reads {@code surfaces} from it, the rate test its own dials), and the platform mapper is a bare
+     * {@code new ObjectMapper()} with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one
+     * foreign key makes {@link #parse} throw, the catch returns null, and the detector silently falls
+     * back to its baked defaults — a signal that reads as configured while ignoring its configuration.
+     * {@code threshold_high} is read only for a blob written before v7 named it {@code threshold}.
      */
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     private record ConfigShape(
-            @com.fasterxml.jackson.annotation.JsonProperty("threshold_high") @Nullable
-            Double thresholdHigh,
+            @com.fasterxml.jackson.annotation.JsonProperty("threshold") @Nullable
+            Double threshold,
 
-            @com.fasterxml.jackson.annotation.JsonProperty("threshold_low") @Nullable
-            Double thresholdLow) {}
+            @com.fasterxml.jackson.annotation.JsonProperty("threshold_high") @Nullable
+            Double thresholdHigh) {}
 }

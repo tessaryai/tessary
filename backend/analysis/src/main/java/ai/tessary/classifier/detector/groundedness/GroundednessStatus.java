@@ -45,16 +45,19 @@ public class GroundednessStatus {
     }
 
     private final ClassifierJobRepository jobs;
+    private final GroundednessAssessmentRepository assessments;
     private final EncoderAvailability encoder;
     private final GroundednessProperties groundedness;
     private final ObserverProperties observer;
 
     public GroundednessStatus(
             ClassifierJobRepository jobs,
+            GroundednessAssessmentRepository assessments,
             EncoderAvailability encoder,
             GroundednessProperties groundedness,
             ObserverProperties observer) {
         this.jobs = jobs;
+        this.assessments = assessments;
         this.encoder = encoder;
         this.groundedness = groundedness;
         this.observer = observer;
@@ -69,6 +72,7 @@ public class GroundednessStatus {
         Optional<ClassifierJobRow> job = jobs.findByClassifier(projectId, row.id());
         boolean everSwept = job.map(j -> j.cursorAt() != null).orElse(false);
         @Nullable Instant caughtUp = jobs.caughtUpAt(projectId, row.id()).orElse(null);
+        @Nullable Instant lastScored = assessments.lastScoredAt(projectId, row.id()).orElse(null);
         Mode mode = groundedness.mode();
         State state = state(
                 row.enabled(),
@@ -87,7 +91,7 @@ public class GroundednessStatus {
                 health.reason(),
                 health.checkedAt() == null ? null : health.checkedAt().toString(),
                 everSwept,
-                null,
+                lastScored == null ? null : lastScored.toString(),
                 caughtUp == null ? null : caughtUp.toString(),
                 AppVersion.sourceRef(AppVersion.current()));
     }
