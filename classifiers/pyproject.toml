@@ -85,6 +85,7 @@ package = false
 # directory, which pytest ignores, and only the open tests under `tests/` remain — the truth.
 pythonpath = [".", "../tessary-paid/classifiers"]
 testpaths = ["tests"]
+markers = ["network: needs to download from Hugging Face; skipped when that isn't possible"]
 
 [tool.ruff]
 line-length = 118

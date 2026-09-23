@@ -145,6 +145,10 @@
 #                                          it takes --edition and runs 3 or 6; see its own header.)
 #   scripts/check-no-bedrock.sh            (hard ban on AWS Bedrock in Python tooling; runs on every
 #                                          slice and in every edition, deliberately; see below)
+#   scripts/check-groundedness-serve.sh    (classifiers/groundedness/serve.py runs as one file from
+#                                          its URL: pytest over its standalone import, PEP 723 header,
+#                                          encoding answer key and contract fixtures. Needs uv, and
+#                                          installs pytest only)
 #
 # Two gates are deliberately NOT in this pipeline, in either edition, and carry EXCLUDED rows so
 # that fact is declared rather than implied by absence:
@@ -304,6 +308,7 @@ compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no 
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
 classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 no-bedrock|scripts/check-no-bedrock.sh|RUN|RUN|repo-wide invariant, every slice and every edition
+groundedness-serve|scripts/check-groundedness-serve.sh|RUN|RUN|open on both sides; setup runs serve.py from its URL, so this is the only place an import, header or encoding break shows up before a user runs it
 price-book-contract|scripts/check-price-book-contract.sh|RUN|RUN|the vendored price book's path and shape are a contract tessary-home fetches by raw URL; nothing in this repo reads that URL, so this gate is the only place a move, rename or reshape shows up. Repo-wide and cheap (one JSON parse, a few greps), so it runs on every slice too
 frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction ('@paid' resolves to the in-tree stub)
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
@@ -543,6 +548,7 @@ if [ -z "$SLICES" ]; then
     _gate version-consistency
     _gate compose-artifact
     _gate classify-service
+    _gate groundedness-serve
     _gate slack-service
     _gate sandbox-runner
     _gate compile-service

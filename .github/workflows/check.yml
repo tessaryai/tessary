@@ -197,6 +197,9 @@ jobs:
         with:
           python-version: '3.13'
       # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
+      # check-groundedness-serve.sh runs serve.py's tests with `uv run --with pytest`; it installs
+      # pytest only, so there is no lockfile to key a cache on.
+      - uses: astral-sh/setup-uv@v7
 
       - name: Install Caddy
         # A pinned release tarball, not the Cloudsmith apt repo. The apt route cost 41 seconds of
