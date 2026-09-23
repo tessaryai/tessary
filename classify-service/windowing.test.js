@@ -10,19 +10,19 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { windowsFor, premiseChunksFor, deBlob, classify, headResidency, reduceWindows, reducerFor } = require('./classify');
+const { windowsFor, premiseChunksFor, deBlob, classify, headResidency } = require('./classify');
 
 const OPTS = { windowChars: 100, overlap: 20, maxWindows: 4 };
 
-// Which edition is this checkout? models.json binds each head to a pinned checkpoint. Read
-// directly rather than via classify.js so this is a statement about the FILE, not about the
+// Which edition is this checkout? models.json — the manifest binding each head to a
+// pinned checkpoint — lives outside this tree, which ships `{}` in its place. The two
+// residency test below asserts against a real manifest entry (a model id to build a fixture path
+// from), so it is meaningful only where the manifest is populated; when it's empty the next test
+// runs instead, which pins the behavior that replaces it.
+// Read directly rather than via classify.js so this is a statement about the FILE, not about the
 // registry classify.js derives from it.
-// The open manifest binds exactly the PUBLIC heads (groundedness, since 2026-09-21); an overlay
-// manifest may bind private heads as well. scripts/check-classify-service.sh is the
-// exact-set gate; this switch only needs to tell the two shapes apart.
-const PUBLIC_HEADS = ['groundedness'];
-const MANIFEST = require('./models.json');
-const OPEN_EDITION = Object.keys(MANIFEST).every((head) => PUBLIC_HEADS.includes(head));
+const OPEN_EDITION = Object.keys(require('./models.json')).length === 0;
+const paidOnly = { skip: OPEN_EDITION ? 'open edition: models.json is empty, no head is backed' : false };
 
 test('a short text is a single window (head-only behavior, no cost)', () => {
   const w = windowsFor('short text', OPTS);
@@ -85,32 +85,15 @@ test('a claim that eats most of the budget still leaves a non-empty premise chun
   assert.ok(chunks.every((c) => c.length >= 50), 'the 50-char floor holds even when the claim is huge');
 });
 
-// reduceWindows / reducerFor — how per-window scores collapse to one score per input. The
-// reduction has to agree with what a head's score() MEANS, and when it doesn't, nothing fails: the
-// head just goes quiet. That is exactly what happened to `groundedness` when it swapped from
-// MiniCheck (binary support) to bart-large-mnli (`1 - P(contradiction)`) and kept the shared MAX.
-test('reduceWindows groups windows back to one score per input', () => {
-  // three windows: two belong to input 0, one to input 1
-  const scores = reduceWindows([0.1, 0.9, 0.4], [0, 0, 1], 2, (b) => Math.max(...b));
-  assert.deepEqual(scores, [0.9, 0.4]);
-});
-
-test('an unregistered head falls back to MAX rather than throwing', () => {
-  assert.equal(reducerFor('some-future-head')([0.2, 0.95]), 0.95);
-});
-
 // classify() request-shape validation for pair heads (groundedness) — no model load needed, these
 // all throw before pipelineFor() is reached.
-// `groundedness` is a TOKEN head since 2026-09-18 (groundedness.js): it takes `responses`, and the
-// pair-shape contract below is pinned through it because it is the one head that used to be a pair.
-test('a token head rejects texts- and pairs-shaped requests', async () => {
-  await assert.rejects(() => classify({ head: 'groundedness', texts: ['x'] }), /takes responses/);
-  await assert.rejects(() => classify({ head: 'groundedness', pairs: [{ premise: 'a', claim: 'b' }] }), /takes responses/);
+test('a pair head rejects a texts-shaped request', async () => {
+  await assert.rejects(() => classify({ head: 'groundedness', texts: ['x'] }), /send pairs, not texts/);
 });
 
-test('a token head rejects a malformed responses array', async () => {
-  await assert.rejects(() => classify({ head: 'groundedness', responses: [{ passages: ['p'] }] }), /non-empty array/);
-  await assert.rejects(() => classify({ head: 'groundedness', responses: [] }), /non-empty array/);
+test('a pair head rejects a malformed pairs array', async () => {
+  await assert.rejects(() => classify({ head: 'groundedness', pairs: [{ premise: 'only' }] }), /non-empty array/);
+  await assert.rejects(() => classify({ head: 'groundedness', pairs: [] }), /non-empty array/);
 });
 
 // deBlob — the unbroken-run breaker that keeps SentencePiece/Unigram tokenization off a single
@@ -135,14 +118,11 @@ test('deBlob leaves ordinary prose untouched', () => {
 // filesystem marker check (residentModelDir), the same one embed.js's checkpointResidency() uses
 // for /embed. Restores HF_CACHE_DIR in a `finally` so this test can't leak state into whatever runs
 // after it in the same process.
-test('headResidency reports the public head resident from marker files alone', () => {
-  const { HEADS } = require('./classify');
+test('headResidency reports the public head resident from marker files alone', paidOnly, () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'classify-residency-'));
-  const groundednessDir = path.join(fixtureRoot, ...HEADS.groundedness.model.split('/'));
+  const groundednessDir = path.join(fixtureRoot, 'Xenova', 'bart-large-mnli');
   fs.mkdirSync(groundednessDir, { recursive: true });
   fs.writeFileSync(path.join(groundednessDir, 'tokenizer.json'), '{}');
-  fs.mkdirSync(path.join(groundednessDir, 'onnx'), { recursive: true });
-  fs.writeFileSync(path.join(groundednessDir, 'onnx', 'model.onnx'), '');
   fs.writeFileSync(path.join(groundednessDir, 'model.onnx'), '');
 
   const prevCacheDir = process.env.HF_CACHE_DIR;
@@ -158,13 +138,13 @@ test('headResidency reports the public head resident from marker files alone', (
   }
 });
 
-// This build's counterpart to the test above. With the open models.json every scorer in
-// classify.js that the manifest does not name is UNBACKED: still resolvable by name — the
-// backend's BuiltInClassifierCatalog / EncoderScorer ask for these heads by name and must not be
-// told they are unknown — but unservable, and saying so in a way a caller can tell apart from a
-// serving failure. The public heads are backed in both editions. Runs whether or not an overlay
-// manifest is present: when it is, this test asserts the opposite, that no head is unbacked, so a
-// manifest entry silently disappearing can never pass unnoticed.
+// This build's counterpart to the test above. With an empty models.json every
+// scorer in classify.js is UNBACKED: still resolvable by name — the backend's
+// BuiltInClassifierCatalog / EncoderScorer ask for these heads by name and must not be told
+// they are unknown — but unservable, and saying so in a way a caller can tell apart from a
+// serving failure. Runs whether or not the manifest is populated: when it is, this test asserts
+// the opposite, that no head is unbacked, so a manifest entry silently disappearing can never
+// pass unnoticed.
 //
 // UNAVAILABLE_IN_OPEN_EDITION is asserted as a LITERAL here on purpose. It is a cross-boundary
 // contract, not prose: scripts/check-classify-service.sh branches on that exact spelling, so a
@@ -173,25 +153,19 @@ test('an unbacked head resolves by name and reports UNAVAILABLE_IN_OPEN_EDITION 
   // Head names are the registry's, not a hard-coded list — the exact-set assertion belongs to
   // check-classify-service.sh, and duplicating it here would just double the edit cost of a
   // legitimately-added head.
-  const { HEADS, PAIR_HEADS, TOKEN_HEADS } = require('./classify');
+  const { HEADS, PAIR_HEADS } = require('./classify');
   for (const [head, spec] of Object.entries(HEADS)) {
     if (!OPEN_EDITION) {
       assert.ok(!spec.unbacked, `paid edition: head '${head}' should have a models.json entry`);
-      continue;
-    }
-    if (PUBLIC_HEADS.includes(head)) {
-      assert.ok(!spec.unbacked, `open edition: public head '${head}' should have a models.json entry`);
       continue;
     }
     assert.ok(spec.unbacked, `open edition: head '${head}' should be unbacked`);
     // Send each head its OWN request shape: the edition error is raised after shape validation
     // (deliberately — see requireResident's comment), so a pair head sent `texts` would fail the
     // shape check first and never reach the assertion this test exists to make.
-    const payload = TOKEN_HEADS.has(head)
-      ? { head, responses: [{ passages: ['p'], answer: 'a' }] }
-      : PAIR_HEADS.has(head)
-        ? { head, pairs: [{ premise: 'p', claim: 'c' }] }
-        : { head, texts: ['x'] };
+    const payload = PAIR_HEADS.has(head)
+      ? { head, pairs: [{ premise: 'p', claim: 'c' }] }
+      : { head, texts: ['x'] };
     await assert.rejects(
       () => classify(payload),
       (e) => e.statusCode === 400 && e.message.startsWith('UNAVAILABLE_IN_OPEN_EDITION:'),
@@ -199,12 +173,8 @@ test('an unbacked head resolves by name and reports UNAVAILABLE_IN_OPEN_EDITION 
     );
   }
   // An unbacked head is neither baked nor missing-a-bake: warmup.js fails the build on a
-  // non-gated head reported `missing`, so headResidency must report it as neither. The public
-  // heads are one or the other, depending on whether this checkout has baked weights on disk.
-  if (OPEN_EDITION) {
-    const { resident, missing } = headResidency();
-    assert.deepEqual([...resident, ...missing].sort(), [...PUBLIC_HEADS].sort());
-  }
+  // non-gated head reported `missing`, so headResidency must report it as neither.
+  if (OPEN_EDITION) assert.deepEqual(headResidency(), { resident: [], missing: [] });
 });
 
 // A head name nothing scores is still a caller bug, in either edition. This is the line the

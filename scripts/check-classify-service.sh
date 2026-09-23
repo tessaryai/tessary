@@ -4,31 +4,27 @@
 # (`task classify:check`) and CI (.github/workflows/check.yml, via scripts/check.sh). Fast static checks only, no model
 # download (the image build's offline warmup validation covers the heads).
 #
-# The scoring code in classify.js is open source. models.json, the manifest binding each head to a
-# pinned checkpoint and revision, binds in THIS tree exactly the heads whose weights are public:
-# `groundedness` (tessaryai/groundedness-token-v1, MIT, public since 2026-09-21). A scorer the
-# manifest does not bind registers unbacked and answers the literal token
-# UNAVAILABLE_IN_OPEN_EDITION (none today: the frustration heads left this service with #104). An
-# overlay manifest handed in at build time is the other shape this gate knows. So it branches on
-# which shape it finds:
+# The scoring code in classify.js is open source; models.json, the manifest binding each head to
+# a pinned checkpoint and revision, is not shipped in this build, so `classify-service/models.json`
+# here is literally `{}` and every head registers unbacked. That is a different assertion from a
+# populated manifest, not a weaker one, so this gate branches on which shape it finds:
 #
-#   --edition open             the manifest must bind exactly the public heads (OPEN_HEADS below).
-#                              Any other set under this flag is a hard failure: a private pin in the
-#                              open manifest would publish it. Every unbacked head carries no
+#   --edition open             the manifest must be empty. A populated models.json under this flag
+#                              is a hard failure. Every head in HEADS is then unbacked, carries no
 #                              model/revision/dtype, and asking to serve one returns the literal
 #                              token UNAVAILABLE_IN_OPEN_EDITION rather than `unknown classify head`.
 #   --edition all   (default)  whichever manifest is present is asserted exactly, and the result is
-#                              printed. Any other manifest: exactly groundedness, with model +
-#                              40-hex revision + dtype + score. Open: the same
+#                              printed. Populated: exactly groundedness, with model + 40-hex
+#                              revision + dtype + score. Empty: the same
 #                              assertions as --edition open, plus a printed line naming the
 #                              assertion that did not run and why.
 #
 # `all` dispatches on the manifest rather than the flag, because a flag-only `all` arm would turn
-# `task check` red on a checkout where the open manifest is the correct state. Dispatching on the
-# manifest keeps the gate honest either way, and printing which arm ran keeps the open result from
-# reading as silent compliance.
+# `task check` red on a checkout where an empty models.json is the correct state. Dispatching on
+# the manifest keeps the gate honest either way, and printing which arm ran keeps an empty result
+# from reading as silent compliance.
 #
-# Branching rather than widening the exact-set lists below: each list is exact by design (see its
+# Branching rather than widening the exact-set list below: that list is exact by design (see its
 # own comment, a head appearing without anyone updating the line is what it exists to catch), and
 # a list widened to "one head, or none, or some" would catch nothing. Two exact assertions, one
 # per manifest shape, keeps that property in both.
@@ -62,29 +58,28 @@ done
 # Concurrency-gate + windowing + /embed unit tests (node:test, no deps, no model
 # download; embed.test.js pins the pooling arithmetic against the backend parity
 # fixture, embed.smoke.test.js self-skips unless CONFORMANCE_ENCODER_MODEL_DIR is set).
-node --test queue.test.js windowing.test.js groundedness.test.js embed.test.js embed.smoke.test.js
+node --test queue.test.js windowing.test.js embed.test.js embed.smoke.test.js
 
 # Loading classify.js enforces the models.json <-> scorer consistency contract and
-# validates the manifest shape; HEADS must expose exactly the built-in heads.
-#
-# The heads whose weights are public, i.e. the exact set the OPEN manifest binds. Exact, not "at
-# least": a private pin landing here is what this line exists to catch.
-OPEN_HEADS="groundedness"
-MANIFEST_KEYS="$(node -e "process.stdout.write(Object.keys(require('./models.json')).sort().join(' '))")"
+# validates the manifest shape; HEADS must expose exactly the built-in heads. The set is exact by
+# design: a head appearing in the service without anyone updating this line is precisely what it
+# exists to catch.
+MANIFEST_HEADS="$(node -e "process.stdout.write(String(Object.keys(require('./models.json')).length))")"
 
-if [ "$EDITION" = open ] && [ "$MANIFEST_KEYS" != "$OPEN_HEADS" ]; then
-  echo "check-classify-service: --edition open but classify-service/models.json binds '$MANIFEST_KEYS'," >&2
-  echo "  not the public set '$OPEN_HEADS'. A private head here means the overlay's copy was materialised" >&2
-  echo "  into the open build context and would publish its checkpoint pin with it." >&2
+if [ "$EDITION" = open ] && [ "$MANIFEST_HEADS" != 0 ]; then
+  echo "check-classify-service: --edition open but classify-service/models.json binds $MANIFEST_HEADS head(s)." >&2
+  echo "  The open edition ships an EMPTY manifest; a populated one here means the overlay's copy was" >&2
+  echo "  materialised into the open build context and would publish the checkpoint pins with it." >&2
   exit 1
 fi
 
-if [ "$MANIFEST_KEYS" = "$OPEN_HEADS" ]; then
-  # The open manifest's assertions, in the order a reader would ask them.
+if [ "$MANIFEST_HEADS" = 0 ]; then
+  # The open manifest's three assertions, in the order a reader would ask them.
   #
-  # (1) The manifest binds exactly the public heads, read as JSON, not grepped, each with a 40-hex
-  #     revision and not marked gated; a private entry here would publish that checkpoint's pin.
-  # (2) Every other head is unbacked and carries no weight fields. `unbacked: true` alone is not enough:
+  # (1) The manifest is empty, read as JSON, not grepped. `{}` and `{"groundedness": {...}}` differ
+  #     by more than a byte count, and a manifest that kept any entry would publish that
+  #     checkpoint's pin.
+  # (2) Every head is unbacked and carries no weight fields. `unbacked: true` alone is not enough:
   #     a spec that kept `model`/`revision` and merely gained a flag would still publish the pin.
   # (3) Asking to serve one produces the literal token. This is the half that actually matters to
   #     the backend, which still calls these heads by name (BuiltInClassifierCatalog carries their
@@ -93,23 +88,18 @@ if [ "$MANIFEST_KEYS" = "$OPEN_HEADS" ]; then
   #     hunting a typo that is not there. Driven through the exported classify() with a minimal
   #     valid payload per head shape, because requireResident() sits deliberately behind
   #     request-shape validation; a malformed probe would get the shape error and prove nothing.
-  OPEN_HEADS="$OPEN_HEADS" node -e "
+  node -e "
 const fs = require('node:fs');
 const raw = JSON.parse(fs.readFileSync('./models.json', 'utf8'));
-const publicHeads = process.env.OPEN_HEADS.split(' ').sort();
-if (JSON.stringify(Object.keys(raw).sort()) !== JSON.stringify(publicHeads)) {
-  throw new Error('open edition: models.json binds ' + Object.keys(raw).join(', ') + ', not the public set ' + publicHeads.join(', '));
+if (Object.keys(raw).length !== 0) {
+  throw new Error('open edition: models.json is not empty — it binds ' + Object.keys(raw).join(', '));
 }
-for (const head of publicHeads) {
-  const spec = raw[head];
-  if (spec.gated) throw new Error('open edition: public head ' + head + ' is marked gated — its weights are public and a keyless build must bake them');
-  if (!/^[0-9a-f]{40}$/.test(spec.revision || '')) throw new Error('open edition: public head ' + head + ' has no 40-hex revision pin');
-}
-const { HEADS, PAIR_HEADS, TOKEN_HEADS, classify } = require('./classify');
+const { HEADS, PAIR_HEADS, classify } = require('./classify');
 const heads = Object.keys(HEADS).sort();
-const unbacked = heads.filter((h) => !publicHeads.includes(h));
-for (const head of unbacked) {
-  const spec = HEADS[head];
+if (heads.length === 0) {
+  throw new Error('open edition: HEADS is empty — the scorers must still be REGISTERED so the backend gets UNAVAILABLE_IN_OPEN_EDITION and not \'unknown classify head\'');
+}
+for (const [head, spec] of Object.entries(HEADS)) {
   if (spec.unbacked !== true) throw new Error('open edition: head ' + head + ' is not marked unbacked');
   for (const field of ['model', 'revision', 'dtype']) {
     if (spec[field] !== undefined) {
@@ -118,38 +108,31 @@ for (const head of unbacked) {
   }
   if (typeof spec.score !== 'function') throw new Error('open edition: head ' + head + ' has no scorer');
 }
-for (const head of publicHeads) {
-  const spec = HEADS[head];
-  if (spec.unbacked) throw new Error('open edition: public head ' + head + ' registered unbacked');
-  if (typeof spec.score !== 'function') throw new Error('open edition: head ' + head + ' has no scorer');
-}
 (async () => {
-  for (const head of unbacked) {
-    // Each head gets its own request shape: shape validation runs before the edition check.
-    const payload = TOKEN_HEADS.has(head)
-      ? { head, responses: [{ passages: ['x'], answer: 'y' }] }
-      : PAIR_HEADS.has(head)
-        ? { head, pairs: [{ premise: 'x', claim: 'y' }] }
-        : { head, texts: ['x'] };
+  for (const head of heads) {
+    const payload = PAIR_HEADS.has(head)
+      ? { head, pairs: [{ premise: 'x', claim: 'y' }] }
+      : { head, texts: ['x'] };
     let msg = null;
     try {
       await classify(payload);
     } catch (e) {
       msg = e && e.message ? e.message : String(e);
     }
-    if (msg === null) throw new Error('open edition: head ' + head + ' SERVED a request with no manifest entry');
+    if (msg === null) throw new Error('open edition: head ' + head + ' SERVED a request with an empty manifest');
     if (!msg.startsWith('UNAVAILABLE_IN_OPEN_EDITION')) {
       throw new Error('open edition: head ' + head + ' failed with ' + JSON.stringify(msg) + ', not the UNAVAILABLE_IN_OPEN_EDITION token the backend contract names');
     }
   }
-  console.log('classify-service check OK (open manifest): public head(s) ' + publicHeads.join(', ') + ' bound; ' + unbacked.length + ' unbacked head(s) reporting UNAVAILABLE_IN_OPEN_EDITION: ' + unbacked.join(', '));
+  console.log('classify-service check OK (empty manifest): ' + heads.length + ' unbacked head(s) reporting UNAVAILABLE_IN_OPEN_EDITION: ' + heads.join(', '));
 })().catch((e) => { console.error(e.message); process.exit(1); });
 "
   if [ "$EDITION" != open ]; then
-    echo "classify-service: NOTE — models.json is the OPEN manifest in this build context, so the"
-    echo "  other-manifest exact-set assertion did NOT run. That is expected in an open checkout; an"
-    echo "  overlay image build hands its own manifest in as the \`manifest\` build context and this"
-    echo "  gate then takes the other arm against that file."
+    echo "classify-service: NOTE — models.json is empty in this build context, so the exact-set head"
+    echo "  assertion (exactly groundedness, with a 40-hex revision) did"
+    echo "  NOT run. That is expected in an open checkout and in a full checkout before the overlay's"
+    echo "  manifest is copied in at image-build time; it is NOT expected in a paid image build, where"
+    echo "  the copy happens first and this gate then takes the populated arm."
   fi
 else
   node -e "

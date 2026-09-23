@@ -75,10 +75,9 @@ COMPOSE="$(cd "$TMP" && bash scripts/lib/dev-compose.sh)"
 #
 # 1. TESSARY_SKIP_CLASSIFY is dropped entirely: this gate exists to prove the classify service
 #    itself builds and boots keyless, so skipping it would skip the thing under test. Note that
-#    `frustration` and `groundedness` are the only built-in classifiers that read it; frustration is
-#    in CapabilityService.UNAVAILABLE_IN_OPEN_EDITION and groundedness's weights are public, so a
-#    keyless build bakes the groundedness head and this proves the container builds and serves it
-#    healthy with no credential.
+#    `frustration` and `groundedness` are the only built-in classifiers that read it, and both are
+#    in CapabilityService.UNAVAILABLE_IN_OPEN_EDITION, so this proves the container builds and
+#    serves healthy with no credential, not that a classifier verdict flows through it today.
 # 2. SANDBOX_BACKEND=docker is exported explicitly as documentation of intent: the `launcher`
 #    compose profile stays off here (see the SCOPE BOUNDARY note further down), so E2B_API_KEY is
 #    never read either way.

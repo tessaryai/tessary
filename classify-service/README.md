@@ -1,9 +1,8 @@
 # classify-service
 
-Standalone serving for the platform's built-in encoder heads: one token head, `groundedness`
-(whole-response unsupported-content scoring — `tessaryai/groundedness-token-v1`, MIT, three-way
-NLI), plus the `/embed` sentence encoder SOP conformance uses.
-Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
+Standalone serving for the platform's built-in encoder heads: one pair head, `groundedness`
+(claim-vs-premise contradiction scoring with `Xenova/bart-large-mnli`), plus the `/embed` sentence
+encoder SOP conformance uses. Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
 burst OOM-looped the shared production host: CPU inference with model weights now runs in its
 own resource envelope (ECS Fargate, ARM64, **2 vCPU / 6 GB** — `classify_cpu` / `classify_memory`
 in the infrastructure repo; see the 2026-08-11 note, which raises the memory) and can only ever
@@ -36,11 +35,11 @@ request shapes depending on the head:
   (default 2, the memory ceiling); extras wait in a bounded FIFO queue (`MAX_QUEUE`, default 8)
   rather than failing outright. It returns 429 only when the queue is full or a waiter exceeds
   `QUEUE_TIMEOUT_MS` (default 20000), at which point the backend's sweep retry is the backpressure.
-- `POST /classify {head, responses: [{passages: [..], question?, answer}]} -> {scores: [{unsupported, conflict, spans[]}]}`
-  — the token head (`groundedness`). One forward pass per response over ALL its passages and the
-  whole answer (8,192 tokens; the context is truncated first, never the answer). `unsupported` is the
-  response's strongest unsupported sentence, `conflict` the strongest contradicted one, `spans` the
-  per-sentence scores with character offsets into `answer` — see "Token head" below.
+- `POST /classify {head, pairs: [{premise, claim}]} -> {scores[]}` — pair heads (`groundedness`
+  today; see `PAIR_HEADS` in `classify.js`). Scores each `claim` for support against its
+  `premise`; a long premise is windowed internally (chunk + max-aggregate, never truncated
+  silently) so a fact buried past one encoder window is still caught — see "Pair heads" below.
+  Same batch cap, auth, and backpressure as the single-text shape.
 - `POST /embed {checkpoint, texts[]} -> {vectors[][], dim, checkpoint}` — raw sentence
   embeddings for the SOP-conformance classifier, under the conformance fit contract
   (tokenize with the checkpoint's own `tokenizer.json`, truncation 256 → `last_hidden_state`
@@ -50,50 +49,14 @@ request shapes depending on the head:
   bounded work per request is this service's founding lesson).
 - `GET /healthz` — unauthenticated, used by the ECS health check.
 
-### Concurrency and CPU quota
+### Pair heads
 
-`MAX_INFLIGHT` (2) requests score at once, `MAX_QUEUE` (8) wait, the rest get 429 with the backend
-retrying after a backoff; the backend keeps its own side under `tessary.observer.encoder.max-inflight`
-so it never sends more than this service can hold. onnxruntime's thread pool is pinned to the CPUs
-the container may use (`os.availableParallelism()`, override `ONNX_INTRA_THREADS`): unpinned it
-sized itself to the host's cores and spun against the cgroup quota, measured at nine times slower.
-
-### Token head: `groundedness`
-
-`groundedness.js`. The head reads every retrieved passage and the whole answer in ONE encoder pass
-and labels each answer token O / BASELESS / CONFLICT; `unsupported = P(BASELESS) + P(CONFLICT)`.
-The caller sends the passages as a LIST — never one joined string — plus the user's question when
-there is one, and the answer as one string:
-
-```json
-{"head":"groundedness","responses":[{"passages":["passage text","another"],"question":"…","answer":"…"}]}
-→ {"scores":[{"unsupported":0.999,"conflict":0.159,"spans":[{"start":0,"end":40,"unsupported":0.999,"conflict":0.159}, …]}]}
-```
-
-Why a list: the context side is laid out for the encoder exactly as the checkpoint was trained
-(`passage 1: …`, `passage 2: …` under a fixed instruction, with the question). That layout is part
-of the model — serving with a different one is a silent accuracy loss — so it is built here, next
-to the model, from structured input. The backend's `GroundingEvidenceReads.Evidence` carries
-`documents` for the same reason.
-
-Why the contract is "unsupported", not "contradicts": measured on human-labelled RAG output
-(RAGTruth), contradiction-only sentence detection tops out at 0.04-0.24 recall at a 2% false-alarm
-rate for every model of this size, published ones included; "unsupported" is what the annotators
-labelled and where this head reaches 0.56 sentence recall / 0.83 response precision at 2% FP
-(0.66 F1 at the F1-optimal point, equal to the best published checkpoint). `conflict` is still
-returned for a consumer that wants the narrower question. A true fact from a tool call that was not
-passed as a passage IS unsupported under this contract; the fix is to pass tool output in.
-
-Encoding is done by hand — transformers.js has no `truncation: only_first` and returns no offsets —
-and pinned id-for-id against the Python evaluator by
-`classifiers/tests/test_groundedness_token_head.py` (runs `groundedness_encode_cli.js` under node).
-The exported ONNX graph matches torch to 3e-5 in probability on 40 real responses; the served
-scores for a response equal `token_eval`'s to six decimals. Cost: ~0.3-0.4 s per typical response
-on four CPU threads (fp32, 1.6 GB weights); the bake must NOT clamp `model_max_length` for this head
-(`tokenModelFor` asserts the 8,192 window). The pair path (`classifyPairs`, `premiseChunksFor`)
-stays in this file for a future pair head; `PAIR_HEADS` is empty and no head registers its own
-window reducer (MAX is the only one).
-
+`groundedness` scores whether a `claim` (the thing being checked — typically a model's output)
+is supported by a `premise` (the source content it should be grounded in — input/context/tool
+results). The model needs BOTH strings, joined internally as
+`premiseChunk + tokenizer.eos_token + claim` (no separate pair-tokenizer path). The premise, not the claim, is what gets chunked when the input is too
+big for the ~512-token window: the claim is the exact content being judged, so it must never be
+the part silently dropped by truncation. See `premiseChunksFor`/`classifyPairs` in `classify.js`.
 
 ### Embedding (`/embed`)
 
@@ -201,18 +164,13 @@ and only then shrink the task, or the running image will not fit the smaller one
 ```bash
 # production image (Fargate runs ARM64/Graviton). A gated head's weights are a private HF
 # repo — HF_TOKEN must be passed as a BuildKit secret, never a build ARG (that would land in
-# image history); groundedness is public and bakes without one. The manifest is a NAMED BUILD
-# CONTEXT: this directory's models.json binds the public head(s) (the open edition), and an
-# overlay's manifest is handed in by name, so the open file never changes on disk. Without
-# --build-context the open manifest bakes.
+# image history).
 HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-  --build-context manifest=<directory holding the overlay's models.json> \
   --platform linux/arm64 -t tessary-classify:dev .
 
 # same, plus the SOP-conformance encoder (~1.4 GB larger, needs a >= 6 GB task to boot and 8 GB for arena headroom —
 # read "Enabling the conformance encoder in production" first). This is what `task dev` builds.
 HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-  --build-context manifest=<directory holding the overlay's models.json> \
   --build-arg BAKE_EMBEDDERS=1 --platform linux/arm64 -t tessary-classify:dev .
 
 # local

@@ -21,10 +21,6 @@ const path = require('node:path');
 // optional dataset_repo / dataset_revision fields are provenance for the platform and
 // are ignored here.
 const HEADS = require('./models.json');
-// Mirrors classify.js's TOKEN_HEADS (not required from there: this script must not load the
-// serving module's transformers.js import chain). A head named here bakes as tokenizer + token
-// classifier and keeps its full window.
-const TOKEN_HEADS = new Set(['groundedness']);
 const EMBEDDERS = require('./embedders.json');
 
 const STAGING = '/tmp/hub-staging';
@@ -67,7 +63,7 @@ function mergeDir(src, dst, overwrite) {
   tf.env.allowRemoteModels = true;
 
   // A head marked `"gated": true` in models.json lives in a private HF repo and needs a token
-  // with read access; groundedness (tessaryai/groundedness-token-v1, MIT) is public and always bakes. A
+  // with read access; groundedness (Xenova/bart-large-mnli) is public and always bakes. A
   // gated head is skipped ONLY on a missing token — an explicit-but-bad token still fails
   // loud below (the fetch itself errors), so this never silently masks a real credential
   // problem, only a genuinely absent one. This is what makes it possible to build the image
@@ -84,14 +80,7 @@ function mergeDir(src, dst, overwrite) {
     const started = Date.now();
     const opts = { dtype: spec.dtype, revision: spec.revision };
     if (spec.subfolder !== undefined) opts.subfolder = spec.subfolder;
-    if (TOKEN_HEADS.has(head)) {
-      // A token head is loaded the way classify.js loads it — tokenizer + token-classification model —
-      // so the same files land in the staging layout.
-      await tf.AutoTokenizer.from_pretrained(spec.model, { revision: spec.revision });
-      await tf.AutoModelForTokenClassification.from_pretrained(spec.model, opts);
-    } else {
-      await tf.pipeline('text-classification', spec.model, opts);
-    }
+    await tf.pipeline('text-classification', spec.model, opts);
     console.log(`downloaded head '${head}' (${spec.model}@${spec.revision}) in ${Date.now() - started}ms`);
 
     // Assemble: <staging>/<model>/<revision>/* is the pinned tree — it wins; any
@@ -123,9 +112,6 @@ function mergeDir(src, dst, overwrite) {
   // support.
   for (const head of baked) {
     const spec = HEADS[head];
-    // A token head's window IS its context (8,192 for the groundedness ModernBERT); classify.js
-    // asserts it is not clamped, and groundedness.js does its own bounded truncation.
-    if (TOKEN_HEADS.has(head)) continue;
     const cfgPath = path.join(TARGET, spec.model, 'tokenizer_config.json');
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     const declared = Number(cfg.model_max_length);

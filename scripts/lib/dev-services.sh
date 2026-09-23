@@ -45,20 +45,3 @@ dev_up_services() {
     # here and avoids bash 3.2's empty-array-under-`set -u` pitfall on stock macOS.
     $compose config --services | grep -vxE 'classify|compile' | tr '\n' ' '
 }
-
-# The classify image bake reads HF_TOKEN through docker-compose.dev.yml's `hf_token` secret, which
-# is sourced from the invoking shell's REAL environment (not .env). A developer who has done
-# `hf auth login` already holds the token at ~/.cache/huggingface/token; default to it when the
-# variable is unset so `task dev` bakes the gated heads without a second copy of the credential
-# in a shell profile. An explicitly set HF_TOKEN wins; an empty file or no file yields nothing, and
-# the bake then skips gated heads exactly as a keyless build does (classify-service/Dockerfile).
-# Printed, not exported: the caller scopes it to the one `docker compose up --build` that needs it,
-# so the credential never lands in a tmux server's environment or any other child process.
-dev_hf_token() {
-    if [ -n "${HF_TOKEN:-}" ]; then
-        printf '%s' "$HF_TOKEN"
-    elif [ -s "${HF_HOME:-$HOME/.cache/huggingface}/token" ]; then
-        tr -d '[:space:]' < "${HF_HOME:-$HOME/.cache/huggingface}/token"
-    fi
-    return 0
-}

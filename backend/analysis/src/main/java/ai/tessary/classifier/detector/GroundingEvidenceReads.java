@@ -46,10 +46,10 @@ public interface GroundingEvidenceReads {
 
     /**
      * @param documents the source material as the retriever returned it: one entry per {@code retrieved_doc}
-     *     row, best rank first, each capped per row, never joined. The token head (classify-service
-     *     {@code groundedness.js}) lays these out as numbered passages — the layout the model was trained
-     *     on — so the boundary between two documents is information the model uses, and a head handed one
-     *     joined string cannot recover it. Empty when none was captured.
+     *     row, best rank first, each capped per row, never joined. The groundedness model server
+     *     ({@code classifiers/groundedness/serve.py}) lays these out as numbered passages — the layout the
+     *     model was trained on — so the boundary between two documents is information the model uses, and a
+     *     head handed one joined string cannot recover it. Empty when none was captured.
      * @param conversationDidExternalWork whether the conversation (up to and including this turn)
      *     contains any tool/mcp/retrieval/reranker span. This is what separates BLIND from GROUNDLESS: a
      *     turn whose conversation retrieved nothing and called nothing has no source by design, so the

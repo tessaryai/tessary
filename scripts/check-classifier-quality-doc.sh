@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md, which lives
-# outside this tree — see CQ_DOC below) to the config it describes.
+# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md by default, see
+# CQ_DOC below) to the config it describes.
 #
 # WHY. That page states the measured precision/recall/F1 of the classifiers that fire on customer
 # traffic, and those numbers are only true for the heads and thresholds they were measured against.
 # Retrain a head or move a threshold without updating the page and it keeps asserting a quality it
 # no longer has, which is worse than no page because it reads as verified.
 #
-# WHAT IS AND IS NOT CHECKED. The machine-readable half only: served model revisions (CQ_MODELS)
-# and thresholds (BuiltInClassifierCatalog, which is in this tree). Frustration has no served
-# revision: its scorer is a hosted decision model, so only its flag threshold is pinned. Whether a number is still
-# right for a changed eval set is a judgement no script can make, and stays a co-update rule in
-# AGENTS.md.
+# WHAT IS AND IS NOT CHECKED. The machine-readable half only: the groundedness model revision the
+# server pins (DEFAULT_REVISION in classifiers/groundedness/serve.py) and the thresholds
+# (BuiltInClassifierCatalog). All three files are in this tree. Frustration has no served
+# revision: its scorer is a hosted decision model, so only its flag threshold is pinned, and only on
+# a page that carries a frustration section. Whether a number is still right for a changed eval set
+# is a judgement no script can make, and stays a co-update rule in AGENTS.md.
 #
 # The page carries its expected values in HTML comments of the form
 #   <!-- pinned: key=value key=value -->
@@ -21,26 +22,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# WHERE ITS TWO INPUTS LIVE, AND WHY THEY ARE VARIABLES. The page and the populated model manifest
-# live outside this tree; the catalog they're compared against is here. This script may not name
-# that other location — check-open-boundary.sh enforces that — so the caller passes the paths in,
-# and the defaults are just what this checkout has (hence the skip branches below). Same shape as
-# check-migrations-populated.sh's MIGPOP_OVERLAY_EXPECTS, for the same reason. A caller with access
-# to that other tree sets both; nothing else does.
+# WHY THE PAGE IS A VARIABLE. This tree's page measures groundedness; a page kept outside this tree
+# may carry more classifiers. This script may not name that other location (check-open-boundary.sh
+# enforces that), so the caller passes the path in, and the default is this tree's page. Same shape
+# as check-migrations-populated.sh's MIGPOP_OVERLAY_EXPECTS, for the same reason.
 CQ_DOC="${CQ_DOC:-devdocs/reference/classifier-quality.md}"
-CQ_MODELS="${CQ_MODELS:-classify-service/models.json}"
-export CQ_DOC CQ_MODELS
+export CQ_DOC
 
-# This tree has nothing to pin: the page isn't here, and the manifest it would read is the empty
-# `{}` this tree ships. Say so rather than dying on an unguarded open() or a KeyError. The gate
-# registry also marks this check SKIP here, but the branch stays so a direct call (Taskfile, CI)
-# cannot report a traceback as red.
+# A checkout without the page (the export candidate, for one) has nothing to pin. Say so rather
+# than dying on an unguarded open().
 if [ ! -f "$CQ_DOC" ]; then
   echo "classifier-quality-doc skipped: $CQ_DOC is not in this checkout (no measured-quality page to pin)"
-  exit 0
-fi
-if [ ! -s "$CQ_MODELS" ] || [ "$(tr -d '[:space:]' < "$CQ_MODELS")" = '{}' ]; then
-  echo "classifier-quality-doc skipped: $CQ_MODELS is an empty manifest, so there are no served revisions to pin against"
   exit 0
 fi
 
@@ -57,45 +49,45 @@ for block in re.findall(r'<!--\s*pinned:(.*?)-->', doc, re.S):
     for k, v in re.findall(r'([a-z_]+)=(\S+)', block):
         pinned[k] = v
 
-models = json.load(open(os.environ['CQ_MODELS'], encoding='utf-8'))
+serve = open('classifiers/groundedness/serve.py', encoding='utf-8').read()
 catalog = open(
     'backend/analysis/src/main/java/ai/tessary/classifier/catalog/BuiltInClassifierCatalog.java',
     encoding='utf-8').read()
 
 
-# Groundedness's config is the one threshold_high/threshold_low literal left; frustration's is the one
-# that opens with its Jev threshold. Each is found by a marker only its own literal contains.
-def config_block(pattern, marker):
-    """The config-string literal matching `pattern` whose text contains `marker`."""
-    for block in re.findall(pattern, catalog, re.S):
-        if marker in block:
-            return block
-    return None
+def module_config(classifier_id):
+    """The config JSON of the catalog module whose id is `classifier_id`, parsed.
 
-
-def number_in(block, key):
-    if block is None:
+    The module is found by its id literal; its config is the first string literal in it that opens
+    a JSON object, joined across `+` concatenations and unescaped. Numbers stay the text the source
+    spells them with, so a pin compares against exactly what is written there."""
+    start = re.search(r'new ClassifierModelModule\(\s*"' + re.escape(classifier_id) + '"', catalog)
+    if start is None:
         return None
-    m = re.search(r'\\"' + key + r'\\":\s*([0-9.]+)', block)
-    return m.group(1) if m else None
+    end = catalog.find('new ClassifierModelModule(', start.end())
+    body = catalog[start.end():end if end != -1 else len(catalog)]
+    m = re.search(r'"\{(?:[^"\\]|\\.)*"(?:\s*\+\s*"(?:[^"\\]|\\.)*")*', body)
+    if m is None:
+        return None
+    pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(0))
+    try:
+        return json.loads(''.join(pieces).replace('\\"', '"'), parse_float=str, parse_int=str)
+    except json.JSONDecodeError:
+        return None
 
 
-# groundedness v5 (token head): the band is 0.975/0.5, see BuiltInClassifierCatalog.
-groundedness_cfg = config_block(r'"\{\\"threshold_high.*?\}",', 'threshold_low\\":0.5')
-frustration_cfg = config_block(r'"\{\\"threshold\\".*?\}",', 'min_baseline_conversations')
+revision = re.search(r'^DEFAULT_REVISION\s*=\s*"([0-9a-f]+)"', serve, re.M)
+groundedness_cfg = module_config('groundedness') or {}
+frustration_cfg = module_config('frustration') or {}
 
-# Groundedness is pinned when the manifest binds it (its revision is the served checkpoint).
-# Frustration's Jev threshold lives in the catalog alone and is pinned only on a page that carries
-# a frustration section (the overlay's copy); this tree's page measures groundedness alone.
-expected = {}
+# Groundedness is open and every edition serves it, so its pins are always checked. The detector
+# reads `threshold`, and an older config's `threshold_high` only when `threshold` is absent.
+expected = {
+    'groundedness_threshold': groundedness_cfg.get('threshold', groundedness_cfg.get('threshold_high')),
+    'groundedness_revision': revision.group(1) if revision else None,
+}
 if 'frustration_threshold' in pinned:
-    expected['frustration_threshold'] = number_in(frustration_cfg, 'threshold')
-if 'groundedness' in models:
-    expected.update({
-        'groundedness_revision': models['groundedness']['revision'],
-        'groundedness_high': number_in(groundedness_cfg, 'threshold_high'),
-        'groundedness_low': number_in(groundedness_cfg, 'threshold_low'),
-    })
+    expected['frustration_threshold'] = frustration_cfg.get('threshold')
 
 problems = []
 for key, actual in expected.items():

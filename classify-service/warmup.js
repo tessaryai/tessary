@@ -7,7 +7,7 @@
  * download.js failed to assemble, or any runtime hub dependency creeping back in, fails
  * the build instead of the deployment.
  */
-const { classify, HEADS, PAIR_HEADS, TOKEN_HEADS, headResidency } = require('./classify');
+const { classify, HEADS, PAIR_HEADS, headResidency } = require('./classify');
 const { embed, checkpointResidency } = require('./embed');
 
 (async () => {
@@ -21,15 +21,11 @@ const { embed, checkpointResidency } = require('./embed');
   const { resident: residentHeads, missing: missingHeads } = headResidency();
   for (const head of residentHeads) {
     const started = Date.now();
-    // Each head gets its own request shape; a token head answers with an object per response.
-    const payload = TOKEN_HEADS.has(head)
-      ? { head, responses: [{ passages: ['warmup document, twenty characters long.'], question: 'warmup?', answer: 'A warmup answer sentence long enough to score.' }] }
-      : PAIR_HEADS.has(head)
-        ? { head, pairs: [{ premise: 'warmup document', claim: 'warmup claim' }] }
-        : { head, texts: ['warmup'] };
+    const payload = PAIR_HEADS.has(head)
+      ? { head, pairs: [{ premise: 'warmup document', claim: 'warmup claim' }] }
+      : { head, texts: ['warmup'] };
     const { scores } = await classify(payload);
-    const score = TOKEN_HEADS.has(head) ? scores?.[0]?.unsupported : scores?.[0];
-    if (!Array.isArray(scores) || scores.length !== 1 || typeof score !== 'number' || Number.isNaN(score)) {
+    if (!Array.isArray(scores) || scores.length !== 1 || typeof scores[0] !== 'number' || Number.isNaN(scores[0])) {
       throw new Error(`head '${head}' warmup returned an invalid score: ${JSON.stringify(scores)}`);
     }
     console.log(`validated head '${head}' offline in ${Date.now() - started}ms`);

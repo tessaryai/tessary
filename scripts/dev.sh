@@ -134,7 +134,7 @@ UP_SERVICES="$(dev_up_services "$COMPOSE")"
 
 echo "starting dev stack (this builds images on first run; subsequent runs hit the cache)..."
 # Intentionally unquoted: empty ⇒ all services; otherwise word-splits into the service list.
-HF_TOKEN="$(dev_hf_token)" $COMPOSE up -d --build $UP_SERVICES
+$COMPOSE up -d --build $UP_SERVICES
 
 # Pre-render the cheat-sheet to a file. We avoid a multi-line heredoc inside
 # `tmux send-keys` because it sometimes causes the receiving shell to enter

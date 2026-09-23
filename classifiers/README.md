@@ -23,7 +23,7 @@ classifiers/
   framework/      # shared contracts — schema, judge, metrics, harness, scorers, agreement, audit
   tool_error/     # windowed tool-error rate detector: corpus + null eval + jshell bridge
   metric_drift/   # duration_drift / cost_drift: corpus, injection, windows + jshell bridge
-  groundedness/   # the token head: training, evaluation, latency harness, native GPU service (see its README)
+  groundedness/   # the groundedness model server (serve.py) and its setup files; training lives in the experiments repo
   data_gen/       # OTLP corpus emitters — the trace generators the boot gates and demos run on
   tests/          # the open test suite
   data/           # generated datasets + eval sets   (gitignored)

@@ -1,9 +1,1 @@
-{
-  "groundedness": {
-    "model": "tessaryai/groundedness-token-v1",
-    "revision": "6746fa25f4f6cdb60f994f056c1919300e6c2b12",
-    "dtype": "fp32",
-    "gated": false,
-    "notes": "TOKEN head (groundedness.js): public repo (MIT), bakes without an HF_TOKEN; onnx/model.onnx fp32 1.58 GB; the bake must NOT clamp model_max_length (8192). Contract is 'unsupported' = P(BASELESS)+P(CONFLICT); see devdocs/reference/classifier-quality.md."
-  }
-}
+{}

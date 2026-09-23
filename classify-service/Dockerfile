@@ -3,7 +3,6 @@
 # rebuilt ONLY when its actual inputs change.
 #
 #   models stage inputs: package.json/pnpm-lock.yaml/pnpm-workspace.yaml, models.json, embedders.json, download.js — nothing else.
-#   runtime stage adds the serving modules, groundedness.js (the token head) among them.
 #     Editing server.js, classify.js scoring, warmup.js, or the README reuses the cached
 #     weights layer (locally via BuildKit, in CI via the ECR registry cache).
 #   runtime stage: deps + code + COPY --from of the baked weights, then an OFFLINE
@@ -12,23 +11,10 @@
 #
 # Build for the deployment platform explicitly; production runs on ARM64 Fargate (Graviton).
 #
-# WHICH models.json. The open edition ships classify-service/models.json binding the PUBLIC heads
-# (today: groundedness — tessaryai/groundedness-token-v1, MIT), and the paid overlay keeps its own
-# manifest at its own classify-service directory. The manifest therefore enters the build through a
-# NAMED BUILD CONTEXT, `manifest`, rather than a plain COPY from this directory: with nothing
-# supplied, the `manifest` stage below is that context and the open manifest bakes; an overlay build
-# points the name at its own directory and the SAME Dockerfile, unchanged and untouched in git,
-# bakes the paid manifest. (Copying the paid file over the open one before building was the old
-# way; it leaves a populated manifest in the open working tree, which check-classify-service.sh
-# rightly refuses.)
-#   docker buildx build --build-context manifest=<the overlay's classify-service directory> ...
-# The overlay's dev compose fragment does this with build.additional_contexts.
-#
-# A head marked "gated": true in a manifest lives in a PRIVATE HF repo and needs an HF_TOKEN
-# with read access; the groundedness TOKEN head is public and bakes with or without one. A build
+# A head marked "gated": true in models.json lives in a PRIVATE HF repo and needs an HF_TOKEN
+# with read access; groundedness (Xenova/bart-large-mnli) is public and always bakes. A build
 # that supplies the token gets every head:
 #   HF_TOKEN=<token> docker buildx build --secret id=hf_token,env=HF_TOKEN \
-#     --build-context manifest=<the overlay's classify-service directory> \
 #     --platform linux/arm64 -t <ecr>/tessary-classify:<sha> .
 #
 # Omitting --secret id=hf_token entirely is a SUPPORTED keyless build, so this image can
@@ -40,12 +26,6 @@
 # An explicit token that is present but invalid/expired is NOT tolerated the same way:
 # only the token's absence skips a gated head, so a bad credential still fails the build
 # loud, as it always has.
-
-# ---------------------------------------------------------------------------
-# Stage 0: the manifest — the default for the `manifest` build context (see the header)
-# ---------------------------------------------------------------------------
-FROM scratch AS manifest
-COPY models.json /
 
 # ---------------------------------------------------------------------------
 # Stage 1: model bake — downloads pinned revisions, assembles localModelPath layout
@@ -74,8 +54,7 @@ ENV HF_CACHE_DIR=/models
 # AFTER the ECS task definition is raised to 8 GB in the infra repo. See the README,
 # "Enabling the conformance encoder in production".
 ARG BAKE_EMBEDDERS=0
-COPY --from=manifest models.json ./
-COPY embedders.json download.js ./
+COPY models.json embedders.json download.js ./
 # A gated head's weights live in a PRIVATE HF repo — download.js needs HF_TOKEN to pull them. A BuildKit secret mount (not ARG/ENV) so the token
 # never lands in an image layer or `docker history`. transformers.js reads HF_TOKEN from the
 # process env on its own (see the @huggingface/transformers dist source; under pnpm it resolves via
@@ -101,8 +80,7 @@ ENV HF_CACHE_DIR=/models
 # --chown at COPY time: a separate `RUN chown -R` would duplicate the whole bake into a new layer.
 COPY --from=models --chown=node:node /models /models
 
-COPY --from=manifest models.json ./
-COPY embedders.json classify.js groundedness.js embed.js warmup.js ./
+COPY models.json embedders.json classify.js embed.js warmup.js ./
 # Offline validation: warmup loads every head through classify() — and every BAKED embed
 # checkpoint through embed() — exactly as runtime does (localModelPath +
 # allowRemoteModels=false) — no network involved, seconds not minutes. The same
