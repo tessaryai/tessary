@@ -93,7 +93,7 @@ public class GroundednessStatus {
                 everSwept,
                 lastScored == null ? null : lastScored.toString(),
                 caughtUp == null ? null : caughtUp.toString(),
-                AppVersion.sourceRef(AppVersion.current()));
+                AppVersion.gitRef(AppVersion.current()));
     }
 
     /**

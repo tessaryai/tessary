@@ -91,11 +91,13 @@ final class GroundednessAnswersFile {
             sb.append("- no longer stored: its trace aged out, so only the ids and scores remain\n");
             return sb.toString();
         }
-        if (a.question() != null) {
-            sb.append("\n### Question\n\n").append(fenced(a.question()));
+        String question = a.question();
+        if (question != null) {
+            sb.append("\n### Question\n\n").append(fenced(question));
         }
         sb.append("\n### Answer\n\n").append(fenced(answer));
-        List<RetrievedDocumentView> documents = a.documents() == null ? List.of() : a.documents();
+        List<RetrievedDocumentView> retrieved = a.documents();
+        List<RetrievedDocumentView> documents = retrieved == null ? List.of() : retrieved;
         if (a.premiseHadEvidence()) {
             sb.append("\n### Documents (").append(documents.size()).append(")\n");
             for (int i = 0; i < documents.size(); i++) {

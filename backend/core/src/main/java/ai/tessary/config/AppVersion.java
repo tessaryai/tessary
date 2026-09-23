@@ -30,7 +30,7 @@ public final class AppVersion {
      * version, and {@code main} for anything else, such as {@code dev} or a short commit SHA. A link
      * to a file at this ref shows the file as the running version shipped it.
      */
-    public static String sourceRef(String version) {
+    public static String gitRef(String version) {
         return RELEASE.matcher(version).matches() ? "v" + version : "main";
     }
 }

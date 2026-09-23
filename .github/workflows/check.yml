@@ -26,7 +26,10 @@ on:
     # DOC-ONLY PRS DO NOT RUN THIS. Safe because scripts/check.sh's own header carries a standing
     # rule that no gate in that pipeline is keyed on prose, and the four that were are EXCLUDED
     # rows in its manifest. Prose is checked by Mintlify's own PR check over docs/, which is where
-    # that job belongs; nothing here duplicates it.
+    # that job belongs; nothing here duplicates it. The two named exceptions in that header read
+    # machine text, not prose: check-blob-links.sh's link paths in docs/ and README.md are skipped
+    # by a docs-only PR and read by the next PR that runs, since it scans the tree; the groundedness
+    # setup MDs live under classifiers/, which this filter does not ignore.
     # secret-scan.yml deliberately keeps no filter: a credential can land in a README.
     #
     # `.github/**` IS ON THE LIST TOO, and that one is not free. Two running gates read paths under
@@ -197,8 +200,9 @@ jobs:
         with:
           python-version: '3.13'
       # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
-      # check-groundedness-serve.sh runs serve.py's tests with `uv run --with pytest`; it installs
-      # pytest only, so there is no lockfile to key a cache on.
+      # check-groundedness-serve.sh runs serve.py's tests with `uv run --with pytest`, and
+      # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template; each installs one tool,
+      # so there is no lockfile to key a cache on. Neither needs more git history than the checkout.
       - uses: astral-sh/setup-uv@v7
 
       - name: Install Caddy

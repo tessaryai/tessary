@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -161,8 +162,7 @@ public final class GroundednessDetector implements BuiltInDetector {
 
     private List<Detection> score(
             @Nullable ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
-        List<Detection> out = new ArrayList<>(batch.size());
-        for (int i = 0; i < batch.size(); i++) out.add(Detection.none());
+        List<Detection> out = new ArrayList<>(Collections.nCopies(batch.size(), Detection.none()));
         List<GroundednessInputs.@Nullable Inputs> read = inputs.read(batch);
 
         List<GroundednessInputs.Inputs> sent = new ArrayList<>();
