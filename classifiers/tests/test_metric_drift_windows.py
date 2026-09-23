@@ -189,3 +189,53 @@ def test_bridge_runs_the_real_suppression_rule() -> None:
     assert response.suppression["with_dominant"]["suppressed_by"] == "dominant"
     assert response.suppression["with_dominant"]["covered"] == pytest.approx(0.95, abs=0.1)
     assert response.suppression["with_flat_only"]["suppressed_by"] is None
+
+
+# Hand-computed from the vendored LiteLLM rates: gpt-4o is $2.50 / $10.00 per million input / output
+# tokens and $1.25 per million cache reads; claude-sonnet-4-5 is $3.00 input, $0.30 cache read and
+# $3.75 cache write per million.
+GPT_4O = {"model": "gpt-4o", "input_tokens": 1000, "output_tokens": 100}
+SONNET_CACHED = {
+    "model": "claude-sonnet-4-5",
+    "input_tokens": 100,
+    "output_tokens": 0,
+    "cache_read_tokens": 1000,
+    "cache_write_tokens": 200,
+}
+
+
+@requires_bridge
+def test_price_turn_sums_every_token_bucket_and_prices_it_at_the_book_rates() -> None:
+    """Catches priceTurn dropping a bucket from the sum or the price, e.g. adding 0 for cache reads."""
+    derived = bridge.derive(
+        [],
+        [bridge.PriceRequest("one", [GPT_4O]), bridge.PriceRequest("two", [GPT_4O, SONNET_CACHED])],
+    )
+    one, two = derived.priced["one"], derived.priced["two"]
+    # 1000 * 2.5e-6 + 100 * 1e-5
+    assert one["cost_usd"] == pytest.approx(0.0035, abs=1e-9)
+    # 0.0035 + 100 * 3e-6 + 1000 * 3e-7 + 200 * 3.75e-6
+    assert two["cost_usd"] == pytest.approx(0.00485, abs=1e-9)
+    assert (two["input_tokens"], two["output_tokens"], two["cache_read_tokens"], two["cache_write_tokens"]) == (
+        1100,
+        100,
+        1000,
+        200,
+    )
+
+
+@requires_bridge
+def test_one_unpriced_leaf_abstains_the_whole_turn() -> None:
+    """Catches priceTurn pricing the known leaves and reporting a partial sum as the turn's cost."""
+    unknown = {"model": "tessary-unpriced-test-model", "input_tokens": 500, "output_tokens": 50}
+    row = bridge.derive([], [bridge.PriceRequest("mixed", [GPT_4O, unknown])]).priced["mixed"]
+    assert row["cost_usd"] is None
+    assert (row["input_tokens"], row["output_tokens"]) == (1500, 150)
+
+
+@requires_bridge
+def test_a_raw_usage_leaf_is_refused_not_read_as_zeros() -> None:
+    """Catches priceTurn skipping a pre-substrate `usage` blob, which abstains the turn silently."""
+    raw = {"model": "gpt-4o", "usage": {"prompt_tokens": 1000, "completion_tokens": 100}}
+    with pytest.raises(bridge.BridgeUnavailable, match="raw `usage`"):
+        bridge.derive([], [bridge.PriceRequest("raw", [raw])])

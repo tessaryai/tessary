@@ -8,6 +8,8 @@ those describes a detector nobody ships.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from tool_error import bridge, corpus
@@ -52,6 +54,24 @@ def test_a_higher_threshold_never_alarms_sooner():
     high = bridge.replay(s, h=12.0)[0]["alarm_after_calls"]
     assert low is not None
     assert high is None or high >= low
+
+
+def test_the_candidate_h_floors_the_derived_threshold():
+    """Catches configOf ignoring the eval's h: a candidate below a tool's derived threshold must report
+    the derived one, a candidate above it must win, and the two must alarm at different points."""
+    # A 1% baseline thick enough that Jeffreys smoothing moves p0 by under 0.05%.
+    baseline = {"bucket": "2026-07-01T00:00:00Z", "calls": 100_000, "failures": 1_000}
+    shifted = [{"bucket": f"2026-07-02T{h:02d}:00:00Z", "calls": 200, "failures": 6} for h in range(24)]
+    s = [{"tool": "search_docs", "buckets": [baseline, *shifted]}]
+    # ToolErrorConfig's fit at the default ARL target: 11.42 + 1.088 * ln(p0), about 6.41.
+    derived = 11.42 + 1.088 * math.log(0.01)
+
+    low = bridge.replay(s, h=5.0)[0]
+    high = bridge.replay(s, h=12.0)[0]
+    assert low["threshold"] == pytest.approx(derived, abs=0.01)
+    assert high["threshold"] == pytest.approx(12.0)
+    assert low["alarm_after_calls"] is not None and high["alarm_after_calls"] is not None
+    assert low["alarm_after_calls"] < high["alarm_after_calls"]
 
 
 def test_a_thin_tool_never_arms():
