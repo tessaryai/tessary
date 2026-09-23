@@ -156,6 +156,10 @@ public final class ToolErrorTrend {
         // slow degradation and never notice it — the failure CusumDetector's comment names as the reason
         // the old rolling-baseline gate was replaced.
         //
+        // A config may freeze it later than judging starts (ToolErrorConfig#freezeBaselineCalls). Then each
+        // hour after the minimum is judged first and learned from second, until the freeze; still anchored
+        // to the leading traffic, only more of it, so a slow degradation still cannot drag it along.
+        //
         // UNLESS a human has pinned one. Then that reference IS the in-control rate and the replay starts
         // after the moment it was accepted — see AcceptedReference#acceptedAt. Re-learning from the leading
         // buckets would rebuild the very reference the human replaced, and replaying the pre-acceptance
@@ -164,7 +168,11 @@ public final class ToolErrorTrend {
         // Read once rather than twice: an accessor called in the guard and again in the branch is two
         // calls that only happen to agree, which is exactly what a null analysis cannot assume.
         ToolErrorRate carriedBaseline = carried == null ? null : carried.baseline();
+        String epoch = CarriedState.epochOf(config, schemaVersion);
         ToolErrorRate baseline;
+        // The last hour the reference already holds; a later hour is learned from, this one or an earlier one
+        // never again. Null when the leading fold below just built it: every hour after that fold is new.
+        String learnedThrough = null;
         int i;
         if (accepted != null) {
             baseline = accepted.asRate();
@@ -172,11 +180,12 @@ public final class ToolErrorTrend {
             while (i < buckets.size() && buckets.get(i).bucket().compareTo(accepted.acceptedAt()) < 0) {
                 i++;
             }
-        } else if (carriedBaseline != null) {
+        } else if (carried != null && carriedBaseline != null && keepsCarried(carried, carriedBaseline, config)) {
             // Learned once, on some earlier sweep, and kept. Re-learning it here would read the leading
             // buckets of a window that has slid forward since, which is a reference walking after the very
-            // degradation it is supposed to be measuring.
-            baseline = carriedBaseline;
+            // degradation it is supposed to be measuring. A copy, because one still learning grows below.
+            baseline = carriedBaseline.copy();
+            learnedThrough = carried.learnedThrough();
             i = 0;
         } else {
             baseline = new ToolErrorRate();
@@ -199,7 +208,6 @@ public final class ToolErrorTrend {
 
         // Resume or rebuild. Resuming is the fast path and the fragile one, so it is taken only when the
         // state was built under this exact tuning against this exact reference — see resumableUnder.
-        String epoch = CarriedState.epochOf(config, schemaVersion);
         State state = State.EMPTY;
         String watermark = null;
         boolean resumed = false;
@@ -223,6 +231,15 @@ public final class ToolErrorTrend {
             state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
             fold(observed, b.calls(), b.failures());
             watermark = b.bucket();
+            // Judged first, learned from second, so no hour is judged against a reference that already
+            // holds it the first time it is seen. Only hours after learnedThrough: a rebuild re-reads the
+            // hours the reference learned on earlier passes. A pinned reference is a human's statement of
+            // the normal and never learns.
+            if (accepted == null
+                    && baseline.calls() < config.freezeBaselineCalls()
+                    && (learnedThrough == null || b.bucket().compareTo(learnedThrough) > 0)) {
+                fold(baseline, b.calls(), b.failures());
+            }
         }
 
         // The pending absorb and the reset fence ride through untouched: both are human decisions, and a
@@ -243,6 +260,21 @@ public final class ToolErrorTrend {
                 decision.fired()
                         ? new Spell(toolKey, decision, baseline, observed, decision.onsetAt(), watermark)
                         : null);
+    }
+
+    /**
+     * Whether a carried reference is used as it stands rather than re-learned from the leading buckets.
+     *
+     * <p>Always, once it is frozen or while it is still below the minimum. Between the two it is still
+     * learning, and it is kept whenever {@link CarriedState#learnedThrough} says which hours it already
+     * holds, resumed or rebuilt, so it keeps growing from the hours after them until the freeze. Only a row
+     * that never advanced a watermark lacks one; that re-learns from the leading buckets after the reset
+     * fence, which are the hours it was built from as long as the window still holds them.
+     */
+    private static boolean keepsCarried(CarriedState carried, ToolErrorRate carriedBaseline, ToolErrorConfig config) {
+        boolean learning = carriedBaseline.calls() >= config.minBaselineCalls()
+                && carriedBaseline.calls() < config.freezeBaselineCalls();
+        return !learning || carried.learnedThrough() != null;
     }
 
     /** Fold a bucket's counts into a rate. Bulk, for the reason {@link ToolErrorRate#addCounts} gives. */
