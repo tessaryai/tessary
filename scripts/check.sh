@@ -75,9 +75,10 @@
 # this line has to assemble all of them:
 #   actions/setup-java java-version 25      -- check-backend.sh hard-fails on any other JDK
 #   pnpm/action-setup + actions/setup-node  -- check-frontend.sh runs tsc and a real vite build
-#   astral-sh/setup-uv                      -- check-classifier-parity.sh, the Python gates, and
-#                                               cfn-lint in check-groundedness-setup.sh
-#   actions/setup-python                    -- check-classify-service.sh, and the overlay's own
+#   astral-sh/setup-uv                      -- check-classifiers.sh (uv sync + pytest over classifiers/tests),
+#                                               the Python gates, and cfn-lint in check-groundedness-setup.sh
+#   actions/setup-python                    -- check-classify-service.sh, check-vendored-plugin-rules.sh
+#                                               (plus pip pyyaml + pytest), and the overlay's own
 #                                               Python gate when it's present
 #   caddy on PATH                           -- check-caddy.sh
 # If a toolchain is genuinely unavailable, the gate must SKIP with a printed reason like any
@@ -95,7 +96,8 @@
 #   1. THIS SCRIPT: the manifest below, minus the rows marked EXCLUDED.
 #   2. .github/workflows/drift-checks.yml: TWO jobs, workflow_dispatch only, and both are gates
 #      this script does not run: check-conformance-parity.sh (EXCLUDED since #875) and
-#      check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`). It was fourteen
+#      check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`; its offline
+#      rules half runs here as `vendored-plugin-rules`). It was fourteen
 #      jobs until the trim that deleted every job duplicating a row below.
 #   3. Standalone Taskfile targets neither pipeline runs the same way: `conformance:parity`
 #      (in CI, not here), `classifiers:parity` (here, not in CI) and `migrations:populated`
@@ -115,6 +117,7 @@
 #   scripts/check-pipeline-vocabulary.sh   (SQL naming a relation the classifier cutover dropped)
 #   scripts/check-contract-consistency.sh  (vendored contract drift)
 #   scripts/check-vendored-plugin.sh       (the vendored plugin's own rules + freshness vs plugins@main)
+#   scripts/check-vendored-plugin-rules.sh (the rules half alone: offline pytest over contract/tests)
 #   scripts/check-backend.sh               (mvn -B verify: tests + static analysis; under
 #                                          `--edition open` the same script runs with -P '!paid',
 #                                          so there is one definition of the backend gate)
@@ -144,6 +147,10 @@
 #                                          Lives in the overlay along with the service and the
 #                                          engine it runs, so with the overlay gone there's no SOP
 #                                          compile service and a skip is the true answer rather than a hole.)
+#   scripts/check-mcp-bridge.sh            (node:test over packages/mcp, the @tessaryai/mcp stdio bridge)
+#   scripts/check-classifiers.sh           (pytest over classifiers/tests, including the two jshell bridges
+#                                          into the shipping detectors; runs after backend, whose build
+#                                          produces the classes they load)
 #   scripts/check-classifier-parity.sh     (Python<->Java/JS classifier port pins. Three of its six
 #                                          pins are on overlay-owned modules and three are not, so
 #                                          it takes --edition and runs 3 or 6; see its own header.)
@@ -306,7 +313,8 @@ license-headers|scripts/check-license-headers.sh|RUN|RUN|SPDX header presence ov
 export-denylist|scripts/lib/check-export-denylist.sh|RUN|RUN|the must-not-publish declaration is well-formed and, with the overlay present, every delete/exempt row resolves; self-scopes the liveness half
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN|RUN|open on both sides
 contract-consistency|scripts/check-contract-consistency.sh|RUN|RUN|open on both sides
-vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. Its offline rules half runs per PR as the `vendored-plugin-rules` row|EXCLUDED:same|declared here only so the completeness assertion can see it
+vendored-plugin-rules|scripts/check-vendored-plugin-rules.sh|RUN|RUN|phase 1 of check-vendored-plugin.sh on its own: pytest over contract/tests, the vendored validator rules the platform's import depends on. Offline and sub-second; needs python3 with pyyaml and pytest. check-vendored-plugin.sh calls this script, so the rules have one definition
 caddy|scripts/check-caddy.sh|RUN|RUN|open on both sides
 paid-caddy|tessary-paid/scripts/check-paid-caddy.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid spec and no Caddyfile.prod for the gate to compare; both live in the overlay|this gate lives in the overlay, the overlay twin of the `caddy` row above; it lives there because check-open-boundary.sh rule 5 fails any scripts/*.sh naming that directory. The checker itself is open and variadic (scripts/lib/caddy-proxies-spec.py); only the caller and the config are the overlay's.
 connect-route|scripts/check-connect-route.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It string-matched eleven prose fragments from docs/self-hosting/setup.mdx against JSX. Renaming a button reds it|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -316,6 +324,7 @@ selfhost-health|scripts/check-selfhost-health.sh|EXCLUDED:dropped 2026-09-09 und
 classify-service|scripts/check-classify-service.sh|RUN|RUN:--edition open|classify-service stays open per the ledger, but its models.json manifest lives in the overlay; without it, this asserts an empty manifest and the UNAVAILABLE_IN_OPEN_EDITION token, not the three built-in heads
 slack-service|tessary-paid/scripts/check-slack-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no Slack adapter; the service and its gate live in the overlay together|a gate that lives in the overlay
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN|RUN|open on both sides; needs only node, already on PATH for the frontend gate
+mcp-bridge|scripts/check-mcp-bridge.sh|RUN|RUN|the @tessaryai/mcp stdio bridge's node:test suite, which otherwise runs only in release.yml right before npm publish; zero dependencies, needs only node
 compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no SOP compile service; the service, its engine and its gate live in the overlay together|a gate that lives in the overlay
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
 classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -328,6 +337,7 @@ frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
 paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid frontend surfaces; they live in the overlay|a gate that lives in the overlay
 backend|scripts/check-backend.sh|RUN|RUN:-P !paid|one script, both editions; the JDK-25 guard is in front of both
+classifiers|scripts/check-classifiers.sh|RUN|RUN|classifiers/tests over uv; open on both sides (pyproject's testpaths is the open tests/ only). ORDERED AFTER backend: the tool_error and metric_drift jshell bridges load backend/*/target/classes, and the script fails rather than letting their tests skip when those are missing
 conformance-parity|scripts/check-conformance-parity.sh|EXCLUDED:run by `task conformance:parity` and the CI conformance-parity job, never by this pipeline|EXCLUDED:same, and its generator is paid so the open edition would skip it anyway|declared here only so the completeness assertion can see it
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|EXCLUDED:same|declared here only so the completeness assertion can see it
 open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only boot-checks.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -558,6 +568,7 @@ if [ -z "$SLICES" ]; then
     _gate pipeline-vocabulary
     _gate contract-consistency
     _gate blob-links
+    _gate vendored-plugin-rules
     _gate caddy
     _gate paid-caddy
     _gate version-consistency
@@ -567,6 +578,7 @@ if [ -z "$SLICES" ]; then
     _gate groundedness-setup
     _gate slack-service
     _gate sandbox-runner
+    _gate mcp-bridge
     _gate compile-service
     _gate overlay-schema
     _gate no-bedrock
@@ -575,6 +587,7 @@ if [ -z "$SLICES" ]; then
     _gate paid-image
     _gate paid-frontend
     _gate backend
+    _gate classifiers
     _summary
     exit 0
 fi

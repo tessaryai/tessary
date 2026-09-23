@@ -19,7 +19,9 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-classify-service `node --test`, and live ITs (`*LiveIT.java`).
+classify-service `node --test`, `packages/mcp` `node --test` (the `mcp-bridge` row),
+`contract/tests` (the `vendored-plugin-rules` row), `classifiers/tests` (the `classifiers` row),
+and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
 key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
@@ -32,7 +34,7 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (15 checks in the open edition): backend `mvn verify`, frontend, classify-service, sandbox-runner, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (18 checks in the open edition): backend `mvn verify`, then `classifiers` after it, frontend, classify-service, sandbox-runner, mcp-bridge, vendored-plugin-rules, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
@@ -42,13 +44,15 @@ package under `ai.tessary`) or the literal `frontend`.
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
-**The vendored-plugin gate needs host Python.** `task check` (bare) runs `contract/tests` against the
-vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest` on the host — it
-says so and stops if either is missing, rather than skipping silently. Its second half diffs the
-vendored copy against the plugin's live `main`; **offline that half warns and passes**, so a local
-gate still works on a plane, and CI (where `$CI` is set) makes it a hard failure. The plugin repo is
-public and deliberately runs no PR CI, so this is the only place that contract is enforced —
-see [`contract/tests/README.md`](../../contract/tests/README.md).
+**Two gates need host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
+vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
+stops if either is missing. `classifiers` runs `uv sync --frozen --group dev --extra quality` and
+pytest over `classifiers/tests`, so it needs `uv`. Its `tool_error` and `metric_drift` bridge tests
+drive the shipping detectors through `jshell` against `backend/*/target/classes`, which is why the row
+runs after `backend`; it fails rather than letting those tests skip when the classes or `jshell` are
+missing. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
+it runs via `task contract:plugin` and `drift-checks.yml`. See
+[`contract/tests/README.md`](../../contract/tests/README.md).
 
 **A narrowed backend slice is not full `mvn verify`.** It runs spotless + test-compile + the
 package's tests. Static analysis bound to the `verify` phase (SpotBugs, PMD, forbidden-apis),
@@ -74,7 +78,8 @@ Two gates are deliberately not on that per-PR path and live in the dispatch-only
 
 - `conformance-parity` — regenerates the fixture pinning the Java port to the Python engine.
 - `vendored-plugin` — its freshness half fetches `tessaryai/plugins` over the network and hard-fails
-  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff.
+  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff. Its offline
+  rules half runs per PR as the `vendored-plugin-rules` row.
 
 Run `gh workflow run drift-checks.yml` before a risky merge, and periodically to catch drift.
 

@@ -7,9 +7,10 @@ name: Check
 # boot-checks.yml.
 #
 # Everything before the final step assembles the toolchains that script needs in one job:
-# Four toolchains: Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm
-# + node (frontend and classify-service), python (the gates that shell out to python3),
-# and caddy on PATH (the caddy gate). Order matters once: pnpm/action-setup must run before
+# Java (backend, and check-backend.sh hard-fails on the wrong JDK first; its jshell also runs the
+# classifier bridges), pnpm + node (frontend, classify-service, sandbox-runner and mcp-bridge),
+# python (the gates that shell out to python3), uv (the classifiers gate), and caddy on PATH (the
+# caddy gate). Order matters once: pnpm/action-setup must run before
 # actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
 # path.
 #
@@ -136,7 +137,8 @@ jobs:
     # "Install Caddy". .github/toolchain/Dockerfile bakes all of them (plus Maven, which
     # ubuntu-latest gave us for free and a container does not). With the `container:` key below,
     # every one of those steps except `pnpm install` deletes, and the job's setup cost becomes a
-    # `docker pull`.
+    # `docker pull`. The later `pip install` and setup-uv steps are not baked into that Dockerfile
+    # yet; arming it means adding them there first.
     #
     # BLOCKER 1 — NOTHING BUILDS OR PUBLISHES THE IMAGE YET. `container:` takes a registry
     # reference, not a Dockerfile path; GitHub will not build one for you. The image has to exist
@@ -192,18 +194,24 @@ jobs:
       # classify-service pins the same pnpm version and installs its own deps inside
       # check-classify-service.sh; no separate install step needed here.
 
-      # Six surviving gates shell out to python3 (version-consistency, open-boundary,
-      # license-headers, caddy, compose-artifact, export-denylist). Pinned rather than relying on
-      # whatever ubuntu-latest ships. No pip install: pyyaml and pytest were vendored-plugin's, and
-      # that gate moved to drift-checks.yml. Nothing left here imports either.
+      # Gates shell out to python3 (version-consistency, open-boundary, license-headers, caddy,
+      # compose-artifact, export-denylist, vendored-plugin-rules). Pinned rather than relying on
+      # whatever ubuntu-latest ships.
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+      # vendored-plugin-rules runs pytest over contract/tests, which imports yaml.
       # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
+      - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
+
+      # check-classifiers.sh: `uv sync --frozen` + pytest over classifiers/tests. It runs after the
+      # backend gate inside check.sh, because its jshell bridges load backend/*/target/classes.
       # check-groundedness-serve.sh runs serve.py's tests with `uv run --with pytest`, and
-      # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template; each installs one tool,
-      # so there is no lockfile to key a cache on. Neither needs more git history than the checkout.
+      # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template.
       - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: classifiers/uv.lock
 
       - name: Install Caddy
         # A pinned release tarball, not the Cloudsmith apt repo. The apt route cost 41 seconds of
