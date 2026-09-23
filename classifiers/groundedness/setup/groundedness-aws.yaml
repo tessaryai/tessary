@@ -1,0 +1,263 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Groundedness model on a GPU instance, for a Tessary that runs on AWS. Follow
+# groundedness-setup-aws.md beside this file; it downloads this template at the running Tessary's
+# tag, checks it against the checksum it carries, and passes ServePyUrl and ServePySha256.
+#
+# One instance in Tessary's VPC runs classifiers/groundedness/serve.py and is stopped most of the
+# time. The timing rule that keeps it cheap:
+#
+#   10 idle minutes  <  30 minutes  <  60 minutes
+#
+# - serve.py exits after IdleMinutes (10) with no /classify request, and its exit stops the instance.
+# - After a production sweep catches up, Tessary sends nothing for 30 minutes, so the model goes idle
+#   and the instance stops before the next sweep could keep it awake.
+# - The schedule starts the instance every 60 minutes. Tessary sees /healthz answer and scores
+#   everything that arrived since its last sweep.
+#
+# The idle stop is inside serve.py, so turning Groundedness off in Tessary does not stop the hourly
+# wakes. Delete this stack to stop them and their charges.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Tessary Groundedness model on a GPU instance that wakes hourly and stops itself when idle.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC Tessary runs in.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A subnet in that VPC with a route to the internet (NAT gateway, or public IPs on launch).
+  TessarySecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: The security group of the Tessary instance. Only it may reach the model.
+  InstanceType:
+    Type: String
+    Default: g4dn.xlarge
+    AllowedValues:
+      - g4dn.xlarge
+      - g5.xlarge
+      - g6.xlarge
+    Description: The GPU instance type.
+  ServePyUrl:
+    Type: String
+    AllowedPattern: "^https://raw\\.githubusercontent\\.com/tessaryai/tessary/[^/]+/classifiers/groundedness/serve\\.py$"
+    Description: serve.py at the running Tessary's tag, from groundedness-setup-aws.md.
+  ServePySha256:
+    Type: String
+    AllowedPattern: "^[0-9a-f]{64}$"
+    Description: The SHA-256 of serve.py, from groundedness-setup-aws.md.
+  IdleMinutes:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 25
+    Description: Minutes with no scoring request before the instance stops itself. Keep it under Tessary's 30-minute sleep.
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
+    Description: The AWS Deep Learning Base GPU AMI (Ubuntu 22.04), which carries the NVIDIA driver.
+
+Resources:
+  # The bearer key Tessary presents on /classify. The instance reads it at every boot, and the
+  # operator reads it once for Tessary's TESSARY_OBSERVER_ENCODER_API_KEY.
+  ModelKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Bearer key for the Tessary Groundedness model.
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      # Session Manager, for debugging a boot without opening SSH.
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-model-key
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ModelKey
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  ModelSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Tessary Groundedness model, reachable from Tessary only.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 18080
+          ToPort: 18080
+          SourceSecurityGroupId: !Ref TessarySecurityGroupId
+          Description: Tessary to serve.py
+      # Hugging Face for the model, PyPI and GitHub for uv, serve.py and its packages.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Downloads
+
+  # User data runs on every boot (cloud-init's scripts-user set to always), not just the first, so
+  # a stack update that changes ServePyUrl reaches the instance. Each boot it installs what is
+  # missing, downloads serve.py when the copy on disk does not match ServePySha256 and verifies it
+  # before moving it into place, fetches the key, and starts the service. Any failure here stops
+  # the instance, so a broken boot never keeps a GPU running. The service is also enabled at boot,
+  # so it may already be running the previous verified serve.py when an update lands; the new one
+  # takes over from the next wake.
+  ModelInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref ModelSecurityGroup
+      InstanceInitiatedShutdownBehavior: stop
+      # The AMI's root snapshot is larger than the model needs; the size must be at least that
+      # snapshot's. uv's cache and the model persist on it across stops.
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 100
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}
+      UserData:
+        Fn::Base64: !Sub |
+          Content-Type: multipart/mixed; boundary="//"
+          MIME-Version: 1.0
+
+          --//
+          Content-Type: text/cloud-config; charset="us-ascii"
+          MIME-Version: 1.0
+          Content-Transfer-Encoding: 7bit
+          Content-Disposition: attachment; filename="cloud-config.txt"
+
+          #cloud-config
+          cloud_final_modules:
+            - [scripts-user, always]
+
+          --//
+          Content-Type: text/x-shellscript; charset="us-ascii"
+          MIME-Version: 1.0
+          Content-Transfer-Encoding: 7bit
+          Content-Disposition: attachment; filename="groundedness.sh"
+
+          #!/bin/bash
+          set -euo pipefail
+          trap 'echo "groundedness: boot setup failed, stopping the instance"; shutdown -h now' ERR
+          D=/opt/groundedness
+          id groundedness >/dev/null 2>&1 || useradd --system --home-dir "$D" --shell /usr/sbin/nologin groundedness
+          mkdir -p "$D/bin" "$D/uv-cache" "$D/python" "$D/hf"
+
+          if [ ! -x "$D/bin/uv" ]; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$D/bin" UV_NO_MODIFY_PATH=1 sh
+          fi
+
+          # Download only when the file on disk is not the one the stack names.
+          if ! echo "${ServePySha256}  $D/serve.py" | sha256sum --check --status 2>/dev/null; then
+            curl -fsSL -o "$D/serve.py.download" "${ServePyUrl}"
+            echo "${ServePySha256}  $D/serve.py.download" | sha256sum --check
+            mv "$D/serve.py.download" "$D/serve.py"
+          fi
+
+          if command -v aws >/dev/null 2>&1; then
+            KEY=$(aws secretsmanager get-secret-value --region "${AWS::Region}" --secret-id "${ModelKey}" --query SecretString --output text)
+          else
+            KEY=$(AWS_DEFAULT_REGION="${AWS::Region}" python3 -c 'import sys, boto3; print(boto3.client("secretsmanager").get_secret_value(SecretId=sys.argv[1])["SecretString"])' "${ModelKey}")
+          fi
+          (umask 077; printf 'CLASSIFY_API_KEY=%s\n' "$KEY" > "$D/key.env")
+          chown -R groundedness:groundedness "$D"
+
+          # ExecStopPost stops the instance whenever serve.py exits: after its idle minutes, or on
+          # a failure. The next hourly wake tries again.
+          cat > /etc/systemd/system/groundedness.service <<'UNIT'
+          [Unit]
+          Description=Tessary Groundedness model
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=groundedness
+          WorkingDirectory=/opt/groundedness
+          Environment=UV_CACHE_DIR=/opt/groundedness/uv-cache
+          Environment=UV_PYTHON_INSTALL_DIR=/opt/groundedness/python
+          Environment=HF_HOME=/opt/groundedness/hf
+          EnvironmentFile=/opt/groundedness/key.env
+          ExecStart=/opt/groundedness/bin/uv run /opt/groundedness/serve.py --host 0.0.0.0 --port 18080 --idle-exit-minutes ${IdleMinutes}
+          ExecStopPost=+/sbin/shutdown -h now
+          Restart=no
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable groundedness.service
+          systemctl start --no-block groundedness.service
+          --//--
+
+  # Starts the instance every hour. Starting a running instance does nothing.
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: start-model-instance
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:StartInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${ModelInstance}
+
+  HourlyStart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Wake the Tessary Groundedness model so Tessary can score the last hour.
+      ScheduleExpression: rate(1 hour)
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"InstanceIds": ["${ModelInstance}"]}'
+
+Outputs:
+  InstanceId:
+    Description: The model instance.
+    Value: !Ref ModelInstance
+  PrivateIp:
+    Description: Tessary's TESSARY_OBSERVER_ENCODER_URL is http://<this>:18080.
+    Value: !GetAtt ModelInstance.PrivateIp
+  KeySecretArn:
+    Description: The secret holding Tessary's TESSARY_OBSERVER_ENCODER_API_KEY.
+    Value: !Ref ModelKey
