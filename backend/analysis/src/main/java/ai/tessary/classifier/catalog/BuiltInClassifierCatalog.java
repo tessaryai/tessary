@@ -89,8 +89,9 @@ public class BuiltInClassifierCatalog {
      * on. {@code capability} rides along because seeding reads it, to decide whether the classifier
      * reaches the org at all.
      *
-     * <p>Every built-in seeds enabled except Frustration, which seeds disabled because enabling it
-     * spends the org's own provider credit. Trust in an unmeasured classifier is expressed only by who
+     * <p>Every built-in seeds enabled except two. Frustration seeds disabled because enabling it
+     * spends the org's own provider credit, and Groundedness because it needs a model server a person
+     * sets up first. Trust in an unmeasured classifier is expressed only by who
      * its capability flag is on for, resolved per org without a deploy, rather than by this switch.
      */
     public record BuiltIn(
@@ -202,60 +203,51 @@ public class BuiltInClassifierCatalog {
             new ClassifierModelModule(
                     "groundedness",
                     "Groundedness",
-                    "The output says something its source content does NOT SUPPORT: either it "
-                            + "contradicts the retrieved documents or it asserts what they never say. A "
-                            + "long-context token head (ModernBERT-large fine-tuned from the published "
-                            + "lettucedetect checkpoint on RAGTruth plus Tessary's own verified corpora) "
-                            + "reads every retrieved document and the whole answer in one pass and marks "
-                            + "the unsupported words; the score is the strongest unsupported sentence. "
-                            + "Measured on human-labelled RAG output: 56% of unsupported sentences caught "
-                            + "at a 2% false-alarm rate, equal to the best published model of its size. "
-                            + "A true fact taken from a tool call but absent from the retrieved evidence "
-                            + "counts as unsupported. Pass tool output in as evidence to ground it. Gated "
-                            + "to call sites whose shape declares verifiable source content "
-                            + "(extract/summarize/rag_answer); quiet on a turn with no evidence.",
+                    // User-facing, the classifier row's text. How the model reads an answer and how the rate
+                    // test judges a call site is the method card's job (ClassifierMethodCard), and the
+                    // catalog quotes no benchmark numbers.
+                    "Answers that state things the retrieved documents don't support.",
                     Kind.GROUNDEDNESS,
                     // v5 (2026-09-18): the pair head (bart-large-mnli, contradiction-only, per-sentence
-                    // windows) is replaced by the token head served as classify-service's `groundedness`
-                    // (classify-service/groundedness.js). The contract changed with it — from "contradicts"
-                    // to "unsupported: contradicted OR baseless" — because on human-labelled data the
-                    // contradiction-only question was unreachable by any model of this size (0.04-0.20
-                    // recall at 2% FP, ours and the published ones alike) while the unsupported question is
-                    // where the field's own benchmarks sit; see classifiers/groundedness/README.md,
-                    // "External validity" and "The long-context token classifier". Evidence reaches the head
-                    // as a LIST of documents (GroundingEvidenceReads.Evidence#documents), never one joined
-                    // string: the layout with numbered passages is the one the checkpoint was trained on.
-                    // A version bump rewrites configJson wholesale, and the band below is NEW, not carried:
-                    // the decoded score is now P(unsupported) directly (higher = worse), not 1 - support.
-                    // v6 (2026-09-21): the classifier ARMS by default — three detections in a day file a
-                    // finding (ClassifierArming) — so Layer 2 has something to rule on; until then no
-                    // built-in shipped an arming block and a groundedness detection never left its table.
-                    6,
-                    // tessaryai/groundedness-token-v1 (MIT; ModernBERT-large, Apache-2.0 base; RAGTruth,
-                    // MIT), measured on RAGTruth's human-labelled test split and on Tessary's held-out
-                    // corpora before shipping — numbers in the classifiers README and the model card.
+                    // windows) is replaced by the long-context token head. The contract changed with it,
+                    // from "contradicts" to "unsupported: contradicted OR baseless", because on
+                    // human-labelled data the contradiction-only question was unreachable by any model of
+                    // this size while the unsupported question is where the field's own benchmarks sit.
+                    // Evidence reaches the head as a LIST of documents (GroundingEvidenceReads.Evidence#
+                    // documents), never one joined string: the layout with numbered passages is the one
+                    // the checkpoint was trained on.
+                    // v6 (2026-09-21): the classifier armed by default, three detections in a day.
+                    // v7: arming is replaced by a rate test per call site, and the two bands by one
+                    // threshold. A fixed count arms on the model's false alarms, whose rate depends on the
+                    // domain; a reference learned per call site absorbs it, so only a rise is a finding.
+                    // A version bump rewrites configJson wholesale, which is what drops the arming block
+                    // and the second band from projects seeded before it.
+                    7,
+                    // tessaryai/groundedness-classifier-v1 (MIT; ModernBERT-large, Apache-2.0 base;
+                    // RAGTruth, MIT), measured on RAGTruth's human-labelled test split before shipping;
+                    // numbers in the classifiers README and the model card.
                     Capability.GROUNDEDNESS,
-                    // Per-call: the pair head scores one output against ITS OWN input, so an inner
+                    // Per-call: the head scores one output against ITS OWN input, so an inner
                     // retrieval-answer call is exactly as checkable as the outermost one.
                     Grain.OBSERVATION,
-                    // Response-level P(unsupported) bands, read off RAGTruth test with thresholds
-                    // cross-validated by response: 0.975 is the 2% false-alarm point (recall 0.41,
-                    // precision 0.83) — a finding above it is worth a case; 0.50 is the F1-optimal point
-                    // (F1 0.66, precision 0.70, recall 0.63) — the band between is "review", where Layer-2
-                    // triage earns its keep. Both are the served model's own numbers, not inherited.
-                    //
-                    // The arming block is the Layer-1 → Layer-2 bar: N detections (either band; the
-                    // review band is exactly what triage is for) in a quantised window open or refresh ONE
-                    // finding whose evidence is the spans that fired, and that finding is the unit Layer 2
-                    // rules on in one microVM. Three in a day is deliberately low: a project that never
-                    // reaches it has no groundedness problem worth a machine's look, and one that does
-                    // pays for one ruling per window, not one per turn. Owners raise it per project.
-                    "{\"threshold_high\":0.975,\"threshold_low\":0.5,"
-                            + "\"arming\":{\"basis\":\"event_count\",\"threshold\":3,\"window_seconds\":86400}}",
+                    // Every key here is one GroundednessConfig parses. threshold is the flag cutoff on
+                    // P(unsupported), the 2% false-alarm point on RAGTruth test; it is hashed into the
+                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
+                    // rate test's dials, in traces: judged from 200, the reference learning until 1,000,
+                    // and one false finding per 50,000 traces on a healthy call site.
+                    "{\"threshold\":0.975,\"arl_target\":50000,\"min_decision_interval\":4,"
+                            + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
+                            + "\"min_baseline_traces\":200,\"freeze_baseline_traces\":1000}",
                     // null: the detector writes its own groundedness_assessment rows, one per scored
                     // answer, so it arrives through the DetectorSupplier seam with its repository
                     // (GroundednessDetectorSupplier), as Frustration's does.
-                    null),
+                    null,
+                    // TRACKING: the one band the detector writes is HIGH, so both modes read the same
+                    // rows, as Frustration's.
+                    ClassifierRow.Mode.TRACKING,
+                    // Seeds disabled: it needs a model server a person sets up first, so a person turns
+                    // it on, through the setup flow that checks the model answers.
+                    false),
             new ClassifierModelModule(
                     "behavior_drift",
                     "Behaviour Drift",

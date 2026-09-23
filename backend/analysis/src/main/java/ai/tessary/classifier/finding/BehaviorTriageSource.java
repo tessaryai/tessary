@@ -6,6 +6,7 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
@@ -83,11 +84,10 @@ public class BehaviorTriageSource implements TriageSource {
 
     /**
      * The classifiers this source escalates for. Naming them explicitly keeps a conformance finding,
-     * which has its own source and its own dossier, out of this lane's queue. Groundedness joined on
-     * 2026-09-21: its armed-window finding is the same shape this lane already rules on (one cause,
-     * a population of spans as evidence, a two-file dossier, the substrate over MCP), so it rides the
-     * lane rather than growing a fourth source; the per-span classifiers with no arming block
-     * (secret_leak, malformed_output) still never file a finding and so never reach here.
+     * which has its own source and its own dossier, out of this lane's queue. Groundedness rides the
+     * lane: its rate finding is the shape Malformed Output's already is (one call site, a rate, its
+     * flagged traces as evidence), filed unruled for this lane to rule on. Frustration is not here:
+     * its findings are ruled when they are filed.
      */
     private static final List<String> BEHAVIOR_CLASSIFIERS = List.of(
             BuiltInDetector.Kind.BEHAVIOR_DRIFT,
@@ -144,6 +144,12 @@ public class BehaviorTriageSource implements TriageSource {
     /** The {@code frustration_rate} branch of {@link #detail}; every other cause never touches it. */
     private final FrustrationDetailService frustrations;
 
+    /**
+     * The groundedness call-site state, re-learned when a person absorbs a {@code groundedness_rate} finding
+     * or its case; see {@link #relearnGroundedness}.
+     */
+    private final GroundednessRateRepository groundednessRates;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -163,7 +169,8 @@ public class BehaviorTriageSource implements TriageSource {
             ObjectMapper mapper,
             MalformedOutputDetailService malformedOutputs,
             SecretLeakDetailService secretLeaks,
-            FrustrationDetailService frustrations) {
+            FrustrationDetailService frustrations,
+            GroundednessRateRepository groundednessRates) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -187,6 +194,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.malformedOutputs = malformedOutputs;
         this.secretLeaks = secretLeaks;
         this.frustrations = frustrations;
+        this.groundednessRates = groundednessRates;
     }
 
     @Override
@@ -401,7 +409,8 @@ public class BehaviorTriageSource implements TriageSource {
      *
      * <p>Branches on {@code cause_kind}, because the two verbs mean different detector-state writes for
      * the classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
-     * tool error corrects a rate (see {@link #resolveRateShift}); malformed-output and armed-window
+     * tool error corrects a rate (see {@link #resolveRateShift}); a groundedness rate re-learns its
+     * call site's reference on absorb (see {@link #relearnGroundedness}); malformed-output and armed-window
      * causes have no fitted state to move; everything else hangs off a fitted profile and goes through
      * {@link CauseResolver}. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
      * which is what actually opens or closes the finding.
@@ -433,6 +442,12 @@ public class BehaviorTriageSource implements TriageSource {
         }
         if (FindingRow.Cause.RATE_SHIFT.equals(finding.causeKind())) {
             return Optional.of(resolveRateShift(projectId, finding, expected, action, userId, now));
+        }
+        if (FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
+            if (expected) relearnGroundedness(projectId, finding, userId, now);
+            writeHumanRuling(projectId, finding.id(), expected, userId, now);
+            logResolved(projectId, findingId, finding.causeKind(), action);
+            return Optional.of(reread(projectId, findingId));
         }
         // Neither has fitted detector state: malformed-output is a recomputed rate with no reference to
         // pin (unlike tool error, it corrects nothing on absorb), and an armed-window classifier just
@@ -474,6 +489,10 @@ public class BehaviorTriageSource implements TriageSource {
         }
         if (FindingRow.Cause.RATE_SHIFT.equals(finding.causeKind())) {
             repinRateShift(projectId, finding, userId, now);
+            return;
+        }
+        if (FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
+            relearnGroundedness(projectId, finding, userId, now);
             return;
         }
         if (FindingRow.Cause.MALFORMED_RATE.equals(finding.causeKind())
@@ -609,6 +628,18 @@ public class BehaviorTriageSource implements TriageSource {
         writeHumanRuling(projectId, finding.id(), expected, userId, now);
         logResolved(projectId, finding.id(), finding.causeKind(), action);
         return reread(projectId, finding.id());
+    }
+
+    /**
+     * The detector-state half of absorbing a groundedness rate finding: its call site forgets the rate it
+     * learned and learns the new one from the traffic after now. Groundedness has no reference a person can
+     * pin, only one it learns, so "this is the new normal" is a reset that re-learns it; the reset fence
+     * keeps the absorbed hours out of the next replay. The call site is judged again once the new reference
+     * holds the minimum.
+     */
+    private void relearnGroundedness(String projectId, FindingRow finding, @Nullable String userId, String now) {
+        String callSite = finding.callSiteId() != null ? finding.callSiteId() : finding.nativeCauseKey();
+        groundednessRates.states().resetAndRelearn(projectId, callSite, userId, "Absorbed.", now);
     }
 
     /** The detector-state half of absorbing a tool-error rate shift — see {@link #resolveRateShift}. */

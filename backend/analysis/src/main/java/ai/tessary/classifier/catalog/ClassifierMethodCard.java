@@ -231,37 +231,6 @@ public final class ClassifierMethodCard {
             `exemplar` turns really violate the rule as written.
             """;
 
-    private static final String ARMED_SIGNAL = """
-            ## {key}: a per-observation detector armed on a threshold
-
-            {measures}
-
-            One observation tripping is not the finding: it fires when enough of them do inside one window.
-
-            **Compares against** a threshold on the count, not another stretch of traffic.
-
-            **The claim's numbers** are in `get_finding` under `armedWindow`: `basis` (`event_count` or
-            `distinct_users`), `observed` against `threshold`, `windowSeconds`, the window, and
-            `confidence` where the detector bands it.
-
-            **Evidence**
-            - `member`: the observations that fired, written in the same transaction as the finding, so a
-              finding never exists without the evidence that justified it.
-
-            **Absent roles**
-            - No `baseline`: nothing here is a two-window comparison, so there is no before side to
-              enumerate.
-            - No `exemplar`: the population is the claim, and every member of it is equally a way in.
-            - No `witness` or `changepoint`: this detector writes neither role.
-
-            ### Cause: `armed_window`
-
-            Enough observations tripped the detector inside one window, and each `member` is one of them.
-            The claim holds when the flagged observations, read from the spans themselves, are what the
-            detector says they are and come from how the agent behaved rather than from what users
-            brought to it.
-            """;
-
     private static final String SECRET_LEAK = """
             ## secret_leak: a credential rule matched in one call site's output
 
@@ -376,10 +345,53 @@ public final class ClassifierMethodCard {
             what changed, not who the users are or what they asked.
             """;
 
-    /**
-     * Cards for the classifiers that write findings through a detector of their own. The armed-signal
-     * family shares one shape and is rendered from {@link #ARMED_SIGNAL} with its key substituted.
-     */
+    private static final String GROUNDEDNESS = """
+            ## groundedness: a Bernoulli CUSUM over one call site's traces with a flagged answer
+
+            **Measures** the fraction of one call site's traces with an answer the model flagged. A token
+            classifier reads the retrieved documents and the whole answer in one pass and scores each sentence
+            of the answer for P(unsupported): contradicted by the documents, or stated where they say nothing.
+            An answer is flagged when its strongest sentence scores at or above the flag threshold, the 2%
+            false-alarm point on RAGTruth's human-labelled test split. Answers with no retrieved documents, or
+            with nothing checkable in them, are not scored and are not trials. A true fact taken from a tool
+            call but absent from the retrieved documents counts as unsupported.
+
+            **Compares against** the rate that call site learned as its own normal, a fitted number and not a
+            stretch of traffic. It is judged from its first 200 traces and keeps learning until 1,000, then
+            stops moving. The model's false-alarm rate depends on the domain, and the learned rate absorbs
+            it. A call site that answered badly from the start learned that as normal and is flagged only for
+            getting worse. Only a rise is reported.
+
+            A trace is one trial on each call site it had an answer scored on, and it is a failure while one
+            of those answers holds an uncleared flag, so two flagged answers in one trace are one failure.
+
+            **The claim's numbers** are in `get_finding` under `groundedness`: `rate` (`refRate` and `curRate`
+            as fractions of traces, `nRef`, `nCur`, `failuresCur`, `statistic` against `threshold`,
+            `effectSize`, `direction`, `onsetAt`, and no pattern breakdown), `flagThreshold`, `baselineTraces`,
+            `learningUntil` and `arlTarget`. `dossier/detections.md` lists the flagged answers with the
+            sentences the model marked in each.
+
+            **Evidence**
+            - `member` trace rows: every trace scored on the call site since onset, the rate's denominator.
+            - `witness` trace rows: every trace with a flagged answer since onset, the numerator. Read these.
+            - `witness` span rows: each flagged answer inside those traces.
+
+            **Absent roles**
+            - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
+              side to enumerate.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
+
+            ### Cause: `groundedness_rate`
+
+            The share of one call site's traces with a flagged answer has risen above the rate it learned.
+            Some flags are normal: at sentence level about two in three flagged sentences are really
+            unsupported. The claim holds when the witness answers really state things their retrieved
+            documents do not support, and that is what changed, not which documents were retrieved or what
+            users asked.
+            """;
+
+    /** Cards for the classifiers that write findings through a detector of their own. */
     private static final Map<String, String> BY_KEY = Map.of(
             BuiltInDetector.Kind.TOOL_ERROR, TOOL_ERROR,
             BuiltInDetector.Kind.DURATION_DRIFT, METRIC_DRIFT,
@@ -388,7 +400,8 @@ public final class ClassifierMethodCard {
             BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE,
             BuiltInDetector.Kind.SECRET_LEAK, SECRET_LEAK,
             BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT,
-            BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION);
+            BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION,
+            BuiltInDetector.Kind.GROUNDEDNESS, GROUNDEDNESS);
 
     /**
      * The card for one classifier key, or null when the key names nothing this knows about — a
@@ -397,35 +410,6 @@ public final class ClassifierMethodCard {
      */
     public static @Nullable String forClassifier(@Nullable String classifierKey) {
         if (classifierKey == null || classifierKey.isBlank()) return null;
-        String card = BY_KEY.get(classifierKey);
-        if (card != null) return card;
-        String measures = ARMED_SIGNAL_MEASURES.get(classifierKey);
-        return measures == null
-                ? null
-                : ARMED_SIGNAL.replace("{key}", classifierKey).replace("{measures}", measures);
+        return BY_KEY.get(classifierKey);
     }
-
-    /**
-     * What each armed-signal detector actually looks for, substituted into {@link #ARMED_SIGNAL}'s
-     * {@code {measures\}} slot.
-     *
-     * <p>The rest of that card is the arming shape, which the family shares. Without this the one card
-     * that never states a method would tell an agent it is auditing observations that "trip the
-     * detector" and never say what tripping it means, which is the single thing it cannot work out from
-     * the evidence in front of it.
-     */
-    private static final Map<String, String> ARMED_SIGNAL_MEASURES = Map.of(
-            BuiltInDetector.Kind.GROUNDEDNESS,
-            "**Measures** whether an answer contradicts its own source: a three-way NLI head scores each"
-                    + " asserted sentence against the source the trace actually produced, the retrieved"
-                    + " documents where there are any and the prompt where the document sits in it. It fires on"
-                    + " contradiction only. A sentence the source simply does not mention is NOT a finding, and"
-                    + " an answer with nothing checkable in it abstains. Claims sourced from a tool call are out"
-                    + " of scope entirely.");
-
-    /**
-     * The built-in detectors that file through {@code ClassifierArming} rather than their own sweep,
-     * taken from {@link #ARMED_SIGNAL_MEASURES} so a key can never be in one and not the other.
-     */
-    static final java.util.Set<String> ARMED_SIGNAL_KEYS = ARMED_SIGNAL_MEASURES.keySet();
 }

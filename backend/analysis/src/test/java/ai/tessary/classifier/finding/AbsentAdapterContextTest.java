@@ -11,6 +11,7 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.debug.ClassifierDebugContributor;
 import ai.tessary.classifier.debug.ClassifierDebugService;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
@@ -154,6 +155,11 @@ class AbsentAdapterContextTest {
         @Bean
         FrustrationDetailService frustrations() {
             return mock(FrustrationDetailService.class);
+        }
+
+        @Bean
+        GroundednessRateRepository groundednessRates() {
+            return mock(GroundednessRateRepository.class);
         }
     }
 

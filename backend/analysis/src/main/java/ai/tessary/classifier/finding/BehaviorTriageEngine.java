@@ -2,9 +2,9 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
-import ai.tessary.classifier.worker.ArmedWindowEvidence;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.open.errors.ClassifierError;
@@ -20,6 +20,9 @@ import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -250,38 +253,37 @@ public class BehaviorTriageEngine {
         return files;
     }
 
-    /** The dossier file listing an armed-window finding's detections, one per flagged span. */
+    /** The dossier file listing a groundedness rate finding's flagged answers, one per flagged span. */
     static final String DETECTIONS_FILE = "detections.md";
 
-    /** Rows listed before the file says "and N more": enough to read the pattern, bounded for the budget. */
+    /** Rows listed before the file says there are more: enough to read the pattern, bounded for the budget. */
     static final int DETECTIONS_CAP = 50;
 
     /**
-     * For an armed-window finding, what the classifier wrote about each span it fired on — the
-     * flagged claim, its score, the band — read back from the detection table over the finding's own
-     * window. The evidence enumeration says WHICH spans; this says WHY each one, which is the material
-     * a ruling on a groundedness finding is made of, and handing it over saves the agent a page of
-     * MCP reads per span. Empty for every other cause kind, and for a faceted arming.
+     * For a groundedness rate finding, what the classifier wrote about each answer it flagged at the
+     * finding's call site since onset: the score and the sentences it marked. The evidence enumeration says
+     * WHICH answers; this says WHERE in each the model saw an unsupported sentence, which is what a ruling
+     * on a groundedness finding is made of, and handing it over saves the agent a page of MCP reads per
+     * answer. Empty for every other cause kind.
      */
     private Optional<String> detectionsFile(FindingRow finding) {
-        ArmedWindowEvidence.ArmedWindowDetail read = ArmedWindowEvidence.detail(finding.payloadJson());
-        if (read == null || read.windowStart() == null || read.windowEnd() == null) return Optional.empty();
-        // A faceted finding (secret leak) is one facet at one call site; the classifier's whole window
-        // would list every other facet's rows beside it. Its detail surface reads those rows itself.
-        if (FindingPayload.text(finding.payloadJson(), "facet") != null) return Optional.empty();
-        List<ClassifierDetectionWriteRepository.DetectionInWindow> rows = detections.listInWindow(
-                finding.classifierKey(),
+        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Optional.empty();
+        String callSite = finding.callSiteId() != null ? finding.callSiteId() : finding.nativeCauseKey();
+        List<ClassifierDetectionWriteRepository.DetectionInWindow> rows = detections.listWitnessDetections(
+                BuiltInDetector.Kind.GROUNDEDNESS,
                 finding.projectId(),
-                finding.causeKey(),
-                read.windowStart(),
-                read.windowEnd(),
+                finding.subjectId(),
+                callSite,
+                finding.onsetAt(),
+                endOfLastHour(finding.lastSeenAt()),
                 DETECTIONS_CAP + 1);
-        StringBuilder sb = new StringBuilder("# Detections in the window\n\n")
-                .append("One line per span the classifier fired on, newest first: trace and span ids (the")
-                .append(" `get_trace` / `get_span` arguments), the band the score fell in, and the")
-                .append(" detector's own evidence for that span, verbatim. `high` is past the classifier's")
-                .append(" upper threshold; `low` is the band between its two thresholds, which is a")
-                .append(" candidate, not a miss.\n\n");
+        StringBuilder sb = new StringBuilder("# Flagged answers since onset\n\n")
+                .append("One line per answer the classifier flagged at this call site, newest first: trace and")
+                .append(" span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's")
+                .append(" score (P(unsupported) of its strongest sentence), and each flagged sentence as")
+                .append(" `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The")
+                .append(" strongest sentence's text follows in quotes. A flagged sentence is where the model")
+                .append(" saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n");
         int shown = Math.min(rows.size(), DETECTIONS_CAP);
         for (int i = 0; i < shown; i++) {
             ClassifierDetectionWriteRepository.DetectionInWindow d = rows.get(i);
@@ -291,23 +293,56 @@ public class BehaviorTriageEngine {
                     .append(d.spanId())
                     .append("` at ")
                     .append(d.subjectStartedAt())
-                    .append(" [")
-                    .append(d.confidence() == null ? "high" : d.confidence())
-                    .append(d.severity() == null ? "" : ", " + d.severity())
-                    .append("]: ")
-                    .append(d.evidenceJson() == null ? "(no evidence recorded)" : d.evidenceJson())
+                    .append(": ")
+                    .append(flaggedAnswerLine(d.evidenceJson()))
                     .append('\n');
         }
         if (rows.size() > DETECTIONS_CAP) {
-            sb.append("\n")
+            sb.append("\nThe newest ")
                     .append(DETECTIONS_CAP)
-                    .append(" of at least ")
-                    .append(read.observed())
                     .append(" shown; page the rest through `get_finding_evidence`.\n");
         } else {
-            sb.append("\n").append(shown).append(" detection(s), the complete window.\n");
+            sb.append("\n").append(shown).append(" flagged answer(s), every one since onset.\n");
         }
         return Optional.of(sb.toString());
+    }
+
+    /** {@code score 0.991; flagged [0, 42) 0.991, [80, 131) 0.978; strongest: "..."}, from a detection's evidence. */
+    private String flaggedAnswerLine(@Nullable String evidenceJson) {
+        if (evidenceJson == null) return "(no evidence recorded)";
+        JsonNode ev;
+        try {
+            ev = mapper.readTree(evidenceJson);
+        } catch (Exception e) {
+            return evidenceJson;
+        }
+        StringBuilder line = new StringBuilder("score ").append(ev.path("unsupported").asText("?"));
+        JsonNode sentences = ev.path("flagged_sentences");
+        if (sentences.isArray() && !sentences.isEmpty()) {
+            line.append("; flagged ");
+            for (int i = 0; i < sentences.size(); i++) {
+                JsonNode s = sentences.get(i);
+                if (i > 0) line.append(", ");
+                line.append('[')
+                        .append(s.path("start").asInt())
+                        .append(", ")
+                        .append(s.path("end").asInt())
+                        .append(") ")
+                        .append(s.path("unsupported").asText("?"));
+            }
+        }
+        String claim = ev.path("claim").asText("");
+        if (!claim.isBlank()) line.append("; strongest: \"").append(claim.replace('\n', ' ')).append('"');
+        return line.toString();
+    }
+
+    /** The end of the hour a finding was last seen in, where its counts stop; now when it cannot be read. */
+    private static String endOfLastHour(String lastSeenAt) {
+        try {
+            return Instant.parse(lastSeenAt).plus(Duration.ofHours(1)).toString();
+        } catch (DateTimeParseException e) {
+            return Instant.now().toString();
+        }
     }
 
     /**

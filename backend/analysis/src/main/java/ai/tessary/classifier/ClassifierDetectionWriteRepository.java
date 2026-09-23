@@ -133,26 +133,35 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
-     * /**
-     * One row per detection this classifier recorded in the event-time window {@code [start, end)} —
-     * the span's own clock, the same one {@link #countWindows} armed on — newest first, capped: the
-     * flagged spans of an armed-window finding with what the detector said about each, for the
-     * triage dossier. Both bands, like the arming count that opened the finding, so the agent sees the
-     * review-band rows it exists to rule on and not only the ones already past the high bar.
+     * The detections this classifier recorded at one call site in the event-time window {@code [since,
+     * until)}, newest first, capped: the flagged answers of a rate finding with what the detector said about
+     * each, for the triage dossier. The call site is the span's own, read through the span table, so a
+     * detection whose span has aged out of retention is not listed.
      */
-    public List<DetectionInWindow> listInWindow(
-            String detectorKind, String projectId, String classifierId, String start, String end, int limit) {
+    public List<DetectionInWindow> listWitnessDetections(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            String callSiteId,
+            String since,
+            String until,
+            int limit) {
         String table = tableFor(detectorKind);
-        if (table == null) return List.of();
-        return jdbc.sql("SELECT subject_trace_id, subject_span_id, subject_session_id, severity, confidence,"
-                        + " evidence::text AS evidence, subject_started_at FROM " + table
-                        + " WHERE project_id = :pid AND classifier_id = :sid"
-                        + " AND subject_started_at >= :start::timestamptz AND subject_started_at < :end::timestamptz"
-                        + " ORDER BY subject_started_at DESC LIMIT :limit")
+        if (table == null || limit <= 0) return List.of();
+        return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, d.subject_session_id, d.severity,"
+                        + " d.confidence, d.evidence::text AS evidence, d.subject_started_at FROM " + table + " d"
+                        + " JOIN span s ON s.project_id = d.project_id AND s.trace_id = d.subject_trace_id"
+                        + " AND s.id = d.subject_span_id"
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :sid AND s.call_site_id = :callSite"
+                        + " AND d.subject_started_at >= CAST(:since AS timestamptz)"
+                        + " AND d.subject_started_at < CAST(:until AS timestamptz)"
+                        + " ORDER BY d.subject_started_at DESC, d.subject_trace_id DESC, d.subject_span_id DESC"
+                        + " LIMIT :limit")
                 .param("pid", projectId)
                 .param("sid", classifierId)
-                .param("start", start)
-                .param("end", end)
+                .param("callSite", callSiteId)
+                .param("since", since)
+                .param("until", until)
                 .param("limit", limit)
                 .query((rs, n) -> new DetectionInWindow(
                         rs.getString("subject_trace_id"),
@@ -244,6 +253,27 @@ public class ClassifierDetectionWriteRepository {
                 .param("pid", projectId)
                 .param("sid", classifierId)
                 .param("sessions", sessionIds)
+                .update();
+    }
+
+    /**
+     * Clear this classifier's detections on each of {@code spans}, the flagged answers a human ruled a false
+     * alarm: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
+     * their first clear time. Returns how many rows it cleared; zero where no detection table is registered.
+     */
+    public int clearSpans(
+            String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans, String now) {
+        String table = tableFor(detectorKind);
+        if (table == null || spans.isEmpty()) return 0;
+        List<Object[]> keys =
+                spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
+        return jdbc.sql("UPDATE " + table + " SET cleared_at = :now"
+                        + " WHERE project_id = :pid AND classifier_id = :sid"
+                        + " AND (subject_trace_id, subject_span_id) IN (:spans) AND cleared_at IS NULL")
+                .param("now", now)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .param("spans", keys)
                 .update();
     }
 

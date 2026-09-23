@@ -267,7 +267,8 @@ class TriageSourceAbsenceTest {
                 null, // ObjectMapper: the two metric/tool-error branches only
                 null, // MalformedOutputDetailService: the malformed_rate branch only
                 null, // SecretLeakDetailService: the secret_leak branch only
-                null); // FrustrationDetailService: the frustration_rate branch only
+                null, // FrustrationDetailService: the frustration_rate branch only
+                null); // GroundednessRateRepository: the groundedness_rate branch only
     }
 
     /** The triage worker with only the collaborators {@code triageForTest} reaches. */

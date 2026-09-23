@@ -285,16 +285,16 @@ class PartnerCatalogTest {
     void flagOffNeverWritesToTheRow() {
         var fix = TenantFixture.bootstrap(tenants, "catalog-nowrite");
         String projectId = fix.project().id();
-        grant(fix.org().id(), Capability.GROUNDEDNESS);
+        grant(fix.org().id(), Capability.SECRET_LEAK);
         classifiers.seedBuiltIns(projectId);
 
-        String id = storedRow(projectId, "groundedness").id();
-        assertTrue(storedRow(projectId, "groundedness").enabled(), "every built-in seeds enabled");
+        String id = storedRow(projectId, "secret_leak").id();
+        assertTrue(storedRow(projectId, "secret_leak").enabled(), "it seeds enabled");
 
-        withhold(fix.org().id(), Capability.GROUNDEDNESS);
+        withhold(fix.org().id(), Capability.SECRET_LEAK);
         classifiers.resyncBuiltIns(projectId); // seeds, then runs retireDroppedBuiltIns over every row
 
-        ClassifierRow stored = storedRow(projectId, "groundedness");
+        ClassifierRow stored = storedRow(projectId, "secret_leak");
         assertEquals(id, stored.id(), "the row is neither deleted nor re-inserted under a new id");
         assertTrue(stored.builtIn(), "and is still a built-in");
         assertTrue(

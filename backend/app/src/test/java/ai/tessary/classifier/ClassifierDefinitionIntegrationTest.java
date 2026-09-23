@@ -13,6 +13,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,12 +61,12 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(9, service.list(pid).size(), "all built-ins are listable");
         assertTrue(defs.stream().allMatch(ClassifierRow::builtIn), "all seeded signals are marked built_in");
         // Every built-in seeds enabled except Frustration, whose sweep spends the org's own provider
-        // credit, so a person turns it on. Otherwise whether a classifier runs for an org is a
-        // capability-flag decision, not something the seeded row encodes. What reaches a project at
-        // all is asserted in PartnerCatalogTest.
+        // credit, and Groundedness, which needs a model server set up first, so a person turns each on.
+        // Otherwise whether a classifier runs for an org is a capability-flag decision, not something the
+        // seeded row encodes. What reaches a project at all is asserted in PartnerCatalogTest.
         for (ClassifierRow def : defs) {
             assertEquals(
-                    !"frustration".equals(def.classifierKey()),
+                    !Set.of("frustration", "groundedness").contains(def.classifierKey()),
                     def.enabled(),
                     def.classifierKey() + " seeds with the wrong switch");
         }

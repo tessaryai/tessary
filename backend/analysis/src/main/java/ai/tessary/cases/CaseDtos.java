@@ -301,9 +301,9 @@ public final class CaseDtos {
     /**
      * Closing a case. The reason is required and is the point of the record.
      *
-     * @param disposition only on a frustration case: {@code fixed} (the call site re-learns its normal rate from
-     *     here) or {@code false_alarm} (the same, and the conversations the case cites stop counting as
-     *     frustrated). Refused on any other case.
+     * @param disposition only on a frustration or groundedness case: {@code fixed} (the call site re-learns its
+     *     normal rate from here) or {@code false_alarm} (the same, and the conversations or answers the case
+     *     cites stop counting as flagged). Refused on any other case.
      */
     public record ResolveCaseRequest(
             @NotBlank @Size(max = 500) String reason,

@@ -71,13 +71,6 @@ public final class GroundednessDetector implements BuiltInDetector {
     /** Cap on the claim echoed into {@code evidence_json} — a detection is a pointer, not a payload. */
     private static final int CLAIM_ECHO_CHARS = 300;
 
-    /**
-     * The flag cutoff on P(unsupported): the 2% false-alarm point on RAGTruth test (recall 0.41,
-     * precision 0.83), read with thresholds cross-validated by response, never fitted to the scored
-     * set. One band: an answer at or above it is flagged, one below is scored clean.
-     */
-    static final double DEFAULT_THRESHOLD = 0.975;
-
     /** The served model, and the revision {@code classifiers/groundedness/serve.py} pins by default. */
     static final String MODEL = "tessaryai/groundedness-classifier-v1@6746fa25f4f6cdb60f994f056c1919300e6c2b12";
 
@@ -159,15 +152,11 @@ public final class GroundednessDetector implements BuiltInDetector {
     }
 
     /**
-     * The flag cutoff {@code config} sets: {@code threshold}, else an older blob's {@code
-     * threshold_high}, else {@link #DEFAULT_THRESHOLD}.
+     * The flag cutoff {@code config} sets, as {@link GroundednessConfig} reads it: {@code threshold}, else an
+     * older blob's {@code threshold_high}, else {@link GroundednessConfig#DEFAULT_THRESHOLD}.
      */
     double threshold(@Nullable String config) {
-        ConfigShape shape = parse(config);
-        if (shape == null) return DEFAULT_THRESHOLD;
-        if (shape.threshold() != null) return shape.threshold();
-        if (shape.thresholdHigh() != null) return shape.thresholdHigh();
-        return DEFAULT_THRESHOLD;
+        return GroundednessConfig.of(mapper, config).threshold();
     }
 
     private List<Detection> score(
@@ -277,31 +266,4 @@ public final class GroundednessDetector implements BuiltInDetector {
     private static double round(double v) {
         return Math.round(v * 1000) / 1000.0;
     }
-
-    @Nullable
-    private ConfigShape parse(@Nullable String config) {
-        if (config == null || config.isBlank()) return null;
-        try {
-            return mapper.readValue(config, ConfigShape.class);
-        } catch (JsonProcessingException e) {
-            return null;
-        }
-    }
-
-    /**
-     * The keys this detector owns. {@code ignoreUnknown} is load-bearing, not politeness: a classifier's
-     * {@code config_json} is one blob shared with features that key off it too (the pre-deploy loop
-     * reads {@code surfaces} from it, the rate test its own dials), and the platform mapper is a bare
-     * {@code new ObjectMapper()} with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one
-     * foreign key makes {@link #parse} throw, the catch returns null, and the detector silently falls
-     * back to its baked defaults — a signal that reads as configured while ignoring its configuration.
-     * {@code threshold_high} is read only for a blob written before v7 named it {@code threshold}.
-     */
-    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-    private record ConfigShape(
-            @com.fasterxml.jackson.annotation.JsonProperty("threshold") @Nullable
-            Double threshold,
-
-            @com.fasterxml.jackson.annotation.JsonProperty("threshold_high") @Nullable
-            Double thresholdHigh) {}
 }

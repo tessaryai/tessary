@@ -3,7 +3,6 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
-import ai.tessary.classifier.worker.ArmedWindowEvidence;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
@@ -52,6 +51,7 @@ public final class FindingTitle {
             case FindingRow.Cause.ARMED_WINDOW -> armed(finding);
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
             case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
+            case FindingRow.Cause.GROUNDEDNESS_RATE -> groundednessRate(finding);
             // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
             // much" to put in a sentence, and the cause key already reads as the action sequence.
             default -> finding.nativeCauseKey();
@@ -96,20 +96,15 @@ public final class FindingTitle {
     }
 
     /**
-     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet;
-     * {@code "groundedness fired on 3 detections in 1 d, bar 3"} for one filed against the whole
-     * classifier, so the Classifiers page and the case it opens carry the same sentence; the
-     * classifier's own key when the payload cannot be read.
+     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet; the
+     * classifier's own key for one filed against the whole classifier, which is what it read before.
      *
      * <p>Built from the payload and the call-site column, not the cause key: the key leads with a classifier
      * id, which means nothing to someone reading a title.
      */
     private static String armed(FindingRow finding) {
         String facet = FindingPayload.text(finding.payloadJson(), "facet");
-        if (facet == null) {
-            ArmedWindowEvidence.ArmedWindowDetail bar = ArmedWindowEvidence.detail(finding.payloadJson());
-            return bar == null ? finding.nativeCauseKey() : ArmedWindowEvidence.title(finding.nativeCauseKey(), bar);
-        }
+        if (facet == null) return finding.nativeCauseKey();
         String callSite = finding.callSiteId();
         return facet + " in " + (callSite == null ? "agent" : callSite) + " output";
     }
@@ -139,6 +134,16 @@ public final class FindingTitle {
         return "Frustrated sessions increased from "
                 + pct(body.path("baseline_rate").asDouble()) + " to "
                 + pct(body.path("current_rate").asDouble()) + " on " + callSite;
+    }
+
+    /**
+     * {@code "Answers on rag-answer became less grounded"}. The direction only, with no rates: the flagged
+     * rate counts the model's false alarms and misses its real ones, so the direction is reliable where the
+     * size is not. The finding's body carries the numbers, labelled as flagged.
+     */
+    private static String groundednessRate(FindingRow finding) {
+        String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
+        return "Answers on " + callSite + " became less grounded";
     }
 
     /**
