@@ -78,7 +78,7 @@ So the product is whole in slim mode: the browser, every page, ingestion, triage
 
 The classifier-training tooling (Argilla, MLflow) is behind the `classifiers` compose profile and never starts in either mode; `task classifiers:up` brings it up alongside.
 
-Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in. Without HuggingFace credentials the classify build fails on its gated encoder-weight download and leaves you with zero containers, so reach for `task dev:up:slim` there.
+Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in.
 
 The tmux session opens four tabbed windows: `[0] shell` (cheat-sheet + common commands; you land here), `[1] backend`, `[2] frontend`, `[3] caddy`. Session-local no-prefix bindings (defined in `.tmux.conf` at the repo root) jump with bare `0`/`1`/`2`/`3` and cycle with `Tab`/`Shift+Tab`; the standard `C-b 0`/`1`/`2`/`3` and `C-b n`/`p` still work as fallbacks.
 

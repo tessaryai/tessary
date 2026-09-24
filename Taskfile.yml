@@ -99,7 +99,7 @@ tasks:
 
   # Slim mode. What actually runs: postgres, backend, frontend, caddy, alloy — the whole
   # product, the browser entry point unchanged. What does NOT: classify (the encoder
-  # service; its build downloads the gated encoder weights and its container is capped at 8 GB)
+  # service; its build downloads ~1.7 GB of encoder weights and its container is capped at 8 GB)
   # and compile (the SOP-conformance fitter, which is `depends_on: classify` and can only
   # dead-letter without it). So the encoder classifier heads and SOP-conformance fits are the one
   # thing dormant here — everything else behaves exactly as under `task dev`.

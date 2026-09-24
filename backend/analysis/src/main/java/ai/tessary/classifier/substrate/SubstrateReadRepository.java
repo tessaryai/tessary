@@ -45,21 +45,20 @@ import org.springframework.stereotype.Repository;
 public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteShapeReads, GroundingEvidenceReads {
 
     /**
-     * Per-row cap on evidence text. The entailment head has a finite window, so one enormous retrieved
-     * document would otherwise crowd out every other piece of evidence in the premise.
+     * Per-row cap on evidence text. The groundedness model has a finite window, so one enormous retrieved
+     * document would otherwise crowd out every other piece of evidence.
      */
     private static final int EVIDENCE_CHARS_PER_ROW = 4_000;
 
     /**
      * Cap on evidence rows per span, taken best-rank-first.
      *
-     * <p>The per-row cap alone doesn't bound the premise: a long trace can retrieve dozens of
-     * passages, and the serving path only reads what fits its window ({@code classify.js} chunks the
-     * premise at {@code PAIR_MAX_CHUNKS=4} and reduces max across chunks, roughly 6.8K characters).
-     * Past that isn't just ignored, it's dangerous: raising the chunk cap to 16 was measured taking
-     * the detector from 3/3 true positives to 0/3, since with enough windows something always
-     * entails the claim. Six documents at 4K sits inside the readable budget, and ordering by
-     * {@code rank} drops the passages the retriever itself ranked least relevant.
+     * <p>The per-row cap alone doesn't bound the evidence: a long trace can retrieve dozens of
+     * passages, and the model reads one window of {@code MAX_LENGTH=8192} tokens
+     * ({@code classifiers/groundedness/serve.py}) and cuts the end of its prompt, where the last
+     * passages sit, to fit.
+     * Ordering by {@code rank} means what falls outside the window is what the retriever itself
+     * ranked least relevant.
      */
     private static final int EVIDENCE_ROWS = 6;
 
