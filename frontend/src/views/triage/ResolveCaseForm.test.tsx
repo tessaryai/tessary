@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The Resolve dialog offers the two dispositions on a frustration case only, each with its one-line
- * explanation, and sends the chosen one; every other case resolves on the reason alone.
+ * The Resolve dialog offers the two dispositions on a frustration or groundedness case, each with its
+ * one-line explanation, and sends the chosen one; every other case resolves on the reason alone.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -30,6 +30,17 @@ describe("ResolveCaseForm", () => {
     const onResolve = renderForm("frustration");
     fireEvent.click(screen.getByRole("button", { name: "Resolve case" }));
     expect(onResolve).toHaveBeenLastCalledWith("shipped a prompt fix", "fixed");
+
+    fireEvent.click(screen.getByRole("radio", { name: /False alarm/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve case" }));
+    expect(onResolve).toHaveBeenLastCalledWith("shipped a prompt fix", "false_alarm");
+  });
+
+  it("offers false alarm on a groundedness case, says it clears the flags, and sends it", () => {
+    const onResolve = renderForm("groundedness");
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByText("The same, and the answers this case cites are no longer flagged.")).not.toBeNull();
+    expect(screen.queryByText(/stop counting as frustrated/)).toBeNull();
 
     fireEvent.click(screen.getByRole("radio", { name: /False alarm/ }));
     fireEvent.click(screen.getByRole("button", { name: "Resolve case" }));
