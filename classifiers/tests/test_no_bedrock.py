@@ -85,13 +85,19 @@ def test_ambient_aws_credentials_no_longer_select_a_backend(monkeypatch: pytest.
     """THE regression that matters. `default_judge` used to sniff AWS credentials and return a
     BedrockJudge, so merely having creds on the machine routed dev work onto a billed API without
     anyone choosing it. Credentials must never again pick the backend."""
-    from framework.judge import ClaudeCliJudge, default_judge
+    from framework.judge import default_judge
 
     monkeypatch.delenv("TESSARY_JUDGE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_REGION"):
+        monkeypatch.delenv(key, raising=False)
+    without_creds = type(default_judge())
+
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFAKE")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert isinstance(default_judge(), ClaudeCliJudge)
+    # Which judge that is depends on the host (the `claude` CLI, else the offline FakeJudge); the rule
+    # is only that adding credentials changes nothing.
+    assert type(default_judge()) is without_creds
 
 
 # The attribution generator has the same hard-wiring, and its own version of this test travels
