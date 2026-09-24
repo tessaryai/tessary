@@ -29,11 +29,13 @@ cd "$ROOT"
 CQ_DOC="${CQ_DOC:-devdocs/reference/classifier-quality.md}"
 export CQ_DOC
 
-# A checkout without the page (the export candidate, for one) has nothing to pin. Say so rather
-# than dying on an unguarded open().
+# The page is always there: the export deletes only the paid overlay, and scripts/check.sh runs this
+# gate in both editions. A missing page means it was moved or deleted, which is a failure, not a
+# reason to skip: skipping would turn this gate green exactly when the page is gone.
 if [ ! -f "$CQ_DOC" ]; then
-  echo "classifier-quality-doc skipped: $CQ_DOC is not in this checkout (no measured-quality page to pin)"
-  exit 0
+  echo "check-classifier-quality-doc: $CQ_DOC is missing. Put the measured-quality page back, or" >&2
+  echo "  pass its new path as CQ_DOC in scripts/check.sh's manifest row and update the default here." >&2
+  exit 1
 fi
 
 python3 - <<'PY'

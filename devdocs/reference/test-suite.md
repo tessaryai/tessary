@@ -40,7 +40,7 @@ package under `ai.tessary`) or the literal `frontend`.
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: classifier-quality-doc (manifest `SKIP`), slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
