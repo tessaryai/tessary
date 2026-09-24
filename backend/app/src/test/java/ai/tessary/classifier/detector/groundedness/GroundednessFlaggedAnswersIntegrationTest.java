@@ -59,7 +59,8 @@ import org.springframework.web.context.WebApplicationContext;
  * cites comes back newest first, a page at a time; one whose span and retrieval are stored comes back with its
  * question, the exact answer, the documents it was compared against and flagged sentences that slice to their
  * text; one whose trace was never stored says so; an RCA cause narrows the list to its traces; and the finding
- * page's block carries the first page.
+ * page's block carries the first page. Another project's finding and groundedness classifier are 404 under the
+ * caller's project, and an RCA report on another finding narrows the list to nothing.
  */
 @SpringBootTest
 class GroundednessFlaggedAnswersIntegrationTest {
@@ -141,32 +142,13 @@ class GroundednessFlaggedAnswersIntegrationTest {
 
     @Test
     void theEndpointPagesEveryFlaggedAnswerAndReadsBackTheStoredOne() throws Exception {
-        MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
-                                Map.of("email", "flagged-answers@example.com", "password", "a-good-password"))))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse();
-        Cookie session = Objects.requireNonNull(signup.getCookie("tessary-session"));
-        String orgId = mapper.readTree(signup.getContentAsString())
-                .path("data")
-                .path("orgId")
-                .asText();
-        Organization org = orgs.findById(orgId).orElseThrow();
-        Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
+        Filed filed = fileFinding("flagged-answers@example.com");
+        Cookie session = filed.session();
+        Organization org = filed.org();
+        Project project = filed.project();
         String pid = project.id();
-        capabilities.grant(org.id(), Capability.GROUNDEDNESS);
-        classifierService.seedBuiltIns(pid);
-        ClassifierRow signal = classifiers.findByKey(pid, "groundedness").orElseThrow();
-
-        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, start, 0, 7, 0.05);
-        seedHours(pid, signal, start, 7, 6, 0.40);
-        rates.refresh(pid, signal, Instant.now());
-        List<FindingRow> filed = findings.listByProject(pid, null, null, "groundedness", false, 10);
-        assertEquals(1, filed.size());
-        FindingRow finding = filed.get(0);
+        ClassifierRow signal = filed.signal();
+        FindingRow finding = filed.finding();
         long cited = evidence.listByFinding(pid, finding.id()).stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
                 .count();
@@ -244,6 +226,85 @@ class GroundednessFlaggedAnswersIntegrationTest {
         assertEquals(
                 finding.payload().path("traces_since_onset").asLong(),
                 block.rate().nCur());
+    }
+
+    @Test
+    void anotherProjectsFindingClassifierAndReportAreNotReachableByTheirIds() throws Exception {
+        Filed mine = fileFinding("flagged-tenant-mine@example.com");
+        Filed theirs = fileFinding("flagged-tenant-theirs@example.com");
+        String base =
+                "/api/orgs/" + mine.org().slug() + "/projects/" + mine.project().slug();
+        String myAnswers = base + "/findings/" + mine.finding().id() + "/flagged-answers";
+        // Both projects were seeded alike, so their findings cite the same trace ids.
+        String trace = page(mine.session(), myAnswers + "?limit=1")
+                .path("rows")
+                .get(0)
+                .path("traceId")
+                .asText();
+        String causes =
+                "[{\"title\":\"One document\",\"evidence_trace_ids\":[\"" + trace + "\"],\"evidence_session_ids\":[]}]";
+        String myReport = rcaReport(mine.project().id(), mine.finding().id(), causes);
+        assertEquals(
+                1,
+                page(mine.session(), myAnswers + "?rcaReport=" + myReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "setup: my own report narrows my list to the trace");
+        mvc.perform(get(base + "/classifiers/" + mine.signal().id() + "/groundedness-status")
+                        .cookie(mine.session()))
+                .andExpect(status().isOk());
+
+        mvc.perform(get(base + "/findings/" + theirs.finding().id() + "/flagged-answers")
+                        .cookie(mine.session()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(base + "/classifiers/" + theirs.signal().id() + "/groundedness-status")
+                        .cookie(mine.session()))
+                .andExpect(status().isNotFound());
+        String theirReport = rcaReport(theirs.project().id(), theirs.finding().id(), causes);
+        assertEquals(
+                0,
+                page(mine.session(), myAnswers + "?rcaReport=" + theirReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "another project's report names nothing of mine");
+        String otherFindingsReport = rcaReport(mine.project().id(), Ids.ulid(), causes);
+        assertEquals(
+                0,
+                page(mine.session(), myAnswers + "?rcaReport=" + otherFindingsReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "a report on another finding of my project names nothing of this one");
+    }
+
+    private record Filed(Cookie session, Organization org, Project project, ClassifierRow signal, FindingRow finding) {}
+
+    /** A signed-up user whose project's groundedness replay filed one finding: 5% for 7 hours, then 40% for 6. */
+    private Filed fileFinding(String email) throws Exception {
+        MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse();
+        Cookie session = Objects.requireNonNull(signup.getCookie("tessary-session"));
+        String orgId = mapper.readTree(signup.getContentAsString())
+                .path("data")
+                .path("orgId")
+                .asText();
+        Organization org = orgs.findById(orgId).orElseThrow();
+        Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
+        String pid = project.id();
+        capabilities.grant(org.id(), Capability.GROUNDEDNESS);
+        classifierService.seedBuiltIns(pid);
+        ClassifierRow signal = classifiers.findByKey(pid, "groundedness").orElseThrow();
+
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, signal, start, 0, 7, 0.05);
+        seedHours(pid, signal, start, 7, 6, 0.40);
+        rates.refresh(pid, signal, Instant.now());
+        List<FindingRow> filed = findings.listByProject(pid, null, null, "groundedness", false, 10);
+        assertEquals(1, filed.size());
+        return new Filed(session, org, project, signal, filed.get(0));
     }
 
     private JsonNode page(Cookie session, String path) throws Exception {

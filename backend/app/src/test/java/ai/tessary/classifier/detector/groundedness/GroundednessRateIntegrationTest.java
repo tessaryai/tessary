@@ -39,6 +39,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -53,8 +54,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * A call site whose answers became less grounded, end to end against Postgres: the replay files one unruled
  * finding for the spell, with every scored trace as a member and every flagged one as a trace and span witness
  * pair; the same onset refreshes it; triage's positive opens a case under detector {@code groundedness}; a
- * false-alarm resolve clears the cited flags and re-learns; an absorb re-learns; and a call site still learning
- * files nothing.
+ * false-alarm resolve clears the cited flags, past the first statement's worth too, and re-learns; an absorb
+ * re-learns; and a call site still learning files nothing.
  */
 @SpringBootTest
 class GroundednessRateIntegrationTest {
@@ -100,6 +101,9 @@ class GroundednessRateIntegrationTest {
     ClassifierService classifierService;
 
     @Autowired
+    GroundednessAnswerClearer clearer;
+
+    @Autowired
     JdbcClient jdbc;
 
     @Autowired
@@ -142,9 +146,20 @@ class GroundednessRateIntegrationTest {
         assertNull(finding.caseId(), "no case until a ruling");
         assertEquals("Answers on cs-rag became less grounded", FindingTitle.of(finding));
 
-        long tracesSinceOnset = finding.payload().path("traces_since_onset").asLong();
-        long flaggedSinceOnset = finding.payload().path("flagged_since_onset").asLong();
-        assertTrue(flaggedSinceOnset > 0 && tracesSinceOnset >= flaggedSinceOnset, finding.payloadJson());
+        // From the seed plan: every cs-rag hour from the onset on, 30 traces each, of which 2 flagged in a
+        // reference hour (0-6) and 12 in a spell hour (7-12). cs-calm is another call site and counts nowhere.
+        Instant onset = Instant.parse(Objects.requireNonNull(finding.onsetAt()));
+        assertEquals(onset.truncatedTo(ChronoUnit.HOURS), onset, "the onset is an hour bucket");
+        long onsetHour = Duration.between(start, onset).toHours();
+        assertTrue(onsetHour > 0 && onsetHour < 13, "setup: the onset is inside the window, not its start: " + onset);
+        long referenceHours = Math.max(0, 7 - onsetHour);
+        long spellHours = 13 - Math.max(7, onsetHour);
+        long tracesSinceOnset = 30 * (referenceHours + spellHours);
+        long flaggedSinceOnset = 2 * referenceHours + 12 * spellHours;
+        assertEquals(
+                tracesSinceOnset, finding.payload().path("traces_since_onset").asLong(), finding.payloadJson());
+        assertEquals(
+                flaggedSinceOnset, finding.payload().path("flagged_since_onset").asLong(), finding.payloadJson());
         assertEquals(flaggedSinceOnset, finding.sampleCount(), "the flagged traces triage has to read");
         assertEquals(0.975, finding.payload().path("flag_threshold").asDouble());
         assertEquals(1_000, finding.payload().path("learning_until").asLong());
@@ -294,6 +309,36 @@ class GroundednessRateIntegrationTest {
         List<FindingRow> filed = findings.listByProject(pid, null, null, "groundedness", false, 10);
         assertEquals(1, filed.size(), "the closed hours are fenced off, so nothing is re-filed");
         assertEquals(FindingRow.Status.CLOSED, filed.get(0).status());
+    }
+
+    @Test
+    void aFalseAlarmClearsEveryCitedAnswerPastTheFirstChunk() {
+        String pid = project("gr-clear-chunks");
+        ClassifierRow signal = groundedness(pid);
+        FindingRow finding = rise(pid, signal);
+        CaseRow opened = open(pid, finding);
+        long citedByReplay = evidence.listByFinding(pid, finding.id()).stream()
+                .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
+                .count();
+        // Top the cited answers up to one past a statement's chunk, each with its standing detection row.
+        int cited = GroundednessAnswerClearer.CLEAR_CHUNK + 1;
+        Instant at = Instant.parse(finding.onsetAt()).plusSeconds(60);
+        List<FindingEvidenceRepository.Ref> extra = new ArrayList<>();
+        for (int i = 0; i < cited - citedByReplay; i++) {
+            String trace = CALL_SITE + "-extra-" + i;
+            extra.add(FindingEvidenceRepository.Ref.span(trace, trace + "-a"));
+            detection(pid, signal, trace, trace + "-a", at);
+        }
+        evidence.record(
+                pid,
+                finding.id(),
+                FindingEvidenceRow.Role.WITNESS,
+                extra,
+                Instant.now().toString());
+
+        assertEquals(cited, clearer.clear(pid, opened.id(), Instant.now().toString()));
+
+        assertEquals(cited, clearedRows(pid), "the answers past the first chunk are cleared too");
     }
 
     @Test
@@ -477,7 +522,10 @@ class GroundednessRateIntegrationTest {
                 flagged,
                 VERSION,
                 at.toString()));
-        if (!flagged) return;
+        if (flagged) detection(pid, signal, trace, span, at);
+    }
+
+    private void detection(String pid, ClassifierRow signal, String trace, String span, Instant at) {
         jdbc.sql("INSERT INTO groundedness_detection"
                         + " (id, project_id, classifier_id, classifier_key, subject_trace_id, subject_span_id,"
                         + " severity, confidence, evidence, subject_started_at)"
