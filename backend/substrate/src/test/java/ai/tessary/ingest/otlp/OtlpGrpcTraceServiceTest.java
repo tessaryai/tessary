@@ -185,6 +185,22 @@ class OtlpGrpcTraceServiceTest {
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
+    /**
+     * gRPC's side of the edge gate: a write buffer past the default 0.8 refuse fraction answers the retryable
+     * UNAVAILABLE and nothing is mapped or enqueued, rather than taking the batch only to shed it.
+     */
+    @Test
+    void aWriteBufferUnderPressure_rejectedUnavailable_andNeverTouchesSubstrate() {
+        when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
+        when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.9);
+
+        StatusRuntimeException ex = assertThrows(
+                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
+
+        assertEquals(io.grpc.Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        verify(substrateWriter, never()).enqueue(anyString(), any());
+    }
+
     @Test
     void exceededSpanQuota_rejectedResourceExhausted_andNeverTouchesSubstrate() {
         // gRPC parity with the HTTP path's 402: a cap that will not lift until the period rolls must not

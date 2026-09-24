@@ -34,13 +34,6 @@ class GroundednessConfigTest {
         assertEquals(d, GroundednessConfig.of(MAPPER, null));
         assertEquals(d, GroundednessConfig.of(MAPPER, "{not json"));
         assertEquals(d, GroundednessConfig.of(MAPPER, "{\"arming\":{\"threshold\":3}}"));
-        assertEquals(0.975, d.threshold());
-        assertEquals(50_000L, d.arlTarget());
-        assertEquals(4.0, d.minDecisionInterval());
-        assertEquals(2.0, d.shiftMultiple());
-        assertEquals(0.02, d.shiftFloor());
-        assertEquals(200, d.minBaselineTraces());
-        assertEquals(1_000, d.freezeBaselineTraces());
     }
 
     @Test
@@ -77,15 +70,27 @@ class GroundednessConfigTest {
                 "an absent freeze below a raised minimum is raised with it");
     }
 
+    /** A project's tuning reaches the engine; the keys this classifier does not set stay at the engine's. */
     @Test
-    void buildsTheEngineConfigThatJudgesFrom200AndLearnsTo1000() {
-        ToolErrorConfig engine = GroundednessConfig.defaults().engine();
-        assertEquals(4.0, engine.minDecisionInterval());
-        assertEquals(50_000L, engine.arlTarget());
-        assertEquals(200, engine.minBaselineCalls());
-        assertEquals(1_000, engine.freezeBaselineCalls());
-        assertEquals(0.02, engine.shiftFloor());
-        assertEquals(2.0, engine.shiftMultiple());
+    void theEngineRunsOnTheParsedTuning() {
+        GroundednessConfig c = GroundednessConfig.of(MAPPER, """
+                {"arl_target":20000,"min_decision_interval":5,"shift_multiple":3.0,"shift_floor":0.03,
+                 "min_baseline_traces":300,"freeze_baseline_traces":2000}
+                """);
+
+        assertEquals(
+                new ToolErrorConfig(
+                        20_000L,
+                        3.0,
+                        0.03,
+                        ToolErrorConfig.DEFAULT_MIN_EFFECT_SIZE,
+                        300,
+                        ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
+                        ToolErrorConfig.DEFAULT_SETTLE_SECONDS,
+                        ToolErrorConfig.DEFAULT_MAX_PATTERNS,
+                        5.0,
+                        2_000),
+                c.engine());
     }
 
     @Test

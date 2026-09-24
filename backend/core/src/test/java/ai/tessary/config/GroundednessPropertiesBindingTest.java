@@ -5,7 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.tessary.config.GroundednessProperties.Mode;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Bindable;
@@ -47,12 +52,40 @@ class GroundednessPropertiesBindingTest {
                 .hasMessage("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE must be dev or production, got 'staging'");
     }
 
+    /**
+     * The GPU instance stops itself after {@code IdleMinutes} with no request and is started on a schedule, both
+     * set in the AWS template. The sleep must outlast the longest idle stop the template allows, or a re-enqueued
+     * sweep keeps the instance up forever; it must end before the next wake, or the woken instance idles out
+     * unscored; and a missed run must span more than one wake, or a healthy schedule reads as not scoring.
+     */
     @Test
-    void theTimingDefaultsKeepIdleStopUnderTheSleepUnderTheWake() {
+    void theTimingDefaultsKeepIdleStopUnderTheSleepUnderTheWakeUnderAMissedRun() throws IOException {
+        String template = Files.readString(Path.of("../../classifiers/groundedness/setup/groundedness-aws.yaml"));
+        long idleStopMax = idleMinutesMax(template);
+        long wake = wakeMinutes(template);
         GroundednessProperties props = new GroundednessProperties();
-        // The GPU instance stops after 10 idle minutes and wakes hourly; the sleep sits between.
-        assertThat(props.getProductionSleepMinutes()).isEqualTo(30);
-        assertThat(props.getProductionMissedRunMinutes()).isEqualTo(120);
+
+        assertThat(idleStopMax).isLessThan(props.getProductionSleepMinutes());
+        assertThat(props.getProductionSleepMinutes()).isLessThan(wake);
+        assertThat(wake).isLessThan(props.getProductionMissedRunMinutes());
+    }
+
+    /** The {@code MaxValue} of the template's {@code IdleMinutes} parameter. */
+    private static long idleMinutesMax(String template) {
+        Matcher m = Pattern.compile("\\n  IdleMinutes:\\n(?:    .*\\n)*?    MaxValue: (\\d+)\\n")
+                .matcher(template);
+        assertThat(m.find()).as("IdleMinutes has a MaxValue").isTrue();
+        return Long.parseLong(m.group(1));
+    }
+
+    /** The template's one {@code rate(N hour[s])} schedule, in minutes. */
+    private static long wakeMinutes(String template) {
+        Matcher m =
+                Pattern.compile("ScheduleExpression: rate\\((\\d+) hours?\\)").matcher(template);
+        assertThat(m.find()).as("an hourly ScheduleExpression").isTrue();
+        long minutes = Long.parseLong(m.group(1)) * 60;
+        assertThat(m.find()).as("one schedule").isFalse();
+        return minutes;
     }
 
     private static GroundednessProperties bind(Map<String, Object> vars) {

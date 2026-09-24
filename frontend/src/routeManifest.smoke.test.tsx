@@ -26,19 +26,33 @@
  * rendered, not the view. Each route's settle loop below waits for that fallback to go away as
  * well as for react-query to go quiet, and fails the route if it never does.
  *
+ * DETAIL PAGES WITH REAL DATA. The manifest loop reaches every detail route with an id that does not
+ * exist, so it only ever renders the not-found branch. The case, finding and RCA pages also mount
+ * once each on a real payload (a secret-leak and a malformed-output case and finding, and a finished
+ * RCA report), so a crash in their success render fails here instead of shipping.
+ *
  * `projectApi(...)` is different, deliberately: each method a test case does not explicitly
  * override defaults to `Promise.resolve(undefined)` via a Proxy, not a safe-empty default. This
  * suite's whole purpose is catching a capability key or API shape that silently stopped resolving
  * — a safe-empty default (`[]`/`{}`) would let exactly that regression pass silently.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 import { ThemeProvider } from "./ui/ThemeContext";
 import { DensityProvider } from "./ui/density";
 import { ApiError } from "./api/types";
+import type {
+  BehaviorFindingDetail,
+  CaseDetail,
+  EvidenceSpanPage,
+  MalformedOutputDetail,
+  MalformedOutputPage,
+  RcaReport,
+  SecretLeakDetail,
+} from "./api/types";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
 import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
@@ -382,26 +396,11 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     listClassifiers: EMPTY,
     getClassifierDailyVolume: EMPTY,
     listClassifierHealth: EMPTY,
-    // Read only for a listed Groundedness row: a new project's, off and never set up.
-    getGroundednessStatus: () =>
-      Promise.resolve({
-        state: "off",
-        mode: "dev",
-        configured: false,
-        available: false,
-        reason: "no encoder URL configured",
-        checked_at: null,
-        ever_swept: false,
-        last_scored_at: null,
-        last_caught_up_at: null,
-        setup_ref: "main",
-      }),
   },
   // A groundedness finding, so the route renders a whole story (rate, pins, flagged answers with their
   // marks) rather than only its not-found state, which every other detail route already covers.
   "classifiers/findings/:findingId": {
     getBehaviorFinding: () => Promise.resolve(GROUNDEDNESS_FINDING_DETAIL),
-    getFlaggedAnswers: () => Promise.resolve({ rows: [], total: 0, nextCursor: null }),
   },
   vitals: {
     getVitals: () => Promise.resolve(EMPTY_VITALS),
@@ -484,6 +483,300 @@ const VIEW_ORG_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>>
   },
 };
 
+// ---- real-data detail fixtures ----------------------------------------------------------------
+// Shapes follow the generated schema types, so a field the API adds or renames fails `tsc` here.
+
+const T0 = "2026-01-06T10:00:00Z";
+const T1 = "2026-01-06T12:00:00Z";
+
+const SECRET_LEAK: SecretLeakDetail = {
+  basis: "Any high-confidence match opens a case.",
+  confidence: "high",
+  firstAt: T0,
+  lastAt: T1,
+  keys: [{ lastAt: T1, leaks: 2, masked: "sk-a…9f2c", storedRaw: true, traces: 2 }],
+  leakCount: 2,
+  leaks: [
+    { at: T0, masked: "sk-a…9f2c", spanId: "span-1", stored: "raw", traceId: "trace-1" },
+    { at: T1, masked: "sk-a…9f2c", spanId: "span-2", stored: "redacted", traceId: "trace-2" },
+  ],
+  rule: "openai_api_key",
+  threshold: 1,
+  traceCount: 2,
+  windowEnd: T1,
+  windowSeconds: 86400,
+  windowStart: "2026-01-05T12:00:00Z",
+};
+
+const MALFORMED_OUTPUT: MalformedOutputDetail = {
+  fields: [
+    { depth: 0, failing: 0, name: "items", path: "items", required: true, type: "array" },
+    { depth: 1, failing: 14, name: "sku", path: "items[].sku", required: true, type: "string" },
+  ],
+  notJson: 3,
+  other: 0,
+  rate: {
+    bucketKey: "extract.order",
+    criticality: 0.9,
+    curRate: 0.17,
+    deltaPp: 15,
+    direction: "up",
+    effectSize: 0.6,
+    failingTraces: ["trace-3"],
+    failuresCur: 17,
+    nCur: 100,
+    nRef: 400,
+    onsetAt: T0,
+    patterns: [],
+    patternsTruncated: false,
+    refRate: 0.02,
+    statistic: 5.1,
+    threshold: 3,
+    windowClosedAt: T1,
+    windowOpenedAt: "2026-01-05T12:00:00Z",
+  },
+};
+
+const MALFORMED_OUTPUTS: MalformedOutputPage = {
+  nextCursor: null,
+  total: 1,
+  rows: [
+    {
+      document: '{"items":[{"qty":2}]}',
+      highlightLines: [1],
+      message: "items[0].sku is required",
+      name: "extract_order",
+      spanId: "span-3",
+      startedAt: T0,
+      traceId: "trace-3",
+    },
+  ],
+};
+
+const WITNESS_EVIDENCE: EvidenceSpanPage = {
+  counts: { witness: 1 },
+  recordedCounts: { witness: 1 },
+  nextCursor: null,
+  rows: [
+    {
+      callSiteId: "extract.order",
+      errorType: null,
+      inputPreview: "order #1182",
+      kind: "llm",
+      latencyMs: 820,
+      level: null,
+      models: ["gpt-5"],
+      name: "extract_order",
+      notRolledUp: false,
+      outputPreview: '{"items":[{"qty":2}]}',
+      partialCost: false,
+      rank: 1,
+      role: "witness",
+      secretKey: null,
+      sessionId: null,
+      spanId: "span-3",
+      staleTotals: false,
+      startedAt: T0,
+      status: "ok",
+      storedAs: null,
+      totalCost: 0.002,
+      totalTokens: 900,
+      traceId: "trace-3",
+      violation: null,
+    },
+  ],
+};
+
+function detailCase(detector: string, title: string): CaseDetail["case"] {
+  return {
+    baseline_value: null,
+    basis: "Measured against the rate fitted over the prior week.",
+    call_site_id: "extract.order",
+    cause: null,
+    current_value: null,
+    delta: null,
+    detector,
+    disposition: null,
+    finding_count: 1,
+    id: "case-1",
+    last_seen_at: T1,
+    latest_finding_id: "finding-1",
+    locked_at: null,
+    metric: detector,
+    muted_at: null,
+    muted_by: null,
+    onset_at: T0,
+    opened_at: T0,
+    rca_verdict: null,
+    reference: "CASE-7",
+    resolution: null,
+    resolution_reason: null,
+    resolved_at: null,
+    resolved_by: null,
+    severity: 3,
+    state: "open",
+    subject_id: "extract.order",
+    subject_kind: "call_site",
+    subject_label: "extract.order",
+    title,
+  };
+}
+
+function caseDetail(over: Partial<CaseDetail> & Pick<CaseDetail, "case">): CaseDetail {
+  return {
+    absorb_available: false,
+    detector_available: true,
+    events: [{ actor: null, created_at: T0, id: "ev-1", kind: "opened", summary: "Case opened" }],
+    exemplars: [],
+    frustration: null,
+    groundedness: null,
+    latest_finding_id: "finding-1",
+    malformed_output: null,
+    metric: null,
+    rca: null,
+    rca_available: true,
+    rca_report_id: null,
+    ruling: null,
+    secret_leak: null,
+    tool_error: null,
+    ...over,
+  };
+}
+
+function findingDetail(
+  detector: string,
+  causeKind: BehaviorFindingDetail["finding"]["causeKind"],
+  over: Partial<BehaviorFindingDetail>,
+): BehaviorFindingDetail {
+  return {
+    armedWindow: null,
+    baseline: null,
+    frustration: null,
+    groundedness: null,
+    malformedOutput: null,
+    metric: null,
+    secretLeak: null,
+    toolError: null,
+    finding: {
+      callSiteId: "extract.order",
+      caseId: "case-1",
+      causeKey: `${detector}:extract.order`,
+      causeKind,
+      conformanceKind: null,
+      detector,
+      evidence: [],
+      firstSeenAt: T0,
+      humanVerdictAt: null,
+      id: "finding-1",
+      lastSeenAt: T1,
+      status: "open",
+      title: `${detector} finding`,
+      traceCount: 2,
+      triageAction: null,
+      triageCitations: [],
+      triageStatus: "pending",
+      triageSummary: null,
+      triageVerdict: null,
+      triagedAt: null,
+      workflowKey: "extract.order",
+    },
+    ...over,
+  };
+}
+
+const FINISHED_RCA: RcaReport = {
+  call_site_id: "extract.order",
+  causes: [],
+  completed_at: T1,
+  created_at: T0,
+  current_value: 0.17,
+  delta: -0.15,
+  detailed_report: "The order extractor dropped `sku` after the prompt change.",
+  engine: "agentic",
+  hypotheses: [
+    { confidence: "high", evidence_trace_ids: ["trace-3"], rationale: "Every failure follows the prompt change.", title: "Prompt change" },
+  ],
+  id: "rca-1",
+  job_id: "job-1",
+  metric: "tool_error_rate",
+  prior_value: 0.02,
+  repo_available: true,
+  report_kind: "degradation",
+  ruled_out: [{ assessment: null, check: "traffic_mix", detail: "Traffic mix unchanged.", measurement: null, passed: true }],
+  status: "done",
+  subject_id: "extract.order",
+  subject_kind: "call_site",
+  subject_label: "extract.order",
+  summary: "The prompt change dropped the sku field.",
+  verdict: "regression",
+  window_from: "2026-01-05T10:00:00Z",
+  window_split: T0,
+  window_to: T1,
+};
+
+const resolved = <T,>(value: T) => () => Promise.resolve(value);
+
+/** One detail route mounted on a real payload: which manifest entry it is, the reads it answers,
+ * and the main heading its success render must draw. */
+const DETAIL_FIXTURES: {
+  name: string;
+  path: string;
+  overrides: Record<string, () => Promise<unknown>>;
+  heading: RegExp;
+}[] = [
+  {
+    name: "a secret-leak case",
+    path: "cases/:caseId",
+    overrides: {
+      getCase: resolved(
+        caseDetail({ case: detailCase("secret_leak", "OpenAI key in extract.order output"), secret_leak: SECRET_LEAK }),
+      ),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+    },
+    heading: /OpenAI key in extract\.order output/,
+  },
+  {
+    name: "a malformed-output case",
+    path: "cases/:caseId",
+    overrides: {
+      getCase: resolved(
+        caseDetail({
+          case: detailCase("malformed_output", "extract.order outputs failing their schema"),
+          malformed_output: MALFORMED_OUTPUT,
+        }),
+      ),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+      getMalformedOutputs: resolved(MALFORMED_OUTPUTS),
+    },
+    heading: /extract\.order outputs failing their schema/,
+  },
+  {
+    name: "a secret-leak finding",
+    path: "classifiers/findings/:findingId",
+    overrides: {
+      getBehaviorFinding: resolved(findingDetail("secret_leak", "armed_window", { secretLeak: SECRET_LEAK })),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+    },
+    heading: /openai_api_key in extract\.order output/,
+  },
+  {
+    name: "a malformed-output finding",
+    path: "classifiers/findings/:findingId",
+    overrides: {
+      getBehaviorFinding: resolved(findingDetail("malformed_output", "malformed_rate", { malformedOutput: MALFORMED_OUTPUT })),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+      getMalformedOutputs: resolved(MALFORMED_OUTPUTS),
+    },
+    heading: /Schema failure rate 2\.00% → 17\.00%/,
+  },
+  {
+    name: "a finished RCA report",
+    path: "rca/:reportId",
+    overrides: { getRcaReport: resolved(FINISHED_RCA) },
+    heading: /RCA \(root-cause analysis\): extract\.order/,
+  },
+];
+
 // ---- rendering ----------------------------------------------------------------------------------
 
 function renderApp(url: string) {
@@ -514,6 +807,77 @@ function renderApp(url: string) {
 // runs its top-level vi.mock() calls in this file's module context, silently overriding a real
 // dependency for every test that runs after it.
 const VIEW_MODULES = import.meta.glob(["./views/**/*.tsx", "!./views/**/*.test.tsx"]);
+
+/**
+ * Mounts the real App at `url` and waits until the routed view has genuinely settled (see the notes
+ * inside). Throws if it never does. Returns the container for any content assertion.
+ */
+async function mountAndSettle(url: string): Promise<HTMLElement> {
+  const { container, queryClient } = renderApp(url);
+
+  await waitFor(
+    () => {
+      expect(container.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+    },
+    { timeout: 5000 },
+  );
+  // Wait for the route to genuinely SETTLE — which means three things at once, none of which
+  // the DOM merely looking non-blank implies:
+  //
+  //  1. The routed view has actually MOUNTED. Every view is React.lazy'd behind ProjectShell's
+  //     own <Suspense> (App.tsx), and the shell chrome around that boundary already satisfies
+  //     the non-blank check above — so "container has text" is true while the routed view is
+  //     still nothing but a spinner. Waiting on the fallback's `aria-label="Loading view"` to
+  //     disappear is what makes this a render smoke test of the VIEW rather than of the shell.
+  //  2. react-query is idle, and
+  //  3. the query cache's shape has been completely unchanged for a full QUIET_MS window —
+  //     a single isFetching()===0 snapshot can be pure luck between two of one query's own
+  //     state transitions, so it does not reliably outlast react-query's "Query data cannot be
+  //     undefined" dev warning, which fires synchronously inside a query's fetch strictly
+  //     before that query's status settles.
+  //
+  // Each poll re-enters `act()` DELIBERATELY. React flushes the work it has queued as an
+  // `act()` scope EXITS, so a wait that runs entirely inside one long-lived act scope — which
+  // is exactly what a single RTL `waitFor` is, since its asyncWrapper wraps the whole poll loop
+  // in one act — parks React's lazy-import resolution in the act queue and never flushes it.
+  // That was this file's real nondeterminism: on most project-scoped routes the view never
+  // mounted at all before the assertion ran, so most of this suite was asserting against a
+  // spinner, and the handful of runs where a view DID win the race were the ones that "flaked"
+  // — its unmocked queries resolved undefined and tripped the console.error assertion. Short
+  // act scopes in a loop flush per iteration, so every route now mounts its view every run.
+  const QUIET_MS = 250;
+  const TIMEOUT_MS = 5000;
+  const snapshotQueries = () =>
+    JSON.stringify(
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .map((q) => [q.queryHash, q.state.status, q.state.fetchStatus])
+        .sort(),
+    );
+  let lastSnapshot = snapshotQueries();
+  let quietSince = Date.now();
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const suspended = container.querySelector('[aria-label="Loading view"]') !== null;
+    const busy = queryClient.isFetching() > 0 || queryClient.isMutating() > 0;
+    const snapshot = snapshotQueries();
+    if (suspended || busy || snapshot !== lastSnapshot) {
+      lastSnapshot = snapshot;
+      quietSince = Date.now();
+    }
+    if (!suspended && Date.now() - quietSince >= QUIET_MS) break;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `route never settled while mounting ${url} (view still suspended: ${suspended}, react-query busy: ${busy})`,
+      );
+    }
+  }
+  return container;
+}
 
 describe("route manifest render smoke test", () => {
   beforeAll(async () => {
@@ -550,70 +914,25 @@ describe("route manifest render smoke test", () => {
       currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...(VIEW_OVERRIDES[view.path] ?? {}) };
       currentOrgApiOverrides = { ...(VIEW_ORG_OVERRIDES[view.path] ?? {}) };
 
-      const { container, queryClient } = renderApp(url);
+      await mountAndSettle(url);
 
-      await waitFor(
-        () => {
-          expect(container.textContent?.trim().length ?? 0).toBeGreaterThan(0);
-        },
-        { timeout: 5000 },
-      );
-      // Wait for the route to genuinely SETTLE — which means three things at once, none of which
-      // the DOM merely looking non-blank implies:
-      //
-      //  1. The routed view has actually MOUNTED. Every view is React.lazy'd behind ProjectShell's
-      //     own <Suspense> (App.tsx), and the shell chrome around that boundary already satisfies
-      //     the non-blank check above — so "container has text" is true while the routed view is
-      //     still nothing but a spinner. Waiting on the fallback's `aria-label="Loading view"` to
-      //     disappear is what makes this a render smoke test of the VIEW rather than of the shell.
-      //  2. react-query is idle, and
-      //  3. the query cache's shape has been completely unchanged for a full QUIET_MS window —
-      //     a single isFetching()===0 snapshot can be pure luck between two of one query's own
-      //     state transitions, so it does not reliably outlast react-query's "Query data cannot be
-      //     undefined" dev warning, which fires synchronously inside a query's fetch strictly
-      //     before that query's status settles.
-      //
-      // Each poll re-enters `act()` DELIBERATELY. React flushes the work it has queued as an
-      // `act()` scope EXITS, so a wait that runs entirely inside one long-lived act scope — which
-      // is exactly what a single RTL `waitFor` is, since its asyncWrapper wraps the whole poll loop
-      // in one act — parks React's lazy-import resolution in the act queue and never flushes it.
-      // That was this file's real nondeterminism: on most project-scoped routes the view never
-      // mounted at all before the assertion ran, so most of this suite was asserting against a
-      // spinner, and the handful of runs where a view DID win the race were the ones that "flaked"
-      // — its unmocked queries resolved undefined and tripped the console.error assertion. Short
-      // act scopes in a loop flush per iteration, so every route now mounts its view every run.
-      const QUIET_MS = 250;
-      const TIMEOUT_MS = 5000;
-      const snapshotQueries = () =>
-        JSON.stringify(
-          queryClient
-            .getQueryCache()
-            .getAll()
-            .map((q) => [q.queryHash, q.state.status, q.state.fetchStatus])
-            .sort(),
-        );
-      let lastSnapshot = snapshotQueries();
-      let quietSince = Date.now();
-      const deadline = Date.now() + TIMEOUT_MS;
-      for (;;) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        });
-        const suspended = container.querySelector('[aria-label="Loading view"]') !== null;
-        const busy = queryClient.isFetching() > 0 || queryClient.isMutating() > 0;
-        const snapshot = snapshotQueries();
-        if (suspended || busy || snapshot !== lastSnapshot) {
-          lastSnapshot = snapshot;
-          quietSince = Date.now();
-        }
-        if (!suspended && Date.now() - quietSince >= QUIET_MS) break;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `route never settled while mounting ${url} (view still suspended: ${suspended}, react-query busy: ${busy})`,
-          );
-        }
-      }
+      expect(unexpectedErrors, `unexpected console.error while mounting ${url}:\n${unexpectedErrors.join("\n")}`).toEqual([]);
+    });
+  }
 
+  // Bug: a crash in the success render of the case, finding or RCA page (for example on a
+  // secret-leak payload) ships with every test green, because the loop above only reaches them
+  // with ids that 404.
+  for (const fixture of DETAIL_FIXTURES) {
+    const view = VIEWS.find((v) => v.path === fixture.path);
+    it(`mounts ${fixture.path} on ${fixture.name} and draws its heading`, async () => {
+      if (!view) throw new Error(`no manifest view with raw path ${fixture.path}`);
+      const url = resolveUrl(view.fullPath);
+      currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES[fixture.path], ...fixture.overrides };
+
+      const container = await mountAndSettle(url);
+
+      within(container).getByRole("heading", { level: 1, name: fixture.heading });
       expect(unexpectedErrors, `unexpected console.error while mounting ${url}:\n${unexpectedErrors.join("\n")}`).toEqual([]);
     });
   }

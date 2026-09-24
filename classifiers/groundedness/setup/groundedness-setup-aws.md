@@ -11,7 +11,7 @@ Rules for the whole run:
 - **Never touch the running Tessary.** You create the model's stack and print what the operator
   runs on Tessary. You never edit Tessary's `.env` or restart it yourself.
 
-`serve.py SHA-256: 70128aafdac8c44bff4dd17b8639cba2cf89d6ab9f7c5708ac906125cb62a71c`
+`serve.py SHA-256: 0f0abe05eb2df81187a432fc2df46d7fead631cf53da0656588b32554cb7d226`
 
 `groundedness-aws.yaml SHA-256: 4d34085ad5e3c4d68704d313b66e65fb9f8cdd87c5527d96fc4fdc10863fe1b6`
 

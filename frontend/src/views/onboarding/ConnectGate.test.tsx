@@ -49,6 +49,7 @@ function deferred<T>() {
 }
 
 let ensureSampleProjectImpl: () => Promise<Project>;
+let status: typeof NOT_CONNECTED_STATUS = NOT_CONNECTED_STATUS;
 let createApiKeyCalls = 0;
 
 vi.mock("../../api/client", () => ({
@@ -58,7 +59,7 @@ vi.mock("../../api/client", () => ({
   },
   projectApi: () => ({
     base: "/api/orgs/fake-org/projects/fake-project",
-    substrateStatus: () => Promise.resolve(NOT_CONNECTED_STATUS),
+    substrateStatus: () => Promise.resolve(status),
     createApiKey: () => {
       createApiKeyCalls += 1;
       return Promise.resolve({ plaintext: "tsy_test_token" });
@@ -68,14 +69,15 @@ vi.mock("../../api/client", () => ({
   orgApi: () => ({ base: "/api/orgs/fake-org" }),
 }));
 
-function renderGate() {
+function renderGate(at = "/orgs/fake-org/projects/fake-project/traces", tracesRoute = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
         <AuthProvider>
-          <MemoryRouter initialEntries={["/orgs/fake-org/projects/fake-project/traces"]}>
+          <MemoryRouter initialEntries={[at]}>
             <Routes>
+              {tracesRoute && <Route path="/orgs/:orgSlug/projects/:projectSlug/traces" element={<p>Traces page</p>} />}
               <Route
                 path="/orgs/:orgSlug/projects/:projectSlug/*"
                 element={
@@ -95,6 +97,7 @@ function renderGate() {
 afterEach(() => {
   cleanup();
   createApiKeyCalls = 0;
+  status = NOT_CONNECTED_STATUS;
   vi.restoreAllMocks();
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
 });
@@ -158,8 +161,9 @@ describe("ConnectGate — copy affordances", () => {
     expect(createApiKeyCalls).toBe(1);
     expect(writeText).toHaveBeenCalledTimes(1);
 
+    // Bug: the on-screen token shown unmasked. First 8 chars, an ellipsis, then the last 4.
     const header = await screen.findByText(/^tsy_test/);
-    expect(header.textContent).not.toContain("tsy_test_token"); // elided on screen
+    expect(header.textContent).toBe("tsy_test…oken");
   });
 
   it("copies the connect prompt", async () => {
@@ -173,5 +177,32 @@ describe("ConnectGate — copy affordances", () => {
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(OTLP_PROMPT));
     await waitFor(() => expect(copy.textContent).toContain("Copied"));
+  });
+});
+
+/*
+ * State 3: the first tagged span arrives. The gate hands the user to the project's traces and draws
+ * nothing meanwhile. Bug: onboarding users stay stuck on the connect screen after that span lands.
+ */
+describe("ConnectGate — first tagged span", () => {
+  const TAGGED_STATUS = { ...NOT_CONNECTED_STATUS, has_live: true, has_tagged_span: true, spans_received: 1, tagged_spans: 1 };
+
+  it("navigates to the project's traces once a tagged span has arrived", async () => {
+    status = TAGGED_STATUS;
+
+    renderGate("/orgs/fake-org/projects/fake-project/triage", true);
+
+    await screen.findByText("Traces page");
+  });
+
+  it("draws nothing once a tagged span has arrived", async () => {
+    status = TAGGED_STATUS;
+
+    // Already on the traces path, so the gate stays mounted after its redirect.
+    renderGate();
+
+    screen.getByRole("heading", { name: "Connect your traces" });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Connect your traces" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Create and copy" })).toBeNull();
   });
 });

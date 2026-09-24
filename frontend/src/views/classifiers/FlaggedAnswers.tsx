@@ -18,7 +18,7 @@
  * that one reads the session's traces, this one draws the flagged-answer payload the finding carries, which
  * is what was scored rather than what the trace page would show.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { infiniteQueryOptions, keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -291,6 +291,7 @@ export function MarkedAnswer({ answer, sentences }: { answer: string; sentences:
 
 /** One flagged answer: the question, the answer with its marks, and what it was checked against. */
 function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
+  const answerLabel = useId();
   const marked = row.flaggedSentences.length;
   const documents = row.documents ?? [];
   return (
@@ -341,10 +342,12 @@ function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
                   </p>
                 </div>
               )}
-              <div className="flex flex-col gap-1.5">
-                <div className={SECTION_LABEL}>Answer</div>
+              <section className="flex flex-col gap-1.5" aria-labelledby={answerLabel}>
+                <div id={answerLabel} className={SECTION_LABEL}>
+                  Answer
+                </div>
                 <MarkedAnswer answer={row.answer} sentences={row.flaggedSentences} />
-              </div>
+              </section>
               {documents.length > 0 &&
                 (row.premiseHadEvidence ? (
                   <div className="flex flex-col gap-1.5">

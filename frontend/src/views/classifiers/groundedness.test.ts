@@ -32,8 +32,9 @@ describe("groundedness", () => {
     expect(atRef(GROUNDEDNESS_AWS_MD, "v1.3.0")).toBe(
       "https://github.com/tessaryai/tessary/blob/v1.3.0/classifiers/groundedness/setup/groundedness-setup-aws.md",
     );
-    expect(restartPrompt("production", "main")).toBe(
-      `Restart the Groundedness model on AWS by following ${GROUNDEDNESS_AWS_MD}#restart`,
+    expect(restartPrompt("production", "v1.3.0")).toBe(
+      "Restart the Groundedness model on AWS by following " +
+        "https://github.com/tessaryai/tessary/blob/v1.3.0/classifiers/groundedness/setup/groundedness-setup-aws.md#restart",
     );
   });
 

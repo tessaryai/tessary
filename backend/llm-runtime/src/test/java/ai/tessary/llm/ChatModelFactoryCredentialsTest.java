@@ -3,6 +3,8 @@ package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -15,7 +17,19 @@ import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import dev.langchain4j.data.message.UserMessage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -177,6 +191,133 @@ class ChatModelFactoryCredentialsTest {
         var resolved = factory.resolve(PROJECT, ModelProvider.OPENAI, "gpt-5.5", "high");
         assertNotNull(resolved);
         assertEquals("gpt-5.5", resolved.modelName());
+    }
+
+    /**
+     * The model cache is shared by every tenant, so its key must carry the org. Two orgs on the same
+     * provider and model, each with its own stored key: org B must get its own client, calling out with
+     * org B's key, never org A's cached client and BYO key. Each client makes one call to a loopback stub
+     * that records the {@code Authorization} header it received.
+     */
+    @Test
+    void twoOrgsOnTheSameModelGetTheirOwnClientCarryingTheirOwnKey() throws Exception {
+        List<String> authorizations = new CopyOnWriteArrayList<>();
+        try (ServerSocket stub = openAiStub(authorizations)) {
+            String baseUrl = "http://127.0.0.1:" + stub.getLocalPort() + "/v1";
+            ProjectRepository projects = mock(ProjectRepository.class);
+            when(projects.findById("p-a"))
+                    .thenReturn(Optional.of(new Project("p-a", "org-a", "s", "n", null, "t", null, null, false, null)));
+            when(projects.findById("p-b"))
+                    .thenReturn(Optional.of(new Project("p-b", "org-b", "s", "n", null, "t", null, null, false, null)));
+            when(repo.findByOrgAndProvider("org-a", ModelProvider.OPENAI))
+                    .thenReturn(Optional.of(openAiCredential("org-a", baseUrl, "sealed-a")));
+            when(repo.findByOrgAndProvider("org-b", ModelProvider.OPENAI))
+                    .thenReturn(Optional.of(openAiCredential("org-b", baseUrl, "sealed-b")));
+            when(secretBox.open("sealed-a")).thenReturn("key-of-org-a");
+            when(secretBox.open("sealed-b")).thenReturn("key-of-org-b");
+            ChatModelFactory twoOrgs = new ChatModelFactory(
+                    repo,
+                    secretBox,
+                    new ProjectOrgResolver(projects),
+                    settings,
+                    mock(ModelCatalogFetchService.class),
+                    "5m");
+
+            var a = twoOrgs.resolve("p-a", ModelProvider.OPENAI, "gpt-5.5", null);
+            var b = twoOrgs.resolve("p-b", ModelProvider.OPENAI, "gpt-5.5", null);
+
+            assertNotSame(a.model(), b.model(), "org B must not be handed org A's cached client");
+            assertSame(
+                    a.model(),
+                    twoOrgs.resolve("p-a", ModelProvider.OPENAI, "gpt-5.5", null)
+                            .model(),
+                    "while each org still reuses its own");
+            a.model().chat(UserMessage.from("hi"));
+            b.model().chat(UserMessage.from("hi"));
+            assertEquals(List.of("Bearer key-of-org-a", "Bearer key-of-org-b"), authorizations);
+        }
+    }
+
+    private static ProviderCredential openAiCredential(String orgId, String baseUrl, String apiKeySealed) {
+        return new ProviderCredential(
+                "pc_" + orgId,
+                orgId,
+                null,
+                ModelProvider.OPENAI,
+                baseUrl,
+                apiKeySealed,
+                null,
+                null,
+                null,
+                null,
+                null,
+                ProviderCredential.AUTH_MODE_API_KEY,
+                "t",
+                "t");
+    }
+
+    /**
+     * A loopback stand-in for the OpenAI chat completions endpoint: records each request's
+     * {@code Authorization} header and answers with a minimal completion. A bare socket, because
+     * forbidden-apis bans {@code com.sun.net.httpserver}.
+     */
+    private static ServerSocket openAiStub(List<String> authorizations) throws IOException {
+        ServerSocket socket = new ServerSocket(0, 8, InetAddress.getLoopbackAddress());
+        byte[] completion = ("{\"id\":\"c1\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"gpt-5.5\","
+                        + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},"
+                        + "\"finish_reason\":\"stop\"}],"
+                        + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}")
+                .getBytes(StandardCharsets.UTF_8);
+        Thread acceptor = new Thread(
+                () -> {
+                    while (!socket.isClosed()) {
+                        try (Socket client = socket.accept()) {
+                            InputStream in = client.getInputStream();
+                            int contentLength = 0;
+                            for (String line : readHead(in).split("\r\n")) {
+                                String lower = line.toLowerCase(Locale.ROOT);
+                                if (lower.startsWith("content-length:")) {
+                                    contentLength = Integer.parseInt(line.substring("content-length:".length())
+                                            .trim());
+                                }
+                                if (lower.startsWith("authorization:")) {
+                                    authorizations.add(line.substring("authorization:".length())
+                                            .trim());
+                                }
+                            }
+                            in.readNBytes(contentLength);
+                            OutputStream out = client.getOutputStream();
+                            out.write(("HTTP/1.1 200 OK\r\n"
+                                            + "Content-Type: application/json\r\n"
+                                            + "Content-Length: " + completion.length + "\r\n"
+                                            + "Connection: close\r\n\r\n")
+                                    .getBytes(StandardCharsets.UTF_8));
+                            out.write(completion);
+                            out.flush();
+                        } catch (IOException e) {
+                            return; // the test closed the socket
+                        }
+                    }
+                },
+                "stub-openai");
+        acceptor.setDaemon(true);
+        acceptor.start();
+        return socket;
+    }
+
+    /** Read up to and including the blank line ending the request head. */
+    private static String readHead(InputStream in) throws IOException {
+        ByteArrayOutputStream head = new ByteArrayOutputStream();
+        int c;
+        while ((c = in.read()) != -1) {
+            head.write(c);
+            byte[] seen = head.toByteArray();
+            int n = seen.length;
+            if (n >= 4 && seen[n - 4] == '\r' && seen[n - 3] == '\n' && seen[n - 2] == '\r' && seen[n - 1] == '\n') {
+                break;
+            }
+        }
+        return head.toString(StandardCharsets.UTF_8);
     }
 
     /** A model not in the catalog throws UNKNOWN_MODEL: there is no platform default left to fall

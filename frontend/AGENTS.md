@@ -142,12 +142,27 @@ Every user-visible string follows the handbook: the
 triage turns a sound finding into a case, while a high-confidence secret leak and frustration rule their own; "detector" is a wire key, never a label). Those docs are
 the only home for the rules.
 
+## Tests
+
+When to add one: root [`AGENTS.md`](../AGENTS.md#tests). The backend rules on exact assertions and doubles
+([`backend/AGENTS.md`](../backend/AGENTS.md#writing-the-test)) apply here too.
+
+- **Test what the user sees.** `render`, query with `getByRole` / `getByLabelText`, act with `fireEvent`.
+  No component internals, no `container.querySelector`, no whole-tree snapshots.
+- **Mock at the API seam only** (`useTenant` / `projectApi`, as the existing tests do). Never mock our
+  other hooks or child components.
+- **Fixtures must be able to fail the test.** A "no secret in the DOM" test needs a secret in the fixture;
+  a page test needs real data, not a 404.
+- **Absence needs a settled query.** `await` something rendered from the same response, then assert
+  `queryBy…` is null.
+- **No real waiting.** `await findBy…` for appearance; `vi.useFakeTimers()` for timed UI.
+
 ## Before you commit
 
 Run `task check -- frontend` from the repo root (type-check + all-routes render
-smoke test + production bundle; no Maven, no Docker). Nothing enforces this
-automatically, and CI only runs the full gate on a weekly cron — your local run
-is the gate.
+smoke test + production bundle; no Maven, no Docker). CI runs the same gate
+([test-suite.md](../devdocs/reference/test-suite.md)), but nothing blocks a merge, so your local run
+comes first.
 
 **The gate does not check design tokens.** A hardcoded hex, an off-scale font
 size and a `tracking-wider` fighting its token all compile and all bundle

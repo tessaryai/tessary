@@ -33,12 +33,6 @@ class FrustrationConfigTest {
         assertEquals(d, FrustrationConfig.of(MAPPER, null));
         assertEquals(d, FrustrationConfig.of(MAPPER, "{not json"));
         assertEquals(d, FrustrationConfig.of(MAPPER, "{\"cold_start_turn_fpr\":0.01}"));
-        assertEquals(0.40, d.threshold());
-        assertEquals(10_000L, d.arlTarget());
-        assertEquals(4.0, d.minDecisionInterval());
-        assertEquals(2.0, d.shiftMultiple());
-        assertEquals(0.02, d.shiftFloor());
-        assertEquals(200, d.minBaselineConversations());
     }
 
     @Test

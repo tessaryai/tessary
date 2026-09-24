@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.CauseKey;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -361,6 +362,121 @@ class ClassifierArmingIntegrationTest {
         FindingRow finding = findings.findById(pid, filed.get(0)).orElseThrow();
         assertEquals(windowStart(happened).toString(), finding.onsetAt(), "the spell starts on the day it happened");
         assertEquals(happened, Instant.parse(finding.lastSeenAt()), "and was last seen when it happened");
+    }
+
+    /**
+     * bf70c1d: a high-confidence leak found long after it happened opened no case, because the case source
+     * only kept findings last seen in the past 48 hours. The key is exposed until someone rotates it, however
+     * old the leak is.
+     */
+    @Test
+    void aHighConfidenceLeakFoundFortyDaysLateStillOpensItsCase() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "arming-late-case").project().id();
+        String classifierId = armedSecretLeak(pid);
+
+        String findingId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(40))),
+                        Instant.now())
+                .get(0);
+
+        String caseId = findings.findById(pid, findingId).orElseThrow().caseId();
+        assertNotNull(caseId, "a leak discovered late still opens a case");
+        assertEquals(
+                CaseRow.State.OPEN,
+                jdbc.sql("SELECT state FROM eval_case WHERE id = :id")
+                        .param("id", caseId)
+                        .query(String.class)
+                        .single(),
+                "and the case stays open until a person resolves it");
+    }
+
+    /**
+     * bf70c1d: high confidence is sticky across a finding's windows. Here the newer window is low and
+     * arrives first, then an older high one lands late. If the late window's high band were dropped
+     * because its window is older, the credential would stay low, unruled and caseless.
+     */
+    @Test
+    void anOlderHighWindowArrivingAfterANewerLowOneMakesTheFindingHighAndOpensItsCase() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-sticky-late-high")
+                .project()
+                .id();
+        String classifierId = armedSecretLeakAnyBand(pid);
+
+        String findingId = arming.evaluate(
+                        secretLeakRow(pid, classifierId),
+                        pid,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", hoursAgo(1))),
+                        Instant.now())
+                .get(0);
+        assertNull(findings.findById(pid, findingId).orElseThrow().triageVerdict(), "low alone is left to triage");
+
+        List<String> late = arming.evaluate(
+                secretLeakRow(pid, classifierId),
+                pid,
+                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(3))),
+                Instant.now());
+
+        assertEquals(List.of(findingId), late, "the older window refreshes the same finding");
+        FindingRow after = findings.findById(pid, findingId).orElseThrow();
+        assertEquals(
+                FindingRow.Confidence.HIGH, after.payload().path("confidence").asText(), "one high window is enough");
+        assertEquals(FindingRow.TriageVerdict.POSITIVE, after.triageVerdict(), "so it is ruled at arming");
+        assertNotNull(after.caseId(), "and its case opens");
+    }
+
+    /**
+     * bf70c1d, the other arrival order: a newer low window refreshing a finding that is already high must
+     * not downgrade it. Written straight to the repository: arming rules a high finding at once, and a ruled
+     * row is never refreshed, so this order only reaches the upsert between the write and the ruling.
+     */
+    @Test
+    void aNewerLowWindowRefreshingAHighFindingKeepsItHigh() {
+        String pid = TenantFixture.bootstrap(tenants, "arming-sticky-newer-low")
+                .project()
+                .id();
+        String classifierId = armedSecretLeakAnyBand(pid);
+        String olderDay = windowStart(daysAgo(3)).toString();
+        String newerDay = windowStart(daysAgo(1)).toString();
+
+        FindingRepository.Recorded high = findings.recordArmedFacet(
+                Ids.ulid(),
+                pid,
+                "secret_leak",
+                classifierId,
+                "secret_leak",
+                "cs-a",
+                "aws-access-key-id",
+                1,
+                olderDay,
+                olderDay,
+                facetPayload("high"),
+                olderDay,
+                Instant.now().toString());
+        assertNotNull(high);
+        FindingRepository.Recorded low = findings.recordArmedFacet(
+                Ids.ulid(),
+                pid,
+                "secret_leak",
+                classifierId,
+                "secret_leak",
+                "cs-a",
+                "aws-access-key-id",
+                1,
+                newerDay,
+                newerDay,
+                facetPayload("low"),
+                olderDay,
+                Instant.now().toString());
+
+        assertNotNull(low);
+        assertEquals(high.findingId(), low.findingId(), "the newer window refreshes the unruled finding");
+        FindingRow after = findings.findById(pid, high.findingId()).orElseThrow();
+        assertEquals(newerDay, after.lastSeenAt(), "the newer window's fields replace the older one's");
+        assertEquals(
+                FindingRow.Confidence.HIGH, after.payload().path("confidence").asText(), "but not its confidence");
     }
 
     @Test
@@ -779,6 +895,12 @@ class ClassifierArmingIntegrationTest {
                 "{\"pattern\":\"" + pattern + "\",\"source\":\"output\",\"masked\":\"" + masked
                         + "\",\"stored\":\"raw\"}");
         return FindingEvidenceRepository.Ref.span(span.traceId(), span.spanId());
+    }
+
+    /** The faceted arming payload for one {@code aws-access-key-id} window at {@code confidence}. */
+    private static String facetPayload(String confidence) {
+        return "{\"cause_kind\":\"armed_window\",\"native_cause_key\":\"aws-access-key-id\","
+                + "\"facet\":\"aws-access-key-id\",\"call_site_id\":\"cs-a\",\"confidence\":\"" + confidence + "\"}";
     }
 
     private FindingRow facetFinding(String pid, String classifierId, String callSiteId, String pattern) {

@@ -103,6 +103,14 @@ public class LauncherEncoderScorer implements EncoderScorer {
      * once and sheds nothing; the waiting happens here, on a virtual thread, inside the lease.
      */
     private final Semaphore inflight;
+    /** Waits out a throttle backoff; {@link Thread#sleep} outside tests. */
+    private final Sleeper sleeper;
+
+    /** How the throttle backoff waits, so a test can record the waits instead of taking them. */
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
 
     @Autowired
     public LauncherEncoderScorer(ObserverProperties props, ObjectMapper mapper, EncoderAvailability availability) {
@@ -110,9 +118,15 @@ public class LauncherEncoderScorer implements EncoderScorer {
     }
 
     LauncherEncoderScorer(ObserverProperties props, ObjectMapper mapper, Consumer<String> onUnreachable) {
+        this(props, mapper, onUnreachable, Thread::sleep);
+    }
+
+    LauncherEncoderScorer(
+            ObserverProperties props, ObjectMapper mapper, Consumer<String> onUnreachable, Sleeper sleeper) {
         this.props = props;
         this.mapper = mapper;
         this.onUnreachable = onUnreachable;
+        this.sleeper = sleeper;
         this.inflight = new Semaphore(Math.max(1, props.getEncoder().getMaxInflight()), true);
     }
 
@@ -610,7 +624,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
                     .field("waitMs", waitMs)
                     .durationMs(start)
                     .log();
-            Thread.sleep(waitMs);
+            sleeper.sleep(waitMs);
         }
     }
 

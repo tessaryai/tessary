@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.llmspi.ModelLane;
@@ -17,6 +18,9 @@ import ai.tessary.pricing.ModelRates;
 import ai.tessary.pricing.ModelResolver;
 import ai.tessary.pricing.PlatformCallPricer;
 import ai.tessary.pricing.PriceBookRepository;
+import ai.tessary.usage.LlmCallRow;
+import ai.tessary.usage.LlmCallWriteRepository;
+import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.AiMessage;
@@ -49,6 +53,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /**
  * The shared LLM entry point every caller (judge, codegen, the agentic sandboxes) routes
@@ -406,6 +411,60 @@ class LlmCallerTest {
         // Full 1000 input tokens billed (not carved against the 800 cache-read tokens).
         assertEquals(3.00 * 1000 / 1_000_000, cost.get("input").asDouble(), 1e-12);
         assertEquals(0.30 * 800 / 1_000_000, cost.get("cache_read_input_tokens").asDouble(), 1e-12);
+    }
+
+    /**
+     * Every platform call is one row in the usage ledger, carrying the completion's tokens and cost.
+     * Without the booking, billing and metering silently under-count every in-process LLM call. Sonnet at
+     * $3 in and $15 out per MTok: 1000 in and 20 out is $0.003 + $0.0003 = $0.0033.
+     */
+    @Test
+    void oneCallBooksExactlyOneLedgerRowWithItsTokensAndCost() {
+        PriceBookRepository books = mock(PriceBookRepository.class);
+        when(books.hasModel("anthropic.claude-sonnet-4-6")).thenReturn(true);
+        when(books.rateFor("anthropic.claude-sonnet-4-6"))
+                .thenReturn(Optional.of(new ModelRate("test-book", SONNET_RATES)));
+        PlatformCallPricer pricer = new PlatformCallPricer(new ModelResolver(books), books);
+        LlmCallWriteRepository ledger = mock(LlmCallWriteRepository.class);
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(AiMessage.from("{}"))
+                        .tokenUsage(new TokenUsage(1000, 20))
+                        .build());
+        LlmPacer pacer = mock(LlmPacer.class);
+        when(pacer.getMaxRetries()).thenReturn(0);
+        LlmCaller llm = new LlmCaller(
+                pacer, OpenTelemetry.noop(), new ObjectMapper(), "5m", new LlmUsageAccountant(ledger, pricer), pricer);
+        var resolved = new ChatModelFactory.Resolved(
+                model,
+                "anthropic.claude-sonnet-4-6",
+                false,
+                null,
+                ServiceTier.STANDARD,
+                true,
+                StructuredOutput.Mode.NATIVE,
+                ModelLane.RCA);
+
+        llm.call(
+                "grader.verdict",
+                resolved,
+                ChatRequest.builder().messages(UserMessage.from("grade this")).build(),
+                "proj",
+                Map.of(),
+                null);
+
+        ArgumentCaptor<LlmCallRow> booked = ArgumentCaptor.forClass(LlmCallRow.class);
+        verify(ledger).insert(booked.capture());
+        LlmCallRow row = booked.getValue();
+        assertEquals("proj", row.projectId());
+        assertEquals("rca", row.lane());
+        assertEquals("anthropic.claude-sonnet-4-6", row.model());
+        assertEquals(LlmCallRow.CostFunding.PLATFORM, row.funding());
+        assertEquals(1000, row.inputTokens());
+        assertEquals(20, row.outputTokens());
+        assertEquals(0, new BigDecimal("0.0033").compareTo(row.costUsd()), "cost was " + row.costUsd());
+        assertEquals("test-book", row.priceBookVersion(), "the book that priced it is named");
     }
 
     /**

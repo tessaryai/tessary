@@ -5,7 +5,7 @@
  * reads its next page and one cause's answers from the server.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { FlaggedAnswer, FlaggedAnswerPage } from "../../api/types";
@@ -89,18 +89,27 @@ function renderList(
   );
 }
 
+/** The drawn answer: its text as one paragraph, and the marks in it. */
+function drawnAnswer() {
+  const section = screen.getByRole("region", { name: "Answer" });
+  return {
+    text: within(section).getByRole("paragraph").textContent,
+    marks: within(section).queryAllByRole("mark"),
+  };
+}
+
 describe("FlaggedAnswers", () => {
   it("marks exactly the offset slices, one mark per flagged sentence", () => {
     renderList([answer()], 58);
 
-    const marks = Array.from(document.querySelectorAll("mark"));
+    const { text, marks } = drawnAnswer();
     expect(marks.map((m) => m.textContent)).toEqual([
       "Refunds are available for up to 60 days after purchase.",
       "After 60 days, you can still get half of your payment back.",
     ]);
     expect(marks.map((m) => m.title)).toEqual(["Score 0.99", "Score 0.98"]);
     // The unmarked text around the marks is kept as it was, never re-split.
-    expect(marks[0].parentElement?.textContent).toBe(ANSWER);
+    expect(text).toBe(ANSWER);
     // Local time, so the expected stamp is built the same way.
     const on = dateTime("2026-09-23T14:41:00Z");
     expect(screen.getByText(`Flagged with a score of 0.99 on ${on}. 2 sentences marked.`)).toBeTruthy();
@@ -108,16 +117,65 @@ describe("FlaggedAnswers", () => {
 
   it("marks what the offsets say, even mid-word", () => {
     renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 1, end: 3, score: 0.98 }] })]);
-    const marks = Array.from(document.querySelectorAll("mark"));
+    const { text, marks } = drawnAnswer();
     expect(marks.map((m) => m.textContent)).toEqual(["bc"]);
-    expect(marks[0].parentElement?.textContent).toBe("abcdef");
+    expect(text).toBe("abcdef");
+  });
+
+  it("draws overlapping ranges once, as the first mark", () => {
+    renderList([
+      answer({
+        answer: "abcdef",
+        flaggedSentences: [
+          { start: 2, end: 6, score: 0.98 },
+          { start: 0, end: 4, score: 0.99 },
+        ],
+      }),
+    ]);
+    const { text, marks } = drawnAnswer();
+    expect(marks.map((m) => m.textContent)).toEqual(["abcd"]);
+    expect(text).toBe("abcdef");
+  });
+
+  it("cuts a range that runs past the end at the end, and draws none for one that starts past it", () => {
+    renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 3, end: 99, score: 0.98 }] })]);
+    let drawn = drawnAnswer();
+    expect(drawn.marks.map((m) => m.textContent)).toEqual(["def"]);
+    expect(drawn.text).toBe("abcdef");
+    cleanup();
+
+    renderList([
+      answer({
+        answer: "abcdef",
+        flaggedSentences: [
+          { start: 0, end: 2, score: 0.98 },
+          { start: 10, end: 20, score: 0.99 },
+        ],
+      }),
+    ]);
+    drawn = drawnAnswer();
+    expect(drawn.marks.map((m) => m.textContent)).toEqual(["ab"]);
+    expect(drawn.text).toBe("abcdef");
   });
 
   it("shows the strongest sentence on the row and how many more were flagged", () => {
-    renderList([answer()], 58, "50");
+    // The strongest sentence is listed second, so the row has to pick it by score.
+    renderList(
+      [
+        answer({
+          flaggedSentences: [
+            { ...span("After 60 days, you can still get half of your payment back."), score: 0.98 },
+            { ...span("Refunds are available for up to 60 days after purchase."), score: 0.99 },
+          ],
+        }),
+      ],
+      58,
+      "50",
+    );
 
     const row = screen.getByRole("button", { pressed: true });
     expect(row.textContent).toContain("Refunds are available for up to 60 days after purchase.");
+    expect(row.textContent).not.toContain("After 60 days");
     expect(row.textContent).toContain("and 1 more");
     expect(screen.getByText("1 of 58 traces")).toBeTruthy();
   });
@@ -131,17 +189,46 @@ describe("FlaggedAnswers", () => {
     expect(screen.getByText("Document 2")).toBeTruthy();
   });
 
-  it("says so when the trace is no longer stored", () => {
-    renderList([answer({ stored: false, answer: null, question: null, documents: null })]);
+  it("draws the prompt, not retrieved documents, when the answer was checked against the prompt", () => {
+    renderList([answer({ premiseHadEvidence: false })]);
 
-    expect(screen.getByText("This trace is no longer stored, so its answer can't be shown.")).toBeTruthy();
-    expect(document.querySelectorAll("mark")).toHaveLength(0);
+    expect(screen.getByText("Prompt")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Refunds are available within 30 days of purchase. Refunds go back to the original payment method.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Retrieved documents/)).toBeNull();
+    expect(screen.queryByText("refund-policy.md")).toBeNull();
   });
 
-  it("marks a cleared answer", () => {
+  it("says so when the trace aged out, and names its row by trace id", () => {
+    // The shape the server sends once the payload ages out: the flag keeps its sentences, the text is gone.
+    renderList([answer({ stored: false, answer: null, question: null, documents: null })]);
+
+    const row = screen.getByRole("button", { pressed: true });
+    expect(within(row).getByText("4f1c9a07e2b84d0f")).toBeTruthy();
+    expect(row.textContent).not.toContain("more");
+    expect(screen.getByText("This trace is no longer stored, so its answer can't be shown.")).toBeTruthy();
+    expect(screen.getByText(/2 sentences marked\./)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Answer" })).toBeNull();
+  });
+
+  it("hides the answer of a trace marked not stored, whatever text the row carries", () => {
+    renderList([answer({ stored: false })]);
+
+    expect(screen.getByText("This trace is no longer stored, so its answer can't be shown.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Answer" })).toBeNull();
+    expect(screen.queryAllByRole("mark")).toHaveLength(0);
+    expect(screen.queryByText("Can I get a refund after 30 days?")).toBeNull();
+  });
+
+  it("marks a cleared answer on its row and in its detail", () => {
     renderList([answer({ cleared: true })]);
 
-    expect(screen.getAllByText(/Cleared/).length).toBeGreaterThan(1);
+    const row = screen.getByRole("button", { pressed: true });
+    expect(within(row).getByText("Cleared")).toBeTruthy();
+    expect(screen.getByText("· Cleared")).toBeTruthy();
     expect(screen.getByText(/Cleared with a score of 0.99/)).toBeTruthy();
   });
 

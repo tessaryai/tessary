@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.ObserverProperties;
@@ -21,6 +24,16 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -338,6 +351,138 @@ class E2bRcaSandboxTest {
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+    }
+
+    /**
+     * The run is one ledger entry against the RCA lane and the report it investigated. Without it the
+     * org's spend and metering silently leave RCA runs out. The tokens and cost are the envelope's own
+     * (input 10, output 5, $0.42); the run carries the org's credential, so it is never platform-funded.
+     */
+    @Test
+    void aFinishedRunBooksItsTokensAndCostToTheReport() throws Exception {
+        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
+        E2bRcaSandbox sandbox =
+                new E2bRcaSandbox(
+                        props(),
+                        new ObserverProperties(),
+                        noLaneSetting(),
+                        credentials(),
+                        usage,
+                        OpenTelemetry.noop(),
+                        MAPPER) {
+                    @Override
+                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
+                        try {
+                            return envelope("{\"verdict\":\"behavior_change\"}");
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                    }
+                };
+
+        sandbox.run(request());
+
+        verify(usage)
+                .recordSandboxRun(
+                        eq("proj"),
+                        eq("rca"),
+                        any(),
+                        any(),
+                        eq(false),
+                        eq(10L),
+                        eq(5L),
+                        eq(0L),
+                        eq(0L),
+                        eq(new BigDecimal("0.42")),
+                        eq(new LlmUsageAccountant.Subject("rca_report", "report-1")));
+    }
+
+    /**
+     * A run the launcher failed still spent tokens before it did, and the launcher's error body carries
+     * them. They are booked before the failure propagates, or a failing RCA costs the org money the
+     * ledger never shows. Goes through the real launcher POST against a loopback stub.
+     */
+    @Test
+    void aRunTheLauncherFailedStillBooksWhatItSpent() throws Exception {
+        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
+        try (ServerSocket launcher = launcherAnswering(
+                502,
+                "{\"error\":\"sandbox orchestration failed\",\"kind\":\"agent_failed\","
+                        + "\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}")) {
+            RcaProperties p = props();
+            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+            E2bRcaSandbox sandbox = new E2bRcaSandbox(
+                    p, new ObserverProperties(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER);
+
+            TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
+            assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+        }
+
+        verify(usage)
+                .recordSandboxRun(
+                        eq("proj"),
+                        eq("rca"),
+                        any(),
+                        any(),
+                        eq(false),
+                        eq(7L),
+                        eq(3L),
+                        eq(0L),
+                        eq(0L),
+                        isNull(),
+                        eq(new LlmUsageAccountant.Subject("rca_report", "report-1")));
+    }
+
+    /**
+     * A one-shot loopback launcher: reads one request and answers it with {@code status} and {@code body}.
+     * forbidden-apis bans {@code com.sun.net.httpserver}, so this is a bare socket.
+     */
+    private static ServerSocket launcherAnswering(int status, String body) throws IOException {
+        ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        Thread responder = new Thread(
+                () -> {
+                    try (Socket client = socket.accept()) {
+                        InputStream in = client.getInputStream();
+                        int contentLength = 0;
+                        for (String line : readHead(in).split("\r\n")) {
+                            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
+                                contentLength = Integer.parseInt(line.substring("content-length:".length())
+                                        .trim());
+                            }
+                        }
+                        in.readNBytes(contentLength);
+                        byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+                        OutputStream out = client.getOutputStream();
+                        out.write(("HTTP/1.1 " + status + " Stub\r\n"
+                                        + "Content-Type: application/json\r\n"
+                                        + "Content-Length: " + payload.length + "\r\n"
+                                        + "Connection: close\r\n\r\n")
+                                .getBytes(StandardCharsets.UTF_8));
+                        out.write(payload);
+                        out.flush();
+                    } catch (IOException e) {
+                        // The socket closed first; the test's own assertions report what went wrong.
+                    }
+                },
+                "stub-rca-launcher");
+        responder.setDaemon(true);
+        responder.start();
+        return socket;
+    }
+
+    /** Read up to and including the blank line ending the request head. */
+    private static String readHead(InputStream in) throws IOException {
+        ByteArrayOutputStream head = new ByteArrayOutputStream();
+        int c;
+        while ((c = in.read()) != -1) {
+            head.write(c);
+            byte[] seen = head.toByteArray();
+            int n = seen.length;
+            if (n >= 4 && seen[n - 4] == '\r' && seen[n - 3] == '\n' && seen[n - 2] == '\r' && seen[n - 1] == '\n') {
+                break;
+            }
+        }
+        return head.toString(StandardCharsets.UTF_8);
     }
 
     @Test

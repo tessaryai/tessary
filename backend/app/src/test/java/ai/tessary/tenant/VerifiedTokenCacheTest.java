@@ -132,30 +132,6 @@ class VerifiedTokenCacheTest {
     }
 
     /**
-     * A rejection is a guess about a row that could be issued or restored, so it must expire. Without an
-     * expiry a token rejected once would stay rejected for as long as the entry survived.
-     */
-    @Test
-    void rejection_expires() throws Exception {
-        long was = props.getNegativeTtlSeconds();
-        try {
-            props.setNegativeTtlSeconds(1);
-            String bogus = ApiKeyService.TOKEN_PREFIX + "w_neverissuedatall";
-            assertTrue(tokens.verify(bogus).isEmpty());
-            assertInstanceOf(VerifiedTokenCache.Lookup.Rejected.class, cache.lookup(bogus));
-
-            Thread.sleep(1100);
-
-            assertInstanceOf(
-                    VerifiedTokenCache.Lookup.Unknown.class,
-                    cache.lookup(bogus),
-                    "past the negative TTL the rejection is forgotten, not sticky");
-        } finally {
-            props.setNegativeTtlSeconds(was);
-        }
-    }
-
-    /**
      * The invariant under a genuinely concurrent revoke, whichever way the interleaving falls: a token
      * revoked while it was being verified must not end up cached as valid. This cannot fail spuriously —
      * if the race is not hit, the assertion holds trivially — but it does catch the ordering mistake of

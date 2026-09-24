@@ -19,6 +19,7 @@ import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.Capability;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Set;
@@ -241,7 +242,7 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void builtInKeysAndVersionsMatchTheManifests() {
+    void builtInKeysAndVersionsMatchTheManifests() throws Exception {
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
         // key -> version, exactly as declared (bumped keys re-sync onto seeded projects).
         assertEquals("frustration", builtIns.get(0).classifierKey());
@@ -285,9 +286,10 @@ class ClassifierModelModuleCatalogTest {
         assertNotNull(configOf(builtIns, "frustration"));
         String groundednessConfig = configOf(builtIns, "groundedness");
         assertNotNull(groundednessConfig);
-        assertFalse(groundednessConfig.contains("\"arming\""), "groundedness files through its rate test");
-        assertTrue(groundednessConfig.contains("\"threshold\":0.975"), groundednessConfig);
-        assertFalse(groundednessConfig.contains("threshold_low"), "one threshold, no review band");
+        JsonNode groundedness = new ObjectMapper().readTree(groundednessConfig);
+        assertFalse(groundedness.has("arming"), "groundedness files through its rate test");
+        assertEquals(0.975, groundedness.get("threshold").doubleValue(), groundednessConfig);
+        assertFalse(groundedness.has("threshold_low"), "one threshold, no review band");
         String secretLeakConfig = configOf(builtIns, "secret_leak");
         assertTrue(secretLeakConfig != null && secretLeakConfig.contains("\"arming\""), "secret_leak ships armed");
     }

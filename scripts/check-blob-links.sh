@@ -94,6 +94,14 @@ done <<EOF
 $links
 EOF
 
+# Zero links means the extraction broke (the grep failed, or the pattern or PREFIX stopped matching
+# how the links are written), not that there is nothing to check: the sources above carry dozens.
+if [ "$checked" -eq 0 ]; then
+  echo "check-blob-links: found no ${PREFIX}<path> link in$existing, so nothing was checked." >&2
+  echo "  The link pattern in this script no longer matches the links; fix the pattern." >&2
+  exit 1
+fi
+
 if [ -n "$bad" ]; then
   {
     echo "check-blob-links: these ${PREFIX}<path> links point at nothing on GitHub."

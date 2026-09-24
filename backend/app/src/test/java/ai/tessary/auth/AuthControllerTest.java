@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.auth;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +39,8 @@ class AuthControllerTest {
         r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         r.add("workos.api-key", () -> "");
         r.add("workos.client-id", () -> "");
+        // The suite runs with auth off; the login test reads its session back through AuthFilter.
+        r.add("tessary.auth.disabled", () -> "false");
     }
 
     @Autowired
@@ -44,24 +49,19 @@ class AuthControllerTest {
     @Autowired
     AuthProvider provider;
 
+    @Autowired
+    AuthFilter authFilter;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).build();
+        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
     }
 
     private String body(String email, String password) throws Exception {
         return mapper.writeValueAsString(Map.of("email", email, "password", password));
-    }
-
-    @Test
-    void signupHappyPath() throws Exception {
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("signup-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
     }
 
     @Test
@@ -71,10 +71,19 @@ class AuthControllerTest {
                         .content(body("login-happy@example.com", "a-good-password")))
                 .andExpect(status().isOk());
 
-        mvc.perform(post("/auth/login")
+        Cookie session = mvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body("login-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getCookie("tessary-session");
+        assertNotNull(session, "a successful login sets the session cookie");
+
+        // The cookie is the sign-in: it must resolve to the account that just logged in.
+        mvc.perform(get("/auth/me").cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value("login-happy@example.com"));
     }
 
     @Test
@@ -121,8 +130,8 @@ class AuthControllerTest {
 
         mvc.perform(get("/auth/login")).andExpect(status().is3xxRedirection()).andExpect(result -> {
             String location = result.getResponse().getRedirectedUrl();
-            org.junit.jupiter.api.Assertions.assertNotNull(location);
-            org.junit.jupiter.api.Assertions.assertTrue(
+            assertNotNull(location);
+            assertTrue(
                     location.endsWith("/login"),
                     "expected the redirect to land on the frontend's own /login screen, got: " + location);
         });

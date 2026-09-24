@@ -17,11 +17,14 @@ import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * The triage system prompt (goals and invariants, one copy for every classifier) and the per-run
@@ -34,6 +37,7 @@ import org.junit.jupiter.api.Test;
  * detector's method, the claim's own numbers are read live off {@code get_finding} rather than
  * shipped as a file, and the budget in the user message is the config value, not a guess.
  */
+@ExtendWith(MockitoExtension.class)
 class BehaviorTriagePromptTest {
 
     /** The job argument neither {@code dossier} nor {@code buildPrompt} reads; a fixed stand-in. */
@@ -207,6 +211,57 @@ class BehaviorTriagePromptTest {
         assertTrue(md.contains("score 0.991; flagged [0, 24) 0.991, [25, 40) 0.98"), md);
         assertTrue(md.contains("strongest: \"The refund window is 90 days.\""), md);
         assertTrue(md.contains("1 flagged answer(s), every one since onset."), md);
+    }
+
+    /**
+     * Past {@link BehaviorTriageEngine#DETECTIONS_CAP} rows the file lists the newest 50 and says the rest are
+     * paged, rather than listing every row and claiming it shows every one since onset.
+     */
+    @Test
+    void aGroundednessFindingWithMoreFlaggedAnswersThanTheCapListsTheNewest50AndSaysSo() {
+        ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
+        List<ClassifierDetectionWriteRepository.DetectionInWindow> rows = new ArrayList<>();
+        StringBuilder listed = new StringBuilder();
+        for (int i = 0; i < 51; i++) {
+            rows.add(new ClassifierDetectionWriteRepository.DetectionInWindow(
+                    "tr-" + i, "sp-" + i, null, "warn", "high", "{\"unsupported\":0.99}", "2026-08-01T12:00:00Z"));
+            if (i < 50)
+                listed.append("- trace `tr-")
+                        .append(i)
+                        .append("` span `sp-")
+                        .append(i)
+                        .append("` at 2026-08-01T12:00:00Z: score 0.99\n");
+        }
+        when(detections.listWitnessDetections(
+                        BuiltInDetector.Kind.GROUNDEDNESS,
+                        "proj-1",
+                        "search_docs",
+                        "rag-answer",
+                        "2026-08-01T00:00:00Z",
+                        "2026-08-02T01:00:00Z",
+                        51))
+                .thenReturn(rows);
+        FindingRow row = finding(
+                BuiltInDetector.Kind.GROUNDEDNESS,
+                "sig-1:rag-answer",
+                "rag-answer",
+                "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}",
+                null);
+
+        String md =
+                engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
+
+        assertEquals(
+                "# Flagged answers since onset\n\n"
+                        + "One line per answer the classifier flagged at this call site, newest first: trace and"
+                        + " span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's"
+                        + " score (P(unsupported) of its strongest sentence), and each flagged sentence as"
+                        + " `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The"
+                        + " strongest sentence's text follows in quotes. A flagged sentence is where the model"
+                        + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n"
+                        + listed
+                        + "\nThe newest 50 shown; page the rest through `get_finding_evidence`.\n",
+                md);
     }
 
     @Test

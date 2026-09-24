@@ -3,11 +3,14 @@ package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
@@ -28,8 +31,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
  */
 class RateLimitFilterTest {
 
-    private static RateLimitFilter filter() {
-        return new RateLimitFilter(new ObjectMapper());
+    /** The filter's monotonic clock. It moves only when a test advances it, so no bucket refills mid-burst. */
+    private final AtomicLong nanos = new AtomicLong();
+
+    private RateLimitFilter filter() {
+        return new RateLimitFilter(new ObjectMapper(), nanos::get);
     }
 
     /**
@@ -125,22 +131,32 @@ class RateLimitFilterTest {
     @DisplayName("an unauthenticated burst against POST /auth/login from one IP is throttled")
     void credentialRouteBurstIsThrottled() throws ServletException, IOException {
         RateLimitFilter f = filter();
-        int rejected = 0;
-        // Burst capacity is 5; six rapid requests from the same IP must trip the limiter.
-        for (int i = 0; i < 6; i++) {
-            MockHttpServletRequest req = request("POST", "/auth/login");
-            req.setRemoteAddr("203.0.113.7");
-            MockHttpServletResponse res = new MockHttpServletResponse();
-            MockFilterChain chain = new MockFilterChain();
-            f.doFilterInternal(req, res, chain);
-            if (res.getStatus() == 429) rejected++;
+        String ip = "203.0.113.7";
+        // Burst capacity is 5: the first five reach the controller, the sixth is refused before it.
+        for (int i = 0; i < 5; i++) {
+            assertEquals(200, login(f, ip).getStatus(), "login " + (i + 1) + " is inside the burst");
         }
-        assertTrue(rejected >= 1, "at least one of six rapid unauthenticated logins from one IP must 429");
+        assertEquals(429, login(f, ip).getStatus(), "the sixth rapid login from one IP must 429");
+    }
+
+    @Test
+    @DisplayName("an exhausted credential bucket refills one attempt every five seconds")
+    void anExhaustedCredentialBucketRefillsOneAttemptPerFiveSeconds() throws ServletException, IOException {
+        RateLimitFilter f = filter();
+        String ip = "203.0.113.9";
+        for (int i = 0; i < 5; i++) login(f, ip);
+        assertEquals(429, login(f, ip).getStatus(), "the burst is spent");
+
+        // 0.2 tokens a second for 5 seconds is exactly one token: one more login, then throttled again.
+        nanos.addAndGet(5_000_000_000L);
+
+        assertEquals(200, login(f, ip).getStatus(), "five seconds buys back one attempt");
+        assertEquals(429, login(f, ip).getStatus(), "and only one");
     }
 
     @Test
     @DisplayName("a full pool evicts the coldest buckets and keeps the ones being spent")
-    void fullPoolEvictsByAgeRatherThanLockingOutNewCallers() throws Exception {
+    void fullPoolEvictsByAgeRatherThanLockingOutNewCallers() throws ServletException, IOException {
         RateLimitFilter f = filter();
 
         // Both of these exhaust their burst, so either one still holding its bucket answers 429 and
@@ -150,6 +166,7 @@ class RateLimitFilterTest {
         // that check passes whether or not a single byte was ever reclaimed.
         String cold = "203.0.113.10";
         for (int i = 0; i < 6; i++) login(f, cold);
+        nanos.addAndGet(1_000);
         assertEquals(429, login(f, cold).getStatus(), "the cold caller starts out at its limit");
 
         // Fill past the cap with addresses that are all being SPENT, so the idle sweep can free
@@ -157,13 +174,15 @@ class RateLimitFilterTest {
         // shape a caller minting addresses out of an IPv6 /64 produces, and the reason a full pool must
         // evict rather than refuse — refusing would turn every later sign-in from an address not
         // already in the map away for as long as that caller cared to continue.
+        // Each filler is a microsecond younger than the last, so the pass has an age order to cut on.
         for (int i = 0; i < 10_050; i++) {
             login(f, "198.51.100." + (i / 250) + "." + (i % 250));
+            nanos.addAndGet(1_000);
         }
         // Past the reclaim interval, so the next new key actually runs a pass instead of returning
         // early. Without this the fill completes inside one interval and the eviction arm is never
         // entered at all.
-        Thread.sleep(1_100);
+        nanos.addAndGet(1_100_000_000L);
 
         // Establishing this caller is the first new key after the interval, so it is what triggers the
         // pass — and reclaim runs BEFORE the insert, so this bucket cannot be evicted by the pass it
@@ -200,12 +219,22 @@ class RateLimitFilterTest {
         assertEquals("5", limited.getHeader("Retry-After"));
     }
 
+    /**
+     * One login, checked for the one thing a status code cannot show: a 429 must stop the request
+     * before the controller, and anything else must reach it.
+     */
     private static MockHttpServletResponse login(RateLimitFilter f, String remoteAddr)
             throws ServletException, IOException {
         MockHttpServletRequest req = request("POST", "/auth/login");
         req.setRemoteAddr(remoteAddr);
         MockHttpServletResponse res = new MockHttpServletResponse();
-        f.doFilterInternal(req, res, new MockFilterChain());
+        MockFilterChain chain = new MockFilterChain();
+        f.doFilterInternal(req, res, chain);
+        if (res.getStatus() == 429) {
+            assertNull(chain.getRequest(), "a throttled login must not reach the controller");
+        } else {
+            assertNotNull(chain.getRequest(), "an admitted login must reach the controller");
+        }
         return res;
     }
 
@@ -221,6 +250,7 @@ class RateLimitFilterTest {
                 MockFilterChain chain = new MockFilterChain();
                 f.doFilterInternal(req, res, chain);
                 assertEquals(200, res.getStatus(), path + " must never be throttled by this filter");
+                assertNotNull(chain.getRequest(), path + " must reach the controller");
             }
         }
     }

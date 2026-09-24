@@ -10,7 +10,7 @@ Rules for the whole run:
   that is taken. Never guess, and never substitute a different install method.
 - **Never install anything silently.** If a tool is missing, tell the user the install command.
 
-`serve.py SHA-256: 70128aafdac8c44bff4dd17b8639cba2cf89d6ab9f7c5708ac906125cb62a71c`
+`serve.py SHA-256: 0f0abe05eb2df81187a432fc2df46d7fead631cf53da0656588b32554cb7d226`
 
 ## Which version
 

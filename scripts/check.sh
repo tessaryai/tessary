@@ -75,9 +75,10 @@
 # this line has to assemble all of them:
 #   actions/setup-java java-version 25      -- check-backend.sh hard-fails on any other JDK
 #   pnpm/action-setup + actions/setup-node  -- check-frontend.sh runs tsc and a real vite build
-#   astral-sh/setup-uv                      -- check-classifier-parity.sh, the Python gates, and
-#                                               cfn-lint in check-groundedness-setup.sh
-#   actions/setup-python                    -- check-classify-service.sh, and the overlay's own
+#   astral-sh/setup-uv                      -- check-classifiers.sh (uv sync + pytest over classifiers/tests),
+#                                               the Python gates, and cfn-lint in check-groundedness-setup.sh
+#   actions/setup-python                    -- check-classify-service.sh, check-vendored-plugin-rules.sh
+#                                               (plus pip pyyaml + pytest), and the overlay's own
 #                                               Python gate when it's present
 #   caddy on PATH                           -- check-caddy.sh
 # If a toolchain is genuinely unavailable, the gate must SKIP with a printed reason like any
@@ -95,7 +96,8 @@
 #   1. THIS SCRIPT: the manifest below, minus the rows marked EXCLUDED.
 #   2. .github/workflows/drift-checks.yml: TWO jobs, workflow_dispatch only, and both are gates
 #      this script does not run: check-conformance-parity.sh (EXCLUDED since #875) and
-#      check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`). It was fourteen
+#      check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`; its offline
+#      rules half runs here as `vendored-plugin-rules`). It was fourteen
 #      jobs until the trim that deleted every job duplicating a row below.
 #   3. Standalone Taskfile targets neither pipeline runs the same way: `conformance:parity`
 #      (in CI, not here), `classifiers:parity` (here, not in CI) and `migrations:populated`
@@ -115,6 +117,7 @@
 #   scripts/check-pipeline-vocabulary.sh   (SQL naming a relation the classifier cutover dropped)
 #   scripts/check-contract-consistency.sh  (vendored contract drift)
 #   scripts/check-vendored-plugin.sh       (the vendored plugin's own rules + freshness vs plugins@main)
+#   scripts/check-vendored-plugin-rules.sh (the rules half alone: offline pytest over contract/tests)
 #   scripts/check-backend.sh               (mvn -B verify: tests + static analysis; under
 #                                          `--edition open` the same script runs with -P '!paid',
 #                                          so there is one definition of the backend gate)
@@ -144,6 +147,9 @@
 #                                          Lives in the overlay along with the service and the
 #                                          engine it runs, so with the overlay gone there's no SOP
 #                                          compile service and a skip is the true answer rather than a hole.)
+#   scripts/check-mcp-bridge.sh            (node:test over packages/mcp, the @tessaryai/mcp stdio bridge)
+#   scripts/check-classifiers.sh           (pytest over classifiers/tests: the open eval framework and
+#                                          groundedness serve.py)
 #   scripts/check-classifier-parity.sh     (Python<->Java/JS classifier port pins. Three of its six
 #                                          pins are on overlay-owned modules and three are not, so
 #                                          it takes --edition and runs 3 or 6; see its own header.)
@@ -285,6 +291,11 @@ fi
 #                            default, finds nothing, and self-skips green in the paid checkout
 #                            too: coverage silently lost, the exact failure this manifest exists
 #                            to prevent.
+#   RUN_ENV_IF_PRESENT:<file> <VAR=value ...>
+#                            RUN_ENV when <file> exists, else plain RUN. <file> is the OVERLAY's
+#                            marker (tessary-paid/pom.xml), never the input itself: with the overlay
+#                            present a missing input must reach the gate and fail it, not fall back
+#                            to this tree's input and pass.
 #   RUN_IF_PRESENT:<reason>  run it when the script FILE exists, else skip with that reason. Used
 #                            only for overlay-owned gates, where the script living inside
 #                            tessary-paid/ makes its own presence the honest edition signal.
@@ -299,14 +310,15 @@ _manifest() {
     cat <<'MANIFEST'
 docs-links|scripts/check-docs-links.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It WAS markdown: it resolved relative links across 81 markdown files. Nothing survives the no-markdown rule|EXCLUDED:same|declared here only so the completeness assertion can see it
 version-consistency|scripts/check-version-consistency.sh|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. VERSION_LITERAL_EXEMPT covers dated literals this script can't name directly (boundary rule 5). Pure text; unlike check-selfhost-images.sh, no Docker or registry call.
-classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV:CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree. The paid column passes the overlay's page, which also pins frustration; the page is an overlay path the script may not name itself (boundary rule 5)
+classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV_IF_PRESENT:tessary-paid/pom.xml CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree. The paid column passes the overlay's page, which also pins frustration; the page is an overlay path the script may not name itself (boundary rule 5)
 module-hygiene|scripts/check-module-hygiene.sh|RUN|RUN|self-scoping on the overlay pom; see the note below the manifest
 open-boundary|scripts/check-open-boundary.sh|RUN|RUN|the open/paid direction check itself
 license-headers|scripts/check-license-headers.sh|RUN|RUN|SPDX header presence over the publishable tree (derived from export-denylist.txt's own `delete` rows, so private trees are out of scope for both editions the same way); the script's own header names the interim manual-audit + weekly-CI posture it runs under until branch protection is available
 export-denylist|scripts/lib/check-export-denylist.sh|RUN|RUN|the must-not-publish declaration is well-formed and, with the overlay present, every delete/exempt row resolves; self-scopes the liveness half
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN|RUN|open on both sides
 contract-consistency|scripts/check-contract-consistency.sh|RUN|RUN|open on both sides
-vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. Its offline rules half runs per PR as the `vendored-plugin-rules` row|EXCLUDED:same|declared here only so the completeness assertion can see it
+vendored-plugin-rules|scripts/check-vendored-plugin-rules.sh|RUN|RUN|phase 1 of check-vendored-plugin.sh on its own: pytest over contract/tests, the vendored validator rules the platform's import depends on. Offline and sub-second; needs python3 with pyyaml and pytest. check-vendored-plugin.sh calls this script, so the rules have one definition
 caddy|scripts/check-caddy.sh|RUN|RUN|open on both sides
 paid-caddy|tessary-paid/scripts/check-paid-caddy.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid spec and no Caddyfile.prod for the gate to compare; both live in the overlay|this gate lives in the overlay, the overlay twin of the `caddy` row above; it lives there because check-open-boundary.sh rule 5 fails any scripts/*.sh naming that directory. The checker itself is open and variadic (scripts/lib/caddy-proxies-spec.py); only the caller and the config are the overlay's.
 connect-route|scripts/check-connect-route.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It string-matched eleven prose fragments from docs/self-hosting/setup.mdx against JSX. Renaming a button reds it|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -316,6 +328,7 @@ selfhost-health|scripts/check-selfhost-health.sh|EXCLUDED:dropped 2026-09-09 und
 classify-service|scripts/check-classify-service.sh|RUN|RUN:--edition open|classify-service stays open per the ledger, but its models.json manifest lives in the overlay; without it, this asserts an empty manifest and the UNAVAILABLE_IN_OPEN_EDITION token, not the three built-in heads
 slack-service|tessary-paid/scripts/check-slack-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no Slack adapter; the service and its gate live in the overlay together|a gate that lives in the overlay
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN|RUN|open on both sides; needs only node, already on PATH for the frontend gate
+mcp-bridge|scripts/check-mcp-bridge.sh|RUN|RUN|the @tessaryai/mcp stdio bridge's node:test suite, which otherwise runs only in release.yml right before npm publish; zero dependencies, needs only node
 compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no SOP compile service; the service, its engine and its gate live in the overlay together|a gate that lives in the overlay
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
 classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -328,6 +341,7 @@ frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
 paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid frontend surfaces; they live in the overlay|a gate that lives in the overlay
 backend|scripts/check-backend.sh|RUN|RUN:-P !paid|one script, both editions; the JDK-25 guard is in front of both
+classifiers|scripts/check-classifiers.sh|RUN|RUN|classifiers/tests over uv; open on both sides (pyproject's testpaths is the open tests/ only)
 conformance-parity|scripts/check-conformance-parity.sh|EXCLUDED:run by `task conformance:parity` and the CI conformance-parity job, never by this pipeline|EXCLUDED:same, and its generator is paid so the open edition would skip it anyway|declared here only so the completeness assertion can see it
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|EXCLUDED:same|declared here only so the completeness assertion can see it
 open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only boot-checks.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -402,6 +416,15 @@ _gate() {
             # assignments cannot leak into the rest of this shell.
             # shellcheck disable=SC2086
             env ${_gate_disp#RUN_ENV:} bash "$_gate_script" "$@"
+            ;;
+        RUN_ENV_IF_PRESENT:*)
+            _gate_args="${_gate_disp#RUN_ENV_IF_PRESENT:}"
+            if [ -e "${_gate_args%% *}" ]; then
+                # shellcheck disable=SC2086
+                env ${_gate_args#* } bash "$_gate_script" "$@"
+            else
+                bash "$_gate_script" "$@"
+            fi
             ;;
         RUN_IF_PRESENT:*)
             if [ -f "$_gate_script" ]; then
@@ -558,15 +581,18 @@ if [ -z "$SLICES" ]; then
     _gate pipeline-vocabulary
     _gate contract-consistency
     _gate blob-links
+    _gate vendored-plugin-rules
     _gate caddy
     _gate paid-caddy
     _gate version-consistency
     _gate compose-artifact
     _gate classify-service
     _gate groundedness-serve
+    _gate classifiers
     _gate groundedness-setup
     _gate slack-service
     _gate sandbox-runner
+    _gate mcp-bridge
     _gate compile-service
     _gate overlay-schema
     _gate no-bedrock

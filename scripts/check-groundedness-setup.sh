@@ -17,7 +17,8 @@
 #      it names exists in this tree
 #   d. `cfn-lint` passes on the template (through uvx)
 #   e. the template's ServePyUrl and ServePySha256 parameters have no default, and its user data
-#      checks the download against ServePySha256 before anything runs serve.py
+#      checks the download against ServePySha256, with a check that can fail, before anything runs
+#      serve.py
 #   f. each MD has a `## Restart` heading, which the in-app restart prompt links as `#restart`
 # The request and response fixtures in classifiers/groundedness/contract/ have one copy, which the
 # backend's test and serve.py's test both read, so there is nothing to compare there.
@@ -112,9 +113,10 @@ for p in ServePyUrl ServePySha256; do
     fail "$TEMPLATE: $p has a Default; it must come from groundedness-setup-aws.md so the stack runs the serve.py that MD verified"
   fi
 done
-# The first line that checks a file against ${ServePySha256} and fails when it differs (no
-# --status), and the first line that runs serve.py. The check must come first.
-verify_line="$(grep -nE '\$\{ServePySha256\}.*sha256sum --check([[:space:]]*$|[[:space:]]+[^-])' "$TEMPLATE" | head -1 | cut -d: -f1 || true)"
+# The first line that checks a file against ${ServePySha256} and ends at `sha256sum --check`, so a
+# mismatch fails the script: not `--status` (the "is it already here" probe) and not `|| true`.
+# Then the first line that runs serve.py. The check must come first.
+verify_line="$(grep -nE '\$\{ServePySha256\}.*sha256sum --check[[:space:]]*$' "$TEMPLATE" | head -1 | cut -d: -f1 || true)"
 download_line="$(grep -nE '\$\{ServePyUrl\}' "$TEMPLATE" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1 || true)"
 run_line="$(grep -nE 'uv run [^[:space:]]*serve\.py' "$TEMPLATE" | head -1 | cut -d: -f1 || true)"
 if [ -z "$download_line" ]; then

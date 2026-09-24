@@ -16,8 +16,9 @@ The **docs** half of the contract is still vendored from the public repo — `ou
 `AUTHORING_CONTRACT.md`, `grader.schema.json`, `CHANGELOG.md` (see
 `scripts/lib/vendored-plugin-files.sh`). The plugins repo deliberately runs no PR CI: a workflow
 there would put its configuration, its logs, and its fixtures in the open. So the enforcement lives
-here: `scripts/check-vendored-plugin.sh` runs these tests and diffs the vendored docs against the
-plugin's live `main` on every CI run — reading a public repo from private CI leaves nothing behind
+here: `scripts/check-vendored-plugin-rules.sh` runs these tests on every pull request, and
+`scripts/check-vendored-plugin.sh` (dispatch-only `drift-checks.yml`) also diffs the vendored docs
+against the plugin's live `main` — reading a public repo from private CI leaves nothing behind
 in the public repo.
 
 **Scope.** These cover the contract surface this platform actually consumes — chiefly the

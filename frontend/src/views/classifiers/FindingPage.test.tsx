@@ -4,14 +4,16 @@
  * verbs before a ruling, and the flagged answers in place of the generic evidence table.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { FindingPage } from "./FindingPage";
+import type { BehaviorFindingDetail } from "../../api/types";
 import { GROUNDEDNESS_FINDING_DETAIL } from "../../test/groundednessFixtures";
 import { dateTime } from "./groundedness";
 
-const getBehaviorFinding = vi.fn(async () => GROUNDEDNESS_FINDING_DETAIL);
+let findingDetail: BehaviorFindingDetail = GROUNDEDNESS_FINDING_DETAIL;
+const getBehaviorFinding = vi.fn(async () => findingDetail);
 const getBehaviorFindingEvidence = vi.fn();
 const getFlaggedAnswers = vi.fn();
 
@@ -27,7 +29,10 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   };
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  findingDetail = GROUNDEDNESS_FINDING_DETAIL;
+});
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -71,9 +76,32 @@ describe("FindingPage, groundedness", () => {
     ).toBeTruthy();
 
     expect(screen.getByText("Marked sentences scored 0.975 or higher")).toBeTruthy();
-    expect(document.querySelectorAll("mark")).toHaveLength(2);
+    expect(within(screen.getByRole("region", { name: "Answer" })).getAllByRole("mark")).toHaveLength(2);
     expect(screen.getByText("1 of 58 traces")).toBeTruthy();
     expect(screen.queryByText("Evidence")).toBeNull();
     expect(getBehaviorFindingEvidence).not.toHaveBeenCalled();
+  });
+
+  it("shows a triaged finding's ruling and its case in place of the triage verbs", async () => {
+    findingDetail = {
+      ...GROUNDEDNESS_FINDING_DETAIL,
+      finding: {
+        ...GROUNDEDNESS_FINDING_DETAIL.finding,
+        caseId: "case-1",
+        status: "closed",
+        triageStatus: "done",
+        triageVerdict: "positive",
+        triageAction: "opened_case",
+        triagedAt: "2026-09-23T13:52:00Z",
+      },
+    };
+    renderPage();
+
+    const toCase = await screen.findByRole("link", { name: "View case" });
+    expect(toCase.getAttribute("href")).toBe("/orgs/acme/projects/default/cases/case-1");
+    expect(screen.getByText("Positive")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run triage" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm and open a case" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Absorb as legitimate" })).toBeNull();
   });
 });

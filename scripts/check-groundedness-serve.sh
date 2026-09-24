@@ -6,11 +6,11 @@
 # import time and nothing else would notice. classifiers/tests/test_groundedness_serve.py checks that
 # it imports alone in an empty directory, that its PEP 723 header lists every third-party import,
 # that its copy of the training encoding matches the answer key, that the request and response in
-# classifiers/groundedness/contract/ still fit it, and what `/healthz` reports.
+# classifiers/groundedness/contract/ still fit it, and how the HTTP handler answers.
 #
-# Only pytest is installed, not the classifiers project and not torch: serve.py imports torch and
-# transformers inside the functions that load the model, and the one test that needs the tokenizer
-# is marked `network` and skips without transformers. So this costs seconds, not a model download.
+# Only pytest is installed, not the classifiers project, torch or transformers: serve.py imports
+# them inside the functions that load the model, and the encoding test checks how encode() calls the
+# tokenizer with a recording fake. So this costs seconds, not a model download.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/classifiers"

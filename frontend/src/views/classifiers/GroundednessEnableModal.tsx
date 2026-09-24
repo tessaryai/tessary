@@ -163,13 +163,17 @@ export function GroundednessEnableModal({
  */
 function SetupSteps({ active }: { active: number }) {
   return (
-    <ol className="m-0 flex flex-col gap-2.25 rounded-card bg-raised px-3.5 py-3" style={{ listStyle: "none" }}>
+    <ol
+      aria-label="Setup steps"
+      className="m-0 flex flex-col gap-2.25 rounded-card bg-raised px-3.5 py-3"
+      style={{ listStyle: "none" }}
+    >
       {STEPS.map((label, i) => {
         const state = i < active ? "done" : i === active ? "active" : "waiting";
         return (
           <li
             key={label}
-            data-state={state}
+            aria-current={state === "active" ? "step" : undefined}
             className={cn(
               "flex items-center gap-2.5 text-small",
               state === "done" ? "text-fg-secondary" : state === "active" ? "text-fg" : "text-subtle",

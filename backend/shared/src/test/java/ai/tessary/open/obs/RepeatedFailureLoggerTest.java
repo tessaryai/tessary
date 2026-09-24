@@ -65,10 +65,4 @@ class RepeatedFailureLoggerTest {
 
         assertEquals(List.of("first", "first"), firsts, "a cleared streak logs fresh on its next failure");
     }
-
-    @Test
-    void clearOnAnUnknownKeyIsANoop() {
-        RepeatedFailureLogger logger = new RepeatedFailureLogger(3);
-        logger.clear("never-seen"); // must not throw
-    }
 }

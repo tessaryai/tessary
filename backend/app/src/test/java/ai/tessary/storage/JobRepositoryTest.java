@@ -138,9 +138,31 @@ class JobRepositoryTest {
     void claimIsScopedToItsKind() {
         String pid = TenantFixture.bootstrap(tenants, "job-kind").project().id();
         jobs.insert(job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.PENDING, null, 0, null));
+        // A classifier job a hung worker left behind: under the cap, lease expired, so reclaimable by its
+        // own kind. The reclaim leg must be kind-scoped too, not just the pending leg.
+        String past = Instant.now().minus(Duration.ofHours(1)).toString();
+        JobRow hung = job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.CLAIMED, null, 1, past);
+        jobs.insert(hung);
 
         assertTrue(
                 jobs.claimBatch(JobRow.Kind.PULL, "worker-3", POLICY).isEmpty(),
-                "a claim for one kind never touches another kind's job");
+                "a claim for one kind never touches another kind's job, pending or reclaimable");
+        assertEquals(
+                "worker-x",
+                jobs.findById(hung.id()).orElseThrow().leaseOwner(),
+                "the hung classifier job still belongs to its original worker");
+
+        // Same for the dead-letter sweep: one kind's sweep never parks another kind's over-cap job.
+        JobRow exhausted = job(pid, JobRow.Kind.CLASSIFIER, JobRow.Status.CLAIMED, null, 3, past);
+        jobs.insert(exhausted);
+        jobs.failExhausted(JobRow.Kind.PULL, "hung mid-pull", POLICY);
+        assertEquals(
+                JobRow.Status.CLAIMED,
+                jobs.findById(exhausted.id()).orElseThrow().status(),
+                "a pull sweep leaves an over-cap classifier job for the classifier sweep");
+
+        // Leave no reclaimable or exhausted classifier job for this class's other claims and sweeps.
+        jobs.markDone(hung.id());
+        jobs.markDone(exhausted.id());
     }
 }

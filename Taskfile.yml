@@ -540,7 +540,7 @@ tasks:
   # The project gate. Nothing enforces it locally, and CI is NOT a per-PR check:
   # CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh --edition open` on
   # `pull_request:`, which is this same manifest, so local green => CI green on the same script.
-  # drift-checks.yml holds the two gates check.sh does NOT run (vendored-plugin,
+  # drift-checks.yml holds the two gates check.sh does NOT run (vendored-plugin's freshness half,
   # conformance-parity), dispatch-only. Merge-blocking is still not possible: branch protection is
   # plan-gated on this repo.
   # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. Since

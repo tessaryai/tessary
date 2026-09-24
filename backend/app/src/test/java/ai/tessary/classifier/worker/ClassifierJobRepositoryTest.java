@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * endpoint: it must return a signal's job row scoped to its project, reflect a failure's
  * {@code status}/{@code attempts}/{@code lastError}, and never leak a job belonging to a different
  * project.
+ *
+ * <p>And the two writes a sweep makes to its job outside a page, {@link ClassifierJobRepository#releaseWithoutAttempt}
+ * and {@link ClassifierJobRepository#recordCaughtUp}, change nothing for a worker whose lease another worker has
+ * since taken, and the second merges into the payload rather than replacing it.
  */
 @SpringBootTest
 class ClassifierJobRepositoryTest {
@@ -143,7 +149,7 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void deadLetteredJob_revivesOnceTheCooldownElapses() throws InterruptedException {
+    void deadLetteredJob_revivesOnceTheCooldownElapses() {
         String pid = project("signal-deadletter-revive");
         String classifierId = Ids.ulid();
         jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
@@ -151,7 +157,7 @@ class ClassifierJobRepositoryTest {
         driveToDeadLetter(pid, classifierId);
         assertFalse(isClaimable(classifierId, "w"), "still dead under the long cooldown");
 
-        Thread.sleep(20); // ensure updated_at (set at dead-letter time) is strictly before the revival floor
+        backdateDeadLetter(classifierId);
         jobs.enqueue(pid, classifierId, 0); // cooldown has fully elapsed
         assertTrue(
                 isClaimable(classifierId, "w2"),
@@ -182,7 +188,7 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void leaseExpiryExhaustion_deadLettersWithTheSameCooldownAsFastFail() throws InterruptedException {
+    void leaseExpiryExhaustion_deadLettersWithTheSameCooldownAsFastFail() {
         String pid = project("signal-reclaim-cap");
         String classifierId = Ids.ulid();
         jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
@@ -212,7 +218,7 @@ class ClassifierJobRepositoryTest {
                 isClaimable(classifierId, "w2"),
                 "the routine heartbeat enqueue must not resurrect a crash-reclaimed dead job under cooldown");
 
-        Thread.sleep(20); // ensure updated_at (set at dead-letter time) is strictly before the revival floor
+        backdateDeadLetter(classifierId);
         jobs.enqueue(pid, classifierId, 0); // cooldown elapsed — same automatic recovery as the fast-fail leg
         ClassifierJobRow revived = claimOne(classifierId, "w3");
         assertEquals(
@@ -306,6 +312,77 @@ class ClassifierJobRepositoryTest {
                 "no job row means no history to re-read — the first sweep already starts from a null cursor");
     }
 
+    @Test
+    void releaseWithoutAttempt_byAWorkerWhoseLeaseExpired_leavesTheNewHoldersJobAlone() {
+        String pid = project("signal-release-stale-owner");
+        String classifierId = Ids.ulid();
+        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
+        claimOneWithExpiredLease(classifierId); // "hung-worker" stalls past its lease
+        ClassifierJobRow held = claimOne(classifierId, "w-new"); // the reclaim leg hands it on
+
+        jobs.releaseWithoutAttempt(held.id(), "hung-worker");
+
+        assertEquals(held, jobs.findByClassifier(pid, classifierId).orElseThrow());
+        jobs.markSwept(held.id(), null, null); // terminal, as rewindCursor_leavesAnInFlightSweepAlone leaves it
+    }
+
+    @Test
+    void releaseWithoutAttempt_neverTakesAttemptsBelowZero() {
+        // A sweep that marked itself swept (attempts reset to 0, lease_owner kept) and then hit an
+        // unreachable encoder in its catch-up work hands the job back from 0.
+        String pid = project("signal-release-floor");
+        String classifierId = Ids.ulid();
+        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
+        ClassifierJobRow claimed = claimOne(classifierId, "w");
+        jobs.markSwept(claimed.id(), null, null);
+
+        jobs.releaseWithoutAttempt(claimed.id(), "w");
+
+        ClassifierJobRow after = jobs.findByClassifier(pid, classifierId).orElseThrow();
+        assertEquals(0, after.attempts());
+        assertNull(after.leaseOwner());
+    }
+
+    @Test
+    void recordCaughtUp_byAWorkerWhoseLeaseExpired_writesNothing() {
+        String pid = project("signal-caught-up-stale-owner");
+        String classifierId = Ids.ulid();
+        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
+        claimOneWithExpiredLease(classifierId);
+        ClassifierJobRow held = claimOne(classifierId, "w-new");
+
+        jobs.recordCaughtUp(held.id(), "hung-worker", Instant.parse("2026-09-01T12:00:00Z"));
+
+        assertEquals(Optional.empty(), jobs.caughtUpAt(pid, classifierId));
+        assertEquals(List.of("classifier_id"), payloadKeys(held.id()));
+        jobs.markSwept(held.id(), null, null);
+    }
+
+    @Test
+    void recordCaughtUp_mergesIntoThePayloadAndKeepsTheClassifierId() {
+        String pid = project("signal-caught-up-merge");
+        String classifierId = Ids.ulid();
+        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
+        ClassifierJobRow claimed = claimOne(classifierId, "w");
+        jobs.markSwept(claimed.id(), null, null);
+
+        jobs.recordCaughtUp(claimed.id(), "w", Instant.parse("2026-09-01T12:00:00Z"));
+        jobs.recordCaughtUp(claimed.id(), "w", Instant.parse("2026-09-01T12:30:00Z"));
+
+        assertEquals(List.of("caught_up_at", "classifier_id"), payloadKeys(claimed.id()));
+        assertEquals(
+                classifierId,
+                jobs.findByClassifier(pid, classifierId).orElseThrow().classifierId());
+        assertEquals(Optional.of(Instant.parse("2026-09-01T12:30:00Z")), jobs.caughtUpAt(pid, classifierId));
+    }
+
+    private List<String> payloadKeys(String jobId) {
+        return jdbc.sql("SELECT k FROM job, jsonb_object_keys(payload) AS k WHERE id = :id ORDER BY k")
+                .param("id", jobId)
+                .query(String.class)
+                .list();
+    }
+
     /** Drive a job through {@code MAX_ATTEMPTS} consecutive fast failures until it dead-letters. */
     private void driveToDeadLetter(String projectId, String classifierId) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -326,6 +403,14 @@ class ClassifierJobRepositoryTest {
                 .toList();
         assertEquals(1, batch.size(), "exactly one due job for this signal");
         return batch.get(0);
+    }
+
+    /** Move the dead-letter moment an hour back, so it is unambiguously before any revival floor. */
+    private void backdateDeadLetter(String classifierId) {
+        jdbc.sql("UPDATE job SET updated_at = :at WHERE kind = 'classifier' AND dedupe_key = :sid")
+                .param("at", Instant.now().minus(Duration.ofHours(1)).toString())
+                .param("sid", classifierId)
+                .update();
     }
 
     private String status(String jobId) {

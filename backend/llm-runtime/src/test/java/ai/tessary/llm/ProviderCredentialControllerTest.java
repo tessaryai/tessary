@@ -25,6 +25,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -214,6 +215,58 @@ class ProviderCredentialControllerTest {
 
         verify(secretBox).seal("sk-new-key");
         verify(repo).update(any());
+    }
+
+    /** A first save must write the row: with no stored credential there is nothing to update. */
+    @Test
+    void aFirstSaveInsertsTheOrgsCredential() {
+        when(secretBox.isConfigured()).thenReturn(true);
+        when(secretBox.seal("sk-first")).thenReturn("sealed-first");
+        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.empty());
+        var req = new ProviderCredentialController.UpsertRequest(null, "sk-first", null, null, null, null, null, null);
+
+        controller.upsert(ctx, ORG_SLUG, ModelProvider.OPENAI, req);
+
+        ArgumentCaptor<ProviderCredential> inserted = ArgumentCaptor.forClass(ProviderCredential.class);
+        verify(repo).insert(inserted.capture());
+        ProviderCredential row = inserted.getValue();
+        assertEquals(ORG_ID, row.orgId());
+        assertEquals(ModelProvider.OPENAI, row.provider());
+        assertEquals("sealed-first", row.apiKeySealed(), "the key is stored sealed");
+        assertEquals(ProviderCredential.AUTH_MODE_API_KEY, row.authMode());
+        verify(repo, never()).update(any());
+    }
+
+    /**
+     * A rotated key must drop the org's cached client for that provider, or calls keep running on the
+     * old key until a restart.
+     */
+    @Test
+    void rotatingAKeyDropsTheOrgsCachedClientForThatProvider() {
+        ProviderCredential existing = new ProviderCredential(
+                "cred_1",
+                ORG_ID,
+                null,
+                ModelProvider.ANTHROPIC,
+                null,
+                "old-sealed-key",
+                null,
+                null,
+                null,
+                null,
+                null,
+                ProviderCredential.AUTH_MODE_API_KEY,
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z");
+        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.ANTHROPIC)).thenReturn(Optional.of(existing));
+        when(secretBox.isConfigured()).thenReturn(true);
+        when(secretBox.seal("sk-rotated")).thenReturn("rotated-sealed-key");
+        var req =
+                new ProviderCredentialController.UpsertRequest(null, "sk-rotated", null, null, null, null, null, null);
+
+        controller.upsert(ctx, ORG_SLUG, ModelProvider.ANTHROPIC, req);
+
+        verify(factory).invalidate(ORG_ID, ModelProvider.ANTHROPIC);
     }
 
     // ---- delete invalidates the factory's cached client (org-wide) so the next call rebuilds ----

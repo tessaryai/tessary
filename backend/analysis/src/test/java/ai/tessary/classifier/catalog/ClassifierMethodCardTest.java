@@ -47,20 +47,6 @@ class ClassifierMethodCardTest {
     }
 
     /**
-     * Groundedness's card describes the rate test it files through, and none of the contradiction-only
-     * method it replaced. Public numbers are RAGTruth's only.
-     */
-    @Test
-    void theGroundednessCardDescribesItsRateTest() {
-        String card = cardOf(BuiltInDetector.Kind.GROUNDEDNESS);
-        assertTrue(card.contains("Bernoulli CUSUM"), card);
-        assertTrue(card.contains("RAGTruth"), card);
-        assertFalse(card.contains("RAGBench"), "public numbers are RAGTruth's only");
-        assertFalse(card.contains("three-way NLI"), "the contradiction-only method is gone");
-        assertFalse(card.contains("armedWindow"), "it files no armed window");
-    }
-
-    /**
      * Every card carries a section per alarm kind the classifier can file — the text that used to be
      * {@code causeExplanation} in {@code finding.md}, now the one place a cause's meaning lives.
      */

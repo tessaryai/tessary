@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.alert.AlertChannelDtos.UpsertChannelRequest;
+import ai.tessary.alert.channel.AlertDeliveryDispatcher;
 import ai.tessary.alert.channel.AlertPayload;
 import ai.tessary.alert.channel.ChannelHttp;
 import ai.tessary.alert.channel.WebhookChannel;
@@ -34,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.AopTestUtils;
 
 /**
  * Acceptance for alert channels. Exercised against the real pgvector Postgres
@@ -71,6 +73,9 @@ class AlertChannelDeliveryTest {
 
     @Autowired
     ApplicationEventPublisher publisher;
+
+    @Autowired
+    AlertDeliveryDispatcher dispatcher;
 
     @Autowired
     ObjectMapper mapper;
@@ -185,12 +190,14 @@ class AlertChannelDeliveryTest {
                 "the slack attempt failed naming the undeployed adapter");
 
         // Re-firing the same event is at-most-once: the (event, channel) claim de-dupes, no new sends.
+        // The re-fire runs the dispatcher's fan-out on this thread, past its @Async proxy, so the
+        // assertions below read what it did once it has returned rather than whatever it had done by
+        // an arbitrary deadline.
         client.bodies.clear();
-        publisher.publishEvent(new AlertFiredEvent(event));
-        // The re-fire is a negative assertion on an async path: give the dispatcher time to run (and find
-        // every slot already claimed) before asserting nothing was re-sent.
-        Thread.sleep(500);
+        AlertDeliveryDispatcher fanOut = AopTestUtils.getUltimateTargetObject(dispatcher);
+        fanOut.deliverAll(event);
         assertTrue(client.bodies.isEmpty(), "a re-fired event does not re-send (at-most-once)");
+        assertEquals(3, attempts.listByProject(pid, 100).size(), "and records no new delivery attempt");
     }
 
     /** Polls the delivery-attempt log until {@code expected} attempts have resolved (not pending). */

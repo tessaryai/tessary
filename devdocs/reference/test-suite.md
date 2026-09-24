@@ -19,7 +19,9 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-classify-service `node --test`, and live ITs (`*LiveIT.java`).
+classify-service `node --test`, `packages/mcp` `node --test` (the `mcp-bridge` row),
+`contract/tests` (the `vendored-plugin-rules` row), `classifiers/tests` (the `classifiers` row),
+and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
 key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
@@ -32,23 +34,22 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (15 checks in the open edition): backend `mvn verify`, frontend, classify-service, sandbox-runner, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (22 checks in the open edition): backend `mvn verify`, then `classifiers` after it, frontend, classify-service, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: classifier-quality-doc (manifest `SKIP`), slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
-**The vendored-plugin gate needs host Python.** `task check` (bare) runs `contract/tests` against the
-vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest` on the host — it
-says so and stops if either is missing, rather than skipping silently. Its second half diffs the
-vendored copy against the plugin's live `main`; **offline that half warns and passes**, so a local
-gate still works on a plane, and CI (where `$CI` is set) makes it a hard failure. The plugin repo is
-public and deliberately runs no PR CI, so this is the only place that contract is enforced —
-see [`contract/tests/README.md`](../../contract/tests/README.md).
+**Two gates need host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
+vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
+stops if either is missing. `classifiers` runs `uv sync --frozen --group dev --extra quality` and
+pytest over `classifiers/tests`, so it needs `uv`. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
+it runs via `task contract:plugin` and `drift-checks.yml`. See
+[`contract/tests/README.md`](../../contract/tests/README.md).
 
 **A narrowed backend slice is not full `mvn verify`.** It runs spotless + test-compile + the
 package's tests. Static analysis bound to the `verify` phase (SpotBugs, PMD, forbidden-apis),
@@ -57,7 +58,7 @@ module-hygiene
 (`scripts/check-pipeline-vocabulary.sh`), the classifier-quality doc gate
 (`scripts/check-classifier-quality-doc.sh`, which pins
 the classifier-quality reference page to the served model revisions and catalog
-thresholds, and skips with a named reason where that page is absent), and root-package tests such as `ContextLoadsTest` run
+thresholds, and fails when that page is missing), and root-package tests such as `ContextLoadsTest` run
 only on bare `task check` / `backend:check`. Error Prone and NullAway are compiler-plugin checks
 bound to the `compile` phase instead, so they run on every narrowed slice too — any
 `mvn test-compile`/`test` triggers `compile` first. Prefer the slices you touched for the inner
@@ -74,7 +75,8 @@ Two gates are deliberately not on that per-PR path and live in the dispatch-only
 
 - `conformance-parity` — regenerates the fixture pinning the Java port to the Python engine.
 - `vendored-plugin` — its freshness half fetches `tessaryai/plugins` over the network and hard-fails
-  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff.
+  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff. Its offline
+  rules half runs per PR as the `vendored-plugin-rules` row.
 
 Run `gh workflow run drift-checks.yml` before a risky merge, and periodically to catch drift.
 
@@ -153,14 +155,15 @@ inner-loop speed is not.
 ## Coverage posture (intentional coldspots)
 
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
-(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build) — a handful of
+(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
-and fails on a render error or un-allowlisted console.error. Coverage is thin (7 test files); the
+(and the case, finding and RCA pages once more on real payloads, since the manifest pass only
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Coverage is thin (23 test files); the
 gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
-near-zero tests are thin wrappers or UI-facing glue —
-do not add tests unless explicitly asked (root `AGENTS.md`).
+near-zero tests are thin wrappers or UI-facing glue; a test there has to name the bug it catches
+(root `AGENTS.md` § Tests).
 
 ### JaCoCo baseline
 

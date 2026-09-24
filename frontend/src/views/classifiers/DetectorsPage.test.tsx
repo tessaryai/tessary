@@ -9,13 +9,22 @@
  *
  * Groundedness: the row says what its model is doing in each state, switching it on opens the setup
  * modal until the model has answered once, and switching it off asks first.
+ *
+ * Each row's status says whether its sweep is failing, whether it has anything to judge yet, and what
+ * it found in 7 days, and never reads "quiet" when the volume is unknown.
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { Classifier, ClassifierEvent, GroundednessStatus } from "../../api/types";
+import type {
+  Classifier,
+  ClassifierDailyVolume,
+  ClassifierEvent,
+  ClassifierHealth,
+  GroundednessStatus,
+} from "../../api/types";
 import { DetectionRow, DetectorsPage } from "./DetectorsPage";
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
@@ -23,6 +32,9 @@ import { clockTime } from "./groundedness";
 const listClassifiers = vi.fn<() => Promise<Classifier[]>>();
 const setClassifierEnabled = vi.fn();
 const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
+const EMPTY_VOLUME: ClassifierDailyVolume = { days: [], trace_totals: [], classifiers: [] };
+const getClassifierDailyVolume = vi.fn<() => Promise<ClassifierDailyVolume>>(async () => EMPTY_VOLUME);
+const listClassifierHealth = vi.fn<() => Promise<ClassifierHealth[]>>(async () => []);
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
@@ -34,8 +46,8 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
       api: {
         base: "/api/orgs/acme/projects/default",
         listClassifiers,
-        getClassifierDailyVolume: async () => ({ days: [], trace_totals: [], classifiers: [] }),
-        listClassifierHealth: async () => [],
+        getClassifierDailyVolume,
+        listClassifierHealth,
         setClassifierEnabled,
         getGroundednessStatus,
         listClassifierEvents: async () => [],
@@ -62,6 +74,8 @@ afterEach(() => {
   setClassifierEnabled.mockReset();
   getGroundednessStatus.mockReset();
   window.localStorage.clear();
+  getClassifierDailyVolume.mockImplementation(async () => EMPTY_VOLUME);
+  listClassifierHealth.mockImplementation(async () => []);
 });
 
 function classifier(overrides: Partial<Classifier>): Classifier {
@@ -92,6 +106,7 @@ function renderPage() {
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  return qc;
 }
 
 describe("DetectorsPage", () => {
@@ -143,6 +158,81 @@ describe("DetectorsPage", () => {
     fireEvent.click(await screen.findByRole("switch", { name: "Enable Tool error" }));
 
     await screen.findByText(/the switch was refused/);
+  });
+});
+
+function health(classifierId: string, status: string): ClassifierHealth {
+  return {
+    classifier_id: classifierId,
+    status,
+    attempts: status === "failed" ? 5 : 0,
+    max_attempts: 5,
+    last_error: status === "failed" ? "judge timed out" : null,
+    last_swept_at: null,
+    next_attempt_at: null,
+  };
+}
+
+/** The catalog row for the classifier named `name`: its name button and everything beside it. */
+async function row(name: string): Promise<HTMLElement> {
+  return (await screen.findByText(name)).closest("button")!.parentElement!;
+}
+
+describe("DetectorsPage row status", () => {
+  const TOOL_ERROR = classifier({ id: "clf-a", classifier_key: "tool_error", name: "Tool error", detector: "tool_error", enabled: true });
+  const REFUSAL = classifier({ id: "clf-b", classifier_key: "refusal", name: "Refusal", detector: "refusal", enabled: true });
+
+  // Bug: a detector whose sweep is failing reads as healthy, with its detections and nothing else.
+  it("flags a failing sweep on its row, and only on that row", async () => {
+    listClassifiers.mockResolvedValue([TOOL_ERROR, REFUSAL]);
+    listClassifierHealth.mockResolvedValue([health("clf-a", "failed"), health("clf-b", "pending")]);
+    getClassifierDailyVolume.mockResolvedValue({
+      ...EMPTY_VOLUME,
+      classifiers: [
+        { classifier_id: "clf-a", counts: [2, 1] },
+        { classifier_id: "clf-b", counts: [0, 1] },
+      ],
+    });
+    renderPage();
+
+    const failing = await row("Tool error");
+    await within(failing).findByText("sweep failing");
+    within(failing).getByText("3 detections 7d");
+    const healthy = await row("Refusal");
+    within(healthy).getByText("1 detection 7d");
+    expect(within(healthy).queryByText("sweep failing")).toBeNull();
+  });
+
+  // Bug: a detector with nothing to judge yet reads "quiet 7d", which says it looked and found nothing.
+  it("reads a detector waiting on schemas as waiting, and a silent one as quiet", async () => {
+    listClassifiers.mockResolvedValue([{ ...TOOL_ERROR, readiness: "waiting_on_schemas" }, REFUSAL]);
+    getClassifierDailyVolume.mockResolvedValue({
+      ...EMPTY_VOLUME,
+      classifiers: [
+        { classifier_id: "clf-a", counts: [0, 0] },
+        { classifier_id: "clf-b", counts: [0, 0] },
+      ],
+    });
+    renderPage();
+
+    const quiet = await row("Refusal");
+    await within(quiet).findByText("quiet 7d");
+    const waiting = await row("Tool error");
+    within(waiting).getByText("waiting on schemas");
+    expect(within(waiting).queryByText("quiet 7d")).toBeNull();
+  });
+
+  // Bug: when the volume read fails, every detector reads "quiet 7d" instead of unknown.
+  it("shows a dash, not quiet, when the 7-day volume could not be read", async () => {
+    listClassifiers.mockResolvedValue([REFUSAL]);
+    getClassifierDailyVolume.mockRejectedValue(new Error("volume unavailable"));
+    const qc = renderPage();
+
+    const unknown = await row("Refusal");
+    // The dash also shows while the read is in flight, so wait for it to fail first.
+    await waitFor(() => expect(qc.isFetching()).toBe(0));
+    within(unknown).getByText("–");
+    expect(within(unknown).queryByText("quiet 7d")).toBeNull();
   });
 });
 
@@ -244,12 +334,21 @@ describe("DetectorsPage, Groundedness", () => {
     await screen.findByText("Setting up...");
   });
 
-  it("keeps the detection count while on in dev", async () => {
+  it("keeps the detection count while on in dev, and drops the setting-up flag", async () => {
+    // A dev row can carry a caught-up time too, and this browser copied a setup prompt earlier.
+    window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
     listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "on", configured: true, available: true, ever_swept: true, last_caught_up_at: todayAt(14, 3) }),
+    );
     renderPage();
 
-    await screen.findByText("quiet 7d");
+    // The flag is cleared once the status reads on, so the row below is drawn from that status.
+    await waitFor(() => expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).toBeNull());
+    const g = await row("Groundedness");
+    within(g).getByText("quiet 7d");
+    expect(within(g).queryByText(/last run/)).toBeNull();
+    expect(within(g).queryByText("Setting up...")).toBeNull();
   });
 
   it("names the last run while on in production", async () => {
@@ -275,10 +374,16 @@ describe("DetectorsPage, Groundedness", () => {
     await screen.findByText("No scores since 2:02 PM");
   });
 
-  it("shows the restart notice in the rail while not scoring", async () => {
+  it("shows the restart notice in the rail while not scoring, and links it at the running version", async () => {
     listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
     getGroundednessStatus.mockResolvedValue(
-      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: todayAt(14, 2) }),
+      status({
+        state: "not_scoring",
+        configured: true,
+        ever_swept: true,
+        last_scored_at: todayAt(14, 2),
+        setup_ref: "v1.3.0",
+      }),
     );
     renderPage();
 
@@ -287,6 +392,9 @@ describe("DetectorsPage, Groundedness", () => {
 
     await screen.findByText("Restart model", { selector: "h2" });
     await screen.findByText(/Restart the Groundedness model on this Mac by following/);
+    screen.getByText(
+      "https://github.com/tessaryai/tessary/blob/v1.3.0/classifiers/groundedness/setup/groundedness-setup-mac.md#restart",
+    );
   });
 
   it("says off for a disabled row that was set up, and switching it on enables it directly", async () => {
