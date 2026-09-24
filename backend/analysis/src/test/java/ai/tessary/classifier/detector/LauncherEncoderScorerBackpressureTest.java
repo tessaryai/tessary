@@ -87,7 +87,11 @@ class LauncherEncoderScorerBackpressureTest {
     }
 
     private LauncherEncoderScorer scorer(ObserverProperties props) {
-        props.getEncoder().setUrl("http://127.0.0.1:" + socket.getLocalPort());
+        return scorer(props, socket.getLocalPort());
+    }
+
+    private LauncherEncoderScorer scorer(ObserverProperties props, int port) {
+        props.getEncoder().setUrl("http://127.0.0.1:" + port);
         props.getEncoder().setApiKey("k");
         return new LauncherEncoderScorer(props, MAPPER, unreachable::add, waits::add);
     }
@@ -262,14 +266,25 @@ class LauncherEncoderScorerBackpressureTest {
         assertTrue(Double.isNaN(out.get(1).unsupported()));
     }
 
+    /**
+     * The target is the local port of an open client connection: nothing listens there, so the connect is
+     * refused, and while the connection holds the port the kernel hands it to no one else. Closing the stub's
+     * socket instead freed its port, which a busy runner could hand to another listener before the connect.
+     * A socket that is only bound would hold the port too, but macOS drops the SYN rather than refusing it.
+     */
     @Test
     void aRefusedConnectionIsUnreachableAndMarksTheModelDown() throws IOException {
-        socket.close();
+        try (ServerSocket peer = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+                Socket held = new Socket(peer.getInetAddress(), peer.getLocalPort())) {
+            LauncherEncoderScorer refused = scorer(new ObserverProperties(), held.getLocalPort());
 
-        EncoderUnreachableException e = assertThrows(
-                EncoderUnreachableException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+            EncoderUnreachableException e = assertThrows(
+                    EncoderUnreachableException.class,
+                    () -> refused.scoreResponses("groundedness", List.of(r("a"))));
 
-        assertTrue(LauncherEncoderScorer.isUnreachable(e), String.valueOf(e.getCause()));
+            assertTrue(LauncherEncoderScorer.isUnreachable(e), String.valueOf(e.getCause()));
+        }
+
         assertEquals(1, unreachable.size(), "the availability is told at once");
         assertTrue(unreachable.getFirst().startsWith("unreachable: "), unreachable.getFirst());
     }
