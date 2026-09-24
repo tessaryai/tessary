@@ -136,9 +136,6 @@ public final class ContentExtractor {
      * excludes {@code system}/{@code developer}/tool messages. A plain-string blob or unrecognized
      * JSON yields a single message under {@code fallbackRole} (the column's default speaker). Empty
      * messages are dropped; {@code []} for null/blank.
-     *
-     * <p>Added for the {@link ai.tessary.classifier.substrate.ConversationThreadAssembler} dialogue view,
-     * which needs both speakers rendered as distinct turns rather than one role's text.
      */
     public static List<RoleMessage> columnMessages(@Nullable String raw, Set<String> roles, String fallbackRole) {
         if (raw == null || raw.isBlank()) return List.of();
@@ -165,11 +162,9 @@ public final class ContentExtractor {
     }
 
     /**
-     * A message's text for the conversation-thread view: like {@link #messageContentText} but
-     * multimodal-aware, non-text parts (images, files, tool calls/results, unknown structured parts)
-     * render as typed placeholders ({@link #partPlaceholder}) instead of being dropped, so a text
-     * encoder scoring the thread still sees that an attachment was present in that turn. Contract v2;
-     * the placeholder/marker vocabulary is shared with Python {@code render_part}.
+     * A message's text, multimodal-aware: like {@link #messageContentText}, but non-text parts (images,
+     * files, tool calls/results, unknown structured parts) render as typed placeholders ({@link
+     * #partPlaceholder}) instead of being dropped, so a reader still sees an attachment was present.
      */
     public static String messageThreadText(JsonNode msg) {
         JsonNode content = msg.get("content");
@@ -195,13 +190,11 @@ public final class ContentExtractor {
     }
 
     /**
-     * One content part rendered for the conversation-thread view (contract v2): text parts return their
-     * text; tool parts return a terse outcome marker ({@link #toolMarker}, {@code [tool:<name> ok]} or
-     * {@code [tool:<name> error: <snippet>]}, a successful {@code tool_result} collapsing to {@code ""});
-     * every other non-text part returns a typed placeholder so the encoder knows it was present without
-     * the raw payload. Handles both the normalized contract shape ({@code {type,caption/name/text}}) and
-     * the vendor gen_ai/OpenAI/Anthropic shapes. The vocabulary is the cross-language contract (mirrored
-     * by Python {@code render_part} and pinned by {@code context_contract.json}).
+     * One content part rendered as text: text parts return their text; tool parts return a terse outcome
+     * marker ({@link #toolMarker}, {@code [tool:<name> ok]} or {@code [tool:<name> error: <snippet>]}, a
+     * successful {@code tool_result} collapsing to {@code ""}); every other non-text part returns a typed
+     * placeholder so a reader knows it was present without the raw payload. Handles both the normalized
+     * contract shape ({@code {type,caption/name/text}}) and the vendor gen_ai/OpenAI/Anthropic shapes.
      */
     public static String partPlaceholder(@Nullable JsonNode part) {
         if (part == null || part.isNull()) return "";
@@ -216,16 +209,14 @@ public final class ContentExtractor {
                 String caption = firstNonBlank(part, "caption", "alt").strip();
                 return caption.isEmpty() ? "[image]" : "[image: " + caption + "]";
             }
-            // "file"/"document"/"input_file" is the third-party/OTel placeholder vocabulary; the three
-            // ContentBlock document kinds route here too (mirroring Python's _FILE_TYPES) so a persisted
-            // document_ref/document_b64/document_url node renders the same terse placeholder rather than
-            // falling to "default", document_url in particular carries only a "url" field, never
-            // "text"/"content", so leaving it out of this list means partTextField finds nothing and it
-            // silently degrades to "[unsupported]" instead of "[file]", a train/serve divergence from the
-            // Python mirror. Neither node carries a "name"/"filename" JSON key (ContentBlock has no
-            // filename field, see its class doc), so this bottoms out at the bare "[file]" label, exactly
-            // mirroring image_ref's bare "[image]" fallback just above (image_ref carries no
-            // "caption"/"alt" key either).
+            // "file"/"document"/"input_file" is the third-party/OTel placeholder vocabulary; the three ContentBlock
+            // document kinds route here too so a persisted document_ref/document_b64/document_url node renders the
+            // same terse placeholder rather than falling to "default", document_url in particular carries only a
+            // "url" field, never "text"/"content", so leaving it out of this list means partTextField finds nothing
+            // and it silently degrades to "[unsupported]" instead of "[file]". Neither node carries a
+            // "name"/"filename" JSON key (ContentBlock has no filename field, see its class doc), so this bottoms out
+            // at the bare "[file]" label, exactly mirroring image_ref's bare "[image]" fallback just above (image_ref
+            // carries no "caption"/"alt" key either).
             case "file",
                     "document",
                     "input_file",
@@ -254,19 +245,17 @@ public final class ContentExtractor {
     /** Head cap on a rendered tool-error snippet (chars); a dumb truncation, never summarization. */
     private static final int ERROR_SNIPPET_MAX = 120;
 
-    // UNICODE_CHARACTER_CLASS so \s matches the full Unicode whitespace set (NBSP, etc.), like Python's
-    // re \s on a str pattern, ASCII-only \s would leave NBSP intact and diverge from the Python renderer.
+    // UNICODE_CHARACTER_CLASS so \s matches the full Unicode whitespace set (NBSP, etc.); ASCII-only \s
+    // would leave NBSP intact.
     private static final java.util.regex.Pattern WHITESPACE =
             java.util.regex.Pattern.compile("\\s+", java.util.regex.Pattern.UNICODE_CHARACTER_CLASS);
 
     /**
-     * A tool outcome as a terse thread marker (contract v2): {@code [tool:<name> ok]} on success,
+     * A tool outcome as a terse marker: {@code [tool:<name> ok]} on success,
      * {@code [tool:<name> error: <snippet>]} on error. A blank name drops to {@code [tool ok]} /
-     * {@code [tool error: …]}. Mirrors Python {@code context.tool_marker}; the single definition
-     * shared by the inline-part view ({@link #partPlaceholder}) and the standalone tool-observation
-     * turn ({@code ConversationThreadRenderer.reduceThread}).
+     * {@code [tool error: …]}.
      */
-    public static String toolMarker(@Nullable String name, @Nullable String error) {
+    private static String toolMarker(@Nullable String name, @Nullable String error) {
         String n = name == null ? "" : name.strip();
         String head = n.isEmpty() ? "tool" : "tool:" + n;
         return error == null || error.isBlank()
@@ -276,11 +265,11 @@ public final class ContentExtractor {
 
     /**
      * A tool error rendered terse: whitespace-collapsed (Unicode-aware), stripped, head-truncated to
-     * {@value #ERROR_SNIPPET_MAX} CODE POINTS. Truncation counts and splits by code point (Python slices
-     * {@code [:120]} by code point), so an emoji at the boundary is kept or dropped whole, a UTF-16
-     * {@code substring} could split its surrogate pair and diverge from the Python renderer.
+     * {@value #ERROR_SNIPPET_MAX} CODE POINTS. Truncation counts and splits by code point, so an emoji
+     * at the boundary is kept or dropped whole; a UTF-16 {@code substring} could split its surrogate
+     * pair.
      */
-    public static String errorSnippet(String msg) {
+    private static String errorSnippet(String msg) {
         String collapsed = WHITESPACE.matcher(msg).replaceAll(" ").strip();
         int cps = collapsed.codePointCount(0, collapsed.length());
         if (cps <= ERROR_SNIPPET_MAX) return collapsed;
@@ -291,7 +280,7 @@ public final class ContentExtractor {
      * The error text a tool part carries, or {@code null} when it succeeded: a part errs when it sets
      * {@code is_error:true} or carries a non-blank {@code error}/{@code error_type} string. When flagged
      * without a message the payload fields ({@code content}/{@code result}/{@code response}) supply one,
-     * falling back to the literal {@code "error"}. Mirrors Python {@code context._part_error}.
+     * falling back to the literal {@code "error"}.
      */
     @Nullable
     private static String partError(JsonNode part) {

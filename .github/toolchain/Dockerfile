@@ -17,7 +17,7 @@
 #                       to frontend/package.json's `packageManager` field, not floated
 #   Python 3.13      -- six gates shell out to `python3` (version-consistency, open-boundary,
 #                       license-headers, caddy, compose-artifact, export-denylist)
-#   uv               -- check-classifier-parity.sh and the classifiers/ Python gates
+#   uv               -- check-groundedness-serve.sh and check-groundedness-setup.sh
 #   caddy            -- check-caddy.sh, which runs `caddy validate` and nothing else
 #
 # AND ONE THE LIST DOES NOT NAME: Maven. check-backend.sh's last line is `exec mvn -B -T 2 verify`,

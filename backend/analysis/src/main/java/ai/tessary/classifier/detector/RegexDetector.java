@@ -19,9 +19,8 @@ import org.jspecify.annotations.Nullable;
  * A regex/keyword detector: the cheapest signal class. A natural-language phrase is compiled
  * <b>once</b>, at signal-definition time, into a {@link Pattern} via the {@link NlPhraseCompiler} seam,
  * and that pattern is matched literally over the observation's text (input, output, or both — per
- * {@link ClassifierField}) at evaluation time with <b>no per-trace model call</b>. Unlike the
- * encoder classifier (which scores the whole assembled conversation thread), a literal keyword match
- * is a per-observation, field-restricted search: "the OUTPUT contains X" must stay the output, not
+ * {@link ClassifierField}) at evaluation time with <b>no per-trace model call</b>. A literal keyword
+ * match is a per-observation, field-restricted search: "the OUTPUT contains X" must stay the output, not
  * leak into prior turns. Backs user-authored regex signals; the one-time NL→regex {@code compile} step
  * is the only work beyond {@link Matcher#find}.
  *

@@ -15,7 +15,6 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetectorSupplier;
 import ai.tessary.classifier.metric.MetricDriftConfig;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.Capability;
@@ -63,7 +62,6 @@ class ClassifierModelModuleCatalogTest {
                 new ObjectMapper(),
                 Mockito.mock(SubstrateReadRepository.class),
                 Mockito.mock(EncoderScorer.class),
-                Mockito.mock(ConversationThreadAssembler.class),
                 TestObjectProvider.of(discovered));
     }
 

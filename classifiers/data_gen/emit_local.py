@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Emit the ZipEats and policygpt corpora to a local Tessary instance as OTLP traces.
+"""Emit synthetic corpora to a running Tessary instance as OTLP traces.
 
-Why this exists separately from `data_gen.food_delivery.emit` (which targets Langfuse): the
-platform's own receiver is protobuf-only and authenticates a project-scoped `tsy_` bearer, and
-the call site here is a property of the agent surface, stamped on every span in the trace,
-rather than on TOOL spans only (which would shatter one agent into many call sites, none of
-which accumulates enough support for behaviour drift to arm).
+The platform's receiver is protobuf-only and authenticates a project-scoped `tsy_` bearer. The
+call site is a property of the agent surface, stamped on every span in the trace, rather than on
+TOOL spans only (which would shatter one agent into many call sites, none of which accumulates
+enough support for behaviour drift to arm).
 
 Shape produced, matching the substrate spine `StructuralEnricher` builds:
 
@@ -15,14 +14,11 @@ Shape produced, matching the substrate spine `StructuralEnricher` builds:
                   └── trace
                         └── observations: AGENT root, LLM / TOOL / RETRIEVAL children
 
-One OTel trace per conversational TURN: that is what makes turn segmentation work, and it is the
-grain the offline evals in `behavior_drift/` were measured against, so the fitted profile here is
-comparable to the numbers in PROGRAM.md.
+One OTel trace per conversational TURN: that is what makes turn segmentation work.
 
 Timestamps are spread across a trailing window (default 28 days) preserving within-conversation
 ordering, so the quarantine -> graduation clock and the arming saturation curve have real time
-spread to work with. Both corpora were generated in a single day and would otherwise all land in
-one bucket, where nothing can graduate.
+spread to work with.
 
 Resumable: emitted conversation ids are appended to a per-corpus ledger, so re-running neither
 duplicates nor loses work.
@@ -30,17 +26,13 @@ duplicates nor loses work.
     # preflight only, proves the endpoint, token and key scope before sending anything
     python -m data_gen.emit_local --check
 
-    # small verification batch, look at it in the UI first
-    python -m data_gen.emit_local --corpus zipeats --limit 25
-
-    # everything remaining, both corpora
-    python -m data_gen.emit_local
+    # one conversation of the canary corpus
+    python -m data_gen.emit_local --corpus canary --limit 1 --no-resume
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
 import hashlib
 import json
 import logging
@@ -66,8 +58,6 @@ from opentelemetry.trace import SpanKind
 log = logging.getLogger("emit_local")
 
 REPO = Path(__file__).resolve().parents[2]
-ZIPEATS_FILE = REPO / "classifiers" / "data" / "food_delivery" / "conversations.jsonl"
-POLICYGPT_DIR = Path(os.environ.get("POLICYGPT_STATE_DIR", Path.home() / "Downloads" / "pr2" / "state"))
 LEDGER_DIR = REPO / "classifiers" / "data" / ".emit_local"
 
 DEFAULT_ENDPOINT = "http://localhost/v1/traces"
@@ -140,118 +130,13 @@ def _clip(value: Any) -> str:
     return text[:MAX_PAYLOAD_CHARS]
 
 
-def load_zipeats() -> Iterator[Conversation]:
-    """ZipEats: turns -> rounds -> actions.
-
-    Each round is one model call that decided on a set of actions, so it reduces to an `llm:plan`
-    followed by that round's actions; the turn closes with an `llm:answer`. That is exactly the
-    reduction `behavior_drift.eval_food_delivery.load()` performs, so the sequence the backend fits
-    is the sequence the offline numbers were measured on.
-    """
-    if not ZIPEATS_FILE.exists():
-        raise SystemExit(f"ZipEats corpus not found: {ZIPEATS_FILE}")
-    for line in ZIPEATS_FILE.read_text().splitlines():
-        if not line.strip():
-            continue
-        c = json.loads(line)
-        turns: list[Turn] = []
-        for t in c.get("turns", []):
-            steps: list[Step] = []
-            for rnd in t.get("rounds", []):
-                actions = rnd.get("actions", [])
-                steps.append(Step(kind="llm", name="plan"))
-                for a in actions:
-                    is_retrieval = a.get("kind") == "retrieval" or bool(a.get("collection"))
-                    steps.append(
-                        Step(
-                            kind="retrieval" if is_retrieval else "tool",
-                            name=a.get("name") or a.get("collection") or "unknown",
-                            args=a.get("args"),
-                            result=a.get("result"),
-                            is_error=bool(a.get("error")),
-                            corpus=a.get("collection"),
-                        )
-                    )
-            steps.append(Step(kind="llm", name="answer"))
-            turns.append(Turn(user=t.get("user_message", ""), assistant=t.get("final_answer", ""), steps=steps))
-        yield Conversation(
-            conversation_id=c["conversation_id"],
-            user_id=c.get("customer_id", "unknown"),
-            turns=turns,
-            attributes={
-                k: str(v)
-                for k, v in {
-                    "tessary.intent": c.get("intent"),
-                    "tessary.persona.id": c.get("persona_id"),
-                    "tessary.persona.tone": c.get("persona_tone"),
-                    "tessary.resolved": c.get("resolved"),
-                }.items()
-                if v is not None
-            },
-        )
-
-
-def load_policygpt() -> Iterator[Conversation]:
-    """policygpt run-2: turns carry a already-interleaved flat `steps` list of llm / tool entries."""
-    files = sorted(glob.glob(str(POLICYGPT_DIR / "cnv-pr2-*.json")))
-    if not files:
-        raise SystemExit(f"no policygpt state files under {POLICYGPT_DIR} (set POLICYGPT_STATE_DIR)")
-    for path in files:
-        d = json.loads(Path(path).read_text())
-        turns: list[Turn] = []
-        for t in d.get("turns", []):
-            steps: list[Step] = []
-            for s in t.get("steps", []):
-                if s.get("kind") == "tool":
-                    result = s.get("result") or {}
-                    errored = isinstance(result, dict) and (
-                        result.get("error") is not None or result.get("verified") is False
-                    )
-                    steps.append(
-                        Step(
-                            kind="tool",
-                            name=s.get("name", "unknown"),
-                            args=s.get("args"),
-                            result=result,
-                            is_error=bool(errored),
-                        )
-                    )
-                else:
-                    steps.append(
-                        Step(
-                            kind="llm",
-                            name="chat",
-                            model=s.get("model"),
-                            usage=s.get("usage") or {},
-                        )
-                    )
-            turns.append(Turn(user=t.get("user", ""), assistant=t.get("assistant", ""), steps=steps))
-        yield Conversation(
-            conversation_id=d["conversation_id"],
-            user_id=d.get("verified_member_id") or d.get("policy_no") or "unknown",
-            turns=turns,
-            attributes={
-                k: str(v)
-                for k, v in {
-                    "tessary.policy_no": d.get("policy_no"),
-                    "tessary.persona.id": d.get("persona_id"),
-                    "tessary.status": d.get("status"),
-                    "tessary.ended_reason": d.get("ended_reason"),
-                }.items()
-                if v is not None
-            },
-        )
-
-
 def load_canary() -> Iterator[Conversation]:
     """One hand-built conversation, no fixture file, no LLM key, for scripts/check-open-boot.sh.
 
-    `zipeats` and `policygpt` both need a file that a fresh CI checkout does not have (a generated
-    fixture, or one under the operator's home directory), so this loader needs nothing but the
-    interpreter. `secret_leak` is the one classifier here that scores an observation's own output
-    against a fixed pattern with no baseline to accumulate first, so this conversation's one tool
-    call returns a value shaped to fire it on the very first sweep after ingest, keeping
-    `/classifiers/events` reliably non-empty without waiting on volume.
+    `secret_leak` is the one classifier here that scores an observation's own output against a fixed
+    pattern with no baseline to accumulate first, so this conversation's one tool call returns a value
+    shaped to fire it on the very first sweep after ingest, keeping `/classifiers/events` reliably
+    non-empty without waiting on volume.
     """
     yield Conversation(
         conversation_id="canary-open-boot-check-0001",
@@ -531,24 +416,6 @@ CORPORA: dict[str, CorpusSpec] = {
         repo_url="https://github.com/tessaryai/tessary",
         load=load_canary,
     ),
-    "zipeats": CorpusSpec(
-        key="zipeats",
-        call_site_id="zipeats-support",
-        agent_name="zipeats-support-agent",
-        service_name="zipeats-support-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/evals-sample-app",
-        load=load_zipeats,
-    ),
-    "policygpt": CorpusSpec(
-        key="policygpt",
-        call_site_id="policygpt-member-support",
-        agent_name="policygpt-member-support-agent",
-        service_name="policygpt",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/evals-sample-app",
-        load=load_policygpt,
-    ),
 }
 
 
@@ -815,7 +682,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--endpoint", default=os.environ.get("TESSARY_OTLP_ENDPOINT", DEFAULT_ENDPOINT))
     ap.add_argument("--token", default=os.environ.get("TESSARY_INGEST_TOKEN", ""))
-    ap.add_argument("--corpus", choices=[*CORPORA, "both"], default="both")
+    ap.add_argument("--corpus", choices=list(CORPORA), default="canary")
     ap.add_argument("--environment", default="production", help="deployment.environment.name")
     ap.add_argument("--window-days", type=int, default=28, help="trailing window to spread traffic across (0 = every conversation starts now)")
     ap.add_argument("--start-order", action="store_true", help="emit conversations in ascending start order, so ingest settles them in the order a trace-grain sweep cursor reads them")
@@ -846,7 +713,7 @@ def main() -> int:
     if args.check:
         return 0
 
-    selected = list(CORPORA.values()) if args.corpus == "both" else [CORPORA[args.corpus]]
+    selected = [CORPORA[args.corpus]]
     total_c = total_t = 0
     for spec in selected:
         log.info("=== %s -> call site %r, environment %r ===", spec.key, spec.call_site_id, args.environment)

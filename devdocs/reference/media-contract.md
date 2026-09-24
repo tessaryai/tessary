@@ -105,9 +105,8 @@ gradable boundary belongs:
   nowhere. The policy is recorded because the reasoning is what any future gradable boundary should
   re-adopt — not because something enforces it today.
 - **Silently labeled** at the classifier-context/trajectory-rendering boundary —
-  `ContentExtractor.partPlaceholder` (Java) and `classifiers/framework/context.py` (Python) render an
-  unrecognized part as `[unsupported]` text, and the frontend's `PayloadViewer.tsx` degrades to an
-  "unsupported image"/"unsupported document" chip. These are correct where they are because they are
+  `ContentExtractor.partPlaceholder` renders an unrecognized part as `[unsupported]` text, and the
+  frontend's `PayloadViewer.tsx` degrades to an "unsupported image"/"unsupported document" chip. These are correct where they are because they are
   **best-effort, non-gradable, informational renderers** — a thread view or a debug pane that drops one
   part is still useful, and failing the whole render over one part would make the tool worse at its actual
   job (showing a human what happened). This predates the current work and is not a bug to merge away.

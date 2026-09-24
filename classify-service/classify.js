@@ -94,12 +94,10 @@ const SCORERS = {
   //
   // WHY NOT MiniCheck ANY MORE. MiniCheck is BINARY — config id2label {'0','1'}, trained to answer
   // "is this claim supported, yes or no" — so "the document does not mention it" collapses into NO.
-  // That single collapse produced every false positive we have measured: on zipeats it fired 474
-  // times, ~28% of swept observations, on answers like "you're entitled to a full refund of $24.74"
-  // premised against a generic refunds leaflet. The claim is TRUE and came from a tool call; the
-  // leaflet can neither confirm nor deny it. Measured on 40 labelled claims, MiniCheck scored those
-  // tool-derived facts at 0.006 support — BELOW outright fabrications at 0.064 — so no threshold
-  // could ever separate them.
+  // That single collapse produced every false positive we measured: answers like "you're entitled to
+  // a full refund of $24.74", premised against a generic refunds leaflet. The claim is TRUE and came
+  // from a tool call; the leaflet can neither confirm nor deny it, and MiniCheck scored such
+  // tool-derived facts below outright fabrications, so no threshold could separate them.
   //
   // Returning 1 - P(contradiction) means the detector's `unsupported = 1 - support` becomes exactly
   // P(contradiction): it fires on what the document CONTRADICTS and stays quiet on what the document

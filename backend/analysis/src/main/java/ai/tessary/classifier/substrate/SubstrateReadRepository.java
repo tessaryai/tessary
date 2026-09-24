@@ -379,7 +379,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
-        // Grouping key mirrors ConversationThreadAssembler/conversationObservationsUpTo's
+        // Grouping key mirrors conversationObservationsUpTo's
         // COALESCE(parent_id, id) exactly. Deliberately not time-bounded here: a call site that
         // reaches outside anywhere in the conversation, even later, still reads BLIND rather than
         // GROUNDLESS. Only the evidence text below is time-bounded, so this never lets a future
@@ -397,8 +397,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                                    COALESCE(xtr.thread_id, xtr.session_id) = COALESCE(tr.thread_id, tr.session_id)
                                    OR (x.trace_id = s.trace_id AND COALESCE(tr.thread_id, tr.session_id) IS NULL)
                                  )
-                                 -- the same set ConversationThreadAssembler treats as external work;
-                                 -- omitting one makes its traces read GROUNDLESS instead of BLIND
+                                 -- the tool-like kinds that count as external work; omitting one
+                                 -- makes its traces read GROUNDLESS instead of BLIND
                                  AND x.kind IN ('tool','mcp','retrieval','reranker','embedding'))
                 """)
                 .param("pid", projectId)
@@ -566,8 +566,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     /**
      * The scored span's conversation thread: the most-recent {@code limit} spans sharing the scored
      * span's conversation grain, at or before the scored span's keyset position, newest first. The
-     * {@link ConversationThreadAssembler} reverses this to chronological order, drops the scored
-     * turn, and renders the rest as prior turns.
+     * frustration classifier's thread reader reverses this to chronological order and drops the scored
+     * turn.
      *
      * <p>Grouping grain is the pinned {@code COALESCE(trace.thread_id, trace.session_id)}: the
      * producer's own thread id when it sent one, else the session.
@@ -584,12 +584,9 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * before the scored one. {@code created_at} only breaks ties within one start instant, where it keeps
      * a turn's agent, llm and tool spans in the order they were written.
      * Both conversational spans ({@code kind in (llm, agent)}) and tool/retrieval spans ({@code
-     * tool, mcp, retrieval, embedding, reranker}) are returned: the assembler renders one dialogue
-     * contribution per turn and each tool span as a terse outcome marker, so the agent's failure
-     * history stays visible without raw payloads polluting the thread. Kept in sync with {@code
-     * ConversationThreadAssembler.TOOL_KINDS}. Perf: one read per scored span on the async sweep
-     * (never the ingest hot path): the conversation's traces first, then their spans by primary-key
-     * prefix, then payloads for the {@code limit} rows kept only.
+     * tool, mcp, retrieval, embedding, reranker}) are returned. Perf: one read per scored span on the
+     * async sweep (never the ingest hot path): the conversation's traces first, then their spans by
+     * primary-key prefix, then payloads for the {@code limit} rows kept only.
      */
     public List<SubstrateObservation> conversationObservationsUpTo(
             String projectId, String scoredTraceId, String scoredSpanId, int limit) {

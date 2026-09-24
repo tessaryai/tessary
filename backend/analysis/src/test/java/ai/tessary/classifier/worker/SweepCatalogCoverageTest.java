@@ -10,7 +10,6 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.metric.MetricDriftSweep;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.toolerror.ToolErrorSweep;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -122,7 +121,6 @@ class SweepCatalogCoverageTest {
                 new ObjectMapper(),
                 mock(SubstrateReadRepository.class),
                 mock(EncoderScorer.class),
-                mock(ConversationThreadAssembler.class),
                 TestObjectProvider.of(List.of()));
     }
 }

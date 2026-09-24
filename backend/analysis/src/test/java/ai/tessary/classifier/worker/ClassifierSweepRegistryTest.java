@@ -10,7 +10,6 @@ import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.EncoderScorer;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -158,7 +157,6 @@ class ClassifierSweepRegistryTest {
                 new ObjectMapper(),
                 mock(SubstrateReadRepository.class),
                 mock(EncoderScorer.class),
-                mock(ConversationThreadAssembler.class),
                 TestObjectProvider.of(List.of()));
     }
 

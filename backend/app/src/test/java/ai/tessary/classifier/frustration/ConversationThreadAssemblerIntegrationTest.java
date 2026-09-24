@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-package ai.tessary.classifier.substrate;
+package ai.tessary.classifier.frustration;
 
-import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.classifier.ClassifierField;
+import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -16,23 +14,20 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * DB-backed proof that {@link ConversationThreadAssembler} walks a whole conversation (not just the
- * scored row): three turns of one session, one carrying a system message, are assembled into the
- * contract-v1 dialogue thread — user↔assistant oldest-first, scored user message last, system message
- * excluded. Runs against the real pgvector Postgres (Testcontainers) so the conversation grouping +
- * keyset ordering execute for real.
+ * DB-backed proof that {@link ConversationThreadAssembler} walks a whole conversation, not just the
+ * scored row: user and assistant messages oldest first, the scored user message as the current turn,
+ * system messages excluded. Runs against the real pgvector Postgres (Testcontainers) so the
+ * conversation grouping and keyset ordering execute for real.
  *
- * <p>The turn is the TRACE now, and the conversation is {@code COALESCE(trace.thread_id,
- * trace.session_id)} — a column on the row rather than a tier of a context tree. So the two things the
- * v1 shape of this test spent most of its lines on, minting a session→conversation→turn spine and
- * ordering by {@code context.seq}, have nothing to seed: a turn is one trace, and its position in the
- * thread is its keyset position.
+ * <p>A turn is one trace, and the conversation is {@code COALESCE(trace.thread_id, trace.session_id)},
+ * so a turn's position in the thread is its keyset position.
  */
 @SpringBootTest
 class ConversationThreadAssemblerIntegrationTest {
@@ -87,19 +82,13 @@ class ConversationThreadAssemblerIntegrationTest {
         SubstrateObservation scored = substrate
                 .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
                 .orElseThrow();
-        String rendered = assembler.assemble(scored, ClassifierField.INPUT);
+        StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
-                "[user] can you export this?\n"
-                        + "[assistant] Sure, running the export now.\n"
-                        + "[user] still broken\n"
-                        + "[assistant] Let me retry.\n"
-                        + "[user] nevermind",
-                rendered);
-        assertAll(
-                () -> assertFalse(rendered.contains("export bot"), "system prompt excluded"),
-                () -> assertFalse(rendered.contains("[system]"), "no system block emitted"),
-                () -> assertTrue(rendered.endsWith("[user] nevermind"), "scored message last"));
+                List.of("can you export this?", "Sure, running the export now.", "still broken", "Let me retry."),
+                texts(thread),
+                "the system prompt is not a message");
+        assertEquals("nevermind", thread.current().text());
     }
 
     @Test
@@ -125,7 +114,7 @@ class ConversationThreadAssemblerIntegrationTest {
                 null);
 
         // c1: each turn carries BOTH an agent and an llm span bearing the same delta (must render ONCE),
-        // turn 0 also has a tool span (surfaced as an outcome marker).
+        // turn 0 also has a tool span, which leaves no text.
         seedTwinTurn(pid, sessionId, c1, base.plusMillis(1_000), user("deploy the app"), assistant("On it."), "search");
         seedTwinTurn(pid, sessionId, c1, base.plusMillis(2_000), user("still failing"), assistant("Retrying."), null);
         SpanRef scoredRef = seedTwinTurn(pid, sessionId, c1, base.plusMillis(3_000), user("nevermind"), null, null);
@@ -133,25 +122,14 @@ class ConversationThreadAssemblerIntegrationTest {
         SubstrateObservation scored = substrate
                 .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
                 .orElseThrow();
-        String rendered = assembler.assemble(scored, ClassifierField.INPUT);
+        StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
-                "[user] deploy the app\n"
-                        + "[assistant] On it.\n"
-                        + "[tool:search ok]\n"
-                        + "[user] still failing\n"
-                        + "[assistant] Retrying.\n"
-                        + "[user] nevermind",
-                rendered,
-                "per-turn deltas concatenated in keyset order, each message once, tool outcome surfaced");
-        assertAll(
-                () -> assertFalse(rendered.contains("OTHER CONVERSATION"), "a sibling conversation never bleeds in"),
-                () -> assertEquals(
-                        1,
-                        countOccurrences(rendered, "deploy the app"),
-                        "the agent/llm twins collapse to one message per turn"),
-                () -> assertTrue(
-                        rendered.endsWith("[user] nevermind"), "the scored final user turn is one trailing message"));
+                List.of("deploy the app", "On it.", "still failing", "Retrying."),
+                texts(thread),
+                "the sibling conversation never bleeds in, the agent/llm twins give one message each, and the"
+                        + " tool span leaves no text");
+        assertEquals("nevermind", thread.current().text());
     }
 
     /** One turn = one trace with a single root llm span carrying the dialogue. Returns the span. */
@@ -174,7 +152,7 @@ class ConversationThreadAssemblerIntegrationTest {
         StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
-                java.util.List.of("can you export this?", "Sure.", "still broken", "Let me retry."),
+                List.of("can you export this?", "Sure.", "still broken", "Let me retry."),
                 thread.earlier().stream().map(StructuredThread.Message::text).toList(),
                 "turns stored after the scored one but started before it are earlier; the later turn is not");
         assertEquals("nevermind", thread.current().text());
@@ -233,10 +211,8 @@ class ConversationThreadAssemblerIntegrationTest {
         return llm;
     }
 
-    private static int countOccurrences(String haystack, String needle) {
-        int count = 0;
-        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) count++;
-        return count;
+    private static List<String> texts(StructuredThread thread) {
+        return thread.earlier().stream().map(StructuredThread.Message::text).toList();
     }
 
     private static String user(String text) {

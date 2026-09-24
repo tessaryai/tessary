@@ -76,8 +76,6 @@ Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and 
 
 So the product is whole in slim mode: the browser, every page, ingestion, triage, RCA. The one thing dormant is SOP-conformance fits, which need `classify`'s `/embed` and stay dormant until a full `task dev`. Frustration is not encoder-backed: it runs in slim mode once an OpenRouter or TypeSafe key is saved. Groundedness does not use `classify` either: its model runs on the Mac's GPU outside Docker, set up by [`groundedness-setup-mac.md`](../../classifiers/groundedness/setup/groundedness-setup-mac.md), and runs the same in either mode.
 
-The classifier-training tooling (Argilla, MLflow) is behind the `classifiers` compose profile and never starts in either mode; `task classifiers:up` brings it up alongside.
-
 Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in.
 
 The tmux session opens four tabbed windows: `[0] shell` (cheat-sheet + common commands; you land here), `[1] backend`, `[2] frontend`, `[3] caddy`. Session-local no-prefix bindings (defined in `.tmux.conf` at the repo root) jump with bare `0`/`1`/`2`/`3` and cycle with `Tab`/`Shift+Tab`; the standard `C-b 0`/`1`/`2`/`3` and `C-b n`/`p` still work as fallbacks.

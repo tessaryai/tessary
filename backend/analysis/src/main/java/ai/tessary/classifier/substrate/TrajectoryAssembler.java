@@ -13,9 +13,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Assembles what the behaviour-drift classifier scores: one trace reduced to its ordered
- * {@link ActionSymbol} sequence. The structural counterpart of {@link ConversationThreadAssembler} —
- * same "read the substrate, produce the scored input" role, but reducing to symbols rather than to
- * rendered text, because this classifier judges the SHAPE of what the agent did, not what was said.
+ * {@link ActionSymbol} sequence. It reduces to symbols rather than text because this classifier judges
+ * the SHAPE of what the agent did, not what was said.
  *
  * <p>The rare-name floor is supplied by the caller from the epoch, never derived from the batch: a
  * batch-local floor makes the same tool map to {@code tool:foo} in one sweep and {@code tool:__rare__}

@@ -20,8 +20,7 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
 classify-service `node --test`, `packages/mcp` `node --test` (the `mcp-bridge` row),
-`contract/tests` (the `vendored-plugin-rules` row), `classifiers/tests` (the `classifiers` row),
-and live ITs (`*LiveIT.java`).
+`contract/tests` (the `vendored-plugin-rules` row), and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
 key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
@@ -34,20 +33,19 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (22 checks in the open edition): backend `mvn verify`, then `classifiers` after it, frontend, classify-service, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (20 checks in the open edition): backend `mvn verify`, frontend, classify-service, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
-| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
+| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, and the cross-language parity test inside the backend verify | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
-**Two gates need host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
+**One gate needs host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
 vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
-stops if either is missing. `classifiers` runs `uv sync --frozen --group dev --extra quality` and
-pytest over `classifiers/tests`, so it needs `uv`. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
+stops if either is missing. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
 it runs via `task contract:plugin` and `drift-checks.yml`. See
 [`contract/tests/README.md`](../../contract/tests/README.md).
 

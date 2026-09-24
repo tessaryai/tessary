@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.frustration;
 
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
-import ai.tessary.classifier.substrate.StructuredThread;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;

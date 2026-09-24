@@ -511,8 +511,8 @@ services:
     expose:
       - "8080"
     ports:
-      # Publish to the host so classifiers/ eval scripts (uv run python -m <module>.eval_baseline)
-      # can reach the real served head directly from outside Docker. Dev-only; loopback-bound.
+      # Publish to the host so the served heads are reachable from outside Docker. Dev-only;
+      # loopback-bound.
       - "127.0.0.1:18080:8080"
     environment:
       PORT: "8080"
@@ -522,8 +522,8 @@ services:
     # ~1.4 GB resident) briefly needed 6g on 2026-07-15 — but the 2026-07-16 catalog reduction
     # dropped refusal/jailbreak/unsafe_text, back down to 2 heads (frustration + groundedness).
     # Re-measured directly (docker run --memory=Ng): 2g OOM-kills (exit 137), 3g and 4g both hold
-    # comfortably in isolation — but on a busy local VM (classifiers profile / dataset streaming /
-    # concurrent backend) 4g still OOM-kills under load, so dev ran at 6g, matching prod's 6 GB.
+    # comfortably in isolation — but on a busy local VM (concurrent backend) 4g still OOM-kills
+    # under load, so dev ran at 6g, matching prod's 6 GB.
     # 2026-08-11: this DEV image bakes the conformance encoder (BAKE_EMBEDDERS=1 above —
     # gte-large-en-v1.5, ~1.7 GB fp32) and boot pre-warm loads it too. Re-measured the same way:
     # 4g is OOM-killed during warmup, 5g and 6g hold, settling at ~4.5 GiB resident. 6g in
@@ -536,126 +536,6 @@ services:
     volumes:
       # Pick up server.js edits on `--force-recreate` without an image rebuild.
       - ./classify-service/server.js:/app/server.js:ro
-    networks:
-      - tessary
-
-  # ---------------------------------------------------------------------------
-  # Classifier-training tooling (classifiers/PROGRAM.md §3) — DEV-ONLY, opt-in.
-  #
-  # All six services sit behind the `classifiers` compose profile so plain `task dev`
-  # (and dev:slim) never pays for them; start them with `task classifiers:up` when doing
-  # classifier data/annotation work. NONE of this ever goes to the prod compose/task
-  # definition — prod is deployment-only for classifiers (baked classify image + manifest).
-  #
-  # Argilla topology mirrors the official v2.8.0 example compose (server + background
-  # worker + postgres + single-node Elasticsearch + redis). UIs are loopback-bound:
-  #   Argilla http://localhost:16900   (SDK: ARGILLA_API_URL=http://localhost:16900,
-  #                                     ARGILLA_API_KEY=argilla.apikey — dev defaults,
-  #                                     override via .env)
-  #   MLflow  http://localhost:15000   (MLFLOW_TRACKING_URI=http://localhost:15000;
-  #                                     host port 15000 because macOS AirPlay squats :5000)
-  argilla:
-    image: argilla/argilla-server:v2.8.0
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:16900:6900"
-    environment: &argilla-env
-      ARGILLA_HOME_PATH: /var/lib/argilla
-      ARGILLA_ELASTICSEARCH: http://argilla-elasticsearch:9200
-      ARGILLA_DATABASE_URL: postgresql+asyncpg://argilla:argilla@argilla-postgres:5432/argilla
-      ARGILLA_REDIS_URL: redis://argilla-redis:6379/0
-      # First-boot owner user (dev defaults; loopback-only service).
-      USERNAME: ${ARGILLA_USERNAME:-argilla}
-      PASSWORD: ${ARGILLA_PASSWORD:-argilla-dev-password}
-      API_KEY: ${ARGILLA_API_KEY:-argilla.apikey}
-      WORKSPACE: classifiers
-    volumes:
-      - argilla-data:/var/lib/argilla
-    depends_on:
-      - argilla-postgres
-      - argilla-elasticsearch
-      - argilla-redis
-    networks:
-      - tessary
-
-  # Runs Argilla's RQ background jobs (dataset import/export etc.). Same image + env,
-  # worker entrypoint — the official compose's split.
-  argilla-worker:
-    image: argilla/argilla-server:v2.8.0
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    command: sh -c 'python -m argilla_server worker --num-workers $${BACKGROUND_NUM_WORKERS}'
-    environment:
-      <<: *argilla-env
-      BACKGROUND_NUM_WORKERS: "2"
-    volumes:
-      - argilla-data:/var/lib/argilla
-    depends_on:
-      - argilla-postgres
-      - argilla-elasticsearch
-      - argilla-redis
-    networks:
-      - tessary
-
-  # Argilla's own metadata DB — deliberately NOT the platform postgres (separate lifecycle,
-  # disposable annotation-tool state, and the platform volume is already initialized so it
-  # can't grow a second database via env alone). postgres:14 = what upstream tests against.
-  argilla-postgres:
-    image: postgres:14
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: argilla
-      POSTGRES_PASSWORD: argilla
-      POSTGRES_DB: argilla
-    volumes:
-      - argilla-postgres-data:/var/lib/postgresql/data
-    networks:
-      - tessary
-
-  argilla-elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: "false"
-      cluster.routing.allocation.disk.threshold_enabled: "false"
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
-    mem_limit: 1g
-    volumes:
-      - argilla-elastic-data:/usr/share/elasticsearch/data
-    networks:
-      - tessary
-
-  argilla-redis:
-    image: redis:7-alpine
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    networks:
-      - tessary
-
-  # Experiment tracking + model registry (registry aliases @shadow/@beta/@ga mirror the
-  # ClassifierModule Lifecycle ladder). SQLite backend + local artifact store in a named
-  # volume — single-user dev tracking, nothing shared. The publish below is LOOPBACK-only:
-  # when the WSL2 training box needs to log here, tunnel (ssh -L 15000:localhost:15000 to
-  # this machine) or deliberately rebind the publish to a LAN interface at that point —
-  # don't widen it by default. (Alternative: train logs to a local file store and syncs.)
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.14.0
-    profiles: ["classifiers"]
-    restart: unless-stopped
-    command: >-
-      mlflow server
-      --host 0.0.0.0 --port 5000
-      --backend-store-uri sqlite:////mlflow/mlflow.db
-      --artifacts-destination /mlflow/artifacts
-      --serve-artifacts
-    ports:
-      - "127.0.0.1:15000:5000"
-    volumes:
-      - mlflow-data:/mlflow
     networks:
       - tessary
 
@@ -675,11 +555,6 @@ volumes:
   # the Engine API, and a project prefix would break the match. See that file for the mechanism.
   sandbox-work:
     name: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
-  # classifiers profile (dev-only tooling)
-  argilla-data:
-  argilla-postgres-data:
-  argilla-elastic-data:
-  mlflow-data:
 
 secrets:
   # Sourced from the HF_TOKEN env var at BUILD time: read access to the private HF repo of any

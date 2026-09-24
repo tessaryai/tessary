@@ -134,9 +134,9 @@ done <<<"$(_read_suppressions uv)"
 for _dir in slack-service classifiers; do
   [ -d "$_dir" ] || { echo "== pip-audit: $_dir == skipped, not in this checkout"; continue; }
   echo "== pip-audit: $_dir =="
-  # --all-extras: classifiers/pyproject.toml's optional extras (torch, transformers, ...) never
-  # sync into a plain `uv run`'s env, so without this flag those CVE-prone packages go unscanned
-  # while the audit silently reports only the base deps as covered.
+  # --all-extras: classifiers/pyproject.toml's `otlp` extra never syncs into a plain `uv run`'s
+  # env, so without this flag it goes unscanned while the audit silently reports only the base
+  # deps as covered.
   if ! (cd "$_dir" && uv run --frozen --all-extras --with pip-audit pip-audit ${_uv_ignore_args[@]+"${_uv_ignore_args[@]}"}); then
     echo "ERROR: pip-audit found an unsuppressed vulnerability in $_dir. Add a documented" >&2
     echo "       suppression to $SUPPRESSIONS_FILE (ecosystems: [uv]) or bump the dependency." >&2

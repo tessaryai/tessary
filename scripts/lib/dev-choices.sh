@@ -314,7 +314,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
             ;;
         compose)
             # Any compose command that creates or recreates dev containers (task rb/rf/rc and
-            # their :full variants, classifiers:up). Compose interpolates docker-compose.dev.yml
+            # their :full variants). Compose interpolates docker-compose.dev.yml
             # on every `up`, so a restart that skips the exports `task dev` made recreates the
             # backend with its empty defaults: no launcher URL, and an MCP base URL a sandbox
             # container cannot reach. Never prompts; saved answers, else the defaults.

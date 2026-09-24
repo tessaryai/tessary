@@ -325,16 +325,14 @@ echo "check-open-boot: verified the stored $PROVIDER_NAME credential reads back 
 
 # (f) emit ONE real trace via classifiers/data_gen/emit_local.py's `canary` corpus.
 #
-# Not `zipeats`/`policygpt`: neither is present in a genuine clean-room export (one needs a
-# separately-run LLM-keyed generate step, the other reads a path outside the repo). `canary` is
-# one hand-built Conversation with no file and no LLM dependency, whose output embeds an
+# `canary` is one hand-built Conversation with no file and no LLM dependency, whose output embeds an
 # AWS-access-key-id-shaped string, which is what makes step (g) below provable: `secret_leak` is
 # the one deterministic, no-baseline classifier available here, so it's the only one a single
 # CI-boot-check trace can trigger.
 echo "check-open-boot: emitting one canary trace through the ingest pipeline…"
 # `uv run`, not a hardcoded `.venv/bin/python`: uv resolves classifiers/pyproject.toml +
-# classifiers/uv.lock and builds/reuses its own venv on demand. `--extra otlp` pulls in just what
-# emit_local.py needs, without the heavier `train`/`quality` extras.
+# classifiers/uv.lock and builds/reuses its own venv on demand. `--extra otlp` pulls in the OTLP
+# exporter emit_local.py needs.
 (cd "$ROOT/classifiers" && uv run --quiet --extra otlp python -m data_gen.emit_local \
     --endpoint "$BASE/v1/traces" \
     --token "$MCP_TOKEN" \

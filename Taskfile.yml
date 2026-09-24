@@ -430,25 +430,10 @@ tasks:
     cmds:
       - bash scripts/check-sandbox-runner-launcher.sh
 
-  check:no-bedrock:
-    desc: 'Hard guardrail: fail if anything in the Python tree can reach AWS Bedrock. Runtime half is classifiers/framework/no_bedrock.py.'
-    cmds:
-      - bash scripts/check-no-bedrock.sh
-
   check:price-book-contract:
     desc: "The vendored price book stays at its pinned path, parses as a LiteLLM-shaped object with a floor of priced models, and every in-repo reader and writer names that path. tessary-home fetches it by raw GitHub URL, so a move breaks every instance's price updates. Runs in `task check` and in price-book-refresh.yml."
     cmds:
       - bash scripts/check-price-book-contract.sh
-
-  classifiers:parity:
-    desc: "Run the classifier port-parity gates (Python <-> Java/JS duplicates that must not drift). ALL SIX pins are overlay-owned, so this runs 6 when they are importable and ZERO otherwise, saying so loudly rather than printing a bare OK. `--edition open` forces the zero-pin arm."
-    cmds:
-      # No overlay guard here: the script decides for itself, on the right predicate — whether
-      # `sop_compiler` actually imports, resolved through classifiers/pyproject.toml's pythonpath
-      # entries. The three pins that used to be open on both sides (verifiable_claims,
-      # premise_windowing, frustration_serving) pin Python originals that moved into the overlay
-      # with groundedness/ and frustration/, so the split is 0+6, not 3+3.
-      - bash scripts/check-classifier-parity.sh {{.CLI_ARGS}}
 
   compile:check:
     desc: Gate for the SOP compile service (ruff + pytest; runs the engine's real fit/export against a stubbed /embed and pins the bundle against a direct `engine.run export`). Skipped, not failed, without the overlay — the open edition has no SOP compile service.
@@ -565,11 +550,10 @@ tasks:
   #   conformance:parity + CI conformance-parity job -> scripts/check-conformance-parity.sh (fixture freshness)
   #   check:open-boundary + CI open-boundary job -> scripts/check-open-boundary.sh (open code reaching into tessary-paid/)
   #   check:license-headers + CI license-headers job -> scripts/check-license-headers.sh (SPDX header presence over the publishable tree)
-  #   classifiers:parity (no CI job) -> scripts/check-classifier-parity.sh (Python <-> Java/JS port pins; all six overlay-owned, so ZERO pins in the open edition and it says so)
   #   migrations:populated (no CI job, and not in `check` either) -> scripts/check-migrations-populated.sh,
   #                                      open lane always, overlay lane (paid baseline + fixture)
   #                                      auto-added when tessary-paid/ is present
-  # That is FIFTEEN pairings, not six, and the three lines above make the point the old text hid:
+  # That is FOURTEEN pairings, not six, and the three lines above make the point the old text hid:
   # these are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 16 of the 23
   # scripts/check-*.sh plus the three overlay gates — the seven it does not run are
   # check-migrations-populated.sh (EXCLUDED: wants a populated Postgres),
@@ -581,8 +565,8 @@ tasks:
   # check-dependency-audit.sh and check-notice-coverage.sh (both EXCLUDED: manual/on-demand only,
   # no real credential in any check) — all seven still carry a manifest row so the
   # completeness assertion covers them; CI runs 16 jobs including conformance:parity,
-  # which `check` does not, and excluding module-hygiene, no-bedrock and classifiers:parity, which
-  # it does; and three targets here belong to neither pipeline in the same way. `check:open` below
+  # which `check` does not, and excluding module-hygiene, which it does; and two targets here
+  # belong to neither pipeline in the same way. `check:open` below
   # filters the FIRST of those sets and nothing else — scripts/check.sh's manifest is where each
   # gate's per-edition disposition is declared, and the manifest is asserted complete against the
   # scripts on disk before anything runs.
@@ -708,9 +692,7 @@ tasks:
       # two-file scratch project): plain `down` then exits 0 having
       # removed nothing of it, prints `Resource is still in use` for the network, and leaves a 2 GB
       # container up on a box that has 1.9 GiB. `--remove-orphans` removes it and the network with
-      # it. Also measured: a service that is only PROFILE-gated (argilla et al., `--profile
-      # classifiers`) is NOT an orphan — compose can still see it in the config, so it survives this
-      # exactly as it does today, and `task classifiers:down` remains the way to stop it.
+      # it.
       - "{{.DC_DEV_ALL}} down --remove-orphans"
 
   dev:logs:
@@ -722,20 +704,6 @@ tasks:
     desc: Recompile Java in the running backend container; devtools restarts on classpath change.
     cmds:
       - "{{.DC_DEV}} exec backend mvn -q compile"
-
-  # ---- classifier-training tooling (dev-only, opt-in, overlay-owned along with the training
-  #      corpora it describes) ----
-  classifiers:up:
-    desc: Start the dev-only classifier tooling (Argilla on :16900, MLflow on :15000) alongside the dev stack.
-    cmds:
-      - "{{.DC_DEV_UP}} --profile classifiers up -d"
-
-  classifiers:down:
-    desc: Stop just the classifier tooling containers (core dev stack keeps running; volumes kept).
-    cmds:
-      # Explicit service list — a bare `--profile classifiers down` would also take down the
-      # profile-less core services, since those are always enabled.
-      - "{{.DC_DEV}} --profile classifiers rm -sf argilla argilla-worker argilla-postgres argilla-elasticsearch argilla-redis mlflow"
 
   # ---- docker (prod) ----
   prod:build:

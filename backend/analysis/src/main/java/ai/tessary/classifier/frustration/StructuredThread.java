@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package ai.tessary.classifier.substrate;
+package ai.tessary.classifier.frustration;
 
 import java.util.List;
 
@@ -13,7 +13,7 @@ import java.util.List;
  *     already joined into one turn
  * @param current the scored turn's user message
  */
-public record StructuredThread(List<Message> earlier, Message current) {
+record StructuredThread(List<Message> earlier, Message current) {
 
     public StructuredThread {
         earlier = List.copyOf(earlier);
