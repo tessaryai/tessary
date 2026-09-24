@@ -89,7 +89,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private final Clock clock;
 
     @Autowired
-    public JevFrustrationDetector(
+    JevFrustrationDetector(
             ConversationThreadAssembler assembler,
             DecisionClient client,
             DecisionProviderResolver providers,

@@ -166,7 +166,7 @@ public final class ContentExtractor {
      * files, tool calls/results, unknown structured parts) render as typed placeholders ({@link
      * #partPlaceholder}) instead of being dropped, so a reader still sees an attachment was present.
      */
-    public static String messageThreadText(JsonNode msg) {
+    private static String messageThreadText(JsonNode msg) {
         JsonNode content = msg.get("content");
         if (content != null && !content.isNull()) return partsThreadText(content);
         JsonNode parts = msg.get("parts");

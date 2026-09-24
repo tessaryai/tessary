@@ -64,11 +64,11 @@ public final class FrustrationTurnBuilder {
     private final ConversationThreadAssembler assembler;
     private final Caps caps;
 
-    public FrustrationTurnBuilder(ConversationThreadAssembler assembler) {
+    FrustrationTurnBuilder(ConversationThreadAssembler assembler) {
         this(assembler, Caps.DEFAULT);
     }
 
-    public FrustrationTurnBuilder(ConversationThreadAssembler assembler, Caps caps) {
+    FrustrationTurnBuilder(ConversationThreadAssembler assembler, Caps caps) {
         this.assembler = assembler;
         this.caps = caps;
     }

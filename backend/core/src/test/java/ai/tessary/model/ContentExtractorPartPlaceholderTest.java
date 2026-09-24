@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link ContentExtractor#partPlaceholder} for the three ContentBlock document kinds: each renders the
- * bare {@code [file]} label, never {@code [unsupported]}.
+ * {@link ContentExtractor#partPlaceholder}: the three ContentBlock document kinds render the bare
+ * {@code [file]} label, never {@code [unsupported]}; tool parts render the terse outcome marker the
+ * ingest preview shows.
  */
 class ContentExtractorPartPlaceholderTest {
 
@@ -44,5 +46,33 @@ class ContentExtractorPartPlaceholderTest {
         assertEquals(
                 "[file]",
                 ContentExtractor.partPlaceholder(node("{\"type\":\"document_url\",\"url\":\"https://e/r.pdf\"}")));
+    }
+
+    @Test
+    void toolCall_rendersOkMarkerWithItsName() throws Exception {
+        // The bug: the tool marker vocabulary drifts and ingest previews show a raw tool part instead.
+        assertEquals(
+                "[tool:search ok]",
+                ContentExtractor.partPlaceholder(node("{\"type\":\"tool_call\",\"name\":\"search\"}")));
+    }
+
+    @Test
+    void toolError_collapsesUnicodeWhitespace() throws Exception {
+        // The bug: an ASCII-only \s leaves the NBSPs in the snippet, so the same error renders with
+        // different spacing depending on where it came from.
+        assertEquals(
+                "[tool error: timeout after 30s]",
+                ContentExtractor.partPlaceholder(node("{\"type\":\"tool_result\",\"is_error\":true,"
+                        + "\"content\":\"timeout\\u00a0\\u00a0after\\n 30s\"}")));
+    }
+
+    @Test
+    void toolError_truncatesAt120CodePointsWithoutSplittingAnEmoji() throws Exception {
+        // The bug: a UTF-16 substring at 120 chars cuts the emoji straddling the boundary in half and
+        // leaves a lone surrogate in the preview.
+        String head = "x".repeat(119) + "\uD83D\uDE00";
+        String error = head + " and more after the cap";
+        String part = MAPPER.writeValueAsString(Map.of("type", "tool_result", "is_error", true, "content", error));
+        assertEquals("[tool error: " + head + "]", ContentExtractor.partPlaceholder(node(part)));
     }
 }
