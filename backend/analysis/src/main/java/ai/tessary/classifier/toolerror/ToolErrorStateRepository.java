@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Persistence for {@link CarriedState}, one row per tool. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5, which carries the argument for why this classifier has
+ * {@code devdocs/concepts/tool-error.md} §5, which carries the argument for why this classifier has
  * state at all and what guards the bug class that came back with it.
  */
 @Repository

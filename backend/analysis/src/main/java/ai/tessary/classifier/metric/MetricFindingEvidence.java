@@ -15,9 +15,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The two user-visible strings a metric-drift finding is made of: its {@code cause_key} and its
- * evidence blob (see {@code classifiers/metric_drift/PROGRAM.md} §6 and §7). Pure: a {@link Decision},
- * two sketches and two workloads in, JSON out, so the eval can print exactly what a finding would have
- * carried without standing up a schema.
+ * evidence blob (see {@code devdocs/concepts/metric-drift.md} §6 and §7). Pure: a {@link Decision},
+ * two sketches and two workloads in, JSON out, so what a finding would have carried is answerable without
+ * standing up a schema.
  *
  * <p>The workload block matters because the correction loop's job is separating "the agent changed"
  * from "the traffic changed", and triage can only judge that from what the finding carries; it opens
@@ -338,7 +338,7 @@ public final class MetricFindingEvidence {
 
     /**
      * A shift at another grain that this finding accounts for, and that was therefore not written as a
-     * finding of its own (PROGRAM.md §6.1). Today there is exactly one shape: a {@code turn_duration}
+     * finding of its own (metric-drift.md §6.1). Today there is exactly one shape: a {@code turn_duration}
      * shift explained by the {@code tool_duration} shift of a tool inside that call site's traces.
      *
      * <p>Carrying it keeps suppression from being lossy: the tool row is the headline because it names
@@ -361,7 +361,7 @@ public final class MetricFindingEvidence {
             double covered) {}
 
     /**
-     * The evidence blob of PROGRAM.md §7.
+     * The evidence blob of metric-drift.md §7.
      *
      * @param ref the reference window's sketch: the previously closed window or the pinned one,
      *     whichever this decision was made against
@@ -372,7 +372,7 @@ public final class MetricFindingEvidence {
      * @param refTokens what the reference window's dollars were made of, or null for every duration
      *     finding and any cost window whose traffic reported no usage
      * @param curTokens the same for the window that just closed. This pair is why {@code cost} is the
-     *     only measure under {@code cost_drift} that opens a finding (PROGRAM.md §6.1): the token
+     *     only measure under {@code cost_drift} that opens a finding (metric-drift.md §6.1): the token
      *     buckets decompose the shift here instead of opening four more rows.
      * @param windowKind {@code count} or {@code elapsed}, the close criterion that fired: a window
      *     closed on thin traffic and one closed on 500 samples in an hour support different amounts of

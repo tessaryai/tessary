@@ -8,7 +8,7 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One event, one finding — the cross-grain half of {@code classifiers/metric_drift/PROGRAM.md} §6.1.
+ * One event, one finding — the cross-grain half of {@code devdocs/concepts/metric-drift.md} §6.1.
  *
  * <p>{@code duration_drift} is one on/off switch spanning two grains: a turn's own duration and the
  * duration of each tool call inside it. That is deliberate — "this turn was slow" sends someone to read

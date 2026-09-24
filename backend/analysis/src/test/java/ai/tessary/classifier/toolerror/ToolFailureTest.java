@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
- * The definition's tests. {@code classifiers/tool_error/PROGRAM.md} §1 and §2 say what a tool failure is
+ * The definition's tests. {@code devdocs/concepts/tool-error.md} §1 and §2 say what a tool failure is
  * and when two of them are the same kind; this is where those sentences are enforceable.
  */
 class ToolFailureTest {

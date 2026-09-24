@@ -380,8 +380,8 @@ h(p0) = clamp(11.42 + 1.088·ln(p0) + ln(10000 / 250000), 4, 12)
       = clamp( 8.20 + 1.088·ln(p0), 4, 12)
 ```
 
-The shipped line against the exact solve, from `arl.py`'s second report block (all counts are
-conversations). **Starting values**, owed a null replay on real traffic like `tool_error`'s:
+The shipped line against the exact solve (all counts are conversations). **Starting values**, owed a
+null replay on real traffic like `tool_error`'s:
 
 | p0 | p1 | exact h | fitted h | ARL₀ at exact | ARL₀ at fitted | lag at p1, exact | lag at p1, fitted |
 |---|---|---|---|---|---|---|---|
@@ -409,9 +409,9 @@ under 4.
 | W₁ noise law `c(rate)·σ·sqrt(2/nEff)` | **Measured** — synthetic null, ±1.3% across σ and window mixes |
 | `c(rate)` table | **Measured** — 40k null comparisons per point |
 | `w1_floor` = 0.139 | A **choice** expressed as a move; equals the 1% bar on wide traffic |
-| Real-corpus null run | **Owed.** PLAN.md §9 — real traffic split in half, unmodified, where every firing is by construction a false positive. Synthetic traffic is lognormal by assumption; real traffic is not. |
+| Real-corpus null run | **Owed.** Real traffic split in half, unmodified, where every firing is by construction a false positive. Synthetic traffic is lognormal by assumption; real traffic is not. |
 | `arl_target` = 250,000 | A **choice**, and the only threshold dial. One false alarm per corpus-and-a-half at the project the launch is measured against. |
-| `h(p0) = 11.42 + 1.088·ln(p0) + ln(arl_target/250000)` | **Derived**, by `classifiers/tool_error/arl.py`, to hold `arl_target` at every base rate — but under an independence assumption real traffic violates. Failures are bursty, and autocorrelation inflates false alarms by an amount arithmetic cannot price. The gap between predicted and measured ARL₀ is what a null-case replay exists to produce. |
+| `h(p0) = 11.42 + 1.088·ln(p0) + ln(arl_target/250000)` | **Derived**, by an exact Brook–Evans solve, to hold `arl_target` at every base rate — but under an independence assumption real traffic violates. Failures are bursty, and autocorrelation inflates false alarms by an amount arithmetic cannot price. The gap between predicted and measured ARL₀ is what a null-case replay exists to produce. |
 | `min_effect_size` = 0.05 | A **landmark**, no longer a gate. Nothing branches on it; it is kept because it is the scale a reader judges a reported effect size against. |
 | `criticality = 10·ln(S)` | A **choice** of scale. Natural log so every 10 points is 2.72x more evidence; unnormalised by design. |
 

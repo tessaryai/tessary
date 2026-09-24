@@ -26,7 +26,7 @@ cd "$ROOT"
 fail=0
 
 # The scanned roots are the ones that exist. classifiers/ ships in BOTH editions — the
-# open half (framework/, tool_error/, metric_drift/, data_gen/) stayed when the research half moved
+# open half (framework/, groundedness/, data_gen/) stayed when the research half moved
 # into the overlay — so in practice both roots are present everywhere and this loop's absent-root
 # arm is now the rare case rather than the public-repo norm it was written for. It stays: an absent
 # root is not a violation, it is a smaller scan. Each grep below runs over $ROOTS only and never

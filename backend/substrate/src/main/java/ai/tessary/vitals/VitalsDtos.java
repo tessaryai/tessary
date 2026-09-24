@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><b>Tool errors were the third and are gone from this shape entirely</b>, along with the
  * {@code tool_errors} field on {@link Group}. They are a classifier now
- * ({@code classifiers/tool_error/PROGRAM.md}) and are shown on the Classifiers page, where a moved rate
+ * ({@code devdocs/concepts/tool-error.md}) and are shown on the Classifiers page, where a moved rate
  * arrives with the failure patterns that moved it rather than as a bare percentage. This is a breaking
  * change to {@code GET .../vitals}, taken deliberately at design-partner scale: the Vitals number and
  * the detector must not be able to disagree, and one number in one place is a stronger answer than

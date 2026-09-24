@@ -34,7 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The correction loop for a {@code distribution_shift} finding — PROGRAM.md §9, the half of the
+ * The correction loop for a {@code distribution_shift} finding — metric-drift.md §9, the half of the
  * metric-drift program a human actually touches.
  *
  * <p>Both verbs already exist on the Classifiers page and already post the same two action strings that
@@ -100,7 +100,7 @@ class MetricFindingResolveIntegrationTest {
                     + ",\"w\":" + CLOSED_WORKLOAD + "}]}";
 
     /**
-     * The user-visible form of PROGRAM.md §6's key. {@code ClassifiersPage.tsx} renders it verbatim in
+     * The user-visible form of metric-drift.md §6's key. {@code ClassifiersPage.tsx} renders it verbatim in
      * mono followed by a literal {@code " — {causeKind}"}, so this string is a sentence a human reads and
      * not an internal identifier — which is what rules out a compact opaque key. Pinned here because the
      * page would happily render an unreadable one.
@@ -119,7 +119,7 @@ class MetricFindingResolveIntegrationTest {
         var view = drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.EXPECTED, "user-1");
 
         MetricBaselineRow row = baselines.findById(f.projectId, f.baselineId).orElseThrow();
-        // PROGRAM.md §9 writes this as `pinned_sketch <- current`, and the column literally named
+        // metric-drift.md §9 writes this as `pinned_sketch <- current`, and the column literally named
         // current_sketch_json is the wrong one to read: it holds the window still being filled, so
         // pinning it would install a nine-sample reference that the detector then abstains on until
         // something else replaces it. The newest COMPLETE summary is the control ring's newest day,

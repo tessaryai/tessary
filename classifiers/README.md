@@ -8,9 +8,8 @@ This is **local-first**: evaluation runs on your own machine, so you can iterate
 anything touches classify-service.
 
 > **What is here and what is not.** This tree is split along the open/paid boundary. The open
-> edition ships `framework/`, `tool_error/`, `metric_drift/`, `groundedness/` and `data_gen/` — the
-> modules whose classifiers run in the open backend (three pure-Java detectors and the groundedness
-> token head, whose model is public), plus the harness and the corpus emitters. The remaining paid
+> edition ships `framework/`, `groundedness/` and `data_gen/`: the groundedness token head's server
+> (its model is public), the harness, and the corpus emitters. The remaining paid
 > classifier modules (the frustration heads and the SOP-conformance work) are not part of this
 > export. `pyproject.toml`'s `pythonpath` carries
 > an overlay entry for that reason; with the overlay absent it is a directory that does not exist,
@@ -21,8 +20,6 @@ anything touches classify-service.
 ```
 classifiers/
   framework/      # shared contracts — schema, judge, metrics, harness, scorers, agreement, audit
-  tool_error/     # windowed tool-error rate detector: corpus + null eval + jshell bridge
-  metric_drift/   # duration_drift / cost_drift: corpus, injection, windows + jshell bridge
   groundedness/   # the groundedness model server (serve.py) and its setup files; training lives in the experiments repo
   data_gen/       # OTLP corpus emitters — the trace generators the boot gates and demos run on
   tests/          # the open test suite
@@ -30,16 +27,14 @@ classifiers/
   artifacts/      # trained model artifacts          (gitignored)
 ```
 
-`tool_error` and `metric_drift` have **no model to train** — those classifiers are pure Java in
-`backend/analysis/.../classifier/{tool,metric}/` — so each module carries a corpus, an evaluation
-rig, and a design write-up rather than training code. Both drive the shipping Java classes over a
-`jshell` bridge instead of restating their arithmetic in Python, so the floor a null run sets is a
-floor on the number the Java sweep actually computes, not on a Python re-implementation of it.
-Read each module's own `README.md` and `PROGRAM.md` before running anything in it.
+`tool_error`, `duration_drift` and `cost_drift` have **no module here**: they are pure Java in
+`backend/analysis/.../classifier/{toolerror,metric}/`, and their designs are
+[`devdocs/concepts/tool-error.md`](../devdocs/concepts/tool-error.md) and
+[`devdocs/concepts/metric-drift.md`](../devdocs/concepts/metric-drift.md).
 
 Frustration is an open classifier with no module here: it scores turns with a hosted decision model
 rather than a trained head, so there is nothing to train. Its rate test is tool_error's CUSUM with a
-conversation as the trial, and `tool_error/arl.py` prints a second report block for its budget.
+conversation as the trial.
 
 `data_gen/` is the emitter side rather than a classifier: `data_gen.emit_local` sends real OTLP
 traces at a running stack (it is what `scripts/check-open-boot.sh` uses to prove ingest works end
@@ -127,8 +122,6 @@ compose or the ECS task definition.
    are fine; only Apache/CC0/owned data may ever be *trained* on.
 4. Write `<name>/eval_null.py` (or `eval_baseline.py` if a head already exists): point
    `ClassifyServiceScorer(head="<name>")` or `LocalHFScorer` at the harness and print the report.
-   For a pure-Java classifier, drive the shipping classes over a `jshell` bridge the way
-   `tool_error/bridge.jsh` and `metric_drift/bridge.jsh` do, rather than reimplementing them here.
 5. Write a module `README.md`: label definition, data table (script → output → source → license),
    the gate and its rationale, and an explicit "not yet built" list so the next person does not
    re-discover gaps you already know about.
@@ -143,5 +136,4 @@ cd classifiers && uv run --extra quality pytest tests/
 ```
 
 `pyproject.toml` sets `pythonpath = [".", "../tessary-paid/classifiers"]`, in that order. `"."`
-must stay first — the overlay ahead of it would shadow the open packages — and it cannot collapse
-to a bare `["."]` either, because `metric_drift/export_corpus.py` spells its own import absolutely.
+must stay first — the overlay ahead of it would shadow the open packages.

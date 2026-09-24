@@ -355,5 +355,5 @@ holds. A package appears in exactly one module.
 | `traces/` | `substrate` | read-side trace explorer over the substrate. | — |
 | `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker were removed along with grading; nothing here caps anything now. | — |
 | `version/` | `tenancy` | project-version timeline (one row per commit SHA). | — |
-| `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage`, and `TokenPriceBook`, an offline reader of the jar's rate file used only by the metric-drift research bridge (the app prices from `pricing/`). | — |
+| `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage` (the app prices from `pricing/`). | — |
 | `web/` | `core` | shared HTTP plumbing ONLY: `ApiResponse` envelope, `ResponseMeta`, `ErrorBody`, `GlobalExceptionHandler`. | — |

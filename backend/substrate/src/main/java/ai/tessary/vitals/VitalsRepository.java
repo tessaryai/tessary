@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
  * grouped by a dimension.
  *
  * <p><b>Two, not three.</b> Tool errors used to be the third and left with the surface that showed them:
- * they are a classifier now ({@code classifiers/tool_error/PROGRAM.md}), watched per tool against that
+ * they are a classifier now ({@code devdocs/concepts/tool-error.md}), watched per tool against that
  * tool's own past. Nothing in this package reads {@code tool_call} any more.
  *
  * <p><b>Everything here is a read.</b> The slice writes no rows and enqueues no jobs, which is what
@@ -26,7 +26,7 @@ import org.springframework.stereotype.Repository;
  * <h2>What the v2 substrate changed here</h2>
  *
  * <p>This used to ship every {@code llm} observation in the window to the application, parse each one's
- * {@code usage} jsonb in Java, and price it against {@link TokenPriceBook} at read time. Three things were
+ * {@code usage} jsonb in Java, and price it against a vendored price book at read time. Three things were
  * wrong with that and all three are gone:
  *
  * <ul>

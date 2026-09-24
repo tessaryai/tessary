@@ -7,12 +7,8 @@ import org.jspecify.annotations.Nullable;
  * Compare-and-decide for metric drift: two sketches of the same bucket plus the operating point
  * in, one decision out.
  *
- * <p><b>Pure by design, and the design depends on it.</b> No database, no Spring, no project
- * concepts, no clock. An eval replays a real corpus through this class directly, injecting a
- * 1.2x / 1.5x / 2.0x shift on one bucket and splitting unmodified traffic in half for the null
- * case, and it is that null run, not a review, that sets {@link MetricDriftConfig#w1Floor()}. An
- * eval that had to stand up a schema to ask "would this have fired" is an eval nobody runs often
- * enough to tune with.
+ * <p><b>Pure by design.</b> No database, no Spring, no project concepts, no clock, so "would this
+ * have fired" is answerable without standing up a schema.
  *
  * <p><b>Effect size, never significance.</b> The whole decision is {@code |signedW1| >= floor} on
  * a sample the caller has already checked is large enough. There is deliberately no test

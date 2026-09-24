@@ -4,7 +4,7 @@ package ai.tessary.classifier.toolerror;
 import ai.tessary.classifier.substrate.ActionSymbol;
 import org.jspecify.annotations.Nullable;
 
-/** How a tool call is keyed into a bucket. Design contract: {@code classifiers/tool_error/PROGRAM.md} §3. */
+/** How a tool call is keyed into a bucket. Design contract: {@code devdocs/concepts/tool-error.md} §3. */
 public final class ToolErrorBuckets {
 
     private ToolErrorBuckets() {}

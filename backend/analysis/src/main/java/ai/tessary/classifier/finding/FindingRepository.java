@@ -215,7 +215,7 @@ public class FindingRepository {
      * Record the current state of a recomputed cause — the tool-error path, and the only write here
      * that ASSIGNS its counts rather than accumulating them.
      *
-     * <p>That difference is the whole of {@code classifiers/tool_error/PROGRAM.md} §5.1. There is no
+     * <p>That difference is the whole of {@code devdocs/concepts/tool-error.md} §5.1. There is no
      * sweep behind a rate_shift: the numbers are recomputed from an hourly aggregate on every read, so
      * an accumulating count would measure how often the recompute ran rather than how often the tool
      * failed. Run this a hundred times on unchanged traffic and the row is identical every time, which

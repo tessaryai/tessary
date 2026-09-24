@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The user-visible strings and the evidence blob a tool-error finding carries. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §6 and §7. Modelled on {@code MetricFindingEvidence}, whose
+ * {@code devdocs/concepts/tool-error.md} §6 and §7. Modelled on {@code MetricFindingEvidence}, whose
  * conventions it keeps deliberately: round before serializing, omit an empty block rather than writing
  * one, and never let a number the UI reports be re-derived somewhere else.
  */
@@ -43,7 +43,7 @@ public final class ToolErrorEvidence {
      * key as detail. This stays readable anyway — it is what someone pastes into a query, and an opaque
      * id would make that step guesswork.
      *
-     * <p>No reference segment, unlike metric drift's. A CUSUM has one reference (PROGRAM.md §4.6), so a
+     * <p>No reference segment, unlike metric drift's. A CUSUM has one reference (tool-error.md §4.6), so a
      * fourth segment could only ever hold one value and would be noise.
      */
     public static String causeKey(String bucketKey, Decision decision) {
@@ -115,7 +115,7 @@ public final class ToolErrorEvidence {
         return Math.min(1.0, c / (c + 60.0));
     }
 
-    /** PROGRAM.md §7's blob. */
+    /** tool-error.md §7's blob. */
     public static String toJson(
             String bucketKey,
             Decision decision,
