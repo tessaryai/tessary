@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * One window of one tool's outcomes: how many calls, how many failed, and which failure patterns those
  * were. The payload behind a {@code metric_baseline} row whose {@code measure} is
- * {@code tool_error_rate}. Design contract: {@code classifiers/tool_error/PROGRAM.md} §2 and §10.
+ * {@code tool_error_rate}. Design contract: {@code devdocs/concepts/tool-error.md} §2 and §10.
  *
  * <p><b>Two counters decide, the patterns explain.</b> Only {@link #calls()} and {@link #failures()}
  * reach {@link ToolErrorDetector}; the pattern tallies exist so that a finding can say <em>which</em>
@@ -104,7 +104,7 @@ public final class ToolErrorRate {
      * <p>The bulk path, and the only one the hourly replay uses. A busy tool over a month is millions of
      * calls, so a loop that folded them one at a time would make a recompute-per-read design unaffordable
      * for exactly the tools most worth watching. Signatures are read separately and only for a tool that
-     * has already alarmed (PROGRAM.md §5), so there is nothing to lose here by counting in bulk.
+     * has already alarmed (tool-error.md §5), so there is nothing to lose here by counting in bulk.
      *
      * @param failures clamped to {@code calls}: a bucket claiming more failures than calls is a query bug,
      *     and a rate above 1 would put the CUSUM's logs into the complex plane rather than failing loudly

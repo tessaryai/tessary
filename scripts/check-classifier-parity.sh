@@ -24,12 +24,6 @@
 #     experiment's scorer; if it drifts, the compiler publishes numbers under different arithmetic
 #     than the tables it is pinned to)
 #
-# Deliberately NOT the whole classifiers suite: tests/test_tool_error_bridge.py and
-# tests/test_metric_drift_windows.py drive the real Java through jshell and raise BridgeUnavailable
-# unless the backend has been compiled in this worktree. That loudness is right for a developer
-# running them deliberately, and wrong for a gate that must pass on a clean checkout. They stay a
-# manual/`task check` -- backend concern.
-#
 # EDITIONS. Six pins total, none present in an open checkout, so `--edition open` runs ZERO of them and says so by
 # name. A green line from this gate in an open checkout asserts nothing on its own; the summary it
 # prints says which pins it did not run and why.
@@ -82,7 +76,7 @@ fi
 
 # EMPTY, and that is the finding, not an oversight: all six pinned Python originals are
 # not present in this checkout, so there is no open-side pin left to run. What stayed public — framework/,
-# tool_error/, metric_drift/, data_gen/ — has no second implementation anywhere, so there is
+# groundedness/, data_gen/ — has no second implementation anywhere, so there is
 # nothing for a port-parity gate to pin. If a public module ever grows a Java or JS twin, its
 # pin goes here and this comment shrinks.
 OPEN_TESTS=""
@@ -169,7 +163,7 @@ else
   echo "  Every pinned Python original is not in this checkout: verifiable_claims.py and"
   echo "  sweep_corpus.py (groundedness/), slice/build.py (frustration/), sop_compiler.{metrics,"
   echo "  artifacts,schema} and experiments.shared.metrics. The open half of classifiers/ that"
-  echo "  remains — framework/, tool_error/, metric_drift/, data_gen/ — has no second implementation"
+  echo "  remains — framework/, groundedness/, data_gen/ — has no second implementation"
   echo "  in Java or JS, so there is nothing here for a PORT-parity gate to pin."
   echo "  READ THAT AS ZERO COVERAGE, NOT AS A PASS. This gate is green in this checkout because"
   echo "  it asserted nothing, and it prints this rather than a bare OK so that is impossible to"

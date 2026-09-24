@@ -40,7 +40,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * decision it makes is a decision about SQL — which span the duration comes off, which kinds are priced,
  * and whether a column that ingestion never writes falls through to a derivation.
  *
- * <p>Two of these matter more than the rest, and PLAN.md §2 says so outright.
+ * <p>Two of these matter more than the rest.
  *
  * <p><b>{@link #durationDerivesAndUnpricedCostAbstains()}</b> is the one that decides whether the
  * classifier works at all. {@code trace.latency_ms} is the intended source for duration and
@@ -202,7 +202,7 @@ class MetricSourceTest {
     }
 
     // -----------------------------------------------------------------------------------------------
-    // The duration rules PROGRAM.md §13 warns about
+    // The duration rules metric-drift.md §11 warns about
     // -----------------------------------------------------------------------------------------------
 
     @Test

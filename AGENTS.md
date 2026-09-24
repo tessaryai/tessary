@@ -46,7 +46,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`classify-service/`](./classify-service/) | Standalone encoder service (ECS Fargate). Serves `/embed` for SOP conformance; in the open edition it serves no `/classify` head, and groundedness runs on `classifiers/groundedness/serve.py` instead. See its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`), the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters. Training and research code lives in `tessaryai/experiments`, not here |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`), the shared eval framework, and the corpus emitters. Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |

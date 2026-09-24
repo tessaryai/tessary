@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
  * A bounded, mergeable summary of a set of {@code log(value)} samples — the payload behind
  * {@code metric_baseline.{pinned,prev,current}_sketch_json}. One sketch is one (bucket × measure)
  * window; comparing two of them through {@link MetricDistance} is the whole statistic
- * ({@code classifiers/metric_drift/PROGRAM.md} §4).
+ * ({@code devdocs/concepts/metric-drift.md} §4).
  *
  * <p><b>Why an interface over one implementation.</b> {@link MetricHistogram} is a fixed log-spaced
  * histogram, chosen because it is fifty lines and exactly reproducible rather than because it is the
@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
  * touching the sweep, the repository or the detector — provided it can project onto a shared log grid,
  * which is what {@link #gridId()}, {@link #slotWidthLog()} and {@link #cdf()} exist to express. The
  * one thing a replacement may <b>not</b> do is grow with the sample count: a thin bucket's window
- * stays open for up to a week (PROGRAM.md §2.3), so a raw sample list is unbounded by design.
+ * stays open for up to a week (metric-drift.md §2.3), so a raw sample list is unbounded by design.
  *
  * <p><b>Everything on this interface is in log space.</b> Callers take the logarithm once, at the
  * source, and never hand a raw millisecond or dollar figure to a sketch. That is not a convenience:
@@ -34,8 +34,8 @@ public interface MetricSketch {
      * Fold one sample in. {@code logValue} is {@code ln} of the measure, not the measure.
      *
      * <p>Values outside the grid are <b>counted at the edge, never dropped and never silently
-     * clipped</b> — see {@link MetricHistogram} on why the eval needs to see a bucket pinned at a
-     * range edge. {@code -inf} (a measure of exactly zero, which duration genuinely produces) lands in
+     * clipped</b> — see {@link MetricHistogram} on why a bucket pinned at a range edge must stay
+     * visible. {@code -inf} (a measure of exactly zero, which duration genuinely produces) lands in
      * underflow and {@code +inf} in overflow; {@code NaN} is a caller bug and throws.
      */
     void add(double logValue);

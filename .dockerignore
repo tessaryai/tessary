@@ -21,8 +21,7 @@
 # .dockerignore coverage, NEVER the reverse (that is why the earlier Caddyfile.prod lines could
 # linger here harmlessly for a long time). So an over-broad line in this block excludes OPEN source
 # from the backend and frontend build contexts and EVERY GATE STAYS GREEN. The two that were live
-# traps here were `classifiers/` (the framework/tool_error/metric_drift/data_gen half stays
-# public) and `.claude/` (launch.json stays public); both are gone from here for that reason.
+# traps here were `classifiers/` (the framework/groundedness/data_gen half stays public) and `.claude/` (launch.json stays public); both are gone from here for that reason.
 tessary-paid/
 
 # Build artifacts
@@ -63,7 +62,7 @@ docker-compose*.yml
 
 # Python bytecode, and the open classifier tree's gitignored run outputs. These were listed one
 # glob at a time originally, then rode in on the blanket `classifiers/` line, which was removed
-# because the framework/tool_error/metric_drift/data_gen half publishes. The paths below mirror
+# because the framework/groundedness/data_gen half publishes. The paths below mirror
 # classifiers/.gitignore; the other build's own .dockerignore restates the experiments/ globs for
 # the half that moved elsewhere.
 **/__pycache__/

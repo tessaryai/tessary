@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The {@code tool_error} classifier's operating point. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §4 and §9.
+ * {@code devdocs/concepts/tool-error.md} §4 and §9.
  *
  * <p>Shaped after {@code CusumParams} and {@code MetricDriftConfig}: per-project dials, clamped on
  * construction, every default tagged {@code EXPERIMENT(tool-error-tuning)}, and deliberately its own
@@ -66,8 +66,8 @@ public record ToolErrorConfig(
     /**
      * EXPERIMENT(tool-error-tuning): the {@code h}-versus-base-rate fit, {@code intercept + slope·ln(p0)}.
      *
-     * <p>Fitted to the exact threshold at each base rate, solved by {@code classifiers/tool_error/arl.py}
-     * (Brook–Evans on a refined integer lattice). It yields 6.0 at 0.5%, 6.4 at 1%, 8.2 at 5% and 9.7 at
+     * <p>Fitted to the exact threshold at each base rate, solved by Brook–Evans on a refined integer
+     * lattice. It yields 6.0 at 0.5%, 6.4 at 1%, 8.2 at 5% and 9.7 at
      * 20%, holding the realised ARL₀ between 220k and 309k against the 250k target. A flat threshold
      * spans 6,936 to 308,498 over the same range, so this collapses a 44x spread to 1.4x.
      *
@@ -79,7 +79,7 @@ public record ToolErrorConfig(
      * <p><b>Exact arithmetic, not a measured operating point.</b> Every figure assumes independent
      * Bernoulli trials, and real tool failures are bursty: one upstream outage fails two hundred
      * consecutive calls, which inflates the false-alarm rate by an amount nobody here has measured.
-     * PROGRAM.md §12's null run against a real corpus is what replaces these two numbers. Expect it to
+     * A null run against real traffic is what replaces these two numbers. Expect it to
      * push them up, not down.
      */
     public static final double ARL_FIT_INTERCEPT = 11.42;
@@ -141,7 +141,7 @@ public record ToolErrorConfig(
      * EXPERIMENT(tool-error-tuning): calls the in-control reference must hold before anything is judged.
      *
      * <p>A <em>wait</em>, not a skip: a tool under this keeps accumulating rather than being dropped, so
-     * a rarely-called tool is watched on a slower clock instead of never (PROGRAM.md §3.3). 500 is about
+     * a rarely-called tool is watched on a slower clock instead of never (tool-error.md §3.3). 500 is about
      * the least from which a rate near 1% can be told from a rate near 2% at all; below it the interval
      * on the in-control estimate is wider than the shifts worth catching, and the CUSUM would be
      * accumulating evidence against a number that is itself noise.

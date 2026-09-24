@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * One tool's CUSUM state as it travels between sweeps: the accumulators, how far the replay got, and the
  * assumptions the accumulators were built under. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5, which carries the argument for why this classifier has
+ * {@code devdocs/concepts/tool-error.md} §5, which carries the argument for why this classifier has
  * state at all.
  *
  * <p>A plain record rather than a nested type of the repository, because {@link ToolErrorTrend} — which

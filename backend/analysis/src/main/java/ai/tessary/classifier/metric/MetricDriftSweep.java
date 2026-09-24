@@ -52,7 +52,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The WINDOW-grain sweep of the classifier worker, alongside the trace-grain and observation-grain ones.
- * Design contract: {@code classifiers/metric_drift/PROGRAM.md}, execution plan {@code PLAN.md} §4.
+ * Design contract: {@code devdocs/concepts/metric-drift.md}.
  *
  * <p>No new scheduler or job table: exactly as {@code BehaviorDriftSweep} does it, a metric-drift
  * signal is an ordinary {@code classifier} job whose cursor walks {@code trace} rows, reusing that
@@ -61,7 +61,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>The scored unit is a window of a bucket, not a span, a turn, or a trace: individual traces fold
  * into a running sketch and are never labelled, since slow is not bad and expensive is not bad
- * (PROGRAM.md §0). What this sweep produces is a closed window compared against the same bucket's
+ * (metric-drift.md §0). What this sweep produces is a closed window compared against the same bucket's
  * own earlier windows.
  *
  * <h2>Two clocks</h2>
@@ -309,7 +309,7 @@ public class MetricDriftSweep implements ClassifierSweep {
 
         // Logged whether or not anything closed. A measure abstaining on 100% of traffic never fires and
         // looks identical to a quiet week in the findings; only these counters tell them apart, which is
-        // the failure PROGRAM.md §13 opens with.
+        // the failure metric-drift.md §11 opens with.
         StructuredLog.info(log, Markers.OPS, "metric.sweep.windows")
                 .field("project", job.projectId())
                 .field("signal", signal.classifierKey())
@@ -446,7 +446,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      *     makes {@code e^W₁} the multiplicative shift a finding reports.
      * @param workload what the USER asked for on this turn, folded into the window's workload sketches
      *     beside the measure. Evidence for the finding, never a covariate of the measure: normalizing
-     *     duration on the agent's own choices would explain the bug away (PROGRAM.md §3.2).
+     *     duration on the agent's own choices would explain the bug away (metric-drift.md §3.2).
      * @param callSiteId the entry point the trace this reading came from was resolved to. At turn grain
      *     it is the bucket key itself; at tool grain it is not, because a tool bucket is keyed on an
      *     {@code ActionSymbol} alone and one tool's window legitimately draws from several call sites.
@@ -455,7 +455,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      *     tool shift was measured over the traffic of the call site whose turns moved.
      * @param tokens what this turn's dollars were made of, or null for a measure that has no dollars.
      *     Folded only under {@code cost}: the decomposition is the explanation a cost finding carries
-     *     (PROGRAM.md §6.1), and summarizing it beside a duration would cost a blob per bucket to explain
+     *     (metric-drift.md §6.1), and summarizing it beside a duration would cost a blob per bucket to explain
      *     nothing. Null here is "this measure has no such quantity", distinct from a null INSIDE
      *     {@link TokenReadings}, which is "the provider did not report this bucket".
      */
@@ -500,7 +500,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      * <p>{@code turnMetrics} returns one reading per head in head order, so the two lists are zipped by
      * index — the head carries the ingest clock and the reading carries the value.
      *
-     * <p><b>{@code __unattributed__} is not a bucket</b> (PROGRAM.md §2.4). Behaviour drift lumps those
+     * <p><b>{@code __unattributed__} is not a bucket</b> (metric-drift.md §2.4). Behaviour drift lumps those
      * traces together, which is right for a sequence model and wrong here: the pile is a mixture of
      * everything the instrumentation missed, so its distribution moves whenever the mix moves and every
      * finding on it would be an artefact. The actionable fact about that pile is its SIZE, which belongs
@@ -557,7 +557,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      *
      * <p>No workload is folded ({@link MetricSource.Workload#NONE} throughout): a tool call has no
      * prompt of its own, and folding the enclosing turn's workload per tool call would condition on
-     * the answer, which PROGRAM.md §3.2 forbids. A tool finding's workload pairs print as nulls, "no
+     * the answer, which metric-drift.md §3.2 forbids. A tool finding's workload pairs print as nulls, "no
      * such quantity" rather than a workload of zero.
      */
     private static Map<Bucket, List<Sample>> toolSamples(List<TraceHead> heads, List<MetricSource.ToolMetrics> tools) {
@@ -905,7 +905,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      *
      * <p>Both references run on every close because each is blind in one direction alone: the rolling
      * control catches sudden breaks and never notices a slow boil; the pinned window catches cumulative
-     * creep and then screams forever once something legitimately changed (PROGRAM.md §4.3).
+     * creep and then screams forever once something legitimately changed (metric-drift.md §4.3).
      *
      * <p>At most one finding per window: two references are two views of one window, not two events,
      * and reporting both would say the same thing twice (§6.1: one event, one finding). The pinned
@@ -1035,7 +1035,7 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     // -----------------------------------------------------------------------------------------------
-    // Emission — PROGRAM.md §6.1, one event one finding
+    // Emission — metric-drift.md §6.1, one event one finding
     // -----------------------------------------------------------------------------------------------
 
     /**
@@ -1306,7 +1306,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      * Whether the window that now holds {@code count} samples, opened at {@code openedAt} in event time
      * and just extended to {@code eventAt}, should close.
      *
-     * <p><b>The minimum sample is a wait, not a skip</b> (PROGRAM.md §2.3). A bucket under it holds its
+     * <p><b>The minimum sample is a wait, not a skip</b> (metric-drift.md §2.3). A bucket under it holds its
      * window open past the elapsed horizon rather than closing one nothing can be compared against, so a
      * tool called thirty times a week is watched on a slower clock instead of never being watched. That
      * is ADWIN's native behaviour and behaviour drift's {@code min_support} posture, and it is why

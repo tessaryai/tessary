@@ -17,11 +17,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The metric-drift decision, driven directly — no Spring, no database, no clock. That is the point of
- * {@link MetricDriftDetector} existing separately from {@link MetricDriftSweep}: PLAN.md §9's eval
- * replays a real corpus through this class to set {@link MetricDriftConfig#w1Floor()}, and an eval that
- * had to stand up a schema first is an eval nobody runs often enough to tune with.
+ * {@link MetricDriftDetector} existing separately from {@link MetricDriftSweep}.
  *
- * <p>The three cases PLAN.md §4 names are the first three below, and between them they pin the whole
+ * <p>The first three cases below, and between them they pin the whole
  * operating point: a 1.4× shift is the smallest move anyone would want reported, 1.02× is ordinary
  * traffic breathing, and a bucket under the sample floor is one whose window has not filled yet. Every
  * fixture is built from a seeded generator so the numbers are the same on every run — the same
@@ -63,7 +61,7 @@ class MetricDriftDetectorTest {
 
         // This is the case a KS test gets wrong. With 400 samples — never mind the 100k a busy call site
         // produces in a window — a two-percent shift is "significant", because significance inflates with
-        // sample size while effect size does not. PROGRAM.md §4.2 names that as the single most common way
+        // sample size while effect size does not. metric-drift.md §4.2 names that as the single most common way
         // distribution monitoring fails in production.
         assertFalse(d.fired());
         assertEquals(Silence.WITHIN_FLOOR, d.silence());
@@ -132,7 +130,7 @@ class MetricDriftDetectorTest {
         MetricSketch ref = durations(1.0);
         // A doubling. Enormous, unmistakable, and reported by nobody: 40 samples cannot tell a real move
         // from four unlucky traces, and a bucket this thin is one whose window is still filling. The floor
-        // makes it WAIT (PROGRAM.md §2.3) rather than be dropped as too rare to watch — a tool called
+        // makes it WAIT (metric-drift.md §2.3) rather than be dropped as too rare to watch — a tool called
         // thirty times a week gets watched on a slower clock, not never.
         MetricSketch thin = durations(2.0, 40);
 

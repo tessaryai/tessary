@@ -1,13 +1,11 @@
-# The tool-error program — a failure rate that moved, explained by pattern
+# Tool error — a failure rate that moved, explained by pattern
 
-Status: **spec.** Agreed 2026-08-08 between Akhil and Claude.
+The design of the `tool_error` classifier (`backend/analysis/.../classifier/toolerror/`).
 
-Sibling of `classifiers/metric_drift/PROGRAM.md`, which is the structural precedent for everything
+Sibling of [metric-drift.md](./metric-drift.md), which is the structural precedent for everything
 here: per-bucket windows, two references, findings-not-firings, effect size rather than significance,
 and a case only after Layer-2. Where this document says "as metric drift does", it means the same
 code, not the same idea — the window state lives in the same table and the findings in the same one.
-
-Base: `launch` at `de86fad7`.
 
 ---
 
@@ -130,7 +128,7 @@ the denominator. Keying failures into their own symbol would make the rate uncom
 
 ### 3.2 Why the signature is not in the key
 
-PROGRAM.md §2.2's rule applies unchanged: **anything you want to detect a change in must not be in the
+Metric drift's §2.2 rule applies unchanged: **anything you want to detect a change in must not be in the
 bucket key.** Two reasons it binds especially hard here:
 
 1. A brand-new failure mode has **no history**. Keyed on `(tool, signature)`, its rate goes from
@@ -196,8 +194,8 @@ from silence.
 ### 4.3 The operating point, and where it came from
 
 **Decision (2026-08-11): the dial is the false-alarm budget, and `h` is derived from it per tool.**
-`arl_target = 250,000` calls between false alarms. Solved by `arl.py`: Brook–Evans on a refined
-integer lattice, exact to the arithmetic.
+`arl_target = 250,000` calls between false alarms. Solved by Brook–Evans on a refined integer
+lattice, exact to the arithmetic.
 
 | in-control p₀ | tuned for p₁ | exact h | ARL₀ | lag at p₁ | **ARL₀ at a flat 6.0** |
 |---|---|---|---|---|---|
@@ -225,15 +223,15 @@ unit of `h` across the whole range, so `arl_target` moves the threshold by its l
 **It is still not a measured operating point.** Every figure above assumes independent Bernoulli
 trials, and real tool failures are bursty: one upstream outage fails two hundred consecutive calls.
 Autocorrelation inflates the false-alarm rate by an amount nobody has measured. So this is a
-defensible starting point, the classifier seeds disabled because of it, and §12's null run is what
-replaces it. Expect that run to push the constants up rather than down.
+defensible starting point, the classifier seeds disabled because of it, and a null run against real
+traffic is what replaces it. Expect that run to push the constants up rather than down.
 
 > **A note on how the earlier numbers were wrong**, because the shape of the error recurs. The old
 > lattice took the *success* step as its unit, so a failure was `round(wf/ws)` steps. That is
 > essentially exact when failures are rare — at 0.1% a failure is ~350 success steps — and badly
 > wrong when they are not: at 20% a failure is 2.41 steps, rounds to 2, and the solved threshold
 > comes out 2.7 too low. The chain was still exact; it was exact for weights that were not the
-> detector's. `arl.py` now refines the unit until a failure spans at least sixty steps.
+> detector's. The solve now refines the unit until a failure spans at least sixty steps.
 
 ### 4.4 The magnitude gate, and why a CUSUM alone is not enough
 
@@ -592,7 +590,7 @@ design-partner scale, and recorded here so it is a decision rather than a surpri
 **Unset.** `decision_interval = 6.0` is derived (§4.3) rather than guessed, but derived under an
 assumption — independent Bernoulli trials — that real tool failures violate. Failures are bursty: one
 upstream outage fails two hundred consecutive calls, and autocorrelation inflates the false-alarm rate
-by an amount arithmetic cannot price. §12's null run against a real corpus is what settles it, and it
+by an amount arithmetic cannot price. A null run against real traffic is what settles it, and it
 will very likely move the number **up**.
 
 Metric drift's `w1_floor`, once measured, says nothing about this one. Different scale, different
@@ -626,7 +624,7 @@ them removes it.
 
 What is genuinely exposed: a partner whose tools fail in bursts may see findings the null run would
 have told us to suppress, and the standing rule that every number the UI states about a detector is one that
-was measured is not satisfied for this classifier until §12 runs.
+was measured is not satisfied for this classifier until that run happens.
 
 ---
 
@@ -665,53 +663,7 @@ un-widened CHECK is what says so out loud.
 
 ---
 
-## 11. Build order
-
-1. `ToolFailure` — the §1 predicate and the §2 signature. Pure, no Spring, no database. Its tests are
-   the definition's tests. **Done.**
-2. `ToolErrorRate` — the counter set, JSON round-trip, bounded pattern map. **Done.**
-3. `ToolErrorDetector` + `ToolErrorConfig` — the CUSUM, its magnitude gate, the onset rule. **Done.**
-4. **Done.** `ToolErrorRepository` — the hourly `(tool, calls, failures, signatures)` aggregate, carrying
-   `ToolFailure.SQL_PREDICATE`. One query, bounded window.
-5. **Done.** `ToolErrorTrend` — replay the buckets through the detector, return the live spells. Pure given the
-   buckets, so it is testable without a database and drivable by the harness.
-6. **Done.** `ToolErrorEvidence` + the finding upsert, under §5.1's three rules.
-7. **Done.** The catalog manifest and the `rate_shift` cause + scope migrations.
-8. **Done.** `ToolErrorCaseSource` + the `eval_case.detector` migration, under §6.1's identity rules.
-9. The Classifiers-page pattern breakdown (which needs `evidence` on `BehaviorFindingView`, since
-   findings do not carry it to the wire today).
-10. **Done, except the injection run.** The harness (§12).
-
-Steps 4 and 5 are what the sweep would have been. That they are a query and a fold is the whole
-argument of §5.
-
----
-
-## 12. Evaluation
-
-The same two runs metric drift needs, against the same kind of corpus, and neither can print a real
-number until a labelled corpus exists to run them against.
-
-1. **The null case.** Real traffic, unmodified, replayed per tool. Everything that alarms is a false
-   positive by construction, so no labels are needed. The report is the **measured ARL₀** at each
-   candidate `h` — calls between false alarms — which is directly comparable to the 250,000 the
-   Brook–Evans solve predicts under independence. **The gap between the two is the cost of burstiness**,
-   and it is the single number this run exists to produce.
-2. **Injection.** Step a tool's failure rate by ×2 / ×5 / 0 → 2%, and collapse one pattern into
-   another. Report detection rate per operator and the lag in calls, against the predicted lags in
-   §4.3's table.
-
-Both runs are strictly better instrumented than a floor sweep: ARL₀ is a quantity with units a human
-can hold ("one false alarm per N calls"), where a count of firings at a candidate threshold is not.
-
-The bridge runs the **shipping Java detector** over `jshell`, as metric drift's does, and for the
-reason its README now spells out twice over: a Python restatement of the arithmetic measures a
-detector nobody ships. It gets its **own** `bridge.jsh` rather than extending metric drift's — a
-different statistic, a different config record, and segment A is editing that file.
-
----
-
-## 13. What will actually bite you
+## 11. What will actually bite you
 
 - **Reading `error_type IS NOT NULL` and calling it the definition.** That is rule 1 of four, and it
   is the one that misses the caught-and-returned error — the most common real failure in an agent

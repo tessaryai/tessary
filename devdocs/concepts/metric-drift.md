@@ -1,14 +1,9 @@
-# The metric-drift program — windowed distribution drift on duration and cost
+# Metric drift — windowed distribution drift on duration and cost
 
-Status: **spec, not built.** Agreed 2026-07-30 between Akhil and Claude.
-Follows the same structural pattern used elsewhere: per-project fitting, an
-epoch lifecycle, findings-not-firings, and an
-alert budget instead of a guessed threshold.
-
-Base: **`main` at `1c3b0071`.** The cases redesign has landed on real production data, so the
-`cases/` slice this classifier plugs into is on main and there is no branch to
-track. Reviewed against main as of 2026-07-30, which also carries behaviour-drift
-saturation handling and abstention cursor rewind — both changed assumptions this spec had made.
+The design of the `duration_drift` and `cost_drift` classifiers
+(`backend/analysis/.../classifier/metric/`). Follows the same structural pattern used elsewhere:
+per-project fitting, an epoch lifecycle, findings-not-firings, and an alert budget instead of a
+guessed threshold.
 
 ---
 
@@ -123,7 +118,7 @@ at all, so a derivation has to exist regardless.
 |---|---|---|
 | turn duration | `trace.latency_ms` | the **root span's own** `ended_at - started_at`; `DISTINCT ON` earliest-starting root for the ~0.1% of traces with several |
 | tool-call duration | `observation.latency_ms` | that span's own `ended_at - started_at` |
-| cost | `trace.total_cost` | **SUM over leaf spans** of `TokenUsage.of(usage, model).nonOverlapping()` priced through `TokenPriceBook` |
+| cost | `trace.total_cost` | **SUM over leaf spans** of `TokenUsage.of(usage, model).nonOverlapping()` priced through the price book |
 | token buckets | `trace.total_tokens` (total only) | same leaf sum, per bucket — the buckets have no column and are always derived |
 
 Two consequences worth stating outright, and they apply to the column just as much as to the
@@ -201,7 +196,7 @@ Three hard requirements, all from `vitals/TokenUsage`:
    volume.
 
 Also: a model with **no rate in the price book is unpriced, not free**. Since cost is summed from
-leaves (§3.0), the NULL to respect is a missing `TokenPriceBook` entry, not a NULL column. An
+leaves (§3.0), the NULL to respect is a missing price-book entry, not a NULL column. An
 unpriced trace leaves the distribution rather than joining it at $0 — the posture `verdict.n`
 already takes, and the counterpart to vitals counting unpriced calls rather than reading them as
 free.
@@ -626,48 +621,7 @@ same PR, and controller/DTO changes regenerate the OpenAPI spec.
 
 ---
 
-## 11. Build-out order (PR-sized)
-
-1. `MetricSketch` + its `W₁` — pure, no Spring, fully unit-testable. Land with the null-case test
-   from §12 before anything touches a database.
-2. `MetricSource` — the column-preferred accessor of §3.0, with the derivation behind it. Its test
-   must cover the null-column path against a fixture that leaves the rollups unset, because that is
-   production today and fixtures otherwise hide it.
-3. `metric_baseline` migration, `MetricBaselineRow`, `MetricBaselineRepository` (lease + keyset
-   upsert, mirroring `BehaviorProfileRepository`).
-4. `MetricDriftSweep` + `MetricDriftConfig` + `MetricDriftDetector` (the pure compare-and-decide
-   step, so the eval can drive it without a database). `turn_duration` measure only.
-5. The `duration_drift` catalog manifest; `DISTRIBUTION_SHIFT` cause; the `resolve(...)` branch and
-   the baseline-changelog write.
-6. `tool_duration` measure + the §6.1 suppression rule (the first point at which one classifier
-   spans two grains, so it is the first point the rule can be tested).
-7. `cost_drift`: the manifest, the `TokenUsage.nonOverlapping()` path, cache-write abstention, and
-   the token buckets as evidence rather than findings.
-8. `MetricDriftSource implements CaseSource` + the `CaseRow.Detector` constant, gated on
-   triage per §8.1.
-9. Unattributed-coverage number in `vitals/`.
-
----
-
-## 12. Evaluation — a number without labels
-
-There is no gold set for "this distribution moved for a bad reason" and there cannot be one, so
-the eval is synthetic injection against replayed real traffic — behaviour drift's approach.
-
-1. **Injection.** Multiply a bucket's durations by 1.2 / 1.5 / 2.0; collapse a cache-read ratio;
-   inject a retry loop. Report detection rate per operator at a fixed alert volume, plus the lag
-   in windows before firing.
-2. **The null case.** Unmodified traffic, split in half. Everything that fires is a false
-   positive, and that number sets the `W₁` floor. This is the run that says whether "no alert
-   budget" is livable; if it is not, the finding is that the floor was too low, not that the
-   decision was wrong.
-3. **Replay a real deploy.** Take a known past regression from production traces, confirm it
-   fires, and confirm `since_version_id` lands on the right deploy.
-4. **Gate.** `task check -- classifier` before commit; CI runs the full gate on every PR.
-
----
-
-## 13. What will actually bite you
+## 11. What will actually bite you
 
 - **Reading the rollup columns without the fallback.** They are unpopulated today, so a detector
   that reads them bare abstains on everything and never fires — and it looks correct in every unit

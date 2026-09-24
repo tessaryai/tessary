@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  *       gradually rather than break it — the worst failure shape available.
  *   <li><b>Out-of-range samples are counted, never clipped.</b> A bucket whose traffic moved
  *       <i>out</i> of the range is precisely the move a drift detector must not miss, and traffic pinned
- *       at an edge is the signal that the range itself is wrong (PLAN.md §11).
+ *       at an edge is the signal that the range itself is wrong.
  * </ul>
  */
 class MetricHistogramTest {
@@ -228,7 +228,7 @@ class MetricHistogramTest {
      * Quantiles land within one slot of the truth — 5% on the value, and by construction half that on
      * average, an order of magnitude below any shift the detector is built to notice. These are what the
      * finding's evidence blob reports as
-     * {@code quantiles.p50} / {@code p95} (PROGRAM.md §7), so the error has to be small enough that a
+     * {@code quantiles.p50} / {@code p95} (metric-drift.md §7), so the error has to be small enough that a
      * human reading "2.1 s → 2.9 s" is reading the traffic and not the grid.
      */
     @Test

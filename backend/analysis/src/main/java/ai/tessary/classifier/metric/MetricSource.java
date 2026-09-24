@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 /**
  * The one accessor every metric-drift measure is read through: column-preferred, with a derivation
  * behind it, and an explicit abstention when neither can answer.
- * ({@code classifiers/metric_drift/PROGRAM.md} §3.0, PLAN.md §2.)
+ * ({@code devdocs/concepts/metric-drift.md} §3.0.)
  *
  * <p><b>Why a seam at all, rather than reading the rollup columns.</b> {@code trace.latency_ms},
  * {@code trace.total_cost} and {@code trace.total_tokens} are the intended source and are NULL on every
@@ -43,7 +43,7 @@ import org.springframework.stereotype.Component;
  * turns a price-book gap into a cost improvement, the single failure that makes the number worse than
  * not having it. Reasons are counted into a {@link Tally} the sweep logs once per pass, so a measure
  * abstaining on all of its traffic costs one glance rather than one investigation, the failure
- * PROGRAM.md §13 opens with.
+ * metric-drift.md §11 opens with.
  *
  * <p><b>The bucket key is not resolved here.</b> It arrives on the {@link TraceHead} this is called
  * with, resolved once by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}'s lateral,
@@ -112,7 +112,7 @@ public class MetricSource {
          * every retry would re-read the same page and hit the same span until the signal dead-lettered,
          * one bad span silencing every metric measure for the project. The counterpart guard on the rollup
          * column is already there ({@code column >= 0}); production is 100% the derivation path today
-         * (PROGRAM.md §3.0), so this is the one that fires.
+         * (metric-drift.md §3.0), so this is the one that fires.
          */
         NEGATIVE_INTERVAL,
 
@@ -213,7 +213,7 @@ public class MetricSource {
      * Everything the turn-grain measures produce for one trace, plus the key they are filed under.
      *
      * @param callSiteId the ENTRY POINT's call site, straight off the head, the bucket key of
-     *     PROGRAM.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
+     *     metric-drift.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
      *     child would model "traces that happened to contain this tool" rather than "traffic that
      *     entered here".
      * @param eventAt the trace's own start, falling back to ingest time, the clock windows are CUT on.
@@ -245,7 +245,7 @@ public class MetricSource {
 
         /**
          * Cache-read share of the prompt, {@code cache_read / (cache_read + input)}, the form
-         * PROGRAM.md §3.3 asks for cache to be watched in.
+         * metric-drift.md §3.3 asks for cache to be watched in.
          *
          * <p>The most common silent cost regression is a prompt-prefix edit that stops the cache
          * hitting. On the ratio that reads as a clean collapse from ~0.8 to ~0.0; on the raw cache-read
@@ -369,7 +369,7 @@ public class MetricSource {
      * them on {@code trace_settle_seconds}; measuring early reads as cheap, which surfaces as a
      * permanent drift toward cheaper whenever ingest lags. Duration needs no settle horizon at all, it
      * is read off the root span, whose arrival IS the completion signal, and applying one there delays
-     * every duration finding for nothing (PROGRAM.md §5).
+     * every duration finding for nothing (metric-drift.md §5).
      *
      * @param tally accumulates provenance and abstention counts. The sweep owns one per pass and hands
      *     the same instance to every page, so its summary describes the pass rather than its last page.
@@ -693,7 +693,7 @@ public class MetricSource {
      * Per-measure counts of what a sweep pass actually read: how many values came off a column, how many
      * were derived, and how many abstained for each reason.
      *
-     * <p><b>This is an instrument, not bookkeeping.</b> The failure PROGRAM.md §13 opens with is a
+     * <p><b>This is an instrument, not bookkeeping.</b> The failure metric-drift.md §11 opens with is a
      * measure that abstains on 100% of traffic and therefore never fires, while looking correct in every
      * unit test. Nothing about the findings distinguishes that from a quiet week; only these counters
      * do, which is why the sweep logs {@link #summary()} once per pass whether or not anything fired.

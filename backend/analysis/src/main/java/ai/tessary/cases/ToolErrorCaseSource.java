@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Shapes a tool-error rate shift into a case, from the CUSUM in {@link ToolErrorService}. Design
- * contract: {@code classifiers/tool_error/PROGRAM.md} §6.1 and §8.2.
+ * contract: {@code devdocs/concepts/tool-error.md} §6.1 and §8.2.
  *
  * <p><b>The gate is the same one metric drift uses</b>: {@link CaseOpener} only calls {@link #shape}
  * once triage has ruled the shift's claim sound or a human has pressed <em>Real deviation</em>, so every

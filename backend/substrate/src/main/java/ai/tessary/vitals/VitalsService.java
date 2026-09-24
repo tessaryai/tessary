@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
  * makes escalation structurally impossible rather than merely switched off.
  *
  * <p><b>Tool errors were the third filter and are no longer here at all.</b> They are a classifier
- * again ({@code classifiers/tool_error/PROGRAM.md}) — but a windowed one, per tool, against that tool's
+ * again ({@code devdocs/concepts/tool-error.md}) — but a windowed one, per tool, against that tool's
  * own past, which is a different thing from the per-observation detector migration {@code 0030} deleted.
  * That one wrote a detection per failing span and every detection enqueued a grader run; this one writes
  * one finding per closed window and enqueues nothing. The property this javadoc claims for the slice is

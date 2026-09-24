@@ -64,10 +64,8 @@ class PriceSnapshotTest {
     @Test
     @DisplayName("entries that price no tokens are not imported as models")
     void load_skipsEntriesThatPriceNoTokens() {
-        // The DB-import side of the same rule TokenPricingTest asserts on the read side; the two must
-        // agree or a model is priced in one surface and unpriced in the other. Imported, a rate-less entry
-        // becomes a model_price row with every bucket null — indistinguishable from a genuinely free model
-        // and invisible to the unpriced count.
+        // Imported, a rate-less entry becomes a model_price row with every bucket null — indistinguishable
+        // from a genuinely free model and invisible to the unpriced count.
         Map<String, ModelRates> models = byId(litellm());
         assertNull(models.get("dall-e-3"), "an entry with no token rate is not a priced model");
         assertNull(models.get("sample_spec"), "LiteLLM's documentation stub is not a model");

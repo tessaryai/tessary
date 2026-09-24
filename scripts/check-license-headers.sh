@@ -32,9 +32,6 @@
 #   .xml              build/tool configuration (pom.xml, the PMD/SpotBugs rulesets, logback config),
 #                     not application source, the same distinction Apache's own release policy draws
 #                     between a package's content and its build tooling.
-#   .jsh              exactly two files exist repo-wide (classifiers/metric_drift/bridge.jsh,
-#                     classifiers/tool_error/bridge.jsh) and both are already out of scope under
-#                     classifiers/ above; nothing to decide today.
 #
 # THE PER-PATH EXCEPTIONS FILE: scripts/lib/license-header-exceptions.txt. Specific, checked-in,
 # one path per line, reviewed same as scripts/lib/scrub-allowlist.txt; never a directory glob, so a

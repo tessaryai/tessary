@@ -54,7 +54,7 @@ package = false
 # not open (`frustration`, `groundedness`, `behavior_drift`, `refusal`, `experiments`, `out`) plus
 # `sop_compiler` and the 17 tests that exercise them into the overlay, so this entry is now what
 # resolves ALL of them, not just top-level `sop_compiler` as it once did. The open packages
-# (`framework`, `tool_error`, `metric_drift`) keep resolving from `"."`, so a relocated test can
+# (`framework`, `data_gen`) keep resolving from `"."`, so a relocated test can
 # still import both halves.
 #
 # Those tests are run by explicit path from THIS rootdir rather than from a second uv project of
@@ -66,8 +66,7 @@ package = false
 # relocated test then fails to import. Measured directly.
 #
 # `"."` MUST stay first: pytest inserts these in declared order, and the overlay ahead of it would
-# shadow the open packages. It cannot collapse to a bare `["."]` either — `metric_drift/
-# export_corpus.py` spells its own import absolutely (`from metric_drift.corpus import ...`).
+# shadow the open packages.
 # With `tessary-paid/` deleted (the public export) the overlay entry is a non-existent
 # directory, which pytest ignores, and only the open tests under `tests/` remain — the truth.
 pythonpath = [".", "../tessary-paid/classifiers"]
