@@ -149,6 +149,19 @@ public class SampleDataRepository {
      * set directly here, same table both statements touch, so the case and its finding commit
      * together in the caller's transaction.
      */
+    /**
+     * Declare a call site's shape, as a bundle import would. A direct write rather than {@code
+     * PipelineService}'s import path: the seed has no bundle, and announcing the change would rewind sweeps
+     * over data the seed wrote for them.
+     */
+    public void setCallSiteShape(String projectId, String callSiteId, String shape) {
+        jdbc.sql("UPDATE call_site SET shape = :shape WHERE project_id = :pid AND id = :id")
+                .param("shape", shape)
+                .param("pid", projectId)
+                .param("id", callSiteId)
+                .update();
+    }
+
     public void insertCase(SampleCase c) {
         jdbc.sql("""
                 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,

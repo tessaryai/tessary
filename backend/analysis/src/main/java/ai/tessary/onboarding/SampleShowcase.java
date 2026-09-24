@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.onboarding;
 
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.model.ContentBlock;
+import ai.tessary.storage.RetrievedDocRow;
+import ai.tessary.storage.SessionRow;
 import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Row;
@@ -41,6 +45,12 @@ import org.jspecify.annotations.Nullable;
  * optionally {@code refund_api}/{@code ticket_escalation} {@code -> } optionally
  * {@code export_ticket}, chosen per scenario category, so a trace reads as one coherent ticket
  * handled end to end rather than unrelated spans sharing a trace id.
+ *
+ * <p>Some tickets are threads: the customer writes back twice, each reply its own trace in one session.
+ * Those threads are what the Frustration classifier scores, and the replies {@code generate_response}
+ * writes from its knowledge-base articles are what the Groundedness classifier scores. From
+ * {@link #UNGROUNDED_ONSET_DAY} the replies start promising things the articles never say, and the
+ * customers they were promised to come back annoyed, so the two findings tell one story.
  */
 final class SampleShowcase {
 
@@ -544,6 +554,72 @@ final class SampleShowcase {
         "Looping in our account owner on this one."
     };
 
+    /**
+     * What a reply adds that its knowledge-base articles never support, per category that searches the
+     * knowledge base, and what the customer writes back once it turns out to be false.
+     *
+     * @param contradicts whether the promise contradicts an article, rather than going beyond them
+     */
+    private record Promise(String sentence, String complaint, boolean contradicts) {}
+
+    private static final Map<String, Promise> PROMISES = Map.of(
+            "billing_refund",
+            new Promise(
+                    "Your refund will be back on your card within 24 hours.",
+                    "You told me the refund would be back on my card within 24 hours. It's been three days and"
+                            + " nothing has arrived. Why did you say that?",
+                    true),
+            "login_access",
+            new Promise(
+                    "I've also added a free month to your plan for the trouble.",
+                    "Where is the free month you said you added? My invoice shows the full price again. That"
+                            + " isn't what you told me.",
+                    false),
+            "export_integration",
+            new Promise(
+                    "Exports no longer have a row limit, so this won't happen again.",
+                    "You said exports had no row limit now. It split the file again and our import broke."
+                            + " Please stop guessing.",
+                    true),
+            "how_to",
+            new Promise(
+                    "Plan upgrades are free for the first 30 days.",
+                    "You said upgrades were free for 30 days. I was just charged the full amount. That was" + " wrong.",
+                    true),
+            "bug_report",
+            new Promise(
+                    "Engineering already shipped a fix for this, so it should work now.",
+                    "You said engineering already shipped a fix. It's still broken. Did anyone actually check?",
+                    false));
+
+    /** The customer's first reply on a thread, before anything has gone wrong. */
+    private static final String[] FOLLOW_UPS = {
+        "Thanks. Is there anything I need to do on my side?",
+        "Okay. Can you confirm this is tied to order {orderId}?",
+        "Got it. How will I know when it's done?",
+        "Thanks for the quick reply. Should I keep this ticket open?"
+    };
+
+    private static final String FOLLOW_UP_REPLY =
+            "Nothing else is needed from you, {customer}. I'll keep this ticket open until it's confirmed on your"
+                    + " side.";
+
+    /** The customer's last reply when the ticket went fine. */
+    private static final String[] CALM_CLOSERS = {
+        "That fixed it, thanks.", "All good now, I appreciate the help.", "Great, I'll reply here if it happens again."
+    };
+
+    /** The customer's last reply when they are annoyed with the agent for a reason other than a promise. */
+    private static final String[] ANNOYED_CLOSERS = {
+        "This is the third time I've explained this. Please read what I wrote before replying.",
+        "You keep sending me the same answer and it doesn't help."
+    };
+
+    private static final String CALM_REPLY = "Glad to hear it, {customer}. I'll close the ticket. Reply here any time.";
+
+    private static final String APOLOGY_REPLY =
+            "I'm sorry, {customer}. I've passed order {orderId} to a senior specialist to check what went wrong.";
+
     // ---- baseline operating point per call site ------------------------------------------------
 
     static final double CLASSIFY_BASE_INPUT_TOKENS = 190;
@@ -587,6 +663,40 @@ final class SampleShowcase {
 
     private static final int DURATION_RAMP_START_DAY = 10;
     private static final int TOOL_ERROR_RAMP_START_DAY = 11;
+
+    /** Day the replies start carrying unsupported promises: the onset of both the groundedness and the
+     *  frustration finding. */
+    static final int UNGROUNDED_ONSET_DAY = 11;
+
+    /** Share of knowledge-base replies carrying a promise before and from {@link #UNGROUNDED_ONSET_DAY}. */
+    private static final double BASELINE_PROMISE_RATE = 0.03;
+
+    private static final double DRIFT_PROMISE_RATE = 0.22;
+
+    /**
+     * Share of tickets the customer writes back on. Higher after a promise, because a customer promised
+     * something is the one who checks. Sized so the frustration reference holds about 50 threads: short of
+     * the 200 the live classifier learns over, which a 14-day sample cannot reach without swamping the rest.
+     */
+    private static final double THREAD_SHARE = 0.17;
+
+    private static final double THREAD_SHARE_PROMISED = 0.6;
+
+    private static final double FRUSTRATED_IF_PROMISED = 0.75;
+    private static final double FRUSTRATED_OTHERWISE = 0.04;
+
+    /** Turns in a thread: the third user message is the first one with four messages before it, the
+     *  earliest turn Frustration scores. */
+    private static final int TURNS_PER_THREAD = 3;
+
+    /** A customer's reply is answered straight from the thread, with no fresh search or tool call. */
+    private static final String[] FOLLOW_UP_CHAIN = {ASSEMBLE, CLASSIFY, GENERATE};
+
+    /** The groundedness flag cutoff; a flagged answer scores at or above it, a clean one well below. */
+    private static final double GROUNDEDNESS_THRESHOLD = 0.975;
+
+    /** The frustration flag cutoff; a turn is flagged above it. */
+    private static final double FRUSTRATION_THRESHOLD = 0.40;
 
     private static double costMultiplier(String callSite, int day) {
         if (CLASSIFY.equals(callSite)) {
@@ -654,12 +764,62 @@ final class SampleShowcase {
         }
     }
 
+    /**
+     * One {@code generate_response} answer the groundedness model scored, as its assessment and, when
+     * flagged, its detection need it.
+     *
+     * @param flagged the unsupported sentence, in UTF-16 offsets into the answer; null when the answer passed
+     */
+    record ScoredAnswer(
+            String traceId,
+            String spanId,
+            @Nullable String sessionId,
+            Instant startedAt,
+            double unsupported,
+            double conflict,
+            @Nullable FlaggedSentence flagged) {}
+
+    record FlaggedSentence(int start, int end, String text) {}
+
+    /** One thread's third user turn, the one the frustration model scored, with the state it was sent. */
+    record ScoredTurn(
+            String conversationId,
+            String traceId,
+            String rootSpanId,
+            Instant startedAt,
+            double score,
+            boolean frustrated,
+            FrustrationTurnBuilder.TurnState state) {}
+
+    /**
+     * One rate test's two windows, counted from the generated rows: trials before the onset (the learned
+     * reference) and since it, with the failures in each, and the evidence refs the live service writes.
+     *
+     * @param lastBucket the hour of the newest trial, the spell's last folded hour
+     */
+    record RateStat(
+            String callSiteId,
+            Instant onset,
+            Instant lastBucket,
+            long baselineTrials,
+            long baselineFailures,
+            long trialsSinceOnset,
+            long failuresSinceOnset,
+            List<FindingEvidenceRepository.Ref> members,
+            List<FindingEvidenceRepository.Ref> witnesses) {}
+
     record Dataset(
             List<TraceV2Row> traces,
             List<SpanRow> spans,
             List<SpanPayloadRow> payloads,
             List<MediaAttach> mediaAttachments,
-            List<DriftStat> driftStats) {}
+            List<DriftStat> driftStats,
+            List<SessionRow> sessions,
+            List<RetrievedDocRow> retrievedDocs,
+            List<ScoredAnswer> answers,
+            List<ScoredTurn> turns,
+            RateStat groundedness,
+            RateStat frustration) {}
 
     // ---- generation -------------------------------------------------------------------------
 
@@ -693,6 +853,10 @@ final class SampleShowcase {
         var refundFailures = new RateSchedule();
         var escalateFailures = new RateSchedule();
         List<String> classifyPostStepTraceIds = new ArrayList<>();
+        List<SessionRow> sessions = new ArrayList<>();
+        List<RetrievedDocRow> retrievedDocs = new ArrayList<>();
+        List<ScoredAnswer> answers = new ArrayList<>();
+        List<ScoredTurn> turnsScored = new ArrayList<>();
 
         for (int day = 1; day <= WINDOW_DAYS; day++) {
             int daysAgo = WINDOW_DAYS - day;
@@ -710,337 +874,455 @@ final class SampleShowcase {
                 double amountValue = 12 + rnd.nextDouble() * 468;
                 String amount = String.format(Locale.ROOT, "$%.2f", amountValue);
                 long offsetSeconds = (long) (rnd.nextDouble() * capSeconds);
-                Instant traceStart = dayStart.plusSeconds(offsetSeconds);
+                Instant ticketStart = dayStart.plusSeconds(offsetSeconds);
                 // The date a ticket REFERS to is always before the ticket itself. Formatting the trace's
                 // own start here made every ticket say "I was charged on <today>, and it still hasn't
                 // been refunded", a complaint about something that had not happened yet.
-                String date = dateFmt.format(traceStart.minus(2 + rnd.nextInt(9), ChronoUnit.DAYS));
+                String date = dateFmt.format(ticketStart.minus(2 + rnd.nextInt(9), ChronoUnit.DAYS));
 
-                String subject = fill(template.subject(), customer, orderId, product, amount, date);
-                String body = fill(template.body(), customer, orderId, product, amount, date);
+                String ticketSubject = fill(template.subject(), customer, orderId, product, amount, date);
+                String ticketBody = fill(template.body(), customer, orderId, product, amount, date);
 
-                String[] chain = chainFor(template.category(), rnd);
+                String[] ticketChain = chainFor(template.category(), rnd);
 
-                String traceId = Ids.ulid();
-                Instant cursor = traceStart;
-                @Nullable String parentSpanId = null;
-                @Nullable String parentPath = null;
-                @Nullable String firstInputPreview = null;
-                @Nullable String lastOutputPreview = null;
-                int errorCount = 0;
-                long totalInputTokens = 0;
-                long totalOutputTokens = 0;
-                BigDecimal totalInputCost = BigDecimal.ZERO;
-                BigDecimal totalOutputCost = BigDecimal.ZERO;
-                boolean anyPriced = false;
+                Promise promise = PROMISES.get(template.category());
+                boolean searchesKb = List.of(ticketChain).contains(KB_SEARCH);
+                boolean promised = promise != null
+                        && searchesKb
+                        && rnd.nextDouble() < (day < UNGROUNDED_ONSET_DAY ? BASELINE_PROMISE_RATE : DRIFT_PROMISE_RATE);
+                boolean threaded = rnd.nextDouble() < (promised ? THREAD_SHARE_PROMISED : THREAD_SHARE);
+                boolean frustrated =
+                        threaded && rnd.nextDouble() < (promised ? FRUSTRATED_IF_PROMISED : FRUSTRATED_OTHERWISE);
+                @Nullable String sessionId = threaded ? Ids.ulid() : null;
+                int turns = threaded ? TURNS_PER_THREAD : 1;
+                boolean threadRetrieved = false;
+                List<FrustrationTurnBuilder.EarlierMessage> history = new ArrayList<>();
+                Instant turnStart = ticketStart;
+                Instant lastActivity = ticketStart;
 
-                String assembleOutput = null;
-                String classifyOutput = null;
-                String intentLabel = template.intent();
-                String kbOutput = null;
+                for (int turn = 0; turn < turns; turn++) {
+                    // A reply that would land after now is one the customer has not sent yet.
+                    if (turn > 0 && turnStart.plusSeconds(30).isAfter(now)) break;
+                    Instant traceStart = turnStart;
+                    String subject = turn == 0 ? ticketSubject : "Re: " + ticketSubject;
+                    String[] chain = turn == 0 ? ticketChain : FOLLOW_UP_CHAIN;
+                    String body;
+                    String reply;
+                    if (turn == 0) {
+                        body = ticketBody;
+                        reply = fill(
+                                RESOLUTION_TEMPLATE.getOrDefault(
+                                        template.category(), "Thanks for reaching out, {customer}."),
+                                customer,
+                                orderId,
+                                product,
+                                amount,
+                                date);
+                        if (promised) reply = reply + " " + promise.sentence();
+                    } else if (turn == 1) {
+                        body = fill(
+                                FOLLOW_UPS[rnd.nextInt(FOLLOW_UPS.length)], customer, orderId, product, amount, date);
+                        reply = fill(FOLLOW_UP_REPLY, customer, orderId, product, amount, date);
+                    } else {
+                        body = !frustrated
+                                ? CALM_CLOSERS[rnd.nextInt(CALM_CLOSERS.length)]
+                                : promised ? promise.complaint() : ANNOYED_CLOSERS[rnd.nextInt(ANNOYED_CLOSERS.length)];
+                        reply = fill(frustrated ? APOLOGY_REPLY : CALM_REPLY, customer, orderId, product, amount, date);
+                    }
+                    @Nullable Promise flaggedPromise = turn == 0 && promised ? promise : null;
+                    @Nullable String rootSpanId = null;
 
-                for (int stepIdx = 0; stepIdx < chain.length; stepIdx++) {
-                    String callSite = chain[stepIdx];
-                    String spanId = Ids.ulid();
-                    String path = parentPath == null ? spanId : parentPath + "." + spanId;
+                    String traceId = Ids.ulid();
+                    Instant cursor = traceStart;
+                    @Nullable String parentSpanId = null;
+                    @Nullable String parentPath = null;
+                    @Nullable String firstInputPreview = null;
+                    @Nullable String lastOutputPreview = null;
+                    int errorCount = 0;
+                    long totalInputTokens = 0;
+                    long totalOutputTokens = 0;
+                    BigDecimal totalInputCost = BigDecimal.ZERO;
+                    BigDecimal totalOutputCost = BigDecimal.ZERO;
+                    boolean anyPriced = false;
 
-                    String kind;
-                    String status = "ok";
-                    String errorType = null;
-                    String errorMessage = null;
-                    String model = null;
-                    Long inputTokens = null;
-                    Long outputTokens = null;
-                    String inputCost = null;
-                    String outputCost = null;
-                    String costSource = SpanRow.CostSource.UNPRICED;
-                    long latencyMs;
-                    String input;
-                    String output;
-                    // What the trace and span LISTS show. Defaulted to the payload itself, and
-                    // overridden by the two steps whose payload is a wire-shaped JSON message array:
-                    // truncating that to 240 characters put `[{"role":"user","content":[{"type":"te`
-                    // in the column a reader scans to find a ticket.
-                    @Nullable String inputPreview = null;
-                    @Nullable String outputPreview = null;
-                    @Nullable String attachedMediaId = null;
+                    String assembleOutput = null;
+                    String classifyOutput = null;
+                    String intentLabel = template.intent();
+                    String kbOutput = null;
 
-                    switch (callSite) {
-                        case ASSEMBLE -> {
-                            kind = KindNormalizer.TOOL;
-                            latencyMs = jitter(rnd, ASSEMBLE_BASE_LATENCY_MS, 0.2);
-                            int priorMessages = day < CLASSIFY_STEP_DAY ? 1 : 3 + rnd.nextInt(5);
-                            // An image_ref against a real stored media object, not a dead URL: a support
-                            // ticket usually does arrive with a screenshot, and this is the only place
-                            // the sample project exercises the image viewer at all (export_ticket
-                            // demonstrates document_ref; nothing else demonstrates the image path).
-                            // Nothing is fetched over the network, so there is no broken chip to render.
-                            input = toMessageJson(
-                                    mapper,
-                                    "user",
-                                    List.of(
-                                            ContentBlock.text(body),
-                                            ContentBlock.imageRef(screenshotPngMediaId, "image/png")));
-                            // Set whether or not the image stays: a lone text block is still a wire
-                            // message ARRAY, so the trace list showed `[{"role":"user","content":...`
-                            // either way.
-                            inputPreview = body;
-                            attachedMediaId = screenshotPngMediaId;
-                            StringBuilder threadHistory = new StringBuilder();
-                            for (int m = 0; m < priorMessages; m++) {
-                                threadHistory
-                                        .append("[")
-                                        .append(dateFmt.format(traceStart.minus(priorMessages - m, ChronoUnit.DAYS)))
-                                        .append("] ")
-                                        .append(customer)
-                                        .append(": ")
-                                        .append(PRIOR_MESSAGES[rnd.nextInt(PRIOR_MESSAGES.length)])
-                                        .append(" ");
+                    for (int stepIdx = 0; stepIdx < chain.length; stepIdx++) {
+                        String callSite = chain[stepIdx];
+                        String spanId = Ids.ulid();
+                        if (stepIdx == 0) rootSpanId = spanId;
+                        String path = parentPath == null ? spanId : parentPath + "." + spanId;
+
+                        String kind;
+                        String status = "ok";
+                        String errorType = null;
+                        String errorMessage = null;
+                        String model = null;
+                        Long inputTokens = null;
+                        Long outputTokens = null;
+                        String inputCost = null;
+                        String outputCost = null;
+                        String costSource = SpanRow.CostSource.UNPRICED;
+                        long latencyMs;
+                        String input;
+                        String output;
+                        // What the trace and span LISTS show. Defaulted to the payload itself, and
+                        // overridden by the two steps whose payload is a wire-shaped JSON message array:
+                        // truncating that to 240 characters put `[{"role":"user","content":[{"type":"te`
+                        // in the column a reader scans to find a ticket.
+                        @Nullable String inputPreview = null;
+                        @Nullable String outputPreview = null;
+                        @Nullable String attachedMediaId = null;
+
+                        switch (callSite) {
+                            case ASSEMBLE -> {
+                                kind = KindNormalizer.TOOL;
+                                latencyMs = jitter(rnd, ASSEMBLE_BASE_LATENCY_MS, 0.2);
+                                int priorMessages = day < CLASSIFY_STEP_DAY ? 1 : 3 + rnd.nextInt(5);
+                                // An image_ref against a real stored media object, not a dead URL: a support
+                                // ticket usually does arrive with a screenshot, and this is the only place
+                                // the sample project exercises the image viewer at all (export_ticket
+                                // demonstrates document_ref; nothing else demonstrates the image path).
+                                // Nothing is fetched over the network, so there is no broken chip to render.
+                                input = toMessageJson(
+                                        mapper,
+                                        "user",
+                                        List.of(
+                                                ContentBlock.text(body),
+                                                ContentBlock.imageRef(screenshotPngMediaId, "image/png")));
+                                // Set whether or not the image stays: a lone text block is still a wire
+                                // message ARRAY, so the trace list showed `[{"role":"user","content":...`
+                                // either way.
+                                inputPreview = body;
+                                attachedMediaId = screenshotPngMediaId;
+                                StringBuilder threadHistory = new StringBuilder();
+                                for (int m = 0; m < priorMessages; m++) {
+                                    threadHistory
+                                            .append("[")
+                                            .append(dateFmt.format(
+                                                    traceStart.minus(priorMessages - m, ChronoUnit.DAYS)))
+                                            .append("] ")
+                                            .append(customer)
+                                            .append(": ")
+                                            .append(PRIOR_MESSAGES[rnd.nextInt(PRIOR_MESSAGES.length)])
+                                            .append(" ");
+                                }
+                                output = "Assembled context for " + customer + " · order " + orderId + " · "
+                                        + priorMessages
+                                        + (priorMessages == 1 ? " prior thread message: " : " prior thread messages: ")
+                                        + threadHistory.toString().strip();
+                                assembleOutput = output;
                             }
-                            output = "Assembled context for " + customer + " · order " + orderId + " · " + priorMessages
-                                    + (priorMessages == 1 ? " prior thread message: " : " prior thread messages: ")
-                                    + threadHistory.toString().strip();
-                            assembleOutput = output;
-                        }
-                        case CLASSIFY -> {
-                            kind = KindNormalizer.LLM;
-                            model = "gpt-4o-mini";
-                            double mult = costMultiplier(CLASSIFY, day);
-                            double inTok = jitterD(rnd, CLASSIFY_BASE_INPUT_TOKENS * mult, 0.12);
-                            double outTok = jitterD(rnd, CLASSIFY_BASE_OUTPUT_TOKENS, 0.12);
-                            inputTokens = Math.round(inTok);
-                            outputTokens = Math.round(outTok);
-                            BigDecimal inC = money(inputTokens * CLASSIFY_PRICE_IN);
-                            BigDecimal outC = money(outputTokens * CLASSIFY_PRICE_OUT);
-                            inputCost = inC.toPlainString();
-                            outputCost = outC.toPlainString();
-                            costSource = SpanRow.CostSource.PROVIDED;
-                            latencyMs = jitter(rnd, CLASSIFY_BASE_LATENCY_MS, 0.15);
-                            input = "Ticket: " + subject + "\n\n" + (assembleOutput == null ? body : assembleOutput);
-                            classifyOutput = "intent: " + intentLabel + " (confidence "
-                                    + String.format(Locale.ROOT, "%.2f", 0.86 + rnd.nextDouble() * 0.12) + ")";
-                            output = classifyOutput;
-                            classifyCost.add(
-                                    day, inputTokens * CLASSIFY_PRICE_IN + outputTokens * CLASSIFY_PRICE_OUT, traceId);
-                            if (day >= CLASSIFY_STEP_DAY && classifyPostStepTraceIds.size() < 6) {
-                                classifyPostStepTraceIds.add(traceId);
+                            case CLASSIFY -> {
+                                kind = KindNormalizer.LLM;
+                                model = "gpt-4o-mini";
+                                double mult = costMultiplier(CLASSIFY, day);
+                                double inTok = jitterD(rnd, CLASSIFY_BASE_INPUT_TOKENS * mult, 0.12);
+                                double outTok = jitterD(rnd, CLASSIFY_BASE_OUTPUT_TOKENS, 0.12);
+                                inputTokens = Math.round(inTok);
+                                outputTokens = Math.round(outTok);
+                                BigDecimal inC = money(inputTokens * CLASSIFY_PRICE_IN);
+                                BigDecimal outC = money(outputTokens * CLASSIFY_PRICE_OUT);
+                                inputCost = inC.toPlainString();
+                                outputCost = outC.toPlainString();
+                                costSource = SpanRow.CostSource.PROVIDED;
+                                latencyMs = jitter(rnd, CLASSIFY_BASE_LATENCY_MS, 0.15);
+                                input = "Ticket: " + subject + "\n\n"
+                                        + (assembleOutput == null ? body : assembleOutput);
+                                classifyOutput = "intent: " + intentLabel + " (confidence "
+                                        + String.format(Locale.ROOT, "%.2f", 0.86 + rnd.nextDouble() * 0.12) + ")";
+                                output = classifyOutput;
+                                classifyCost.add(
+                                        day,
+                                        inputTokens * CLASSIFY_PRICE_IN + outputTokens * CLASSIFY_PRICE_OUT,
+                                        traceId);
+                                if (day >= CLASSIFY_STEP_DAY && classifyPostStepTraceIds.size() < 6) {
+                                    classifyPostStepTraceIds.add(traceId);
+                                }
+                                totalInputTokens += inputTokens;
+                                totalOutputTokens += outputTokens;
+                                totalInputCost = totalInputCost.add(inC);
+                                totalOutputCost = totalOutputCost.add(outC);
+                                anyPriced = true;
                             }
-                            totalInputTokens += inputTokens;
-                            totalOutputTokens += outputTokens;
-                            totalInputCost = totalInputCost.add(inC);
-                            totalOutputCost = totalOutputCost.add(outC);
-                            anyPriced = true;
+                            case KB_SEARCH -> {
+                                kind = KindNormalizer.RETRIEVAL;
+                                double mult = durationMultiplier(KB_SEARCH, day);
+                                latencyMs = Math.round(jitterD(rnd, KB_BASE_LATENCY_MS * mult, 0.15));
+                                kbDuration.add(day, latencyMs, traceId);
+                                List<KbArticle> articles = KB_ARTICLES.getOrDefault(intentLabel, List.of());
+                                input = "query: " + intentLabel.replace('_', ' ') + " " + product;
+                                StringBuilder sb = new StringBuilder();
+                                for (KbArticle a : articles) {
+                                    sb.append(a.title())
+                                            .append(" — ")
+                                            .append(a.snippet())
+                                            .append(" ");
+                                }
+                                kbOutput = sb.toString();
+                                output = kbOutput;
+                            }
+                            case GENERATE -> {
+                                kind = KindNormalizer.LLM;
+                                model = "gpt-4o";
+                                double mult = costMultiplier(GENERATE, day);
+                                double inTok = jitterD(rnd, GENERATE_BASE_INPUT_TOKENS * mult, 0.15);
+                                double outTok = jitterD(rnd, GENERATE_BASE_OUTPUT_TOKENS, 0.15);
+                                inputTokens = Math.round(inTok);
+                                outputTokens = Math.round(outTok);
+                                BigDecimal inC = money(inputTokens * GENERATE_PRICE_IN);
+                                BigDecimal outC = money(outputTokens * GENERATE_PRICE_OUT);
+                                inputCost = inC.toPlainString();
+                                outputCost = outC.toPlainString();
+                                costSource = SpanRow.CostSource.PROVIDED;
+                                latencyMs = jitter(rnd, GENERATE_BASE_LATENCY_MS, 0.2);
+                                // The instructions and the articles as the system message and the customer's
+                                // text as the user message, so what a reader sees as the question the answer
+                                // replied to is the customer's words, not the prompt around them.
+                                input = toMessagesJson(
+                                        mapper,
+                                        List.of(
+                                                new WireMessage(
+                                                        "system",
+                                                        List.of(ContentBlock.text("Classified intent: " + intentLabel
+                                                                + "\n\nRelevant KB:\n"
+                                                                + (kbOutput == null ? "(none)" : kbOutput)))),
+                                                new WireMessage("user", List.of(ContentBlock.text(body)))));
+                                inputPreview = body;
+                                output = reply;
+                                generateCost.add(
+                                        day,
+                                        inputTokens * GENERATE_PRICE_IN + outputTokens * GENERATE_PRICE_OUT,
+                                        traceId);
+                                totalInputTokens += inputTokens;
+                                totalOutputTokens += outputTokens;
+                                totalInputCost = totalInputCost.add(inC);
+                                totalOutputCost = totalOutputCost.add(outC);
+                                anyPriced = true;
+                            }
+                            case REFUND -> {
+                                kind = KindNormalizer.TOOL;
+                                double mult = durationMultiplier(REFUND, day);
+                                latencyMs = Math.round(jitterD(rnd, REFUND_BASE_LATENCY_MS * mult, 0.15));
+                                refundDuration.add(day, latencyMs, traceId);
+                                boolean failed = refundFailures.next(errorRate(REFUND, day));
+                                refundErrors.add(day, failed, traceId);
+                                input = "order_id=" + orderId + " amount=" + amount + " customer=\"" + customer + "\"";
+                                if (failed) {
+                                    status = "error";
+                                    errorType = "validation_error";
+                                    errorMessage = "amount exceeds refund window for order " + orderId;
+                                    output = "status=error code=validation_error message=\"" + errorMessage + "\"";
+                                    errorCount++;
+                                } else {
+                                    output = "status=approved refund_id=RFND-" + (100000 + rnd.nextInt(899999));
+                                }
+                            }
+                            case ESCALATE -> {
+                                kind = KindNormalizer.TOOL;
+                                latencyMs = jitter(rnd, ESCALATE_BASE_LATENCY_MS, 0.15);
+                                boolean failed = escalateFailures.next(errorRate(ESCALATE, day));
+                                escalateErrors.add(day, failed, traceId);
+                                input = "ticket_id=" + orderId + " priority=high reason=" + intentLabel;
+                                if (failed) {
+                                    status = "error";
+                                    errorType = "timeout";
+                                    errorMessage = "ticketing system did not respond within 10s for order " + orderId;
+                                    output = "status=error code=timeout message=\"" + errorMessage + "\"";
+                                    errorCount++;
+                                } else {
+                                    output = "status=escalated assigned_to=tier2 escalation_id=ESC-"
+                                            + (100000 + rnd.nextInt(899999));
+                                }
+                            }
+                            case EXPORT -> {
+                                kind = KindNormalizer.TOOL;
+                                latencyMs = jitter(rnd, EXPORT_BASE_LATENCY_MS, 0.15);
+                                input = "export order " + orderId + " as pdf";
+                                String extracted = "Ticket Export — Order " + orderId + "\nCustomer: " + customer
+                                        + "\nProduct: " + product + "\nStatus: resolved";
+                                output = toMessageJson(
+                                        mapper,
+                                        "assistant",
+                                        List.of(
+                                                ContentBlock.text("Export ready for order " + orderId + "."),
+                                                new ContentBlock(
+                                                        ContentBlock.TYPE_DOCUMENT_REF,
+                                                        extracted,
+                                                        null,
+                                                        exportPdfMediaId,
+                                                        "application/pdf")));
+                                outputPreview = "Export ready for order " + orderId + ". (PDF attached)";
+                                attachedMediaId = exportPdfMediaId;
+                            }
+                            default -> throw new IllegalStateException("unreachable call site " + callSite);
                         }
-                        case KB_SEARCH -> {
-                            kind = KindNormalizer.RETRIEVAL;
-                            double mult = durationMultiplier(KB_SEARCH, day);
-                            latencyMs = Math.round(jitterD(rnd, KB_BASE_LATENCY_MS * mult, 0.15));
-                            kbDuration.add(day, latencyMs, traceId);
+
+                        Instant spanStart = cursor;
+                        Instant spanEnd = spanStart.plusMillis(latencyMs);
+                        cursor = spanEnd.plusMillis(30 + rnd.nextInt(120));
+
+                        spans.add(new SpanRow(
+                                projectId,
+                                traceId,
+                                spanId,
+                                parentSpanId,
+                                path,
+                                sessionId,
+                                null,
+                                null,
+                                callSite,
+                                subject,
+                                kind,
+                                callSite,
+                                stepIdx == 0,
+                                status,
+                                null,
+                                errorType,
+                                errorMessage,
+                                spanStart.toString(),
+                                spanEnd.toString(),
+                                latencyMs,
+                                null,
+                                model,
+                                null,
+                                inputTokens,
+                                outputTokens,
+                                null,
+                                null,
+                                null,
+                                inputCost,
+                                outputCost,
+                                null,
+                                null,
+                                costSource,
+                                null,
+                                preview(inputPreview == null ? input : inputPreview),
+                                preview(outputPreview == null ? output : outputPreview),
+                                SpanRow.ResolverState.NONE,
+                                SpanRow.ResolverState.RESOLVED,
+                                spanStart.toString(),
+                                false,
+                                null,
+                                null,
+                                null,
+                                null));
+
+                        payloads.add(new SpanPayloadRow(
+                                projectId, traceId, spanId, input, output, null, null, spanStart.toString()));
+
+                        if (KB_SEARCH.equals(callSite)) {
                             List<KbArticle> articles = KB_ARTICLES.getOrDefault(intentLabel, List.of());
-                            input = "query: " + intentLabel.replace('_', ' ') + " " + product;
-                            StringBuilder sb = new StringBuilder();
-                            for (KbArticle a : articles) {
-                                sb.append(a.title())
-                                        .append(" — ")
-                                        .append(a.snippet())
-                                        .append(" ");
+                            for (int a = 0; a < articles.size(); a++) {
+                                retrievedDocs.add(new RetrievedDocRow(
+                                        Ids.ulid(),
+                                        projectId,
+                                        a,
+                                        RetrievedDocRow.ListRole.RESULT,
+                                        a + 1,
+                                        "kb-" + intentLabel + "-" + (a + 1),
+                                        articles.get(a).title(),
+                                        articles.get(a).snippet(),
+                                        0.92 - a * 0.11,
+                                        null,
+                                        null,
+                                        null,
+                                        spanId,
+                                        spanStart.toString(),
+                                        false,
+                                        spanStart.toString(),
+                                        traceId,
+                                        spanId));
                             }
-                            kbOutput = sb.toString();
-                            output = kbOutput;
+                            threadRetrieved = true;
                         }
-                        case GENERATE -> {
-                            kind = KindNormalizer.LLM;
-                            model = "gpt-4o";
-                            double mult = costMultiplier(GENERATE, day);
-                            double inTok = jitterD(rnd, GENERATE_BASE_INPUT_TOKENS * mult, 0.15);
-                            double outTok = jitterD(rnd, GENERATE_BASE_OUTPUT_TOKENS, 0.15);
-                            inputTokens = Math.round(inTok);
-                            outputTokens = Math.round(outTok);
-                            BigDecimal inC = money(inputTokens * GENERATE_PRICE_IN);
-                            BigDecimal outC = money(outputTokens * GENERATE_PRICE_OUT);
-                            inputCost = inC.toPlainString();
-                            outputCost = outC.toPlainString();
-                            costSource = SpanRow.CostSource.PROVIDED;
-                            latencyMs = jitter(rnd, GENERATE_BASE_LATENCY_MS, 0.2);
-                            input = body + "\n\nClassified intent: " + intentLabel + "\n\nRelevant KB:\n"
-                                    + (kbOutput == null ? "(none)" : kbOutput);
-                            output = fill(
-                                    RESOLUTION_TEMPLATE.getOrDefault(
-                                            template.category(), "Thanks for reaching out, {customer}."),
-                                    customer,
-                                    orderId,
-                                    product,
-                                    amount,
-                                    date);
-                            generateCost.add(
-                                    day, inputTokens * GENERATE_PRICE_IN + outputTokens * GENERATE_PRICE_OUT, traceId);
-                            totalInputTokens += inputTokens;
-                            totalOutputTokens += outputTokens;
-                            totalInputCost = totalInputCost.add(inC);
-                            totalOutputCost = totalOutputCost.add(outC);
-                            anyPriced = true;
+                        if (GENERATE.equals(callSite) && threadRetrieved) {
+                            answers.add(
+                                    scoredAnswer(rnd, traceId, spanId, sessionId, spanStart, output, flaggedPromise));
                         }
-                        case REFUND -> {
-                            kind = KindNormalizer.TOOL;
-                            double mult = durationMultiplier(REFUND, day);
-                            latencyMs = Math.round(jitterD(rnd, REFUND_BASE_LATENCY_MS * mult, 0.15));
-                            refundDuration.add(day, latencyMs, traceId);
-                            boolean failed = refundFailures.next(errorRate(REFUND, day));
-                            refundErrors.add(day, failed, traceId);
-                            input = "order_id=" + orderId + " amount=" + amount + " customer=\"" + customer + "\"";
-                            if (failed) {
-                                status = "error";
-                                errorType = "validation_error";
-                                errorMessage = "amount exceeds refund window for order " + orderId;
-                                output = "status=error code=validation_error message=\"" + errorMessage + "\"";
-                                errorCount++;
-                            } else {
-                                output = "status=approved refund_id=RFND-" + (100000 + rnd.nextInt(899999));
-                            }
+
+                        if (attachedMediaId != null) {
+                            mediaAttachments.add(new MediaAttach(traceId, spanId, attachedMediaId));
                         }
-                        case ESCALATE -> {
-                            kind = KindNormalizer.TOOL;
-                            latencyMs = jitter(rnd, ESCALATE_BASE_LATENCY_MS, 0.15);
-                            boolean failed = escalateFailures.next(errorRate(ESCALATE, day));
-                            escalateErrors.add(day, failed, traceId);
-                            input = "ticket_id=" + orderId + " priority=high reason=" + intentLabel;
-                            if (failed) {
-                                status = "error";
-                                errorType = "timeout";
-                                errorMessage = "ticketing system did not respond within 10s for order " + orderId;
-                                output = "status=error code=timeout message=\"" + errorMessage + "\"";
-                                errorCount++;
-                            } else {
-                                output = "status=escalated assigned_to=tier2 escalation_id=ESC-"
-                                        + (100000 + rnd.nextInt(899999));
-                            }
+                        if (firstInputPreview == null) {
+                            firstInputPreview = preview(inputPreview == null ? input : inputPreview);
                         }
-                        case EXPORT -> {
-                            kind = KindNormalizer.TOOL;
-                            latencyMs = jitter(rnd, EXPORT_BASE_LATENCY_MS, 0.15);
-                            input = "export order " + orderId + " as pdf";
-                            String extracted = "Ticket Export — Order " + orderId + "\nCustomer: " + customer
-                                    + "\nProduct: " + product + "\nStatus: resolved";
-                            output = toMessageJson(
-                                    mapper,
-                                    "assistant",
-                                    List.of(
-                                            ContentBlock.text("Export ready for order " + orderId + "."),
-                                            new ContentBlock(
-                                                    ContentBlock.TYPE_DOCUMENT_REF,
-                                                    extracted,
-                                                    null,
-                                                    exportPdfMediaId,
-                                                    "application/pdf")));
-                            outputPreview = "Export ready for order " + orderId + ". (PDF attached)";
-                            attachedMediaId = exportPdfMediaId;
-                        }
-                        default -> throw new IllegalStateException("unreachable call site " + callSite);
+                        lastOutputPreview = preview(outputPreview == null ? output : outputPreview);
+
+                        parentSpanId = spanId;
+                        parentPath = path;
                     }
 
-                    Instant spanStart = cursor;
-                    Instant spanEnd = spanStart.plusMillis(latencyMs);
-                    cursor = spanEnd.plusMillis(30 + rnd.nextInt(120));
-
-                    spans.add(new SpanRow(
+                    Instant traceEnd = cursor;
+                    traces.add(new TraceV2Row(
                             projectId,
                             traceId,
-                            spanId,
-                            parentSpanId,
-                            path,
+                            sessionId,
                             null,
                             null,
-                            null,
-                            callSite,
                             subject,
-                            kind,
-                            callSite,
-                            stepIdx == 0,
-                            status,
                             null,
-                            errorType,
-                            errorMessage,
-                            spanStart.toString(),
-                            spanEnd.toString(),
-                            latencyMs,
                             null,
-                            model,
+                            // status. Left null, a trace carrying a failed refund_api span rendered with no
+                            // status at all next to the error count that contradicts it.
+                            errorCount > 0 ? "error" : "ok",
+                            traceStart.toString(),
+                            traceEnd.toString(),
                             null,
-                            inputTokens,
-                            outputTokens,
+                            chain.length,
+                            errorCount,
+                            anyPriced ? totalInputTokens : null,
+                            anyPriced ? totalOutputTokens : null,
                             null,
                             null,
                             null,
-                            inputCost,
-                            outputCost,
+                            anyPriced ? totalInputTokens + totalOutputTokens : null,
+                            anyPriced ? totalInputCost.toPlainString() : null,
+                            anyPriced ? totalOutputCost.toPlainString() : null,
+                            anyPriced ? totalInputCost.add(totalOutputCost).toPlainString() : null,
+                            0,
+                            firstInputPreview,
+                            lastOutputPreview,
+                            ASSEMBLE,
                             null,
-                            null,
-                            costSource,
-                            null,
-                            preview(inputPreview == null ? input : inputPreview),
-                            preview(outputPreview == null ? output : outputPreview),
-                            SpanRow.ResolverState.NONE,
-                            SpanRow.ResolverState.RESOLVED,
-                            spanStart.toString(),
-                            false,
-                            null,
-                            null,
-                            null,
-                            null));
+                            now.toString(),
+                            traceEnd.toString(),
+                            true,
+                            true,
+                            traceStart.toString(),
+                            false));
 
-                    payloads.add(new SpanPayloadRow(
-                            projectId, traceId, spanId, input, output, null, null, spanStart.toString()));
-
-                    if (attachedMediaId != null) {
-                        mediaAttachments.add(new MediaAttach(traceId, spanId, attachedMediaId));
+                    if (sessionId != null) {
+                        if (turn == TURNS_PER_THREAD - 1 && rootSpanId != null) {
+                            double score = frustrated ? 0.55 + rnd.nextDouble() * 0.4 : 0.01 + rnd.nextDouble() * 0.27;
+                            turnsScored.add(new ScoredTurn(
+                                    sessionId,
+                                    traceId,
+                                    rootSpanId,
+                                    traceStart,
+                                    score,
+                                    score > FRUSTRATION_THRESHOLD,
+                                    new FrustrationTurnBuilder.TurnState(body, history)));
+                        }
+                        history.add(new FrustrationTurnBuilder.EarlierMessage("user", body));
+                        history.add(new FrustrationTurnBuilder.EarlierMessage("assistant", reply));
                     }
-                    if (firstInputPreview == null) {
-                        firstInputPreview = preview(inputPreview == null ? input : inputPreview);
-                    }
-                    lastOutputPreview = preview(outputPreview == null ? output : outputPreview);
-
-                    parentSpanId = spanId;
-                    parentPath = path;
+                    turnStart = traceEnd.plus(4 + rnd.nextInt(37), ChronoUnit.MINUTES);
+                    lastActivity = traceEnd;
                 }
-
-                Instant traceEnd = cursor;
-                traces.add(new TraceV2Row(
-                        projectId,
-                        traceId,
-                        null,
-                        null,
-                        null,
-                        subject,
-                        null,
-                        null,
-                        // status. Left null, a trace carrying a failed refund_api span rendered with no
-                        // status at all next to the error count that contradicts it.
-                        errorCount > 0 ? "error" : "ok",
-                        traceStart.toString(),
-                        traceEnd.toString(),
-                        null,
-                        chain.length,
-                        errorCount,
-                        anyPriced ? totalInputTokens : null,
-                        anyPriced ? totalOutputTokens : null,
-                        null,
-                        null,
-                        null,
-                        anyPriced ? totalInputTokens + totalOutputTokens : null,
-                        anyPriced ? totalInputCost.toPlainString() : null,
-                        anyPriced ? totalOutputCost.toPlainString() : null,
-                        anyPriced ? totalInputCost.add(totalOutputCost).toPlainString() : null,
-                        0,
-                        firstInputPreview,
-                        lastOutputPreview,
-                        ASSEMBLE,
-                        null,
-                        now.toString(),
-                        traceEnd.toString(),
-                        true,
-                        true,
-                        traceStart.toString(),
-                        false));
+                if (sessionId != null) {
+                    sessions.add(new SessionRow(
+                            projectId,
+                            sessionId,
+                            null,
+                            ticketStart.toString(),
+                            lastActivity.toString(),
+                            ticketStart.toString(),
+                            false));
+                }
             }
         }
 
@@ -1093,7 +1375,19 @@ final class SampleShowcase {
                 refundErrors.stat(REFUND, TOOL_ERROR_RAMP_START_DAY, todayMidnight, now),
                 escalateErrors.stat(ESCALATE, TOOL_ERROR_RAMP_START_DAY, todayMidnight, now));
 
-        return new Dataset(traces, spans, payloads, mediaAttachments, driftStats);
+        Instant ungroundedOnset = todayMidnight.minus(WINDOW_DAYS - UNGROUNDED_ONSET_DAY, ChronoUnit.DAYS);
+        return new Dataset(
+                traces,
+                spans,
+                payloads,
+                mediaAttachments,
+                driftStats,
+                sessions,
+                retrievedDocs,
+                answers,
+                turnsScored,
+                groundednessRate(answers, ungroundedOnset),
+                frustrationRate(turnsScored, ungroundedOnset));
     }
 
     // ---- helpers ------------------------------------------------------------------------------
@@ -1135,6 +1429,119 @@ final class SampleShowcase {
         };
     }
 
+    /**
+     * What the groundedness model makes of one answer: a score at or above the threshold on the promise
+     * sentence when there is one, else a score well below it. Clean answers sit low with a long tail, as
+     * the model's do on replies that restate their articles.
+     */
+    private static ScoredAnswer scoredAnswer(
+            Random rnd,
+            String traceId,
+            String spanId,
+            @Nullable String sessionId,
+            Instant startedAt,
+            String answer,
+            @Nullable Promise promise) {
+        if (promise == null) {
+            double unsupported = Math.pow(rnd.nextDouble(), 3) * 0.9;
+            return new ScoredAnswer(traceId, spanId, sessionId, startedAt, unsupported, unsupported * 0.3, null);
+        }
+        int start = answer.indexOf(promise.sentence());
+        double unsupported = GROUNDEDNESS_THRESHOLD + 0.001 + rnd.nextDouble() * 0.022;
+        double conflict = promise.contradicts() ? 0.7 + rnd.nextDouble() * 0.25 : 0.05 + rnd.nextDouble() * 0.1;
+        return new ScoredAnswer(
+                traceId,
+                spanId,
+                sessionId,
+                startedAt,
+                unsupported,
+                conflict,
+                new FlaggedSentence(start, start + promise.sentence().length(), promise.sentence()));
+    }
+
+    /**
+     * Groundedness's rate test over the generated answers, as its replay counts it: a trace is one trial on
+     * {@code generate_response}, bucketed at its first scored answer, and fails when any answer in it was
+     * flagged. Members are every trial since onset, newest first; witnesses are each failed trial followed by
+     * its flagged answers.
+     */
+    private static RateStat groundednessRate(List<ScoredAnswer> answers, Instant onset) {
+        Map<String, List<ScoredAnswer>> byTrace = new LinkedHashMap<>();
+        for (ScoredAnswer a : answers)
+            byTrace.computeIfAbsent(a.traceId(), k -> new ArrayList<>()).add(a);
+        List<Trial> trials = new ArrayList<>();
+        for (Map.Entry<String, List<ScoredAnswer>> e : byTrace.entrySet()) {
+            List<FindingEvidenceRepository.Ref> witness = new ArrayList<>();
+            Instant first = null;
+            for (ScoredAnswer a : e.getValue()) {
+                if (first == null || a.startedAt().isBefore(first)) first = a.startedAt();
+                if (a.flagged() != null) witness.add(FindingEvidenceRepository.Ref.span(a.traceId(), a.spanId()));
+            }
+            if (!witness.isEmpty()) witness.add(0, FindingEvidenceRepository.Ref.trace(e.getKey()));
+            trials.add(new Trial(first, FindingEvidenceRepository.Ref.trace(e.getKey()), witness));
+        }
+        return rate(GENERATE, trials, onset);
+    }
+
+    /**
+     * Frustration's rate test over the scored turns: a thread is one trial on the call site of its scored
+     * turn's root span, and fails when that turn was flagged. Members are the sessions, witnesses each
+     * frustrated session followed by the turn that fired.
+     */
+    private static RateStat frustrationRate(List<ScoredTurn> turns, Instant onset) {
+        List<Trial> trials = new ArrayList<>();
+        for (ScoredTurn t : turns) {
+            List<FindingEvidenceRepository.Ref> witness = t.frustrated()
+                    ? List.of(
+                            FindingEvidenceRepository.Ref.session(t.conversationId()),
+                            FindingEvidenceRepository.Ref.trace(t.traceId()))
+                    : List.of();
+            trials.add(new Trial(t.startedAt(), FindingEvidenceRepository.Ref.session(t.conversationId()), witness));
+        }
+        return rate(ASSEMBLE, trials, onset);
+    }
+
+    /** One trial of a rate test: when it counts, its member ref, and its witness refs when it failed. */
+    private record Trial(
+            Instant at, FindingEvidenceRepository.Ref member, List<FindingEvidenceRepository.Ref> witness) {}
+
+    private static RateStat rate(String callSiteId, List<Trial> trials, Instant onset) {
+        long baselineTrials = 0;
+        long baselineFailures = 0;
+        Instant newest = onset;
+        List<Trial> since = new ArrayList<>();
+        for (Trial t : trials) {
+            if (t.at().isBefore(onset)) {
+                baselineTrials++;
+                if (!t.witness().isEmpty()) baselineFailures++;
+            } else {
+                since.add(t);
+            }
+            if (t.at().isAfter(newest)) newest = t.at();
+        }
+        since.sort((a, b) -> b.at().compareTo(a.at()));
+        List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
+        List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>();
+        long failures = 0;
+        for (Trial t : since) {
+            members.add(t.member());
+            if (!t.witness().isEmpty()) {
+                failures++;
+                witnesses.addAll(t.witness());
+            }
+        }
+        return new RateStat(
+                callSiteId,
+                onset,
+                newest.truncatedTo(ChronoUnit.HOURS),
+                baselineTrials,
+                baselineFailures,
+                since.size(),
+                failures,
+                members,
+                witnesses);
+    }
+
     private static String fill(
             String template, String customer, String orderId, String product, String amount, String date) {
         return template.replace("{customer}", customer)
@@ -1173,8 +1580,12 @@ final class SampleShowcase {
     private record WireMessage(String role, Object content) {}
 
     private static String toMessageJson(ObjectMapper mapper, String role, List<ContentBlock> blocks) {
+        return toMessagesJson(mapper, List.of(new WireMessage(role, blocks)));
+    }
+
+    private static String toMessagesJson(ObjectMapper mapper, List<WireMessage> messages) {
         try {
-            return mapper.writeValueAsString(List.of(new WireMessage(role, blocks)));
+            return mapper.writeValueAsString(messages);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("sample showcase message serialization failed", e);
         }

@@ -1,16 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.onboarding;
 
+import ai.tessary.cases.CaseOpener;
 import ai.tessary.cases.CaseRow;
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
+import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.Detection;
+import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
+import ai.tessary.classifier.detector.groundedness.GroundednessConfig;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
+import ai.tessary.classifier.finding.CauseKey;
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
+import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
+import ai.tessary.classifier.frustration.FrustrationAssessmentRepository;
+import ai.tessary.classifier.frustration.FrustrationConfig;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
+import ai.tessary.classifier.frustration.JevFrustrationQuestion;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorConfig;
+import ai.tessary.classifier.toolerror.ToolErrorDetector;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.media.MediaStore;
 import ai.tessary.open.obs.Markers;
@@ -19,12 +35,16 @@ import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaReportRow;
 import ai.tessary.storage.MediaRefRepository;
+import ai.tessary.storage.RetrievedDocRepository;
+import ai.tessary.storage.SessionRepository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectCreatedEvent;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -33,7 +53,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -79,13 +102,23 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * own NOT NULL/CHECK constraints says plainly "this row is fabricated," which a call through the
  * business-logic layer would not.
  *
+ * <p>The Groundedness and Frustration findings are the exception, and go through the live writers
+ * ({@code FindingRepository#recordRecomputedRate}, {@code FindingEvidenceRepository}, {@link CaseOpener}).
+ * Their counts are read off generated rows the same way the rate services read them, so there is no
+ * synthetic number for the business layer to dress up; and what a raw insert would have to copy by hand
+ * (the native cause vocabulary in the payload, a case key cut from it, the null title the finding page
+ * fills in) would otherwise have to be kept in step with the live writer by hand.
+ *
  * <h2>The showcase dataset</h2>
  *
  * <p>{@link SampleShowcase} generates ~500+ "AI customer-support agent" traces spread over a 14-day
  * window and threaded through seven call sites; six of them carry a real cost/duration/error-rate
  * drift baked into the generated span numbers themselves (visible when aggregated by day and call
  * site), and three of those six are elevated into an open {@code eval_case} — one ({@code
- * classify_intent} cost drift) with a full agentic RCA report citing this same generated data. The
+ * classify_intent} cost drift) with a full agentic RCA report citing this same generated data. About
+ * one ticket in five is a three-turn thread, which is what gives Groundedness answers to score and
+ * Frustration conversations to score; each opens a case on the rate it learned before
+ * {@link SampleShowcase#UNGROUNDED_ONSET_DAY}. The
  * substrate volume is inserted as batched multi-row SQL ({@link SampleDataRepository#insertTraces}
  * and friends) rather than through the substrate repositories' single-row upsert methods, which
  * exist for live ingest's replay semantics this one-shot seed does not need.
@@ -119,6 +152,14 @@ public class SampleProjectSeedListener {
     private final SampleDataRepository sampleData;
     private final MediaStore mediaStore;
     private final MediaRefRepository mediaRefs;
+    private final SessionRepository sessions;
+    private final RetrievedDocRepository retrievedDocs;
+    private final FindingRepository findings;
+    private final FindingEvidenceRepository evidence;
+    private final ClassifierDetectionWriteRepository detections;
+    private final GroundednessAssessmentRepository groundednessAssessments;
+    private final FrustrationAssessmentRepository frustrationAssessments;
+    private final CaseOpener caseOpener;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public SampleProjectSeedListener(
@@ -128,7 +169,15 @@ public class SampleProjectSeedListener {
             MetricBaselineRepository baselines,
             SampleDataRepository sampleData,
             MediaStore mediaStore,
-            MediaRefRepository mediaRefs) {
+            MediaRefRepository mediaRefs,
+            SessionRepository sessions,
+            RetrievedDocRepository retrievedDocs,
+            FindingRepository findings,
+            FindingEvidenceRepository evidence,
+            ClassifierDetectionWriteRepository detections,
+            GroundednessAssessmentRepository groundednessAssessments,
+            FrustrationAssessmentRepository frustrationAssessments,
+            CaseOpener caseOpener) {
         this.projects = projects;
         this.pipeline = pipeline;
         this.classifiers = classifiers;
@@ -136,6 +185,14 @@ public class SampleProjectSeedListener {
         this.sampleData = sampleData;
         this.mediaStore = mediaStore;
         this.mediaRefs = mediaRefs;
+        this.sessions = sessions;
+        this.retrievedDocs = retrievedDocs;
+        this.findings = findings;
+        this.evidence = evidence;
+        this.detections = detections;
+        this.groundednessAssessments = groundednessAssessments;
+        this.frustrationAssessments = frustrationAssessments;
+        this.caseOpener = caseOpener;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
@@ -166,10 +223,10 @@ public class SampleProjectSeedListener {
         // has to run BEFORE the lookup below, which is what hangs the findings off a real classifier.
         classifiers.seedBuiltIns(projectId);
 
-        Map<String, String> classifierIds = classifiers.list(projectId).stream()
-                .collect(Collectors.toMap(ClassifierRow::classifierKey, ClassifierRow::id, (a, b) -> a));
-        String costDriftId = classifierIds.get("cost_drift");
-        String durationDriftId = classifierIds.get("duration_drift");
+        Map<String, ClassifierRow> classifierRows = classifiers.list(projectId).stream()
+                .collect(Collectors.toMap(ClassifierRow::classifierKey, Function.identity(), (a, b) -> a));
+        String costDriftId = idOf(classifierRows.get("cost_drift"));
+        String durationDriftId = idOf(classifierRows.get("duration_drift"));
 
         Instant now = Instant.now();
         long seed = projectId.hashCode();
@@ -183,12 +240,14 @@ public class SampleProjectSeedListener {
         SampleShowcase.Dataset dataset =
                 SampleShowcase.generate(projectId, seed, now, exportPdfMediaId, screenshotPngMediaId);
 
+        sessions.getOrCreateAll(dataset.sessions());
         sampleData.insertTraces(dataset.traces());
         sampleData.insertSpans(dataset.spans());
         sampleData.insertSpanPayloads(dataset.payloads());
         for (SampleShowcase.MediaAttach attachment : dataset.mediaAttachments()) {
             mediaRefs.insertAll(projectId, attachment.traceId(), attachment.spanId(), List.of(attachment.mediaId()));
         }
+        retrievedDocs.insertAll(dataset.retrievedDocs());
 
         List<SampleShowcase.DriftStat> drift = dataset.driftStats();
         // Order matches the design spec's drift array exactly: [0] classify_intent cost (Case A),
@@ -216,6 +275,16 @@ public class SampleProjectSeedListener {
             seedCase(projectId, 2L, CaseRow.Detector.METRIC_DRIFT, drift.get(3), refundDurationFinding);
         }
         seedCase(projectId, 3L, CaseRow.Detector.TOOL_ERROR, drift.get(5), escalationErrorFinding);
+
+        // After the three cases above, so the live opener these two go through numbers them 4 and 5.
+        ClassifierRow groundedness = classifierRows.get(BuiltInDetector.Kind.GROUNDEDNESS);
+        if (groundedness != null) seedGroundedness(projectId, groundedness, dataset);
+        ClassifierRow frustration = classifierRows.get(BuiltInDetector.Kind.FRUSTRATION);
+        if (frustration != null) seedFrustration(projectId, frustration, dataset);
+    }
+
+    private static @Nullable String idOf(@Nullable ClassifierRow row) {
+        return row == null ? null : row.id();
     }
 
     /**
@@ -709,6 +778,234 @@ public class SampleProjectSeedListener {
         root.put("window", window);
         root.put("cause_kind", FindingRow.Cause.RATE_SHIFT);
         return writeJson(root);
+    }
+
+    // ---- groundedness and frustration --------------------------------------------------------------
+
+    /**
+     * Groundedness on {@code generate_response}: the call site declared {@code rag_answer} so the finding page
+     * can rebuild each answer's question and documents, one assessment per scored answer and one detection per
+     * flagged one, then the finding, its evidence and its case through the same writers the live rate service
+     * and triage use. The classifier stays as the catalog seeded it, disabled, so no sweep rescores this data.
+     */
+    private void seedGroundedness(String projectId, ClassifierRow classifier, SampleShowcase.Dataset dataset) {
+        sampleData.setCallSiteShape(projectId, SampleShowcase.GENERATE, "rag_answer");
+        GroundednessConfig config = GroundednessConfig.of(mapper, classifier.configJson());
+        String scorerVersion = config.scorerVersion();
+        for (SampleShowcase.ScoredAnswer answer : dataset.answers()) {
+            groundednessAssessments.insert(new GroundednessAssessmentRepository.Assessment(
+                    Ids.ulid(),
+                    projectId,
+                    classifier.id(),
+                    answer.sessionId(),
+                    answer.traceId(),
+                    answer.spanId(),
+                    SampleShowcase.GENERATE,
+                    answer.unsupported(),
+                    answer.flagged() != null,
+                    scorerVersion,
+                    answer.startedAt().toString()));
+            if (answer.flagged() == null) continue;
+            detections.insert(
+                    Ids.ulid(),
+                    classifier.detector(),
+                    projectId,
+                    classifier.id(),
+                    classifier.classifierKey(),
+                    null,
+                    answer.sessionId(),
+                    answer.traceId(),
+                    answer.spanId(),
+                    Detection.Severity.WARN,
+                    Detection.Confidence.HIGH,
+                    groundednessDetectionEvidence(answer));
+        }
+
+        SampleShowcase.RateStat stat = dataset.groundedness();
+        ToolErrorDetector.Decision d = decision(stat, config.engine());
+        String callSite = stat.callSiteId();
+        String findingId = seedRateFinding(
+                projectId,
+                classifier,
+                stat,
+                d,
+                CauseKey.groundedness(classifier.id(), callSite),
+                FindingRow.Cause.GROUNDEDNESS_RATE,
+                GroundednessEvidence.payload(mapper, callSite, d, stat.baselineFailures(), config),
+                "Read the flagged answers against the articles they were written from. From "
+                        + REPORT_DATE.format(stat.onset())
+                        + " the replies add promises no article makes, like refunds within 24 hours and"
+                        + " exports with no row limit. The rise is real.");
+        if (findingId != null) caseOpener.ensureCaseFor(projectId, findingId, null);
+    }
+
+    /**
+     * Frustration on the threads' third turns: one assessment per scored turn and one detection per frustrated
+     * thread, then the finding the live rate service files, ruled positive at filing with its own summary, and
+     * its case. Scored with no model call, so the assessment rows carry the request as it would have been sent
+     * and a response shaped like the decision model's.
+     */
+    private void seedFrustration(String projectId, ClassifierRow classifier, SampleShowcase.Dataset dataset) {
+        FrustrationConfig config = FrustrationConfig.of(mapper, classifier.configJson());
+        String scorerVersion = config.scorerVersion();
+        String questions = writeJson(JevFrustrationQuestion.questions());
+        for (SampleShowcase.ScoredTurn turn : dataset.turns()) {
+            frustrationAssessments.insert(new FrustrationAssessmentRepository.Assessment(
+                    Ids.ulid(),
+                    projectId,
+                    classifier.id(),
+                    turn.traceId(),
+                    turn.rootSpanId(),
+                    turn.conversationId(),
+                    SampleShowcase.ASSEMBLE,
+                    turn.startedAt(),
+                    turn.frustrated(),
+                    scorerVersion,
+                    SAMPLE_DECISION_PROVIDER,
+                    SAMPLE_DECISION_MODEL,
+                    "{\"state\":" + writeJson(turn.state()) + ",\"questions\":" + questions + "}",
+                    frustrationResponse(turn.score()),
+                    420 + turn.state().currentUserMessage().length() / 4,
+                    new BigDecimal("0.00042000"),
+                    640 + (int) (turn.score() * 300)));
+            if (!turn.frustrated()) continue;
+            Map<String, Object> ev = new LinkedHashMap<>();
+            ev.put("model", SAMPLE_DECISION_MODEL);
+            ev.put("provider", SAMPLE_DECISION_PROVIDER);
+            ev.put("score", Math.round(turn.score() * 1000) / 1000.0);
+            ev.put("threshold", config.threshold());
+            ev.put("scorer_version", scorerVersion);
+            ev.put("k_turn", 3);
+            ev.put("call_site_id", SampleShowcase.ASSEMBLE);
+            detections.insert(
+                    Ids.ulid(),
+                    classifier.detector(),
+                    projectId,
+                    classifier.id(),
+                    classifier.classifierKey(),
+                    null,
+                    turn.conversationId(),
+                    turn.traceId(),
+                    turn.rootSpanId(),
+                    Detection.Severity.WARN,
+                    Detection.Confidence.HIGH,
+                    writeJson(ev));
+        }
+
+        SampleShowcase.RateStat stat = dataset.frustration();
+        ToolErrorDetector.Decision d = decision(stat, config.engine());
+        String callSite = stat.callSiteId();
+        String findingId = seedRateFinding(
+                projectId,
+                classifier,
+                stat,
+                d,
+                CauseKey.frustration(classifier.id(), callSite),
+                FindingRow.Cause.FRUSTRATION_RATE,
+                FrustrationEvidence.payload(mapper, callSite, d, stat.baselineFailures(), config),
+                FrustrationEvidence.SUMMARY);
+        if (findingId != null) caseOpener.ensureCaseFor(projectId, findingId, null);
+    }
+
+    /** What the frustration assessments name as the model that scored them: a Jev call on TypeSafe. */
+    private static final String SAMPLE_DECISION_PROVIDER = "TYPESAFE";
+
+    private static final String SAMPLE_DECISION_MODEL = "jev-latest";
+
+    /**
+     * A rate finding as the live rate services file it ({@code recordRecomputedRate}), with its members and
+     * witnesses, ruled positive with {@code summary}. Returns the finding id, or null when a ruled finding on the
+     * same cause already covered it.
+     */
+    private @Nullable String seedRateFinding(
+            String projectId,
+            ClassifierRow classifier,
+            SampleShowcase.RateStat stat,
+            ToolErrorDetector.Decision d,
+            String causeKey,
+            String causeKind,
+            String payload,
+            String summary) {
+        String now = Instant.now().toString();
+        String eventAt = stat.lastBucket().toString();
+        FindingRepository.Recorded recorded = findings.recordRecomputedRate(
+                Ids.ulid(),
+                projectId,
+                classifier.classifierKey(),
+                causeKey,
+                causeKind,
+                stat.callSiteId(),
+                FindingRow.SubjectKind.CLASSIFIER,
+                classifier.id(),
+                classifier.name(),
+                d.failuresSinceOnset(),
+                stat.callSiteId(),
+                d.onsetAt(),
+                payload,
+                eventAt,
+                stat.lastBucket().minus(Duration.ofHours(6)).toString(),
+                now);
+        if (recorded == null) return null;
+        evidence.record(projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, stat.members(), now);
+        evidence.record(projectId, recorded.findingId(), FindingEvidenceRow.Role.WITNESS, stat.witnesses(), now);
+        findings.recordTriage(projectId, recorded.findingId(), FindingRow.TriageVerdict.POSITIVE, summary, null, now);
+        return recorded.findingId();
+    }
+
+    /**
+     * The decision tool_error's engine reaches on these counts: the Jeffreys-smoothed reference, the up arm's
+     * log-likelihood CUSUM over the trials since onset, and the decision interval that reference earns.
+     */
+    private static ToolErrorDetector.Decision decision(SampleShowcase.RateStat stat, ToolErrorConfig engine) {
+        double p0 = (stat.baselineFailures() + 0.5) / (stat.baselineTrials() + 1.0);
+        double p1 = ToolErrorDetector.shiftedUp(p0, engine);
+        long n = stat.trialsSinceOnset();
+        long f = stat.failuresSinceOnset();
+        double s = Math.max(0, f * Math.log(p1 / p0) + (n - f) * Math.log((1 - p1) / (1 - p0)));
+        double current = n == 0 ? p0 : (double) f / n;
+        return new ToolErrorDetector.Decision(
+                true,
+                ToolErrorDetector.Direction.UP,
+                s,
+                engine.decisionIntervalFor(p0),
+                ToolErrorDetector.criticality(s),
+                p0,
+                current,
+                (current - p0) * 100.0,
+                ToolErrorDetector.cohensH(p0, current),
+                n,
+                f,
+                stat.baselineTrials(),
+                stat.onset().toString(),
+                null);
+    }
+
+    /** The detection the groundedness detector writes for a flagged answer: its flagged sentence, with offsets. */
+    private String groundednessDetectionEvidence(SampleShowcase.ScoredAnswer answer) {
+        SampleShowcase.FlaggedSentence flagged = Objects.requireNonNull(answer.flagged());
+        Map<String, Object> sentence = new LinkedHashMap<>();
+        sentence.put("start", flagged.start());
+        sentence.put("end", flagged.end());
+        sentence.put("unsupported", Math.round(answer.unsupported() * 1000) / 1000.0);
+        Map<String, Object> ev = new LinkedHashMap<>();
+        ev.put("head", "groundedness");
+        ev.put("unsupported", Math.round(answer.unsupported() * 1000) / 1000.0);
+        ev.put("conflict", Math.round(answer.conflict() * 1000) / 1000.0);
+        ev.put("premise_had_evidence", true);
+        ev.put("flagged_sentences", List.of(sentence));
+        ev.put("claim", flagged.text());
+        return writeJson(ev);
+    }
+
+    /** The decision model's answer to the one question, as its response body carries it. */
+    private String frustrationResponse(double score) {
+        double other = (1 - score) * 0.2;
+        Map<String, Object> probabilities = new LinkedHashMap<>();
+        probabilities.put(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT, round(score));
+        probabilities.put(JevFrustrationQuestion.UNHAPPY_OTHER_CAUSE, round(other));
+        probabilities.put(JevFrustrationQuestion.NEUTRAL_OR_POSITIVE, round(1 - score - other));
+        return writeJson(
+                Map.of("answers", Map.of(JevFrustrationQuestion.NAME, Map.of("probabilities", probabilities))));
     }
 
     private String writeJson(Object value) {
