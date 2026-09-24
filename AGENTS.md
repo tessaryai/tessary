@@ -46,7 +46,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`classify-service/`](./classify-service/) | Standalone encoder service (ECS Fargate). Serves `/embed` for SOP conformance; in the open edition it serves no `/classify` head, and groundedness runs on `classifiers/groundedness/serve.py` instead. See its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`), the shared eval framework, and the corpus emitters. Training and research code lives in `tessaryai/experiments`, not here |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`) and the OTLP trace emitter the boot check uses (`classifiers/data_gen/`). Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
@@ -73,8 +73,7 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
   and quality-dimension shards this tree has nothing to run; `BundleAssembler` routes them to
   `Shard.IGNORE` rather than rejecting the bundle, and that is deliberate.
 - **Python uses uv, never pip or poetry.** `classifiers/` owns a `pyproject.toml` + `uv.lock`;
-  the gate runs `uv sync --frozen`, so a stale lockfile is a failure rather than a silent
-  re-resolve.
+  run `uv lock` after any dependency change and commit both.
 - **Node packages use pnpm, never npm.** Each has its own `pnpm-lock.yaml`; they are deliberately
   NOT a workspace, so every Dockerfile can build from its own directory. Two consequences worth
   knowing before you touch one: pnpm 11 keeps settings in `pnpm-workspace.yaml` rather than the

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.frustration;
 
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
-import ai.tessary.classifier.substrate.StructuredThread;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -66,11 +64,11 @@ public final class FrustrationTurnBuilder {
     private final ConversationThreadAssembler assembler;
     private final Caps caps;
 
-    public FrustrationTurnBuilder(ConversationThreadAssembler assembler) {
+    FrustrationTurnBuilder(ConversationThreadAssembler assembler) {
         this(assembler, Caps.DEFAULT);
     }
 
-    public FrustrationTurnBuilder(ConversationThreadAssembler assembler, Caps caps) {
+    FrustrationTurnBuilder(ConversationThreadAssembler assembler, Caps caps) {
         this.assembler = assembler;
         this.caps = caps;
     }

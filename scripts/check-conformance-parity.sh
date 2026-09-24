@@ -69,8 +69,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# Importability, not directory existence: the same probe shape and the same three-way answer as
-# check-classifier-parity.sh, for the same reason. A broken uv environment must never read as an
+# Importability, not directory existence. A broken uv environment must never read as an
 # absent generator and quietly turn a gate into a skip. 0 = present, 3 = absent, anything else is
 # a hard failure. Path entries come out of pyproject.toml so this file names no fixed directory
 # and stays true if the layout moves.

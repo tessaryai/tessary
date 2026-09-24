@@ -40,10 +40,10 @@
 #   handbook/                     all 8 files publish. Company handbook, written to be read outside.
 #   .claude/launch.json           publishes. A dev-server config with no internal process in it; the
 #                                 rest of .claude/ (commands/, workflows/) went private separately.
-#   classifiers/framework/,       publish. The open half of the classifier tree: the harness, the
-#   classifiers/groundedness/,    groundedness server, their tests, pyproject.toml and uv.lock.
-#   classifiers/data_gen/         The research half (experiments/, frustration/, behavior_drift/,
-#                                 refusal/, out/) is excluded instead.
+#   classifiers/groundedness/,    publish. The open half of the classifier tree: the groundedness
+#   classifiers/data_gen/         server, the boot check's trace emitter, their test, pyproject.toml
+#                                 and uv.lock. The research half (experiments/, frustration/,
+#                                 behavior_drift/, refusal/, out/) is excluded instead.
 #                                 data_gen/ publishes because check-open-boot.sh's trace emitter is
 #                                 this build's only working one.
 

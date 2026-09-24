@@ -374,7 +374,7 @@ public class ChatModelFactory {
 
     /**
      * Whether judge calls go through the {@link LlmPacer} (sequential, single-in-flight,
-     * 429 backoff). OpenRouter/Ollama/Moonshot stay paced under the same single-flight
+     * 429 backoff). OpenRouter/Moonshot stay paced under the same single-flight
      * assumption their rate limits require. The caching providers (Bedrock, Anthropic) and
      * OpenAI direct are unpaced: their throughput is bounded by the worker pools rather than by
      * a per-call min-interval, and 429 backoff plus retry covers the rest.
@@ -409,7 +409,7 @@ public class ChatModelFactory {
     private ChatModel build(ProviderCredential cred, ModelCatalog.CatalogEntry entry, String effort) {
         return switch (entry.provider()) {
             // GEMINI/GLM/GROK/CUSTOM all speak the OpenAI Chat Completions wire against their own
-            // base URL (see PlatformCatalog); no new build method, same as OpenRouter/Ollama/Moonshot.
+            // base URL (see PlatformCatalog); no new build method, same as OpenRouter/Moonshot.
             case OPENAI, OPENROUTER, MOONSHOT, GEMINI, GLM, GROK, CUSTOM -> buildOpenAiCompat(cred, entry, effort);
             case ANTHROPIC -> buildAnthropic(cred, entry);
             case BEDROCK -> buildBedrock(cred, entry);

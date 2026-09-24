@@ -321,8 +321,8 @@ public class ProviderCredentialController {
 
     /**
      * Bedrock needs a region (AWS auth). {@code api_key}/{@code none} platforms are not
-     * checked; a credential may be saved without a key, and a paid platform then fails at run
-     * time with {@code MISSING_CREDENTIALS} (only Ollama may run keyless).
+     * checked; a credential may be saved without a key, and the platform then fails at run time
+     * with {@code MISSING_CREDENTIALS}.
      *
      * <p>{@code auth_mode} is meaningful only for {@code AUTH_AWS} platforms (Bedrock/mantle): a
      * non-AWS platform saving {@code iam_role} would be a setting that can never take effect, since

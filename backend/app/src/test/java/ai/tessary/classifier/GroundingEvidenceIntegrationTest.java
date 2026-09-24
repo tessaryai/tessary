@@ -236,8 +236,8 @@ class GroundingEvidenceIntegrationTest {
 
     @Test
     void anEmbeddingSpanCountsAsReachingOutside() {
-        // The reached-outside kinds must match what the rest of the codebase treats as external work
-        // (ConversationThreadAssembler.TOOL_KINDS). Omitting one makes its traces read GROUNDLESS —
+        // The reached-outside kinds are every tool-like span kind (tool, mcp, retrieval, reranker,
+        // embedding). Omitting one makes its traces read GROUNDLESS —
         // scored against the prompt — when they should read BLIND and abstain.
         String pid = TenantFixture.bootstrap(tenants, "grounding-embedding")
                 .project()

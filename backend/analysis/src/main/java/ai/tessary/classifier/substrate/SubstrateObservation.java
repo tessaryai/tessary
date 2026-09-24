@@ -27,10 +27,10 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>{@code input}/{@code output} are the raw payload columns read from {@code span_payload} — the
  * role-tagged {@code gen_ai} message envelope on the native OTLP path (kept raw for rendering
- * fidelity). Text detectors must NOT read them directly: the encoder classifier scores the assembled
- * conversation thread ({@link ConversationThreadAssembler}); the regex/pair/structural detectors read
- * {@link #inputText()} / {@link #outputText()} / {@link #groundingPremiseText()}, each unwrapped from
- * the envelope so a classifier never scores envelope JSON.
+ * fidelity). Text detectors must NOT read them directly: they read {@link #inputText()} /
+ * {@link #outputText()} / {@link #groundingPremiseText()}, each unwrapped from the envelope so a
+ * classifier never scores envelope JSON. The frustration classifier parses the envelope message by
+ * message.
  */
 public record SubstrateObservation(
         String observationId,
@@ -102,7 +102,7 @@ public record SubstrateObservation(
      * The Groundedness built-in's premise source: system AND user text combined, unlike the user-only
      * {@link #inputText()}. Source content commonly rides in either — a system message ("here is the
      * document: …") or a pasted-inline user message — so both roles are kept for the premise, unlike
-     * the thread view which excludes system.
+     * the frustration thread, which excludes system.
      */
     public String groundingPremiseText() {
         return ContentExtractor.columnTextForRoles(input, Set.of("system", "user"));

@@ -11,7 +11,6 @@ import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
 import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.TurnFacts;
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EligibleTurn;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.config.FrustrationProperties;
 import ai.tessary.llm.decisions.DecisionAnswer;
@@ -90,7 +89,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private final Clock clock;
 
     @Autowired
-    public JevFrustrationDetector(
+    JevFrustrationDetector(
             ConversationThreadAssembler assembler,
             DecisionClient client,
             DecisionProviderResolver providers,

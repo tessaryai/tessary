@@ -3,7 +3,6 @@ package ai.tessary.classifier.catalog;
 
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.EncoderScorer;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -140,11 +139,7 @@ public record ClassifierModelModule(
     }
 
     /** The shared dependencies a detector is built from, injected once by the catalog. */
-    public record Deps(
-            ObjectMapper mapper,
-            EncoderScorer encoderScorer,
-            SubstrateReadRepository substrate,
-            ConversationThreadAssembler threadAssembler) {}
+    public record Deps(ObjectMapper mapper, EncoderScorer encoderScorer, SubstrateReadRepository substrate) {}
 
     /** Builds the classifier's detector from the shared dependencies. */
     @FunctionalInterface

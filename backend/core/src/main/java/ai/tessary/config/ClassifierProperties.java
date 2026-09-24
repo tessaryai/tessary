@@ -48,37 +48,8 @@ public class ClassifierProperties {
     private long deadLetterCooldownSeconds = 1800;
 
     /**
-     * Classifier signals. Cold-start training labels a bounded sample of recent observations with a
-     * platform-funded LLM (the whole point is to keep the LLM off the per-trace hot path, bound by COUNT,
-     * never by truncating trace text), embeds them, and trains a per-project centroid model.
-     */
-    private int classifierSampleLimit = 100;
-
-    /** Minimum labeled examples (across both classes) required before a centroid model can be trained. */
-    private int classifierMinExamples = 4;
-
-    /**
-     * Character budget for a THREAD-scoped classifier's reduced conversation thread. Turns are already
-     * compact (assistant prose capped, tool payloads collapsed to terse markers), so the budget bounds
-     * how much history rides through {@link
-     * ai.tessary.classifier.substrate.ConversationThreadRenderer#reduceThread}: over budget it keeps the
-     * baseline head (earliest turn + earliest failure marker) and the most-recent {@link
-     * #threadRecentTurns} turns, thins the middle, and marks the drop. ~8000 chars is ~2k tokens; the
-     * encoder is not finally pinned, so this stays a config knob.
-     */
-    private int threadCharBudget = 8000;
-
-    /**
-     * How many of the most-recent turns the reduction always keeps intact when it must evict to fit
-     * {@link #threadCharBudget}. Recency carries the scored signal; the baseline head (earliest turn +
-     * earliest failure marker) is kept alongside it and the middle is thinned.
-     */
-    private int threadRecentTurns = 3;
-
-    /**
-     * Row cap on how many of a session's most-recent observations a THREAD assembly loads before
-     * the character budget trims further. Bounds the per-observation session read so one enormous
-     * session can't be walked in full on the sweep.
+     * Row cap on how many of a conversation's most-recent spans the frustration classifier reads per
+     * scored turn, so one long conversation is never walked in full on the sweep.
      */
     private int threadMaxObservations = 40;
 
@@ -352,38 +323,6 @@ public class ClassifierProperties {
 
     public void setDeadLetterCooldownSeconds(long v) {
         this.deadLetterCooldownSeconds = v;
-    }
-
-    public int getClassifierSampleLimit() {
-        return classifierSampleLimit;
-    }
-
-    public void setClassifierSampleLimit(int v) {
-        this.classifierSampleLimit = v;
-    }
-
-    public int getClassifierMinExamples() {
-        return classifierMinExamples;
-    }
-
-    public void setClassifierMinExamples(int v) {
-        this.classifierMinExamples = v;
-    }
-
-    public int getThreadCharBudget() {
-        return threadCharBudget;
-    }
-
-    public void setThreadCharBudget(int v) {
-        this.threadCharBudget = v;
-    }
-
-    public int getThreadRecentTurns() {
-        return threadRecentTurns;
-    }
-
-    public void setThreadRecentTurns(int v) {
-        this.threadRecentTurns = v;
     }
 
     public int getThreadMaxObservations() {

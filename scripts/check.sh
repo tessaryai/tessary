@@ -29,11 +29,9 @@
 #
 # MODE IS A PROXY; A PHYSICAL DETACH IS THE PROOF. `--edition open` runs with the overlay
 # directory still on disk and only changes what this script asks for; it cannot see a break that
-# exists solely because the directory is gone. The seams that matter still resolve under any
-# flag: `backend/pom.xml`'s `paid` profile activates on the overlay pom existing, and the Python
-# gates reach a relocated test through `classifiers/pyproject.toml`'s second pythonpath entry,
-# which pytest silently ignores when it isn't a directory. The gate you can run every day is
-# `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d" && bash scripts/check.sh --edition open)`;
+# exists solely because the directory is gone. The seam that matters still resolves under any
+# flag: `backend/pom.xml`'s `paid` profile activates on the overlay pom existing. The gate you can
+# run every day is `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d" && bash scripts/check.sh --edition open)`;
 # that's what actually proves the property, not moving the overlay directory aside, which leaves
 # the git index believing files under it still exist, so `check-docs-links.sh` dies first with a
 # stale-path error before any other gate runs.
@@ -75,8 +73,8 @@
 # this line has to assemble all of them:
 #   actions/setup-java java-version 25      -- check-backend.sh hard-fails on any other JDK
 #   pnpm/action-setup + actions/setup-node  -- check-frontend.sh runs tsc and a real vite build
-#   astral-sh/setup-uv                      -- check-classifiers.sh (uv sync + pytest over classifiers/tests),
-#                                               the Python gates, and cfn-lint in check-groundedness-setup.sh
+#   astral-sh/setup-uv                      -- check-groundedness-serve.sh (pytest over serve.py) and
+#                                               cfn-lint in check-groundedness-setup.sh
 #   actions/setup-python                    -- check-classify-service.sh, check-vendored-plugin-rules.sh
 #                                               (plus pip pyyaml + pytest), and the overlay's own
 #                                               Python gate when it's present
@@ -100,8 +98,7 @@
 #      rules half runs here as `vendored-plugin-rules`). It was fourteen
 #      jobs until the trim that deleted every job duplicating a row below.
 #   3. Standalone Taskfile targets neither pipeline runs the same way: `conformance:parity`
-#      (in CI, not here), `classifiers:parity` (here, not in CI) and `migrations:populated`
-#      (deliberately in neither).
+#      (in CI, not here) and `migrations:populated` (deliberately in neither).
 # `--edition` filters set 1 and nothing else. The manifest still carries a row for every
 # `scripts/check-*.sh` on disk, EXCLUDED ones included, because the completeness assertion below
 # is what stops a gate from being deleted from the pipeline by accident and saying nothing.
@@ -148,13 +145,6 @@
 #                                          engine it runs, so with the overlay gone there's no SOP
 #                                          compile service and a skip is the true answer rather than a hole.)
 #   scripts/check-mcp-bridge.sh            (node:test over packages/mcp, the @tessaryai/mcp stdio bridge)
-#   scripts/check-classifiers.sh           (pytest over classifiers/tests: the open eval framework and
-#                                          groundedness serve.py)
-#   scripts/check-classifier-parity.sh     (Python<->Java/JS classifier port pins. Three of its six
-#                                          pins are on overlay-owned modules and three are not, so
-#                                          it takes --edition and runs 3 or 6; see its own header.)
-#   scripts/check-no-bedrock.sh            (hard ban on AWS Bedrock in Python tooling; runs on every
-#                                          slice and in every edition, deliberately; see below)
 #   scripts/check-groundedness-serve.sh    (classifiers/groundedness/serve.py runs as one file from
 #                                          its URL: pytest over its standalone import, PEP 723 header,
 #                                          encoding answer key and contract fixtures. Needs uv, and
@@ -331,8 +321,6 @@ sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN|RUN|open on both sid
 mcp-bridge|scripts/check-mcp-bridge.sh|RUN|RUN|the @tessaryai/mcp stdio bridge's node:test suite, which otherwise runs only in release.yml right before npm publish; zero dependencies, needs only node
 compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no SOP compile service; the service, its engine and its gate live in the overlay together|a gate that lives in the overlay
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
-classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
-no-bedrock|scripts/check-no-bedrock.sh|RUN|RUN|repo-wide invariant, every slice and every edition
 groundedness-serve|scripts/check-groundedness-serve.sh|RUN|RUN|open on both sides; setup runs serve.py from its URL, so this is the only place an import, header or encoding break shows up before a user runs it
 groundedness-setup|scripts/check-groundedness-setup.sh|RUN|RUN|open on both sides; a setup MD whose checksum line lags serve.py or the template stops every install at the checksum, and nothing else reads that line before a user does. A named exception to the no-markdown rule: it reads checksum lines, URLs and one heading, not prose
 blob-links|scripts/check-blob-links.sh|RUN|RUN|open on both sides; the in-app prompts, skills and docs send people and agents to files by their GitHub path, so a move 404s them all. A named exception to the no-markdown rule: it reads link paths and, for an anchor, headings, never prose
@@ -341,7 +329,6 @@ frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
 paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid frontend surfaces; they live in the overlay|a gate that lives in the overlay
 backend|scripts/check-backend.sh|RUN|RUN:-P !paid|one script, both editions; the JDK-25 guard is in front of both
-classifiers|scripts/check-classifiers.sh|RUN|RUN|classifiers/tests over uv; open on both sides (pyproject's testpaths is the open tests/ only)
 conformance-parity|scripts/check-conformance-parity.sh|EXCLUDED:run by `task conformance:parity` and the CI conformance-parity job, never by this pipeline|EXCLUDED:same, and its generator is paid so the open edition would skip it anyway|declared here only so the completeness assertion can see it
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|EXCLUDED:same|declared here only so the completeness assertion can see it
 open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only boot-checks.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -523,13 +510,7 @@ _summary() {
     if [ "$EDITION" = open ] && [ -f tessary-paid/pom.xml ]; then
         echo ""
         echo "check: this was the OPEN edition with tessary-paid/ still on disk, which is a PROXY."
-        echo "       It cannot see a break that appears only when the directory is GONE. Maven is"
-        echo "       NOT such a gap: -P with the paid profile negated deactivates it exactly as its"
-        echo "       absence would. The real one is the Python import seam: every relocated test is"
-        echo "       reached through classifiers/pyproject.toml's second pythonpath entry,"
-        echo "       ../tessary-paid/classifiers, which pytest ignores when it is not a directory —"
-        echo "       so with the overlay present the packages resolve no matter which edition was"
-        echo "       asked for. The proof is:"
+        echo "       It cannot see a break that appears only when the directory is GONE. The proof is:"
         echo "         d=\$(bash scripts/lib/export-simulate.sh) && (cd \"\$d\" && bash scripts/check.sh --edition open)"
         echo "       NOT 'mv tessary-paid /tmp/' — that leaves the git index believing"
         echo "       tessary-paid/README.md still exists, so check-docs-links.sh dies first with a"
@@ -588,14 +569,12 @@ if [ -z "$SLICES" ]; then
     _gate compose-artifact
     _gate classify-service
     _gate groundedness-serve
-    _gate classifiers
     _gate groundedness-setup
     _gate slack-service
     _gate sandbox-runner
     _gate mcp-bridge
     _gate compile-service
     _gate overlay-schema
-    _gate no-bedrock
     _gate price-book-contract
     _gate frontend
     _gate paid-image
@@ -671,11 +650,9 @@ if [ "$want_compile_service" = 1 ]; then
     _gate compile-service
 fi
 
-# ALWAYS, whatever slice was asked for. The Bedrock ban, the license-header gate and the price-book
-# contract are all repo-wide invariants and all cheap (a few greps / a text scan / one JSON parse),
-# so a narrow `task check -- rca` must not be a hole a new call site, a new header-less file or a
-# moved price book slips through.
-_gate no-bedrock
+# ALWAYS, whatever slice was asked for. The license-header gate and the price-book contract are
+# both repo-wide invariants and both cheap (a text scan / one JSON parse), so a narrow
+# `task check -- rca` must not be a hole a new header-less file or a moved price book slips through.
 _gate license-headers
 _gate price-book-contract
 # Also unconditional, for the same reason: docker-compose.yml is the PUBLISHED one-command

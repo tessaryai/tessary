@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
  * Unit acceptance for {@link RegexDetector}: an NL phrase, compiled once to a regex, fires over the
  * selected observation field with no model call; {@code config_json} overrides the phrases, field,
  * and word-boundary. Evidence is bounded JSON. Literal keyword matching stays per-observation and
- * field-restricted (unlike the encoder classifier, which scores the whole conversation thread).
+ * field-restricted.
  */
 class RegexDetectorTest {
 

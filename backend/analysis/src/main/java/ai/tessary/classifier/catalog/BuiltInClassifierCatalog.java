@@ -13,7 +13,6 @@ import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.detector.SecretLeakDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetector;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -497,9 +496,8 @@ public class BuiltInClassifierCatalog {
             ObjectMapper mapper,
             SubstrateReadRepository substrate,
             EncoderScorer encoderScorer,
-            ConversationThreadAssembler threadAssembler,
             ObjectProvider<DetectorSupplier> discovered) {
-        Deps deps = new Deps(mapper, encoderScorer, substrate, threadAssembler);
+        Deps deps = new Deps(mapper, encoderScorer, substrate);
 
         // Catalog metadata + built-in detectors are both derived from the manifests.
         this.builtIns = MODULES.stream().map(ClassifierModelModule::toBuiltIn).toList();

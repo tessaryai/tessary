@@ -132,7 +132,7 @@ share a lifecycle — but a package split, so the module boundary stops it regre
 | `finding/` | 36 | the shared findings + triage feature every classifier serves through: the `finding`/`finding_evidence` store, the read surface and its DTOs, the Layer-2 queue, engine, worker, sandbox client and auto-escalator, and the two ports a classifier attaches through (`TriageSource`, `CauseResolver`) — see its `package-info.java` for the seam contract |
 | `metric/` | 16 | duration + cost drift |
 | `toolerror/` | 13 | tool-error rate drift |
-| `substrate/` | 13 | trajectories, thread assembly, observation text, call-site reads, the trace/action reader all three drift classifiers share |
+| `substrate/` | 10 | trajectories, observation text, call-site reads, the trace/action reader all three drift classifiers share |
 | `detector/` | 10 | encoder + deterministic detectors |
 | `encoder/` | 2 | the embedding seam and its HTTP implementation, neutral to any one classifier |
 | `catalog/` | 8 | `BuiltInClassifierCatalog`, `ClassifierModelModule`, `BuiltInDetector`, `DetectorSupplier`, `ClassifierMethodCard`, `OpenDetectionTables`, and provisioning's two triggers — `ClassifierSeedListener` (once, on project creation) + `ClassifierCatalogWorker` (the periodic reconcile over every active project). Provisioning lives here rather than in `worker/` because it answers to the capability flag layer, not to the sweep: which classifiers a project HAS is a licensing question, and which of them sweep is a traffic question |

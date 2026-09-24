@@ -128,8 +128,7 @@
 #                                    APPLIED changeset, and editing a comment there changes the
 #                                    Liquibase checksum on every existing database. They ship
 #                                    unedited, deliberately.
-#   synthetic regression fixtures    present — classifiers/framework/fixtures/context_contract.json,
-#                                    contract/tests/, the backend test resources
+#   synthetic regression fixtures    present — contract/tests/, the backend test resources
 #   public extension interfaces      present — the classifier extension SPI and its reference page
 #   architecture + configuration     present — devdocs/reference/architecture.md, config-keys.md,
 #   references                       modules.md, principles.md and the rest of devdocs/ that stayed
@@ -145,22 +144,17 @@
 # Read that box as "no AGPL or CLA DECLARATION survives". Two greps, because the narrow one is
 # misleading about what is actually in the tree:
 #     git grep -nIE 'AGPL|\bCLA\b' -- . (excluding this build's export-excluded directory)
-#         -> ONE hit: classifiers/pyproject.toml:18. CONTRIBUTING.md does NOT match, because it
+#         -> no hits. CONTRIBUTING.md does NOT match, because it
 #            spells the term out and never writes the acronym.
 #     git grep -nIE 'AGPL|\bCLA\b|Contributor License Agreement|Developer Certificate' -- . (excluding that same directory)
-#         -> TWO hits, the pair below. Use this one; the narrow pattern would let someone delete
+#         -> ONE hit, below. Use this one; the narrow pattern would let someone delete
 #            CONTRIBUTING.md's grant without the grep ever noticing it had gone.
-# Both hits are CORRECT. Deleting either would make the tree less true:
+# The hit is CORRECT. Deleting it would make the tree less true:
 #
 #   CONTRIBUTING.md:25 — "We don't require a separate Contributor License Agreement or Developer
 #     Certificate of Origin sign-off: submitting the pull request is the grant." This is the
 #     inbound-equals-outbound Apache 2.0 grant, and this exemption makes it the source of truth. It states the
 #     ABSENCE of a CLA; the string is the statement, not a contradiction of it.
-#
-#   classifiers/pyproject.toml:18 — "# cleanlab relicensed AGPL->Apache-2.0 at v2.9.0 — the >=2.9
-#     pin is a license floor, keep it." A version-floor comment about a THIRD-PARTY dependency's
-#     history, not a declaration about this repo. Removing the comment would eventually cost the
-#     pin, which is the thing actually keeping AGPL code out of the dependency set.
 #
 # devdocs/reference/principles.md's "OSS core is AGPL-3.0 with a CLA" section was deleted during
 # the license cleanup, not rewritten: it was the third place LICENSE and CONTRIBUTING.md could drift apart, and it
@@ -321,6 +315,8 @@ backend/analysis/src/main/java/ai/tessary/classifier/finding/dossier/MetricDrift
 backend/analysis/src/main/java/ai/tessary/classifier/finding/dossier/ToolErrorDossier.java
 backend/analysis/src/main/java/ai/tessary/classifier/finding/dossier/WindowFindingDossier.java
 backend/analysis/src/main/java/ai/tessary/classifier/finding/package-info.java
+backend/analysis/src/main/java/ai/tessary/classifier/frustration/ConversationThreadAssembler.java
+backend/analysis/src/main/java/ai/tessary/classifier/frustration/StructuredThread.java
 backend/analysis/src/main/java/ai/tessary/classifier/metric/MetricBaselineRepository.java
 backend/analysis/src/main/java/ai/tessary/classifier/metric/MetricBaselineRow.java
 backend/analysis/src/main/java/ai/tessary/classifier/metric/MetricControl.java
@@ -342,8 +338,6 @@ backend/analysis/src/main/java/ai/tessary/classifier/substrate/BehaviorSubstrate
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/CallSiteFactListener.java
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/CallSiteSchemaReads.java
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/CallSiteShapeReads.java
-backend/analysis/src/main/java/ai/tessary/classifier/substrate/ConversationThreadAssembler.java
-backend/analysis/src/main/java/ai/tessary/classifier/substrate/ConversationThreadRenderer.java
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/ObservationText.java
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/SubstrateController.java
 backend/analysis/src/main/java/ai/tessary/classifier/substrate/SubstrateObservation.java
@@ -408,7 +402,6 @@ backend/analysis/src/test/java/ai/tessary/cases/CasePageCodecTest.java
 backend/analysis/src/test/java/ai/tessary/cases/MetricDriftSourceTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/CheckoutRoot.java
 backend/analysis/src/test/java/ai/tessary/classifier/ClassifierHealthTest.java
-backend/analysis/src/test/java/ai/tessary/classifier/ConversationThreadContractParityTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/TestObjectProvider.java
 backend/analysis/src/test/java/ai/tessary/classifier/catalog/ClassifierMethodCardTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/catalog/ClassifierModelModuleCatalogTest.java
@@ -430,7 +423,6 @@ backend/analysis/src/test/java/ai/tessary/classifier/metric/MetricDriftDetectorT
 backend/analysis/src/test/java/ai/tessary/classifier/metric/MetricHistogramTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/metric/MetricSuppressionTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/substrate/ActionSymbolTest.java
-backend/analysis/src/test/java/ai/tessary/classifier/substrate/ConversationThreadAssemblerTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/substrate/TrajectoryAssemblerParityTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/toolerror/ToolErrorDetectorTest.java
 backend/analysis/src/test/java/ai/tessary/classifier/toolerror/ToolErrorTrendTest.java
@@ -496,13 +488,13 @@ backend/app/src/test/java/ai/tessary/classifier/detector/SecretLeakDetectorTest.
 backend/app/src/test/java/ai/tessary/classifier/finding/BehaviorBlockedRecurrenceIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/finding/BehaviorFindingOnsetTest.java
 backend/app/src/test/java/ai/tessary/classifier/finding/SharedFindingTableIntegrationTest.java
+backend/app/src/test/java/ai/tessary/classifier/frustration/ConversationThreadAssemblerIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/metric/MetricBaselineRepositoryTest.java
 backend/app/src/test/java/ai/tessary/classifier/metric/MetricDriftSweepIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/metric/MetricFindingResolveIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/metric/MetricSourceTest.java
 backend/app/src/test/java/ai/tessary/classifier/substrate/BehaviorEventTimeReadIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/substrate/BehaviorTailWindowIntegrationTest.java
-backend/app/src/test/java/ai/tessary/classifier/substrate/ConversationThreadAssemblerIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/substrate/TraceScopeIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/toolerror/ToolErrorClassifierIntegrationTest.java
 backend/app/src/test/java/ai/tessary/classifier/worker/ClassifierJobRepositoryTest.java
@@ -1111,30 +1103,7 @@ classifiers/.gitignore
 classifiers/README.md
 classifiers/data_gen/__init__.py
 classifiers/data_gen/emit_local.py
-classifiers/data_gen/food_delivery/__init__.py
-classifiers/data_gen/food_delivery/consolidate.py
-classifiers/data_gen/food_delivery/design.py
-classifiers/data_gen/food_delivery/emit.py
-classifiers/data_gen/food_delivery/env.py
-classifiers/data_gen/food_delivery/generate.py
-classifiers/data_gen/food_delivery/run_parallel.py
-classifiers/framework/__init__.py
-classifiers/framework/agreement.py
-classifiers/framework/annotation_io.py
-classifiers/framework/audit.py
-classifiers/framework/context.py
-classifiers/framework/fixtures/context_contract.json
-classifiers/framework/harness.py
-classifiers/framework/judge.py
-classifiers/framework/metrics.py
-classifiers/framework/no_bedrock.py
-classifiers/framework/schema.py
-classifiers/framework/scorer.py
 classifiers/pyproject.toml
-classifiers/tests/test_agreement.py
-classifiers/tests/test_audit.py
-classifiers/tests/test_context.py
-classifiers/tests/test_no_bedrock.py
 classifiers/uv.lock
 classify-service/.dockerignore
 classify-service/.gitignore
@@ -1434,7 +1403,6 @@ sandbox-runner/launcher/test/sandbox-posture.test.js
 scripts/audit-evals-shape.py
 scripts/check-backend.sh
 scripts/check-caddy.sh
-scripts/check-classifier-parity.sh
 scripts/check-classifier-quality-doc.sh
 scripts/check-classify-service.sh
 scripts/check-compose-artifact.sh
@@ -1449,7 +1417,6 @@ scripts/check-license-headers.sh
 scripts/check-migrations-populated.sh
 scripts/check-module-hygiene.sh
 scripts/check-namespaces.sh
-scripts/check-no-bedrock.sh
 scripts/check-notice-coverage.sh
 scripts/check-open-artifacts.sh
 scripts/check-open-boot-selfhost.sh

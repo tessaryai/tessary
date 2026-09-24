@@ -39,8 +39,8 @@ dev_up_services() {
 
     echo "slim mode — skipping the classify + compile services (no gated encoder-weight download, no 8 GB container)." >&2
     # Derive the list from compose itself (grep it out) so new services are picked up
-    # automatically. `config --services` already omits profile-gated services (the classifier
-    # tooling behind `--profile classifiers`), which is what we want: an explicit service list
+    # automatically. `config --services` already omits profile-gated services, which is what we
+    # want: an explicit service list
     # would otherwise opt them in. Service names are bare tokens, so a word-split string is safe
     # here and avoids bash 3.2's empty-array-under-`set -u` pitfall on stock macOS.
     $compose config --services | grep -vxE 'classify|compile' | tr '\n' ' '
