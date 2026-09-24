@@ -37,7 +37,7 @@ A flagged message is not a finding on its own. Each call site learns its normal 
 
 `groundedness` is in this build and starts switched off on every project. It checks whether an answer is supported by the documents the call retrieved: a public model (`tessaryai/groundedness-classifier-v1`) reads the documents and the whole answer in one pass and flags the sentences they don't support. The model needs a GPU and runs outside Tessary's containers, on a Mac with Apple silicon for development or on a GPU instance on AWS for production. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md).
 
-A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
+A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md). [Catch answers your documents don't support](/classifiers/groundedness) covers turning it on, what it sends, what it costs, and reading the case.
 
 ### What is not available in the open edition
 
@@ -80,7 +80,7 @@ The record has four properties worth understanding, because they shape what you 
 
 **Onset is the start of the current spell.** It holds still while the detection keeps firing and moves only after the detection has gone quiet for longer than that classifier's own window. That gap is how Tessary observes a recovery: nothing writes "this came back", a recovered detection stops appearing.
 
-**A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings — and, on the Classifiers page, charts its volume — on the real days that traffic occurred.
+**A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings on the real days that traffic occurred, and the Classifiers page charts its volume on those days too.
 
 **The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. A high-confidence secret leak and a frustration finding are the exceptions: each is filed already ruled, because its numbers are the claim, and opens its case without triage. [Cases](/concepts/cases) covers that step.
 

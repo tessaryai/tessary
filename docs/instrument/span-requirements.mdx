@@ -124,11 +124,13 @@ A handoff between agents needs no attribute. It is already wire-encoded as an `e
 | Attribute | Required | Carries | Constraints |
 | --- | --- | --- | --- |
 | `retrieval.documents.<N>.document.id` | Optional | The retrieved document's id. | `<N>` is the index within the attribute name. Tessary stores the rank 1-based. |
-| `retrieval.documents.<N>.document.content` | Optional | The retrieved text. | |
+| `retrieval.documents.<N>.document.content` | Optional; required for groundedness | The retrieved text. | The text the groundedness classifier checks an answer against. |
 | `retrieval.documents.<N>.document.score` | Optional | The retrieval score. | |
 | `retrieval.documents.<N>.document.metadata` | Optional | Anything else about the document. | |
 
 Extraction runs on every span and does nothing when the prefix is absent, so there is no kind gate to satisfy.
+
+The groundedness classifier reads `document.content` from the answer's own trace, or from the nearest earlier trace in the same session that retrieved anything. An answer on a `rag_answer` call site with no document content to read is not scored when its session called a tool or a retriever. See [Which answers are scored](/classifiers/groundedness#which-answers-are-scored).
 
 ## Code and repository provenance
 

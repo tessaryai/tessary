@@ -3,9 +3,10 @@
 **What a classifier is, as a plug-in.** The platform's launch promise is that the classifier
 interface stays open, we charge for the classifiers we build, and anyone can write and run their own
 on the open interface. This page is that interface written down: the ports a classifier attaches
-through, how one is packaged and discovered, what happens when it is absent, and how the three paid
-classifiers with an actual Java extraction map onto it. (Frustration, once a fourth, is open: its
-detector, table and rate test all ship in this tree; see §8.)
+through, how one is packaged and discovered, what happens when it is absent, and how the paid
+classifiers with an actual Java extraction map onto it: behaviour drift and SOP conformance.
+(Frustration and groundedness, once paid, are open: their detectors, tables and rate tests all ship
+in this tree; see §8.)
 
 This is implemented far enough to sever the engine's compile-time dependency on the
 paid classifiers, and is used end to end. The seam was later extended a second
@@ -84,8 +85,12 @@ factories populate, keyed by whatever `kind()` the detector it builds reports. G
 worked example — its catalog entry sat in-tree with `detectorFactory: null` and the paid
 `GroundednessAutoConfiguration` supplied the real `GroundednessDetector` through this seam — until
 2026-09-21, when the model went public and the detector moved in-tree
-(`classifier/detector/groundedness/`). No shipped manifest entry has a null factory today; the seam
-stays, proven by `ClassifierModelModuleCatalogTest`'s two discovery tests.
+(`classifier/detector/groundedness/`). Two shipped manifest entries still have a null factory,
+`frustration` and `groundedness`, and both are open: each detector needs something the catalog's
+shared `Deps` do not carry (its own repositories, and for frustration the decision client), so each
+arrives through an in-tree
+`DetectorSupplier` (`FrustrationDetectorSupplier`, `GroundednessDetectorSupplier`). The seam is
+proven by `ClassifierModelModuleCatalogTest`'s two discovery tests.
 
 **What still constrains it, and it is sharp enough to be a live trap, not a footnote.**
 `BuiltInClassifierCatalog#builtIns()` and `ClassifierService`'s seeding both still read only the
@@ -270,7 +275,7 @@ implementation, `BehaviorTriageSource`, never left the open package. `AbsentAdap
 
 ---
 
-## 8. The paper port of the three paid classifiers
+## 8. The paper port of the paid classifiers, and of groundedness
 
 Frustration is not in this section: it is an open classifier. Its detector
 (`classifier/frustration/JevFrustrationDetector`, supplied to the catalog through a `DetectorSupplier`
@@ -278,7 +283,8 @@ in the same package), its `frustration_detection` table (registered in `OpenDete
 its rate test all ship in the open tree, and `Capability.FRUSTRATION` is not in
 `CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`. It seeds disabled, because enabling it spends the
 org's own provider credit. This section is about classifiers with an actual Java DETECTOR extraction
-into the paid tree, and there are three of those.
+into the paid tree: behaviour drift and SOP conformance today, and groundedness, which had one until
+its model went public and its detector moved back in-tree.
 
 **Behaviour drift** (package `ai.tessary.paid.classifier.behavior`):
 
@@ -299,7 +305,7 @@ between two classes in the same module, not a cross-boundary extension point.
 
 | Port | Implementation |
 |---|---|
-| none — in-tree `detectorFactory` closure | `GroundednessDetector` with its `VerifiableClaims` pre-filter, built by `BuiltInClassifierCatalog.MODULES` like frustration's |
+| `DetectorSupplier`, in-tree (`GroundednessDetectorSupplier`; the manifest entry's `detectorFactory` is null) | `GroundednessDetector` with its `VerifiableClaims` pre-filter, supplied like frustration's |
 
 **Groundedness was a PARTIAL extraction while its weights were private, and the shape is worth
 keeping on record because it is the one a future partial extraction would reuse.** Only the compute

@@ -118,6 +118,11 @@ these fields through `FindingController` (renamed from `BehaviorController`) and
 [`architecture.md`](./architecture.md) § *The three analysis layers*. On a frustration finding or case, the
 `frustration` block goes out with its `conversations` list emptied (`FrustrationDetail.withoutIds()`), so
 no conversation or trace id reaches a caller through it; `get_finding_evidence` still pages the refs.
+On a groundedness finding or case, the `groundedness` block goes out the same way
+(`GroundednessDetail.withoutIds()`): `rate`, `flagThreshold`, `baselineTraces`, `learningUntil`, and
+`arlTarget` survive, and `answers` is emptied and `answersNextCursor` nulled, so no flagged answer's
+trace or span id reaches a caller through it. Its `rate.failingTraces` is always empty, because the
+groundedness rate is read off the finding's flat payload rather than enumerated.
 
 **`get_finding` carries a second, separate redaction: no sample, no trace or span id of any kind.**
 It is a complete SUMMARY of every number a finding's classifier measured — a tool-error shift's
@@ -129,7 +134,7 @@ same method that strips the triage ruling above); `McpFindingToolsTest` pins it.
 /findings/{id}` renders `BehaviorFindingDetailView` unstripped — a human following a link is a
 reading aid, not an undeclared sample presented as the whole population, which is what handing an
 agent a handful of ids would be. `get_case` applies the same stripping to its `tool_error`,
-`malformed_output`, `secret_leak` and `frustration` blocks and returns `exemplars` empty, since those are the
+`malformed_output`, `secret_leak`, `frustration`, and `groundedness` blocks and returns `exemplars` empty, since those are the
 finding's evidence rows; the UI's `GET /cases/{id}` keeps every id. `get_finding_evidence` is where
 an agent gets ids on purpose, one row per unit the detector measured, never a sample.
 

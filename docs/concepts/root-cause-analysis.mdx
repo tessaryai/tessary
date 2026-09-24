@@ -78,6 +78,20 @@ The verdict is one of two:
 
 Each cause names what the agent did, how many of the frustrated sessions show it, the sessions and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and a suggested fix. Every cited session is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no session is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
 
+### On a groundedness case
+
+A groundedness finding has no before-and-after comparison either. It says that at one call site, the share of traces with an answer its documents don't support rose above the rate that call site learned as normal. So a run on one also returns causes, with the same two verdicts: `causes_identified` or `no_cause_found`.
+
+The agent is handed the newest flagged answers the finding cites, each with its question, its flagged sentences, and the documents it was checked against. A flagged sentence is where the model saw no support, not proof that the sentence is wrong. So the agent reads each flag against its documents before grouping, and treats a flag the documents do support as a false alarm rather than a cause. It then groups the rest by why the answers went beyond their documents, for example:
+
+- Retrieval served wrong, stale, or too few documents.
+- The prompt asks for more than the documents hold.
+- The answer merges or misreads the documents.
+
+Each cause names what the agent did, how many traces with a flagged answer show it, the traces that support it, where in your repository it comes from when a diff, prompt text, or retrieval code lines up with it, and a suggested fix. The checks on a frustration report apply here with traces in place of sessions: a trace the agent cites that the finding does not is dropped, a cause left with no trace is dropped, and a report with no cause left reads `no_cause_found`.
+
+On the case page, each cause has a button such as **Show 12 answers** that narrows the case's **Flagged answers** list to the answers behind that cause. [Run RCA on the case](/classifiers/groundedness#run-rca-on-the-case) covers reading the report.
+
 ## What a run needs before it is useful
 
 - **A case to press it on.** RCA analyzes the finding behind a case, so the chain from [classifiers and findings](/concepts/classifiers-and-findings) through [cases](/concepts/cases) has to have produced one.

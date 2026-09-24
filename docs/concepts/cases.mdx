@@ -23,7 +23,7 @@ The question it answers is narrow. Does the claim hold, was it measured over eno
 | `negative` | The claim does not hold. The finding closes. |
 | No ruling | The run did not settle the question, never reached the evidence, or did not happen at all. Nothing is written and the job retries. |
 
-A ruling settles the finding it landed on for good — closed on `negative`, or open only as long as the case it backs stays unresolved. Either way, the next time the cause fires it is a fresh finding, triaged from scratch: closing on `negative` is safe because a cause that is real fires again and gets a second look, and a cause that was a one-off costs nobody a queue entry it never re-enters.
+A ruling settles the finding it landed on for good: closed on `negative`, or open only as long as the case it backs stays unresolved. Either way, the next time the cause fires it is a fresh finding, triaged from scratch: closing on `negative` is safe because a cause that is real fires again and gets a second look, and a cause that was a one-off costs nobody a queue entry it never re-enters.
 
 A ruling changes nothing about the classifier itself. It never moves a baseline and never resolves anything. Absorbing a shift moves the reference an entire population is judged against, and that stays a decision a person makes.
 
@@ -39,9 +39,9 @@ Three things identify a case: the classifier that noticed, the subject it fired 
 
 The subject is the population, not the finding. A tool's failure rate rising in March and falling in April are two causes to explain and one thing to page about, so both land on the same case. The same holds for a call site whose latency moved twice.
 
-A case opens the moment a finding's ruling qualifies it — a triage positive, a person's **Real deviation**, or the ruling a high-confidence secret leak or a frustration finding carries when it is filed — never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
+A case opens the moment a finding's ruling qualifies it (a triage positive, a person's **Real deviation**, or the ruling a high-confidence secret leak or a frustration finding carries when it is filed), never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
 
-A case closes only when a person resolves or absorbs it — nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
+A case closes only when a person resolves or absorbs it. Nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
 
 ## The states a case moves through
 
@@ -60,7 +60,7 @@ A resolved case records why it closed, and the difference between the reasons is
 | `human` | A person closed it, with a required one-line reason. The classifier's reference did not move, so an unchanged population opens another case. |
 | `absorbed` | A person ruled the shift legitimate and the classifier's reference moved to include every window the case held. This level is the new baseline, and it does not open another case. |
 
-Both close every finding the case still holds open, in the same action. A frustration case cannot be absorbed. Resolving it records a disposition, and the call site learns its normal rate again, as [Resolving a frustration case](#resolving-a-frustration-case) describes.
+Both close every finding the case still holds open, in the same action. A frustration case cannot be absorbed. Resolving it records a disposition, and the call site learns its normal rate again, as [Resolving a frustration case](#resolving-a-frustration-case) describes. A groundedness case can be resolved or absorbed, and either way its call site learns its normal rate again, as [Resolving a groundedness case](#resolving-a-groundedness-case) describes.
 
 **Absorb as legitimate** is the one that ends the argument rather than this instance of it. Use **Resolve** when you have shipped a fix and the window has not caught up yet; use **Absorb as legitimate** when the new level is correct and you want it to become normal.
 
@@ -77,11 +77,26 @@ Resolving one asks what it was, and both answers restart that call site's test: 
 
 The rate is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live. Resolved before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
 
-Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA (root-cause analysis) requests and completions, resolution, muting and unmuting, and absorption.
+### Resolving a groundedness case
+
+A groundedness case comes through triage like most cases. Its finding says a call site's share of traces with a flagged answer rose above the share it learned as normal.
+
+On the case page, **Resolve case** and **Absorb as legitimate** appear once RCA (root-cause analysis) has produced a report. Until then the page reads "Run RCA before resolving this case." Resolving asks what the case was, and both answers restart the call site's test: the accumulator goes back to zero, and the call site learns its normal share again from the traces after the resolve.
+
+| Disposition | What it does |
+| --- | --- |
+| **Fixed** | Restarts the test. The answers the case cites stay flagged. |
+| **False alarm** | Restarts the test, and every flagged answer cited by any finding in the case is cleared. A trace stops counting as flagged unless another flagged answer in it still stands. |
+
+**Absorb as legitimate** restarts the test the same way, because a groundedness call site has no reference to pin, only one it learns. What differs is the record: an absorbed case says the new level is correct, and the answers it cites stay flagged.
+
+As with frustration, the share is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live.
+
+Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA requests and completions, resolution, muting and unmuting, and absorption.
 
 ## Running RCA locks the case
 
-Pressing **Run RCA** locks the case, at the moment of the press: no later finding can join a locked case, so the case an agent is reading stays exactly what the person saw when they pressed the button. The cause's next positive opens a **new** case instead of joining the locked one. Re-pressing on an already-locked case coalesces onto the same report, exactly as before locking existed — it only ever analyzes one finding, the one the case held when it was first pressed.
+Pressing **Run RCA** locks the case, at the moment of the press: no later finding can join a locked case, so the case an agent is reading stays exactly what the person saw when they pressed the button. The cause's next positive opens a **new** case instead of joining the locked one. Re-pressing on an already-locked case coalesces onto the same report, exactly as before locking existed. It only ever analyzes one finding, the one the case held when it was first pressed.
 
 A locked case is otherwise ordinary: it can still be muted, resolved, or absorbed, and a person can still read it and its report at any time.
 
@@ -91,7 +106,7 @@ New cases are listed on **Triage**, which is also where a project reports its pr
 
 Tessary seeds each project with a `case_opened` alert rule, enabled, which notifies nobody until a destination exists. Add one under **Settings → Notifications** and cases start arriving there with no rule to compose. A case-opened notification is written to be actionable without opening the product, so it carries the case reference, what moved and by how much, the classifier and call site, why it crossed that classifier's bar, and whether a triage run or a person ruled it real. Quiet hours and cadence defer a notification and never drop it: everything that opened while the window was shut goes out when it reopens, stamped with when the case actually opened.
 
-Only the open notifies. A later finding joining an already-open case is silent — it shows up in the case's activity trail, not as a second alert for one problem you already know about.
+Only the open notifies. A later finding joining an already-open case is silent. It shows up in the case's activity trail, not as a second alert for one problem you already know about.
 
 ## Read next
 

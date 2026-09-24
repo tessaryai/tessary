@@ -1,0 +1,216 @@
+---
+title: "Catch answers your documents don't support"
+description: "Turn on the groundedness classifier, see what it sends and where, what it costs, and read and resolve the finding and case it opens when a call site's answers stop matching their retrieved documents."
+---
+
+The groundedness classifier checks each answer your agent gives against the documents it retrieved, or against its prompt when it retrieved none, and flags the sentences that source doesn't support. It opens a finding when the share of a call site's traces with a flagged answer rises above what that call site learned as normal. It starts switched off on every project, because the model it scores with runs on a GPU you provide: a Mac with Apple silicon for development, or a GPU instance on AWS for production.
+
+## Before you start
+
+- Tessary v1.3.0 or later. Earlier releases can't set up the model.
+- A coding agent, such as Claude Code, that can run commands on the Mac that will host the model, or where your AWS CLI is signed in. It follows Tessary's setup file for you.
+- One place for the model to run:
+  - **This Mac (dev):** a Mac with Apple silicon, 16 GB of memory, and 6 GB of free disk, running Tessary's stack, with `uv` installed.
+  - **AWS (production):** Tessary running on AWS, the AWS CLI signed in to the same account, a subnet in Tessary's VPC that reaches the internet, and a quota of at least 4 vCPUs for G instances in Tessary's region.
+- Spans tagged with a call site whose shape is `rag_answer`, `summarize`, or `extract`. A shape comes from the `.tessary/` bundle you import, not from your traces. See [Call-site shapes](/concepts/call-sites#call-site-shapes).
+- Retrieved documents on your spans as `retrieval.documents.<N>.document.content`. See [Retrieval](/instrument/span-requirements#retrieval).
+- Traces that carry a thread ID or a session ID, if your agent answers follow-up questions from documents it retrieved on an earlier turn.
+
+## Turn it on
+
+1. Open **Classifiers**.
+2. Switch on the **Groundedness** row. **Enable Groundedness** opens.
+3. Under **Where the model runs**, choose **This Mac (dev)** or **AWS (production)**.
+4. Select **Copy prompt**, and paste the prompt into your coding agent on that Mac, or where your AWS CLI is signed in. The prompt links the setup file for the Tessary version you run.
+5. Keep the dialog open while the agent works. Its steps tick over in order: **Set up model**, **Restart Tessary**, and **Start scoring**.
+
+Once the model answers, the dialog switches the classifier on and reads **Groundedness enabled**.
+
+What the agent does depends on where the model runs:
+
+- **On a Mac,** it checks the Mac, downloads `serve.py` and checks it against the checksum in the setup file, starts the model as a background process, adds three lines to your stack's `.env`, and restarts Tessary. The first start downloads PyTorch and the model, which can take up to 15 minutes.
+- **On AWS,** it shows you what it will create and an estimate of the cost, and waits for your yes. It then creates the `groundedness-model` CloudFormation stack in Tessary's region and VPC, and prints three lines for Tessary's `.env` and the command that restarts Tessary. It never changes the running Tessary: you add the lines and run the restart. Tessary starts scoring within the hour.
+
+The setup files are in the repository, [for a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) and [for AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md), if you want to read them first.
+
+<Note>
+  The dialog says "You can close this. Setup continues." The setup does continue, but only the open dialog switches the classifier on. If you close it, the row reads **off** once the model answers. Switch it on, and it starts scoring without the dialog.
+</Note>
+
+## What is sent, and to whom
+
+For each answer it scores, Tessary sends the model server:
+
+- The answer, as stored, which means after PII redaction.
+- The retrieved documents it is checked against: the highest-ranked ones, up to a fixed number, each cut at a fixed length, with the user's message as the question.
+- When there are no retrieved documents, the prompt instead: the system and user text.
+
+Tool calls and tool results are not sent.
+
+The request goes to the model server you set up, and to no one else. On a Mac, that is `serve.py` on the Mac itself, which Tessary's containers reach at `host.docker.internal:18080`. On AWS, it is the instance in your VPC, whose security group lets only Tessary's security group reach port 18080. The request is plain HTTP and carries a key that the setup generated. `serve.py` scores in memory and keeps nothing it receives; its log records counts and timings.
+
+The machine that runs the model makes its own downloads when it is set up and when it first starts: `serve.py` from GitHub, the Python packages it runs on (and, on AWS, `uv` itself), and the model's weights from Hugging Face. None of your answers or documents are part of them. [What leaves your network](/self-hosting/configuration#what-leaves-your-network) lists every destination Tessary itself reaches.
+
+## What it costs
+
+Scoring needs no provider key and no per-answer charge. What it costs is the machine the model runs on.
+
+- **This Mac:** nothing billed. The model uses the Mac's GPU and memory while it runs, and it runs until you stop it or restart the Mac.
+- **AWS:** the `groundedness-model` stack bills for three things:
+  - The GPU instance, `g4dn.xlarge` by default (`g5.xlarge` and `g6.xlarge` are also allowed), for the time it runs. A schedule starts it every hour, Tessary scores what arrived since the last run, and the instance stops itself after 10 minutes with no requests.
+  - A 100 GB gp3 disk, billed all month, whether the instance runs or not.
+  - One Secrets Manager secret, which holds the key.
+
+Before it creates the stack, the agent looks up the instance's current on-demand price in your region and shows you a monthly estimate.
+
+Triage and RCA on the classifier's findings and cases run on your LLM provider, as they do for every classifier.
+
+<Warning>
+  Turning the classifier off doesn't stop AWS charges. The schedule keeps starting the instance every hour until you delete the `groundedness-model` stack. See [Turn it off](#turn-it-off).
+</Warning>
+
+## Which answers are scored
+
+An answer is scored only when all of these are true:
+
+- Its span is tagged with a call site whose shape is `rag_answer`, `summarize`, or `extract`. Answers at any other call site, or with no call site, are not scored.
+- It asserts something that can be checked. An answer made only of greetings, thanks, questions back to the user, or the agent describing its own actions, such as "I've escalated this to our returns team," is not scored. This check is a set of text rules, so an answer made only of short, plain sentences with no number or name in them can be skipped too.
+- It has something to be checked against, as described below.
+
+An answer is checked against the first of these that applies:
+
+1. **Retrieved documents.** The `document.content` of documents retrieved in the answer's own trace, or in the nearest earlier trace in the same session that retrieved anything. Only documents retrieved before the answer count, and documents a reranker discarded don't. A session here is the traces that share a thread ID, or a session ID when there is no thread.
+2. **Nothing, on a `rag_answer` call site that reached outside.** With no retrieved documents to read, an answer on a `rag_answer` call site is not scored when its session called a tool, an MCP server, a retriever, a reranker, or an embedding model. Its source is somewhere Tessary can't read.
+3. **The prompt.** Any other answer with no retrieved documents is checked against its system and user text. This is the usual case on a `summarize` or `extract` call site, where the prompt holds the document.
+
+Tool results are never read as documents. If your agent answers from tool output, emit that output as a retrieved document so the classifier can check the answer against it. When the answer also has retrieved documents, a fact that came only from a tool call reads as unsupported and can be flagged.
+
+The documents and the answer are read together in one pass of up to 8,192 tokens. When they don't fit, the documents are shortened to make room. A very long answer is cut at a fixed length first, and one that still leaves no room for documents is not scored.
+
+With the model on a Mac, new answers are scored shortly after they arrive. On AWS, they are scored on the hourly run.
+
+## The model
+
+The model is [`tessaryai/groundedness-classifier-v1`](https://huggingface.co/tessaryai/groundedness-classifier-v1) on Hugging Face, released under the MIT license. It is ModernBERT-large, fine-tuned to label each word of an answer as supported by the documents, not in them, or contradicting them.
+
+For each sentence, it gives the probability that the documents don't support it, whether the sentence contradicts them or says something they never say. An answer is flagged when any sentence scores 0.975 or higher, and every sentence at or above that score is marked. `serve.py` loads a pinned revision of the model, so an update to the Hugging Face repository changes nothing until a Tessary release moves the pin.
+
+On the RAGTruth test set, a public benchmark of news summaries and question answering with human-labeled errors, at 0.975:
+
+- It catches 39% of unsupported answers (recall 0.39), while flagging at most 2% of supported ones.
+- Of the answers it flags, 83% are unsupported (precision 0.83).
+
+So it misses most unsupported answers, and some of its flags are false alarms. That is why one flag is not a finding: a finding opens on a rise in the rate of flags across many traces. The false alarm rate also depends on the domain, and each call site's learned normal absorbs its own. The [model card](https://huggingface.co/tessaryai/groundedness-classifier-v1) has the measurements.
+
+## When a finding opens
+
+One flagged answer is not a finding and pages nobody. It is listed on the classifier as a detection.
+
+Each call site learns its normal share of traces with a flagged answer from its first traces, then watches that share. A trace counts once per call site, and it counts as flagged when any answer scored in it at that call site is flagged. When the share rises above what the call site learned, Tessary files a finding titled, for example, "Answers on support-rag became less grounded". Only a rise is reported.
+
+Unlike a frustration finding, a groundedness finding goes through triage. Triage runs on its own when automatic triage is on for your organization; otherwise, select **Run triage** on the finding. A positive ruling opens a case, or joins the case already open for that call site. You can also rule on the finding yourself: **Confirm and open a case**, or **Absorb as legitimate** to make the call site learn its normal share again from the traces after that. See [What triage does](/concepts/cases#what-triage-does).
+
+<Note>
+  A call site whose answers are ungrounded from its first day learns that share as its normal, and opens a finding only if it gets worse.
+</Note>
+
+## Read the finding
+
+The finding page and the case page show the same evidence:
+
+- **What changed:** the call site's share of traces with a flagged answer, charted against the share it learned. One pin gives the current share and how many traces since the onset had a flagged answer. The other gives the share that is normal for this call site, and how many percentage points higher the current one is.
+- **Flagged answers:** every answer the finding counts, newest first, each with its time, its score, and its highest-scoring sentence. Scroll to the end, or select **Load more answers**, for the next page.
+- The selected answer as the model read it: the **Question**, the **Answer** with every sentence that scored 0.975 or higher marked, and the **Retrieved documents** it was checked against, or the **Prompt** when nothing was retrieved. **View trace** and **View session** open the originals.
+
+A mark means the model found no support for the sentence in those documents, not that the sentence is wrong. Read each one against the documents below it.
+
+The question, answer, and documents are read from the trace when you open the page. If a trace has passed your retention period, the page says "This trace is no longer stored, so its answer can't be shown." The finding's counts still stand.
+
+## Run RCA on the case
+
+Select **Run RCA** on the case. Root-cause analysis reads the newest flagged answers the finding cites, each with its question, flagged sentences, and documents. It opens traces when it needs more and, with a connected repository, reads your code. It checks each flag against its documents first: a flagged sentence the documents do support is a false alarm, not a cause. It returns one of two verdicts: **Causes identified** or **No cause found**.
+
+Causes are grouped by why the answers went beyond their documents, for example:
+
+- Retrieval served wrong, stale, or too few documents.
+- The prompt asks for more than the documents hold.
+- The answer merges or misreads the documents.
+
+Each cause shows:
+
+- What the agent did.
+- A confidence: high, medium, or low.
+- Where it comes from: a prompt, code, a tool, the model, or unknown, with the file, commit, and excerpt when one lines up.
+- A **Suggested fix**.
+- The traces that show it. On the case, the **Show** button on a cause, such as **Show 12 answers**, narrows the **Flagged answers** list to that cause. The buttons above the list, such as **All · 48** and **Cause 1 · 12**, switch between causes.
+
+[Root-cause analysis](/concepts/root-cause-analysis#on-a-groundedness-case) covers how the report checks its own citations.
+
+## Resolve the case
+
+**Resolve case** and **Absorb as legitimate** appear at the end of the case page once RCA has produced a report. Until then, the page reads "Run RCA before resolving this case."
+
+Select **Resolve case**, write one line on what happened, and choose what the case turned out to be:
+
+| Choice | What it does |
+| --- | --- |
+| **Fixed** | The call site learns its normal share again from the traces after the resolve. The answers the case cites stay flagged. |
+| **False alarm** | The same, and every flagged answer the case cites is cleared. A trace stops counting as flagged unless another flagged answer in it still stands. A cleared answer reads **Cleared** in the list. |
+
+Resolve as **Fixed** only once the fix is live. Resolved earlier, the call site learns the ungrounded share as its normal.
+
+**Absorb as legitimate** says the new share is correct for this call site. The call site learns its normal share again from the traces after you absorb, and the answers the case cites stay flagged.
+
+## When it pauses
+
+Scoring pauses whenever the model server doesn't answer, and the classifier's row on **Classifiers** says so:
+
+| Row reads | Cause | Fix |
+| --- | --- | --- |
+| **No scores since** and a time | The model stopped answering: its process stopped, the Mac restarted, or, on AWS, no hourly run has finished for 2 hours. | Open the classifier and select **Restart model**. |
+| **Not scoring** | The same, before the model scored anything. | Open the classifier and select **Restart model**. |
+| **needs setup** | The model has never been set up. | Follow [Turn it on](#turn-it-on). |
+
+The classifier's panel says "The model isn't responding. Restart it to resume scoring." **Restart model** gives you a prompt for your coding agent, which follows the restart section of the same setup file. The dialog closes on its own once scoring resumes.
+
+Answers that arrive while the classifier is paused are not skipped. Tessary keeps its place and scores them once the model answers again.
+
+On AWS, a row that is scoring reads **last run** and the time of the latest hourly run.
+
+## What Tessary keeps
+
+- Each scored answer's score and whether it was flagged are kept, with no text, because the call site's share is rebuilt from them. The retention sweep does not delete them.
+- Flagged answers are detections, and follow the detection retention period. Each keeps the position and score of its flagged sentences and the text of its highest-scoring sentence, shortened when it is long.
+- The question, answer, and documents are not copied. The finding reads them from the trace, so they are deleted on the trace's schedule. See [Data retention](/self-hosting/configuration#data-retention).
+- `serve.py` keeps nothing it is sent.
+
+## Turn it off
+
+Switch the classifier off on its row under **Classifiers**. **Turn off Groundedness?** opens and says "Findings and detections stay." Select **Turn off**. Tessary stops sending answers. Cases it already opened stay open until someone resolves them.
+
+Turning the classifier off doesn't stop the model:
+
+- **On a Mac,** stop the process:
+
+  ```bash
+  kill "$(cat ~/.tessary/groundedness/serve.pid)"
+  ```
+
+- **On AWS,** the dialog warns that the AWS instance keeps running. Delete the stack to stop the charges. This deletes the instance, its disk, the hourly schedule, and the key. Replace `<region>` with the region Tessary runs in:
+
+  ```bash
+  aws cloudformation delete-stack --region <region> --stack-name groundedness-model
+  ```
+
+To turn it back on while the model is still set up, switch the row on. It resumes scoring without the setup dialog.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases#resolving-a-groundedness-case">
+    How a groundedness case is resolved or absorbed, and the states a case moves through.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/self-hosting/troubleshooting#the-groundedness-classifier-never-fires">
+    What to check when the classifier scores nothing or opens no findings.
+  </Card>
+</CardGroup>
