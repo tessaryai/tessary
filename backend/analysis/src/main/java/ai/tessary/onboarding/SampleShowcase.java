@@ -1010,7 +1010,8 @@ final class SampleShowcase {
                                             .append(PRIOR_MESSAGES[rnd.nextInt(PRIOR_MESSAGES.length)])
                                             .append(" ");
                                 }
-                                output = "Assembled context for " + customer + " · order " + orderId + " · " + priorMessages
+                                output = "Assembled context for " + customer + " · order " + orderId + " · "
+                                        + priorMessages
                                         + (priorMessages == 1 ? " prior thread message: " : " prior thread messages: ")
                                         + threadHistory.toString().strip();
                                 assembleOutput = output;
@@ -1466,7 +1467,8 @@ final class SampleShowcase {
      */
     private static RateStat groundednessRate(List<ScoredAnswer> answers, Instant onset) {
         Map<String, List<ScoredAnswer>> byTrace = new LinkedHashMap<>();
-        for (ScoredAnswer a : answers) byTrace.computeIfAbsent(a.traceId(), k -> new ArrayList<>()).add(a);
+        for (ScoredAnswer a : answers)
+            byTrace.computeIfAbsent(a.traceId(), k -> new ArrayList<>()).add(a);
         List<Trial> trials = new ArrayList<>();
         for (Map.Entry<String, List<ScoredAnswer>> e : byTrace.entrySet()) {
             List<FindingEvidenceRepository.Ref> witness = new ArrayList<>();
