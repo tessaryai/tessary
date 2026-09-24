@@ -11,11 +11,13 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -29,6 +31,10 @@ CLASSIFIERS = Path(__file__).resolve().parents[1]
 SERVE_PY = CLASSIFIERS / "groundedness" / "serve.py"
 CONTRACT = CLASSIFIERS / "groundedness" / "contract"
 ANSWER_KEY = Path(__file__).resolve().parent / "fixtures" / "groundedness_answer_key.json"
+# tokenizer.json and tokenizer_config.json copied unchanged from tessaryai/groundedness-classifier-v1
+# at DEFAULT_REVISION (the model repo is MIT; the tokenizer is ModernBERT's, Apache-2.0), so the
+# encoding check runs offline on exactly the tokenizer the model was trained with.
+TOKENIZER = Path(__file__).resolve().parent / "fixtures" / "groundedness_tokenizer"
 
 # A dependency's distribution name to the top-level module it installs, where the two differ.
 PACKAGE_MODULES = {"transformers": "transformers", "torch": "torch"}
@@ -53,18 +59,57 @@ def test_validate_accepts_the_contract_and_refuses_the_rest():
         serve.validate({"head": "groundedness", "texts": ["x"]})
     with pytest.raises(ValueError, match="non-empty array"):
         serve.validate({"head": "groundedness", "responses": [{"passages": [], "answer": "a"}]})
+    # The backend sends at most 16 responses per request (MAX_RESPONSES_PER_REQUEST), so a full
+    # batch of 16 is the normal case and must pass; one more is refused.
+    full = [{"passages": ["p"], "answer": "a"}] * 16
+    assert serve.validate({"head": "groundedness", "responses": full}) == full
     with pytest.raises(ValueError, match="exceeds"):
         serve.validate({"head": "groundedness", "responses": [{"passages": ["p"], "answer": "a"}] * 17})
 
 
-def test_gate_bounds_inflight_and_queue_and_answers_the_rest_with_a_refusal():
-    gate = serve.Gate(max_inflight=1, max_queue=1, timeout_s=0.05)
+def _until(condition, what: str, timeout_s: float = 5.0) -> None:
+    """Wait for another thread to reach a state, failing the test instead of hanging it."""
+    deadline = time.monotonic() + timeout_s
+    while not condition():
+        assert time.monotonic() < deadline, f"timed out waiting for {what}"
+        time.sleep(0.001)
+
+
+def _acquire_in_thread(gate) -> tuple[threading.Thread, list]:
+    got: list = []
+    waiter = threading.Thread(target=lambda: got.append(gate.acquire()), daemon=True)
+    waiter.start()
+    return waiter, got
+
+
+def test_gate_admits_a_queued_request_when_the_slot_frees_and_refuses_past_the_queue():
+    gate = serve.Gate(max_inflight=1, max_queue=1, timeout_s=10)
     assert gate.acquire() is True, "the one slot, taken without queueing"
-    assert gate.acquire() is False, "the one queue place times out waiting for the slot"
+
+    waiter, got = _acquire_in_thread(gate)
+    _until(lambda: got or gate.waiting == 1, "the first waiter to queue")
+    assert not got, f"the queued request returned {got} while the slot was still held"
+    started = time.monotonic()
+    assert gate.acquire() is False, "the queue's one place is taken, so the next request is refused"
+    assert time.monotonic() - started < 5, "refused at once, not after waiting out the 10 s timeout"
     gate.release()
-    assert gate.acquire() is True, "the released slot is reusable"
+    waiter.join(5)
+    assert got == [True], "the queued request gets the slot the moment it is released"
+    assert gate.waiting == 0, "and leaves the queue, freeing its place"
+
+    waiter, got = _acquire_in_thread(gate)
+    _until(lambda: got or gate.waiting == 1, "the second waiter to queue")
     gate.release()
-    strict = serve.Gate(max_inflight=1, max_queue=0, timeout_s=0.05)
+    waiter.join(5)
+    assert got == [True], "a later request can queue and be admitted too"
+    gate.release()
+
+    timing_out = serve.Gate(max_inflight=1, max_queue=1, timeout_s=0.01)
+    assert timing_out.acquire() is True
+    assert timing_out.acquire() is False, "a waiter whose timeout passes is refused"
+    assert timing_out.waiting == 0, "and leaves the queue"
+
+    strict = serve.Gate(max_inflight=1, max_queue=0, timeout_s=10)
     assert strict.acquire() is True, "no queue still means the free slot is granted"
     assert strict.acquire() is False, "and the second concurrent request is refused at once"
 
@@ -167,14 +212,24 @@ def test_encoding_matches_the_answer_key():
         assert got == want, case["name"]
 
 
-@pytest.mark.network
+def _transformers():
+    """check-groundedness-serve.sh installs transformers at the answer key's version and sets
+    GROUNDEDNESS_SERVE_GATE, so there a missing transformers fails instead of skipping. The
+    classifiers gate runs this file too, without transformers, and skips this one test."""
+    if os.environ.get("GROUNDEDNESS_SERVE_GATE") == "1":
+        import transformers
+
+        return transformers
+    return pytest.importorskip("transformers")
+
+
 def test_encoding_matches_the_answer_key_on_the_pinned_tokenizer():
-    transformers = pytest.importorskip("transformers")
+    transformers = _transformers()
     key = _answer_key()
-    try:
-        tok = transformers.AutoTokenizer.from_pretrained(key["model"], revision=key["revision"])
-    except Exception as e:  # noqa: BLE001 — offline, or the hub is unreachable: this half can't run
-        pytest.skip(f"the pinned tokenizer did not load: {e}")
+    assert transformers.__version__ == key["transformers"], "the answer key was made on another transformers"
+    names = {case["name"] for case in key["cases"]}
+    assert {"truncated_qa_8192", "truncated_summary_8192"} <= names, "the key must keep a case cut at MAX_LENGTH"
+    tok = transformers.AutoTokenizer.from_pretrained(TOKENIZER)
     for case in key["cases"]:
         enc = serve.encode(tok, case["passages"], case["question"], case["answer"])
         assert enc["input_ids"] == case["input_ids"], case["name"]
@@ -184,6 +239,59 @@ def test_encoding_matches_the_answer_key_on_the_pinned_tokenizer():
             toks = [i for i, (a, b) in answer if a < sent["end"] and b > sent["start"]]
             got = (toks[0], toks[-1] + 1) if toks else (None, None)
             assert got == (sent["token_start"], sent["token_end"]), (case["name"], sent)
+
+
+class _CountingTokenizer:
+    """Answers every text with `n` token ids and records the texts it was given."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.seen: list[str] = []
+
+    def __call__(self, text: str, add_special_tokens: bool = True) -> dict:
+        assert add_special_tokens is False, "the bound counts the answer's own tokens"
+        self.seen.append(text)
+        return {"input_ids": [7] * self.n}
+
+
+def test_fit_answer_cuts_to_the_char_cap_then_leaves_room_for_one_context_token():
+    # MAX_LENGTH 8192 less [CLS] and two [SEP]s less one context token: 8188 answer tokens fit.
+    long_answer = "a" * (serve.MAX_ANSWER_CHARS + 1000)
+    fits = _CountingTokenizer(8188)
+    assert serve.fit_answer(fits, long_answer) == "a" * serve.MAX_ANSWER_CHARS
+    assert fits.seen == ["a" * serve.MAX_ANSWER_CHARS], "the char cap applies before tokens are counted"
+    with pytest.raises(ValueError, match="too long to score"):
+        serve.fit_answer(_CountingTokenizer(8189), long_answer)
+
+
+class _FakeModel:
+    def __init__(self):
+        self.calls: list = []
+
+    def eval(self):
+        self.calls.append("eval")
+        return self
+
+    def half(self):
+        self.calls.append("half")
+        return self
+
+    def to(self, device):
+        self.calls.append(("to", device))
+        return self
+
+
+@pytest.mark.parametrize("dtype, halved", [("fp16", True), ("fp32", False)])
+def test_head_casts_the_model_to_half_only_for_fp16(monkeypatch, dtype, halved):
+    model = _FakeModel()
+    fake_transformers = SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda name, **kw: object()),
+        AutoModelForTokenClassification=SimpleNamespace(from_pretrained=lambda name, **kw: model))
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    head = serve.Head("some/model", "rev", "cuda", dtype)
+    assert ("half" in model.calls) is halved, model.calls
+    assert ("to", "cuda") in model.calls and head.dtype == dtype
 
 
 def _shape(value):
@@ -228,44 +336,122 @@ def _get(url: str) -> dict:
         return json.loads(r.read())
 
 
-def _post(url: str, body: dict, key: str) -> int:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+def _post(url: str, body, key: str = "k") -> tuple[int, dict, dict]:
+    """(status, headers, JSON body). `body` is sent as is when it is bytes, else as JSON."""
+    data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
-            return r.status
+            return r.status, dict(r.headers), json.loads(r.read())
     except urllib.error.HTTPError as e:
-        return e.code
+        return e.code, dict(e.headers), json.loads(e.read())
 
 
-def test_healthz_reports_heads_and_idle():
+class _Serving:
+    """serve.py's handler on a free local port, around a fake head."""
+
+    def __init__(self, head, gate=None, clock=None):
+        gate = gate or serve.Gate(1, 1, 1.0)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0),
+                                          serve.make_handler(head, "k", gate, clock or serve.IdleClock()))
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def __enter__(self):
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def test_classify_scores_each_response_and_healthz_reports_heads_and_idle():
+    request = json.loads((CONTRACT / "classify-request.json").read_text())
     fixed = json.loads((CONTRACT / "classify-response.json").read_text())["scores"]
-    calls = iter(fixed * 2)
-    head = SimpleNamespace(device="mps", dtype="fp32", score=lambda passages, question, answer: next(calls))
+    calls = []
+
+    def score(passages, question, answer):
+        calls.append((passages, question, answer))
+        return fixed[len(calls) - 1]
+
+    head = SimpleNamespace(device="mps", dtype="fp32", score=score)
     now = _FakeTime(100.0)
-    clock = serve.IdleClock(now)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), serve.make_handler(head, "k", serve.Gate(1, 1, 1.0), clock))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
+    with _Serving(head, clock=serve.IdleClock(now)) as s:
         now.t = 130.0
-        health = _get(f"{base}/healthz")
+        health = _get(f"{s.base}/healthz")
         assert health == {"ok": True, "heads": ["groundedness"], "device": "mps", "dtype": "fp32", "idle_seconds": 30}
-        assert _get(f"{base}/healthz")["idle_seconds"] == 30, "a health probe does not reset the idle clock"
+        assert _get(f"{s.base}/healthz")["idle_seconds"] == 30, "a health probe does not reset the idle clock"
 
-        request = json.loads((CONTRACT / "classify-request.json").read_text())
-        assert _post(f"{base}/classify", request, "wrong") == 401
-        assert _get(f"{base}/healthz")["idle_seconds"] == 30, "an unauthorized request does not reset it"
-        assert _post(f"{base}/classify", request, "k") == 200
-        assert _get(f"{base}/healthz")["idle_seconds"] == 0, "a finished /classify request does"
+        assert _post(f"{s.base}/classify", request, "wrong")[0] == 401
+        assert calls == [], "an unauthorized request scores nothing"
+        assert _get(f"{s.base}/healthz")["idle_seconds"] == 30, "an unauthorized request does not reset it"
+        status, _, body = _post(f"{s.base}/classify", request)
+        assert (status, body) == (200, {"scores": fixed}), "one score per response, in request order"
+        want = [(r["passages"], r.get("question"), r["answer"]) for r in request["responses"]]
+        assert calls == want, "each response's passages, question and answer reach the head as sent"
+        assert calls[1][1] is None, "the summary response has no question, and the head is told so"
+        assert _get(f"{s.base}/healthz")["idle_seconds"] == 0, "a finished /classify request does"
         now.t = 145.0
-        assert _get(f"{base}/healthz")["idle_seconds"] == 15
-    finally:
-        server.shutdown()
-        server.server_close()
+        assert _get(f"{s.base}/healthz")["idle_seconds"] == 15
 
 
-def test_idle_watch_stops_the_server_once_the_limit_passes():
+ONE = {"head": "groundedness", "responses": [{"passages": ["p"], "question": "q?", "answer": "a"}]}
+
+
+def test_a_failed_scoring_call_is_a_500_and_frees_the_only_slot():
+    outcomes = iter([RuntimeError("CUDA out of memory"), {"unsupported": 0.1, "conflict": 0.0, "spans": []}])
+
+    def score(passages, question, answer):
+        out = next(outcomes)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    head = SimpleNamespace(device="cuda", dtype="fp16", score=score)
+    with _Serving(head, serve.Gate(1, 0, 1.0)) as s:
+        status, _, body = _post(f"{s.base}/classify", ONE)
+        assert (status, body) == (500, {"error": "scoring failed: RuntimeError"})
+        status, _, body = _post(f"{s.base}/classify", ONE)
+        assert status == 200, "the failed call released the one slot, so this is not a 429"
+        assert body == {"scores": [{"unsupported": 0.1, "conflict": 0.0, "spans": []}]}
+
+
+def test_a_refusal_from_the_head_or_a_malformed_body_is_a_400():
+    def score(passages, question, answer):
+        raise ValueError("groundedness answer too long to score")
+
+    head = SimpleNamespace(device="cuda", dtype="fp16", score=score)
+    with _Serving(head, serve.Gate(1, 0, 1.0)) as s:
+        status, _, body = _post(f"{s.base}/classify", ONE)
+        assert (status, body) == (400, {"error": "groundedness answer too long to score"})
+        assert _post(f"{s.base}/classify", b"{not json")[0] == 400, "malformed JSON"
+        assert _post(f"{s.base}/classify", b"[]")[0] == 400, "JSON that is not an object"
+        assert _post(f"{s.base}/classify", ONE)[0] == 400, "and every refusal released the one slot"
+
+
+def test_a_request_past_the_one_busy_slot_gets_429_with_retry_after():
+    entered, release = threading.Event(), threading.Event()
+
+    def score(passages, question, answer):
+        entered.set()
+        assert release.wait(5), "the test never released the blocked scoring call"
+        return {"unsupported": 0.0, "conflict": 0.0, "spans": []}
+
+    head = SimpleNamespace(device="cuda", dtype="fp16", score=score)
+    with _Serving(head, serve.Gate(1, 0, 1.0)) as s:
+        first: list = []
+        holder = threading.Thread(target=lambda: first.append(_post(f"{s.base}/classify", ONE)), daemon=True)
+        holder.start()
+        assert entered.wait(5), "the first request never reached the head"
+        status, headers, body = _post(f"{s.base}/classify", ONE)
+        assert (status, headers.get("Retry-After"), body) == (429, "2", {"error": "at capacity, retry later"})
+        release.set()
+        holder.join(5)
+        assert first and first[0][0] == 200
+
+
+def test_idle_clock_counts_a_request_in_flight_as_activity():
     now = _FakeTime(0.0)
     clock = serve.IdleClock(now)
     clock.start()
@@ -275,7 +461,24 @@ def test_idle_watch_stops_the_server_once_the_limit_passes():
     now.t = 3600.0 + 9 * 60
     assert clock.seconds() == 9 * 60
 
+
+class _Readings:
+    """A now() that returns the given times in order, one per call, and fails once they run out,
+    so a watch that never stops ends the test instead of hanging it."""
+
+    def __init__(self, *times: float):
+        self.times = list(times)
+        self.last = None
+
+    def __call__(self) -> float:
+        assert self.times, "watch_idle kept checking past the idle limit without stopping"
+        self.last = self.times.pop(0)
+        return self.last
+
+
+def test_idle_watch_keeps_watching_under_the_limit_and_stops_once_at_it():
+    now = _Readings(0.0, 9 * 60, 10 * 60)  # startup, then one reading per check
+    clock = serve.IdleClock(now)
     stops = []
-    now.t = 3600.0 + 10 * 60
-    serve.watch_idle(clock, 10, lambda: stops.append(True), interval_s=0)
-    assert stops == [True]
+    serve.watch_idle(clock, 10, lambda: stops.append(now.last), interval_s=0)
+    assert stops == [10 * 60], "not at 9 idle minutes, and exactly once at 10"

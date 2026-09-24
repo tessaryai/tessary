@@ -206,7 +206,7 @@ jobs:
 
       # check-classifiers.sh: `uv sync --frozen` + pytest over classifiers/tests. It runs after the
       # backend gate inside check.sh, because its jshell bridges load backend/*/target/classes.
-      # check-groundedness-serve.sh runs serve.py's tests with `uv run --with pytest`, and
+      # check-groundedness-serve.sh runs serve.py's tests through `uv run`, and
       # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template.
       - uses: astral-sh/setup-uv@v7
         with:

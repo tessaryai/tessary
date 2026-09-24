@@ -184,12 +184,7 @@ class Head:
 
     def score(self, passages: list[str], question: str | None, answer: str) -> dict:
         passages = [p[:MAX_PASSAGE_CHARS] for p in passages]
-        answer = answer[:MAX_ANSWER_CHARS]
-        # An answer that leaves no room for context is refused as a 400 ("answer too long to
-        # score"); HF's only_first truncation would instead log and run the over-long pair, so the
-        # bound is enforced here before encoding.
-        if len(self.tok(answer, add_special_tokens=False)["input_ids"]) > MAX_LENGTH - 3 - 1:
-            raise ValueError("groundedness answer too long to score")
+        answer = fit_answer(self.tok, answer)
         enc = encode(self.tok, passages, question, answer, return_tensors="pt")
         offsets = enc.pop("offset_mapping")[0].tolist()
         seq = enc.sequence_ids()
@@ -199,6 +194,17 @@ class Head:
                 self.torch.mps.synchronize()
             probs = logits.softmax(-1).cpu().tolist()
         return reduce(probs, offsets, seq, answer)
+
+
+def fit_answer(tok, answer: str) -> str:
+    """The answer cut to MAX_ANSWER_CHARS, or ValueError when even that leaves no room for context
+    beside [CLS] and two [SEP]s. The handler answers that ValueError 400 ("answer too long to
+    score"); HF's only_first truncation would instead log and run the over-long pair, so the bound
+    is enforced here before encoding."""
+    answer = answer[:MAX_ANSWER_CHARS]
+    if len(tok(answer, add_special_tokens=False)["input_ids"]) > MAX_LENGTH - 3 - 1:
+        raise ValueError("groundedness answer too long to score")
+    return answer
 
 
 def encode(tok, passages: list[str], question: str | None, answer: str, return_tensors: str | None = None):
