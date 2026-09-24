@@ -86,8 +86,8 @@ public class EncoderFixture {
                 }
                 OutputStream out = client.getOutputStream();
                 byte[] body = HEALTHY.getBytes(StandardCharsets.UTF_8);
-                out.write(("HTTP/1.1 200 Stub\r\nContent-Type: application/json\r\n"
-                                + "Content-Length: " + body.length + "\r\nConnection: close\r\n\r\n")
+                out.write(("HTTP/1.1 200 Stub\r\nContent-Type: application/json\r\n" + "Content-Length: " + body.length
+                                + "\r\nConnection: close\r\n\r\n")
                         .getBytes(StandardCharsets.UTF_8));
                 out.write(body);
                 out.flush();

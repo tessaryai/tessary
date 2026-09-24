@@ -131,8 +131,7 @@ public final class GroundednessDetector implements BuiltInDetector {
      * refused, writes nothing, because it is not a trial.
      */
     @Override
-    public List<Detection> sweepBatch(
-            ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+    public List<Detection> sweepBatch(ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
         return score(signal, batch, config);
     }
 
@@ -144,8 +143,7 @@ public final class GroundednessDetector implements BuiltInDetector {
     public static String scorerVersion(double threshold) {
         String material = MODEL + "|" + ENCODING + "|" + String.format(Locale.ROOT, "%.4f", threshold);
         try {
-            byte[] digest =
-                    MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8));
             return "gnd-v1-" + HexFormat.of().formatHex(digest, 0, 6);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("cannot hash the groundedness scorer", e);

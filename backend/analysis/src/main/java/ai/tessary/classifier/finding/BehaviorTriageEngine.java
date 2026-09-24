@@ -316,7 +316,8 @@ public class BehaviorTriageEngine {
         } catch (Exception e) {
             return evidenceJson;
         }
-        StringBuilder line = new StringBuilder("score ").append(ev.path("unsupported").asText("?"));
+        StringBuilder line =
+                new StringBuilder("score ").append(ev.path("unsupported").asText("?"));
         JsonNode sentences = ev.path("flagged_sentences");
         if (sentences.isArray() && !sentences.isEmpty()) {
             line.append("; flagged ");
@@ -332,7 +333,8 @@ public class BehaviorTriageEngine {
             }
         }
         String claim = ev.path("claim").asText("");
-        if (!claim.isBlank()) line.append("; strongest: \"").append(claim.replace('\n', ' ')).append('"');
+        if (!claim.isBlank())
+            line.append("; strongest: \"").append(claim.replace('\n', ' ')).append('"');
         return line.toString();
     }
 

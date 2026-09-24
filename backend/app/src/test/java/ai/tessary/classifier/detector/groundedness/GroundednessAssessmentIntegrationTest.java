@@ -108,7 +108,16 @@ class GroundednessAssessmentIntegrationTest {
     void aSpanThatIsGoneFallsBackToTheIngestTime() {
         Fixture f = fixture("ga-fallback");
         assertTrue(assessments.insert(new Assessment(
-                Ids.ulid(), f.pid(), f.row().id(), null, "t-gone", "s-gone", "", 0.1, false, "gnd-a",
+                Ids.ulid(),
+                f.pid(),
+                f.row().id(),
+                null,
+                "t-gone",
+                "s-gone",
+                "",
+                0.1,
+                false,
+                "gnd-a",
                 "2026-09-02T08:00:00Z")));
         Instant started = jdbc.sql("SELECT observation_started_at FROM groundedness_assessment WHERE project_id = :pid")
                 .param("pid", f.pid())
@@ -131,7 +140,8 @@ class GroundednessAssessmentIntegrationTest {
             @Override
             public List<ResponseScore> scoreResponses(String h, List<Response> responses) {
                 return responses.stream()
-                        .map(r -> new ResponseScore(0.99, 0.1, List.of(new Span(0, r.answer().length(), 0.99, 0.1))))
+                        .map(r -> new ResponseScore(
+                                0.99, 0.1, List.of(new Span(0, r.answer().length(), 0.99, 0.1))))
                         .toList();
             }
         };

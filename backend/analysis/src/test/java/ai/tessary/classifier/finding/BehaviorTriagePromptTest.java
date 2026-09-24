@@ -197,7 +197,8 @@ class BehaviorTriagePromptTest {
                 "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}",
                 null);
 
-        Map<String, String> dossier = engine(new ObserverProperties(), detections).dossier(JOB, row);
+        Map<String, String> dossier =
+                engine(new ObserverProperties(), detections).dossier(JOB, row);
 
         assertEquals(Set.of("finding.md", "method.md", "detections.md"), dossier.keySet());
         String md = dossier.get("detections.md");

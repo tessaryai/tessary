@@ -209,7 +209,8 @@ final class RcaSynthesisOutput {
     /** How one kind of causes report turns an agent's cause into a validated one, or null to drop it. */
     @FunctionalInterface
     private interface CauseValidator {
-        @Nullable Cause validate(CauseBody body, String title);
+        @Nullable
+        Cause validate(CauseBody body, String title);
     }
 
     /**

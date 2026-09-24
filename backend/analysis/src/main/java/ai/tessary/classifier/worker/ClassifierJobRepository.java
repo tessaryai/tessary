@@ -251,12 +251,7 @@ public class ClassifierJobRepository {
         return jdbc.sql("""
             SELECT payload->>'caught_up_at' FROM job
             WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
-            """)
-                .param("pid", projectId)
-                .param("sid", classifierId)
-                .query(String.class)
-                .list()
-                .stream()
+            """).param("pid", projectId).param("sid", classifierId).query(String.class).list().stream()
                 .filter(Objects::nonNull)
                 .findFirst()
                 .map(Instant::parse);

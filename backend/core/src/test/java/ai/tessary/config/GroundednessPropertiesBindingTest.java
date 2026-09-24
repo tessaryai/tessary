@@ -22,9 +22,11 @@ class GroundednessPropertiesBindingTest {
 
     @Test
     void productionBindsFromTheEnvVarWhateverItsCase() {
-        assertThat(bind(Map.of("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE", "production")).mode())
+        assertThat(bind(Map.of("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE", "production"))
+                        .mode())
                 .isEqualTo(Mode.PRODUCTION);
-        assertThat(bind(Map.of("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE", "PRODUCTION")).mode())
+        assertThat(bind(Map.of("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE", "PRODUCTION"))
+                        .mode())
                 .isEqualTo(Mode.PRODUCTION);
         assertThat(bind(Map.of("TESSARY_GROUNDEDNESS_CLASSIFIER_MODE", "Dev")).mode())
                 .isEqualTo(Mode.DEV);

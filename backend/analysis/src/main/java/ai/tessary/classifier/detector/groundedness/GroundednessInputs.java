@@ -53,8 +53,7 @@ public final class GroundednessInputs {
      *     the passage
      * @param premiseHadEvidence whether the passages are retrieved documents rather than the prompt
      */
-    public record Inputs(
-            List<String> passages, @Nullable String question, String answer, boolean premiseHadEvidence) {}
+    public record Inputs(List<String> passages, @Nullable String question, String answer, boolean premiseHadEvidence) {}
 
     private final CallSiteShapeReads shapes;
     private final GroundingEvidenceReads evidenceReads;
@@ -112,9 +111,7 @@ public final class GroundednessInputs {
         // outside and captured nothing readable, so the answer's source is not ours to judge. Not
         // abstained: a conversation that reached outside for nothing (the prompt is the whole world),
         // and extract/summarize, whose document is in the prompt.
-        if (documents.isEmpty()
-                && ev.conversationDidExternalWork()
-                && EVIDENCE_EXPECTED_SHAPES.contains(siteShape)) {
+        if (documents.isEmpty() && ev.conversationDidExternalWork() && EVIDENCE_EXPECTED_SHAPES.contains(siteShape)) {
             return null;
         }
         if (!documents.isEmpty()) {

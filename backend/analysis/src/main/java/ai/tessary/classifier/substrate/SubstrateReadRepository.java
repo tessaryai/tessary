@@ -655,10 +655,21 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
             String projectId, java.util.Collection<GroundingEvidenceReads.SpanRef> spans) {
         if (spans.isEmpty()) return List.of();
         java.util.Set<GroundingEvidenceReads.SpanRef> wanted = new java.util.HashSet<>(spans);
-        return jdbc.sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id IN (:tids) AND s.id IN (:sids)")
+        return jdbc
+                .sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id IN (:tids) AND s.id IN (:sids)")
                 .param("pid", projectId)
-                .param("tids", wanted.stream().map(GroundingEvidenceReads.SpanRef::traceId).distinct().toList())
-                .param("sids", wanted.stream().map(GroundingEvidenceReads.SpanRef::spanId).distinct().toList())
+                .param(
+                        "tids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::traceId)
+                                .distinct()
+                                .toList())
+                .param(
+                        "sids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::spanId)
+                                .distinct()
+                                .toList())
                 .query((rs, n) -> map(rs))
                 .list()
                 .stream()

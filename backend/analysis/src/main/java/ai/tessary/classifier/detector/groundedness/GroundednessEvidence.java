@@ -56,7 +56,10 @@ public final class GroundednessEvidence {
     }
 
     /** One page of a finding's flagged answers, and how many it cites in all. */
-    public record FlaggedAnswerPage(List<FlaggedAnswerView> rows, long total, @Nullable String nextCursor) {
+    public record FlaggedAnswerPage(
+            List<FlaggedAnswerView> rows,
+            long total,
+            @Nullable String nextCursor) {
 
         public FlaggedAnswerPage {
             rows = List.copyOf(rows);

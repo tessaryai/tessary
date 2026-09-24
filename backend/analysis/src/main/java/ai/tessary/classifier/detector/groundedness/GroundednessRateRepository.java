@@ -298,7 +298,9 @@ public class GroundednessRateRepository {
                 .list();
         if (rows.isEmpty() && offset > 0) {
             // Past the end: the window count is on no row, so read it on its own.
-            return new AnswerPage(List.of(), answerPage(projectId, classifierId, findingId, cause, 1, 0).total());
+            return new AnswerPage(
+                    List.of(),
+                    answerPage(projectId, classifierId, findingId, cause, 1, 0).total());
         }
         return new AnswerPage(rows, total[0]);
     }

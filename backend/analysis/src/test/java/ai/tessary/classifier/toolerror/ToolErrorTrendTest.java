@@ -603,7 +603,8 @@ class ToolErrorTrendTest {
         List<HourlyToolTally> s = series(4, 200, 0.01); // 800 calls: judging has started, learning has not ended
         series(s, 4, 30, 200, 0.05);
 
-        List<Spell> spells = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of()).spells();
+        List<Spell> spells =
+                ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of()).spells();
         assertEquals(1, spells.size(), "a rise that lands while the reference is still learning must not be absorbed");
         assertEquals(Direction.UP, spells.get(0).decision().direction());
         Instant onset = Instant.parse(spells.get(0).onsetBucket());
@@ -621,7 +622,8 @@ class ToolErrorTrendTest {
         assertEquals(2000, requireBaseline(resumed).calls(), "a frozen reference does not grow on a resume");
         assertEquals(1, resumed.spells().size(), "and the rise after it is judged against it");
 
-        Map<String, CarriedState> rebuilt = Map.of(TOOL, resumed.advanced().get(0).rebuilding());
+        Map<String, CarriedState> rebuilt =
+                Map.of(TOOL, resumed.advanced().get(0).rebuilding());
         Sweep again = ToolErrorTrend.sweep(s.subList(20, s.size()), LEARNING, Map.of(), rebuilt);
         assertEquals(2000, requireBaseline(again).calls(), "nor on a rebuild, after the window slid");
         assertTrue(requireBaseline(again).rate() < 0.02, "it is still the healthy traffic that taught it");
@@ -642,13 +644,13 @@ class ToolErrorTrendTest {
         Sweep first = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of());
         assertEquals(1400, requireBaseline(first).calls());
 
-        Sweep rebuilt =
-                ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, first.advanced().get(0).rebuilding()));
+        Sweep rebuilt = ToolErrorTrend.sweep(
+                s, LEARNING, Map.of(), Map.of(TOOL, first.advanced().get(0).rebuilding()));
         assertEquals(1400, requireBaseline(rebuilt).calls(), "the same hours, learned once");
 
         series(s, 7, 2, 200, 0.01);
-        Sweep grown =
-                ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, rebuilt.advanced().get(0).rebuilding()));
+        Sweep grown = ToolErrorTrend.sweep(
+                s, LEARNING, Map.of(), Map.of(TOOL, rebuilt.advanced().get(0).rebuilding()));
         assertEquals(1800, requireBaseline(grown).calls(), "and then only the hours after them");
     }
 
@@ -687,7 +689,8 @@ class ToolErrorTrendTest {
     @Test
     void aResetThatKeepsALearningReferenceKeepsWhatItLearned() {
         List<HourlyToolTally> s = series(7, 200, 0.01); // 1,400 calls, still learning
-        CarriedState was = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of()).advanced().get(0);
+        CarriedState was =
+                ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of()).advanced().get(0);
 
         // What reset leaves: the reference and the watermark kept, the accumulator cleared, the fence at hour 8.
         String resetAt = START.plus(Duration.ofHours(8)).toString();
@@ -738,7 +741,8 @@ class ToolErrorTrendTest {
         assertEquals(2000, requireBaseline(resumed).calls(), "up to the freeze again, and no further");
         assertEquals(resetAt, resumed.advanced().get(0).resetAt());
 
-        Map<String, CarriedState> rebuilding = Map.of(TOOL, partway.advanced().get(0).rebuilding());
+        Map<String, CarriedState> rebuilding =
+                Map.of(TOOL, partway.advanced().get(0).rebuilding());
         Sweep rebuilt = ToolErrorTrend.sweep(s, LEARNING, Map.of(), rebuilding);
         assertEquals(2000, requireBaseline(rebuilt).calls(), "a rebuild relearns from the fence too");
         assertTrue(requireBaseline(rebuilt).rate() > 0.04);

@@ -169,7 +169,8 @@ class GroundednessRateIntegrationTest {
         assertTrue(members.stream().allMatch(r -> r.traceId() != null && r.spanId() == null));
 
         assertTrue(
-                findings.listAutoEscalatable(pid, List.of(BuiltInDetector.Kind.GROUNDEDNESS), flaggedSinceOnset, 10)
+                findings
+                        .listAutoEscalatable(pid, List.of(BuiltInDetector.Kind.GROUNDEDNESS), flaggedSinceOnset, 10)
                         .stream()
                         .anyMatch(f -> f.id().equals(finding.id())),
                 "eligible for triage: its sample count is the flagged traces and it cites traces");

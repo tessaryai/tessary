@@ -87,9 +87,7 @@ public class ClassifierWorker {
      * the classify service at the pace it can take, never as one tick's worth of calls.
      */
     private static final Set<String> DRAIN_TO_HEAD = Set.of(
-            BuiltInDetector.Kind.SECRET_LEAK,
-            BuiltInDetector.Kind.MALFORMED_OUTPUT,
-            BuiltInDetector.Kind.GROUNDEDNESS);
+            BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT, BuiltInDetector.Kind.GROUNDEDNESS);
 
     // A job stuck failing every tick gets one full stacktrace, then a "still failing" summary
     // every 30 occurrences (~30 ticks at the default 60s heartbeat) instead of one per tick.

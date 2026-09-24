@@ -94,6 +94,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
     private final ObjectMapper mapper;
     /** Told the reason when a send finds the encoder unreachable; {@link EncoderAvailability#markUnreachable}. */
     private final Consumer<String> onUnreachable;
+
     private final HttpClient client =
             HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     /**

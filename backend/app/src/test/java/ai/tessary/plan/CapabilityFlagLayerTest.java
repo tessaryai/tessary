@@ -32,10 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 class CapabilityFlagLayerTest {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's two private sets. */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(
-            Capability.BEHAVIOR_DRIFT,
-            Capability.SOP_CONFORMANCE,
-            Capability.TRIAGE_AUTOMATIC);
+    private static final Set<Capability> OFF_BY_DEFAULT =
+            EnumSet.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.TRIAGE_AUTOMATIC);
 
     @Autowired
     TenantService tenants;

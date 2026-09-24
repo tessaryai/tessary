@@ -45,8 +45,14 @@ class GroundednessConfigTest {
 
     @Test
     void anOlderBlobsHighBandIsTheThresholdOnlyWhenThresholdIsAbsent() {
-        assertEquals(0.9, GroundednessConfig.of(MAPPER, "{\"threshold_high\":0.9,\"threshold_low\":0.5}").threshold());
-        assertEquals(0.95, GroundednessConfig.of(MAPPER, "{\"threshold\":0.95,\"threshold_high\":0.9}").threshold());
+        assertEquals(
+                0.9,
+                GroundednessConfig.of(MAPPER, "{\"threshold_high\":0.9,\"threshold_low\":0.5}")
+                        .threshold());
+        assertEquals(
+                0.95,
+                GroundednessConfig.of(MAPPER, "{\"threshold\":0.95,\"threshold_high\":0.9}")
+                        .threshold());
     }
 
     @Test

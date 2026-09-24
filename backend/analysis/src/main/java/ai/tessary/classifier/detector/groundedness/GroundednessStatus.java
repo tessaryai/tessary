@@ -72,7 +72,8 @@ public class GroundednessStatus {
         Optional<ClassifierJobRow> job = jobs.findByClassifier(projectId, row.id());
         boolean everSwept = job.map(j -> j.cursorAt() != null).orElse(false);
         @Nullable Instant caughtUp = jobs.caughtUpAt(projectId, row.id()).orElse(null);
-        @Nullable Instant lastScored = assessments.lastScoredAt(projectId, row.id()).orElse(null);
+        @Nullable
+        Instant lastScored = assessments.lastScoredAt(projectId, row.id()).orElse(null);
         Mode mode = groundedness.mode();
         State state = state(
                 row.enabled(),

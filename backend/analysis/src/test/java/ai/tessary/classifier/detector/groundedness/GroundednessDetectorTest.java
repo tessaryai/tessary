@@ -322,7 +322,8 @@ class GroundednessDetectorTest {
     void configThresholdOverridesTheDefault() {
         String answer = "Refunds take 5-7 business days.";
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.9));
-        assertFalse(d.detect(obs("cs-1", "how long do refunds take?", answer), null).fired());
+        assertFalse(
+                d.detect(obs("cs-1", "how long do refunds take?", answer), null).fired());
         Detection lowered = detector(Map.of("cs-1", "extract"), List.of(0.9))
                 .detect(obs("cs-1", "how long do refunds take?", answer), "{\"threshold\":0.85}");
         assertTrue(lowered.fired(), "0.9 clears a lowered 0.85 threshold");
@@ -470,7 +471,9 @@ class GroundednessDetectorTest {
         assertEquals(0.975, flagged.get(1).get("unsupported").asDouble(), 1e-9, "at the threshold is listed");
         assertEquals(
                 "Extended Warranty KB-77 covers you.",
-                answer.substring(flagged.get(0).get("start").asInt(), flagged.get(0).get("end").asInt()));
+                answer.substring(
+                        flagged.get(0).get("start").asInt(),
+                        flagged.get(0).get("end").asInt()));
     }
 
     @Test
@@ -490,17 +493,19 @@ class GroundednessDetectorTest {
 
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                return List.of(new ResponseScore(
-                        0.99, 0.1, List.of(new Span(firstCodePoints, totalCodePoints, 0.99, 0.1))));
+                return List.of(
+                        new ResponseScore(0.99, 0.1, List.of(new Span(firstCodePoints, totalCodePoints, 0.99, 0.1))));
             }
         };
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
         Detection got = new GroundednessDetector(emoji, extract, none, assessments, mapper)
                 .detect(obs("cs-1", "refund status for order 42", answer), null);
-        JsonNode sentence = mapper.readTree(got.evidenceJson()).get("flagged_sentences").get(0);
+        JsonNode sentence =
+                mapper.readTree(got.evidenceJson()).get("flagged_sentences").get(0);
         assertEquals(
                 second,
-                answer.substring(sentence.get("start").asInt(), sentence.get("end").asInt()),
+                answer.substring(
+                        sentence.get("start").asInt(), sentence.get("end").asInt()),
                 "the emoji is two UTF-16 units and one code point");
         assertEquals(second, mapper.readTree(got.evidenceJson()).get("claim").asText());
     }

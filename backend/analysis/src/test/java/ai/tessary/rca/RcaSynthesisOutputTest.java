@@ -369,7 +369,8 @@ class RcaSynthesisOutputTest {
 
         RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
 
-        assertEquals(List.of("Real"), out.causes().stream().map(RcaDtos.Cause::title).toList());
+        assertEquals(
+                List.of("Real"), out.causes().stream().map(RcaDtos.Cause::title).toList());
     }
 
     @Test

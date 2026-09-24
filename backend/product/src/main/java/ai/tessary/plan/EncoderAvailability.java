@@ -67,7 +67,10 @@ public class EncoderAvailability implements HealthIndicator {
      * found up, kept while it is down; it lives in memory only, so a restart clears it.
      */
     public record Snapshot(
-            boolean available, String reason, @Nullable Instant checkedAt, @Nullable Instant lastAvailableAt) {}
+            boolean available,
+            String reason,
+            @Nullable Instant checkedAt,
+            @Nullable Instant lastAvailableAt) {}
 
     private static final Snapshot UNPROBED = new Snapshot(false, "not probed yet", null, null);
 

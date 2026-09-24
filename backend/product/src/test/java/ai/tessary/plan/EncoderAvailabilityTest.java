@@ -156,8 +156,8 @@ class EncoderAvailabilityTest {
                 requestLines.add(head.toString().split("\r\n")[0]);
                 OutputStream out = client.getOutputStream();
                 byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-                out.write(("HTTP/1.1 " + status + " Stub\r\nContent-Type: application/json\r\n"
-                                + "Content-Length: " + payload.length + "\r\nConnection: close\r\n\r\n")
+                out.write(("HTTP/1.1 " + status + " Stub\r\nContent-Type: application/json\r\n" + "Content-Length: "
+                                + payload.length + "\r\nConnection: close\r\n\r\n")
                         .getBytes(StandardCharsets.UTF_8));
                 out.write(payload);
                 out.flush();

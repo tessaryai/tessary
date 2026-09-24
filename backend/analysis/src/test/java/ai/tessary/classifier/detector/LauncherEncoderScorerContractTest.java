@@ -114,7 +114,10 @@ class LauncherEncoderScorerContractTest {
             List<String> passages = new ArrayList<>();
             r.get("passages").forEach(p -> passages.add(p.asText()));
             JsonNode question = r.get("question");
-            out.add(new Response(passages, question == null ? null : question.asText(), r.get("answer").asText()));
+            out.add(new Response(
+                    passages,
+                    question == null ? null : question.asText(),
+                    r.get("answer").asText()));
         }
         return out;
     }
@@ -126,7 +129,8 @@ class LauncherEncoderScorerContractTest {
                 int contentLength = 0;
                 for (String line : readHead(in).split("\r\n")) {
                     if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
-                        contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                        contentLength = Integer.parseInt(
+                                line.substring("content-length:".length()).trim());
                     }
                 }
                 received.set(new String(in.readNBytes(contentLength), StandardCharsets.UTF_8));

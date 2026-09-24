@@ -385,7 +385,8 @@ class ClassifierWorkerEncoderGateIntegrationTest {
             int contentLength = 0;
             for (String line : lines) {
                 if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
-                    contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                    contentLength = Integer.parseInt(
+                            line.substring("content-length:".length()).trim());
                 }
             }
             in.readNBytes(contentLength);

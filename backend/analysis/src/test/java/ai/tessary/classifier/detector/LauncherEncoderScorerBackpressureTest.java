@@ -192,8 +192,8 @@ class LauncherEncoderScorerBackpressureTest {
     void aServerErrorIsAFaultNotUnreachable() {
         failWith = 500;
 
-        IllegalStateException e = assertThrows(
-                IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
 
         assertFalse(e instanceof EncoderUnreachableException, "a model that answers 500 is broken, not asleep");
         assertTrue(unreachable.isEmpty());
@@ -203,8 +203,8 @@ class LauncherEncoderScorerBackpressureTest {
     void anUnauthorisedAnswerIsAFaultNotUnreachable() {
         failWith = 401;
 
-        IllegalStateException e = assertThrows(
-                IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
 
         assertFalse(e instanceof EncoderUnreachableException, "a wrong key is a fault the attempts should count");
         assertTrue(unreachable.isEmpty());

@@ -73,7 +73,8 @@ class ToolErrorConfigTest {
                 ToolErrorConfig.of(MAPPER, "{\"min_baseline_calls\": 200, \"freeze_baseline_calls\": 1000}");
         assertEquals(200, parsed.minBaselineCalls());
         assertEquals(1000, parsed.freezeBaselineCalls());
-        assertEquals(700, ToolErrorConfig.of(MAPPER, "{\"min_baseline_calls\": 700}").freezeBaselineCalls());
+        assertEquals(
+                700, ToolErrorConfig.of(MAPPER, "{\"min_baseline_calls\": 700}").freezeBaselineCalls());
     }
 
     @Test

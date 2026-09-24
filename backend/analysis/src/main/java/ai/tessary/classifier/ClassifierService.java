@@ -752,7 +752,8 @@ public class ClassifierService {
      * and stop between scheduled runs. Dev mode never sleeps.
      */
     Optional<String> encoderSkipReason(String projectId, String classifierId, Instant now) {
-        if (!encoder.available()) return Optional.of("model down: " + encoder.snapshot().reason());
+        if (!encoder.available())
+            return Optional.of("model down: " + encoder.snapshot().reason());
         if (groundedness.mode() != GroundednessProperties.Mode.PRODUCTION) return Optional.empty();
         Optional<Instant> caughtUp = jobs.caughtUpAt(projectId, classifierId);
         if (caughtUp.isPresent()

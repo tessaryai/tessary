@@ -199,8 +199,16 @@ class GroundednessFlaggedAnswersIntegrationTest {
         assertTrue(stored.path("documents").get(0).path("title").isNull());
         JsonNode marks = stored.path("flaggedSentences");
         assertEquals(2, marks.size());
-        assertEquals(FIRST, ANSWER.substring(marks.get(0).path("start").asInt(), marks.get(0).path("end").asInt()));
-        assertEquals(SECOND, ANSWER.substring(marks.get(1).path("start").asInt(), marks.get(1).path("end").asInt()));
+        assertEquals(
+                FIRST,
+                ANSWER.substring(
+                        marks.get(0).path("start").asInt(),
+                        marks.get(0).path("end").asInt()));
+        assertEquals(
+                SECOND,
+                ANSWER.substring(
+                        marks.get(1).path("start").asInt(),
+                        marks.get(1).path("end").asInt()));
         assertEquals(0.992, stored.path("score").asDouble(), "the highest marked sentence");
 
         JsonNode last = page(session, base + "?limit=2&cursor=" + (cited - 1));
@@ -208,20 +216,34 @@ class GroundednessFlaggedAnswersIntegrationTest {
         assertTrue(last.path("nextCursor").isNull(), "the last page");
 
         // An RCA cause narrows the list to the answers in the traces it names; an index past its causes is none.
-        String report = rcaReport(pid, finding.id(), "[{\"title\":\"One document\",\"evidence_trace_ids\":[\""
-                + trace + "\",\"not-a-cited-trace\"],\"evidence_session_ids\":[]}]");
+        String report = rcaReport(
+                pid,
+                finding.id(),
+                "[{\"title\":\"One document\",\"evidence_trace_ids\":[\"" + trace
+                        + "\",\"not-a-cited-trace\"],\"evidence_session_ids\":[]}]");
         JsonNode share = page(session, base + "?limit=50&rcaReport=" + report + "&cause=0");
         assertEquals(1, share.path("total").asLong(), "only the cause's trace");
         assertEquals(span, share.path("rows").get(0).path("spanId").asText());
         assertTrue(share.path("nextCursor").isNull());
-        assertEquals(0, page(session, base + "?rcaReport=" + report + "&cause=1").path("total").asLong());
-        assertEquals(cited, page(session, base + "?rcaReport=" + report).path("total").asLong(), "both or neither");
+        assertEquals(
+                0,
+                page(session, base + "?rcaReport=" + report + "&cause=1")
+                        .path("total")
+                        .asLong());
+        assertEquals(
+                cited,
+                page(session, base + "?rcaReport=" + report).path("total").asLong(),
+                "both or neither");
 
         GroundednessEvidence.GroundednessDetail block = detail.detail(finding);
         assertNotNull(block);
-        assertEquals(Math.min(cited, GroundednessDetailService.PAGE_SIZE), block.answers().size());
+        assertEquals(
+                Math.min(cited, GroundednessDetailService.PAGE_SIZE),
+                block.answers().size());
         assertEquals(span, block.answers().getFirst().spanId());
-        assertEquals(finding.payload().path("traces_since_onset").asLong(), block.rate().nCur());
+        assertEquals(
+                finding.payload().path("traces_since_onset").asLong(),
+                block.rate().nCur());
     }
 
     private JsonNode page(Cookie session, String path) throws Exception {

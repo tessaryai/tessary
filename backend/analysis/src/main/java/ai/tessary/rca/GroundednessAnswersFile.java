@@ -61,8 +61,8 @@ final class GroundednessAnswersFile {
         String out = sb.toString();
         // Only a single answer can pass the budget on its own; cut it where the budget ends and say so.
         if (out.length() <= CHAR_BUDGET) return out;
-        return out.substring(0, CHAR_BUDGET)
-                + "\n\n[cut at " + CHAR_BUDGET + " characters: read the rest of this answer with `get_span`.]\n";
+        return out.substring(0, CHAR_BUDGET) + "\n\n[cut at " + CHAR_BUDGET
+                + " characters: read the rest of this answer with `get_span`.]\n";
     }
 
     private static String answer(int n, FlaggedAnswerView a) {
@@ -81,7 +81,9 @@ final class GroundednessAnswersFile {
         for (FlaggedSentenceView s : a.flaggedSentences()) {
             sb.append(String.format(Locale.ROOT, "- flagged sentence, score %.3f", s.score()));
             if (answer != null && s.start() >= 0 && s.end() <= answer.length() && s.start() < s.end()) {
-                sb.append(": \"").append(oneLine(answer.substring(s.start(), s.end()))).append('"');
+                sb.append(": \"")
+                        .append(oneLine(answer.substring(s.start(), s.end())))
+                        .append('"');
             } else {
                 sb.append(String.format(Locale.ROOT, ": [%d, %d)", s.start(), s.end()));
             }

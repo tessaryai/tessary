@@ -66,8 +66,7 @@ public class GroundednessProperties {
         for (Mode m : Mode.values()) {
             if (m.wire().equals(value.trim().toLowerCase(Locale.ROOT))) return m;
         }
-        throw new IllegalArgumentException(
-                ENV + " must be dev or production, got '" + value.trim() + "'");
+        throw new IllegalArgumentException(ENV + " must be dev or production, got '" + value.trim() + "'");
     }
 
     public long getProductionSleepMinutes() {

@@ -203,7 +203,8 @@ public class GroundednessRateService implements ClassifierCatchUp {
         String onset = spell.decision().onsetAt();
         Instant since = onset != null ? parse(onset, windowFrom) : windowFrom;
         // The end of the last hour the replay folded, not now: the traces stop where the spell's counts stop.
-        Instant until = spell.lastBucket() != null ? parse(spell.lastBucket(), at).plus(Duration.ofHours(1)) : at;
+        Instant until =
+                spell.lastBucket() != null ? parse(spell.lastBucket(), at).plus(Duration.ofHours(1)) : at;
         String scorerVersion = config.scorerVersion();
         List<String> scored =
                 rates.scoredSince(projectId, signal.id(), scorerVersion, callSite, windowFrom, since, until);
@@ -228,7 +229,8 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 d.failuresSinceOnset(),
                 callSite,
                 d.onsetAt(),
-                GroundednessEvidence.payload(mapper, callSite, d, spell.baseline().failures(), config),
+                GroundednessEvidence.payload(
+                        mapper, callSite, d, spell.baseline().failures(), config),
                 eventAt,
                 parse(eventAt, at).minus(QUIET_WINDOW).toString(),
                 now);

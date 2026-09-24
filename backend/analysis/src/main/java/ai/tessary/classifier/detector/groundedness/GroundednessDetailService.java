@@ -121,11 +121,14 @@ public class GroundednessDetailService {
         Double score = null;
         for (JsonNode s : evidence.path("flagged_sentences")) {
             FlaggedSentenceView sentence = new FlaggedSentenceView(
-                    s.path("start").asInt(0), s.path("end").asInt(0), s.path("unsupported").asDouble(0));
+                    s.path("start").asInt(0),
+                    s.path("end").asInt(0),
+                    s.path("unsupported").asDouble(0));
             sentences.add(sentence);
             if (score == null || sentence.score() > score) score = sentence.score();
         }
-        if (score == null && evidence.path("unsupported").isNumber()) score = evidence.path("unsupported").asDouble();
+        if (score == null && evidence.path("unsupported").isNumber())
+            score = evidence.path("unsupported").asDouble();
         String answer = span == null ? null : span.outputText();
         boolean stored = answer != null && !answer.isBlank();
         List<RetrievedDocumentView> documents = null;

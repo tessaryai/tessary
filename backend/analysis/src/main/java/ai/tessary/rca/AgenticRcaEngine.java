@@ -261,22 +261,28 @@ public class AgenticRcaEngine {
                     issued.plaintext(),
                     report.id()));
 
-            RcaSynthesisOutput.Parsed parsed = switch (kind) {
-                case RcaReportRow.ReportKind.FRUSTRATION_CAUSES ->
-                    RcaSynthesisOutput.parseFrustration(
-                            mapper, run.resultText(), flaggedTraceIds, sessionIds, measuredChecks, job.projectId());
-                case RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES ->
-                    RcaSynthesisOutput.parseGroundedness(
-                            mapper, run.resultText(), flaggedTraceIds, measuredChecks, job.projectId());
-                default ->
-                    RcaSynthesisOutput.parse(
-                            mapper,
-                            run.resultText(),
-                            baselineTraceIds,
-                            flaggedTraceIds,
-                            measuredChecks,
-                            job.projectId());
-            };
+            RcaSynthesisOutput.Parsed parsed =
+                    switch (kind) {
+                        case RcaReportRow.ReportKind.FRUSTRATION_CAUSES ->
+                            RcaSynthesisOutput.parseFrustration(
+                                    mapper,
+                                    run.resultText(),
+                                    flaggedTraceIds,
+                                    sessionIds,
+                                    measuredChecks,
+                                    job.projectId());
+                        case RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES ->
+                            RcaSynthesisOutput.parseGroundedness(
+                                    mapper, run.resultText(), flaggedTraceIds, measuredChecks, job.projectId());
+                        default ->
+                            RcaSynthesisOutput.parse(
+                                    mapper,
+                                    run.resultText(),
+                                    baselineTraceIds,
+                                    flaggedTraceIds,
+                                    measuredChecks,
+                                    job.projectId());
+                    };
             if (parsed.detailedReport() == null) {
                 // Schema-required, but a schema-ignoring model must not sink an otherwise-valid
                 // verdict — fall back to the summary so the report page never renders empty.

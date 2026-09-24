@@ -108,10 +108,14 @@ class GroundednessDetailServiceTest {
         String answer = Objects.requireNonNull(a.answer());
         assertEquals(
                 FIRST,
-                answer.substring(a.flaggedSentences().get(0).start(), a.flaggedSentences().get(0).end()));
+                answer.substring(
+                        a.flaggedSentences().get(0).start(),
+                        a.flaggedSentences().get(0).end()));
         assertEquals(
                 SECOND,
-                answer.substring(a.flaggedSentences().get(1).start(), a.flaggedSentences().get(1).end()));
+                answer.substring(
+                        a.flaggedSentences().get(1).start(),
+                        a.flaggedSentences().get(1).end()));
         assertTrue(a.premiseHadEvidence());
         List<RetrievedDocumentView> documents = Objects.requireNonNull(a.documents());
         assertEquals(2, documents.size());
@@ -134,7 +138,8 @@ class GroundednessDetailServiceTest {
                         1));
         when(substrate.observationsByIds(eq(PROJECT), any())).thenReturn(List.of());
 
-        FlaggedAnswerView a = service.page(finding(payload()), null, 50, null).rows().getFirst();
+        FlaggedAnswerView a =
+                service.page(finding(payload()), null, 50, null).rows().getFirst();
 
         assertFalse(a.stored());
         assertTrue(a.cleared());
@@ -157,9 +162,13 @@ class GroundednessDetailServiceTest {
         FlaggedAnswerPage first = service.page(finding, null, 2, null);
         FlaggedAnswerPage rest = service.page(finding, null, 2, first.nextCursor());
 
-        assertEquals(List.of("tr_3", "tr_2"), first.rows().stream().map(FlaggedAnswerView::traceId).toList());
+        assertEquals(
+                List.of("tr_3", "tr_2"),
+                first.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertEquals("2", first.nextCursor());
-        assertEquals(List.of("tr_1"), rest.rows().stream().map(FlaggedAnswerView::traceId).toList());
+        assertEquals(
+                List.of("tr_1"),
+                rest.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertNull(rest.nextCursor(), "the last page");
         assertEquals(3, rest.total());
     }
@@ -175,7 +184,9 @@ class GroundednessDetailServiceTest {
 
         FlaggedAnswerPage page = service.page(finding, cause, 50, null);
 
-        assertEquals(List.of("tr_2"), page.rows().stream().map(FlaggedAnswerView::traceId).toList());
+        assertEquals(
+                List.of("tr_2"),
+                page.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertEquals(1, page.total());
         assertNull(page.nextCursor());
     }

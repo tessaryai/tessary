@@ -245,7 +245,8 @@ class AgenticRcaPromptTest {
     void aFewFlaggedTracesCapConfidence() {
         RcaReportRow r = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
         assertTrue(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 3).contains("cap every cause"));
-        assertFalse(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 30).contains("cap every cause"));
+        assertFalse(
+                AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 30).contains("cap every cause"));
     }
 
     /** The two resources the groundedness branch sends: a schema whose causes cite traces, and its own rules. */
