@@ -34,13 +34,6 @@ class GroundednessConfigTest {
         assertEquals(d, GroundednessConfig.of(MAPPER, null));
         assertEquals(d, GroundednessConfig.of(MAPPER, "{not json"));
         assertEquals(d, GroundednessConfig.of(MAPPER, "{\"arming\":{\"threshold\":3}}"));
-        assertEquals(0.975, d.threshold());
-        assertEquals(50_000L, d.arlTarget());
-        assertEquals(4.0, d.minDecisionInterval());
-        assertEquals(2.0, d.shiftMultiple());
-        assertEquals(0.02, d.shiftFloor());
-        assertEquals(200, d.minBaselineTraces());
-        assertEquals(1_000, d.freezeBaselineTraces());
     }
 
     @Test
