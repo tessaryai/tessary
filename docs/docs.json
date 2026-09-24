@@ -59,7 +59,8 @@
       {
         "group": "Classifiers",
         "pages": [
-          "classifiers/frustration"
+          "classifiers/frustration",
+          "classifiers/groundedness"
         ]
       },
       {

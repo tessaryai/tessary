@@ -241,12 +241,16 @@ Retention and shedding look identical from outside. Distinguish them:
 | Recent data has gaps under load | `shed_batches` non-zero | Our fault. Re-ingest recovers it; the write path is idempotent. |
 | Recent data thin but present, uniformly | — | Not us. This used to mean a sampling policy; there is no longer any server-side path that thins a project's traffic, so look at the producer's own exporter. |
 
-### "Can we scale classify-service to zero?"
+### "Can we turn off the groundedness model?"
 
 Loki: `event="encoder.dependency"`. Only when `decommissionable=true`. The field counts projects with an
-*enabled* encoder-backed classifier row whose org also holds the capability — if it is above zero,
-turning the service off silently stops those classifiers producing, which reads like a quiet week
-rather than an outage.
+*enabled* `groundedness` row whose org also holds the capability, whether or not the model answers
+right now. If it is above zero, turning the model off pauses those projects' groundedness scoring,
+which reads like a quiet week rather than an outage.
+
+The event is about the groundedness model server (`classifiers/groundedness/serve.py`, at
+`tessary.observer.encoder.url`), not classify-service. classify-service serves no classifier head in
+the open edition, so this event says nothing about scaling it to zero.
 
 ---
 

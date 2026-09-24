@@ -1,6 +1,6 @@
 ---
 title: "Call Sites"
-description: "Understand what a call site is in Tessary, how a span is attributed to one, and why spans that carry no call-site tag cannot be watched."
+description: "Understand what a call site is in Tessary, how a span is attributed to one, why spans that carry no call-site tag cannot be watched, and what a call site's shape decides."
 ---
 
 A call site is a place in your code that causes a model to run. It is the unit almost everything else in Tessary is scoped to: a baseline is fitted per call site, a duration or cost finding names one, and a case points back at one.
@@ -39,12 +39,57 @@ The same gap closes other checks quietly:
 | `duration_drift`, `cost_drift` at turn grain | The trace is skipped. The unattributed pile is not a bucket. |
 | `duration_drift` at tool grain | The trace still contributes. A tool's latency is that tool's latency whichever entry point dispatched it. |
 | `malformed_output` | The span is skipped: with no call site there is no declared output schema to validate against. |
+| `groundedness` | The answer is not scored. Groundedness scores only answers at a call site whose shape is `rag_answer`, `summarize`, or `extract`, and a span with no call site has no [shape](#call-site-shapes). |
 
 This is also what the connect gate in [Set up Tessary](/self-hosting/setup#sign-up-and-connect-your-traces) is testing. The gate does not open when spans arrive. It opens when a **tagged** span arrives, and until then it shows a live count of spans received against spans tagged, because the only useful fix in that state is to tag the traffic that is already arriving.
 
 <Note>
   Tool-grain measurements are keyed on the tool, not on the tool within a call site. A shared tool called from five entry points stays one population, because splitting it per call site would shatter it into populations too thin to watch. Tessary files a tool finding under the call site that supplied the traffic in the window the finding fired on.
 </Note>
+
+## Call-site shapes
+
+A call site's shape says what kind of work the model does there: answer from retrieved documents, summarize, pick a route, and so on. Tessary doesn't infer a shape from traffic or code, and the interface doesn't show it. It comes from the `.tessary/` bundle you import, in the format the evals plugin defines.
+
+Groundedness is the one classifier that reads it. It scores answers only at a call site whose shape is `rag_answer`, `summarize`, or `extract`, because those are the shapes whose answer should be supported by a source the trace carries. A call site with any other shape, or with none, is never scored. [Which answers are scored](/classifiers/groundedness#which-answers-are-scored) has the full rule.
+
+| Shape | The model at this call site |
+| --- | --- |
+| `rag_answer` | Answers a question from retrieved documents. |
+| `summarize` | Condenses input it was given into a shorter form. |
+| `extract` | Pulls structured data, such as fields or JSON, out of text. |
+| `classify` | Assigns a label or category to its input. |
+| `draft` | Writes long-form text for a person to edit, such as an email. |
+| `route` | Decides which tool, branch, or path runs next. |
+| `tool_call` | Picks a tool or function to call, and its arguments. |
+| `agent_step` | Runs one step of a multi-step agent loop. |
+| `conversational_turn` | Replies in a conversation where earlier turns matter. |
+| `embedding` | Turns text into a vector for similarity search. |
+| `rerank` | Reorders candidate passages by relevance to a query. |
+| `guardrail` | Checks content before or after another call, and blocks or allows it. |
+| `moderation` | Calls a provider's moderation API. |
+| `ensemble_vote` | Is one of several parallel calls with the same prompt, whose answers are compared. |
+| `other` | Fits none of the above. |
+
+Two boundaries decide whether groundedness runs. A summary returned as structured fields is `extract`, not `summarize`. An answer written from retrieved documents is `rag_answer`, not `draft`, even when it reads like a draft.
+
+### Set or change a shape
+
+A shape is the `shape` field in the call site's file, `.tessary/pipeline/call_sites/<id>.yaml`, where `id` is the call site's `tessary.call_site.id` value, verbatim. The [bundle format](https://github.com/tessaryai/tessary/blob/main/contract/output_format.md) describes every field.
+
+```yaml
+id: support.answer
+shape: rag_answer
+```
+
+Tagging a call site doesn't give it a shape. It has none until you import a bundle that carries one:
+
+1. Set `shape` in the call site's file.
+2. Open **Settings** → **Sources** and select **Import bundle**. You need the owner role on the project.
+3. Select **Choose directory** and pick your `.tessary/` directory. It must contain `pipeline/meta.yaml`.
+4. Keep **Upsert**, which adds and updates call sites and deletes none, and select **Import bundle**.
+
+When an import adds or changes a shape, groundedness goes back over the traces Tessary still holds, so answers that arrived before the shape was set are scored too.
 
 ## Choosing which call sites to tag
 

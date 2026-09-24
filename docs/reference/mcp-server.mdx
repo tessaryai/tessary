@@ -66,6 +66,8 @@ Two fields deliberately survive: `triageStatus`, which says only whether a rulin
 
 A high-confidence secret leak and a frustration finding have no triage run to strip: each is filed already ruled, and `triageStatus` reflects that ruling. On a frustration finding or case, the `frustration` block also comes back with an empty `conversations` list, so the frustrated sessions' ids do not reach a caller through it. `get_finding_evidence` pages them as refs.
 
+A groundedness finding goes through triage like any other, so its ruling is stripped as the table says. On a groundedness finding or case, the `groundedness` block comes back with an empty `answers` list and a null `answersNextCursor`, so the flagged answers' trace and span ids do not reach a caller through it. `get_finding_evidence` pages them as `witness` refs.
+
 ## Conventions the tools share
 
 - **Read-only.** Nothing writes, spends, or starts an agent run.
@@ -100,6 +102,8 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 
 On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session counts behind each, and the scoring settings the finding was filed under.
 
+On a groundedness case, `groundedness` carries the call site's learned and current rates of flagged answers with the trace counts behind each, the score at which a sentence is flagged (`flagThreshold`), and the rate test's settings the finding was filed under.
+
 `get_case` accepts either the stored id or the human reference a person would quote, such as `C-118`. `rca` is null while a report is still running, in which case `rca_report_id` names it so you can poll, and null when none has been run; `rca_available` says whether one could be.
 
 ### Findings and evidence
@@ -107,7 +111,7 @@ On a frustration case, `frustration` carries the call site's learned and current
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob |
-| `get_finding` | `id` | none | One finding with its parsed evidence, including the `frustration` block on a frustration finding |
+| `get_finding` | `id` | none | One finding with its parsed evidence, including the `frustration` block on a frustration finding and the `groundedness` block on a groundedness finding |
 | `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
 
 A finding is the aggregated cause behind many classifier firings, distinct from a single firing in the `classifier_events` dataset.

@@ -62,11 +62,19 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 ## The groundedness classifier never fires
 
-**Symptom:** The `groundedness` row under **Classifiers** reads "needs setup" or "No scores since" a time, and no groundedness findings appear, even on projects whose call sites declare a retrieval shape (`rag_answer`, `summarize`, `extract`) and carry retrieved documents.
+**Symptom:** The `groundedness` row under **Classifiers** reads "needs setup", "No scores since" a time, or "Not scoring", and no groundedness findings appear, even on projects whose call sites have a shape it scores (`rag_answer`, `summarize`, `extract`).
 
-**Cause:** Groundedness scores with a model that runs on a GPU, outside Tessary's containers. "needs setup" means it has never scored; "No scores since" means the model server stopped answering, or, on AWS, missed its hourly run. While it doesn't answer, groundedness pauses and keeps its place.
+**Cause:** Groundedness scores with a model that runs on a GPU, outside Tessary's containers. "needs setup" means the model has never answered. "No scores since" means the model server stopped answering, or, on AWS, missed its hourly run. "Not scoring" means the same, before the first score. While the model doesn't answer, groundedness pauses and keeps its place. See [When it pauses](/classifiers/groundedness#when-it-pauses).
 
-**Resolution:** Under **Classifiers**, turn it on, or open it and choose **Restart model**, then paste the prompt into your coding agent. It follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). A host without a GPU can't run it. Once the model answers, groundedness scores what arrived while it was down. Two further conditions are by design, not faults: it only scores turns whose call site shape declares verifiable source content, and it is quiet on a turn that reached no evidence.
+**Resolution:** Under **Classifiers**, turn it on, or open it and choose **Restart model**, then paste the prompt into your coding agent. It follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). A host without a GPU can't run it. Once the model answers, groundedness scores what arrived while it was down.
+
+If the row shows no alert and still no findings appear, the classifier may be running as designed. Each call site first learns its own normal rate of flagged answers, and a finding opens only when the rate rises above it. These answers are never scored:
+
+- An answer on a call site whose shape is not `rag_answer`, `summarize`, or `extract`, or that has no shape because no imported bundle set one. [Call-site shapes](/concepts/call-sites#call-site-shapes) says how to set it.
+- An answer that asserts nothing checkable, such as a greeting or a question back to the user.
+- An answer on a `rag_answer` call site with no retrieved documents to compare against, when its session called a tool or a retriever. Tool results are not read as documents.
+
+Any other answer with no retrieved documents is scored against its prompt. [Which answers are scored](/classifiers/groundedness#which-answers-are-scored) has the full rule.
 
 ## Frustration classifier produces nothing
 

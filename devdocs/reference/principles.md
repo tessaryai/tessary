@@ -165,9 +165,10 @@ never really about grading:
   exception: it scores a fixed window with a fixed budget, so it clips long messages to head and tail
   and replaces pastes with a marker (`FrustrationTurnBuilder`), and says so in the user docs.
 - **Cheap detection runs on all traffic; LLM work is the escalation.** Deterministic
-  pattern/telemetry detectors and the shared ONNX encoder heads served CPU-side by
-  classify-service's `/classify` run unsampled — model cost paid at train/serve time, not per
-  event. (The per-project trained centroid classifier was removed along with the vector
+  pattern/telemetry detectors and the `groundedness` encoder, a token head the self-hoster serves on
+  their own GPU with `classifiers/groundedness/serve.py`, run unsampled: model cost is paid at
+  train/serve time, not per event. classify-service serves no classifier head in the open edition.
+  (The per-project trained centroid classifier was removed along with the vector
   substrate; the only user-authored classifier kind today is the regex detector.) An
   LLM only runs once a cheap detector has already filed a finding. This was the "online
   grading is opt-in and layered" principle, and it outlived the grading half: the layering was
