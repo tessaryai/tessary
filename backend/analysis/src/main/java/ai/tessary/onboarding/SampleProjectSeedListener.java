@@ -1004,7 +1004,8 @@ public class SampleProjectSeedListener {
         probabilities.put(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT, round(score));
         probabilities.put(JevFrustrationQuestion.UNHAPPY_OTHER_CAUSE, round(other));
         probabilities.put(JevFrustrationQuestion.NEUTRAL_OR_POSITIVE, round(1 - score - other));
-        return writeJson(Map.of("answers", Map.of(JevFrustrationQuestion.NAME, Map.of("probabilities", probabilities))));
+        return writeJson(
+                Map.of("answers", Map.of(JevFrustrationQuestion.NAME, Map.of("probabilities", probabilities))));
     }
 
     private String writeJson(Object value) {

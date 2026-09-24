@@ -584,8 +584,7 @@ final class SampleShowcase {
             "how_to",
             new Promise(
                     "Plan upgrades are free for the first 30 days.",
-                    "You said upgrades were free for 30 days. I was just charged the full amount. That was"
-                            + " wrong.",
+                    "You said upgrades were free for 30 days. I was just charged the full amount. That was" + " wrong.",
                     true),
             "bug_report",
             new Promise(
@@ -890,8 +889,7 @@ final class SampleShowcase {
                 boolean searchesKb = List.of(ticketChain).contains(KB_SEARCH);
                 boolean promised = promise != null
                         && searchesKb
-                        && rnd.nextDouble()
-                                < (day < UNGROUNDED_ONSET_DAY ? BASELINE_PROMISE_RATE : DRIFT_PROMISE_RATE);
+                        && rnd.nextDouble() < (day < UNGROUNDED_ONSET_DAY ? BASELINE_PROMISE_RATE : DRIFT_PROMISE_RATE);
                 boolean threaded = rnd.nextDouble() < (promised ? THREAD_SHARE_PROMISED : THREAD_SHARE);
                 boolean frustrated =
                         threaded && rnd.nextDouble() < (promised ? FRUSTRATED_IF_PROMISED : FRUSTRATED_OTHERWISE);
@@ -922,7 +920,8 @@ final class SampleShowcase {
                                 date);
                         if (promised) reply = reply + " " + promise.sentence();
                     } else if (turn == 1) {
-                        body = fill(FOLLOW_UPS[rnd.nextInt(FOLLOW_UPS.length)], customer, orderId, product, amount, date);
+                        body = fill(
+                                FOLLOW_UPS[rnd.nextInt(FOLLOW_UPS.length)], customer, orderId, product, amount, date);
                         reply = fill(FOLLOW_UP_REPLY, customer, orderId, product, amount, date);
                     } else {
                         body = !frustrated
@@ -1003,7 +1002,8 @@ final class SampleShowcase {
                                 for (int m = 0; m < priorMessages; m++) {
                                     threadHistory
                                             .append("[")
-                                            .append(dateFmt.format(traceStart.minus(priorMessages - m, ChronoUnit.DAYS)))
+                                            .append(dateFmt.format(
+                                                    traceStart.minus(priorMessages - m, ChronoUnit.DAYS)))
                                             .append("] ")
                                             .append(customer)
                                             .append(": ")
@@ -1029,12 +1029,15 @@ final class SampleShowcase {
                                 outputCost = outC.toPlainString();
                                 costSource = SpanRow.CostSource.PROVIDED;
                                 latencyMs = jitter(rnd, CLASSIFY_BASE_LATENCY_MS, 0.15);
-                                input = "Ticket: " + subject + "\n\n" + (assembleOutput == null ? body : assembleOutput);
+                                input = "Ticket: " + subject + "\n\n"
+                                        + (assembleOutput == null ? body : assembleOutput);
                                 classifyOutput = "intent: " + intentLabel + " (confidence "
                                         + String.format(Locale.ROOT, "%.2f", 0.86 + rnd.nextDouble() * 0.12) + ")";
                                 output = classifyOutput;
                                 classifyCost.add(
-                                        day, inputTokens * CLASSIFY_PRICE_IN + outputTokens * CLASSIFY_PRICE_OUT, traceId);
+                                        day,
+                                        inputTokens * CLASSIFY_PRICE_IN + outputTokens * CLASSIFY_PRICE_OUT,
+                                        traceId);
                                 if (day >= CLASSIFY_STEP_DAY && classifyPostStepTraceIds.size() < 6) {
                                     classifyPostStepTraceIds.add(traceId);
                                 }
@@ -1090,7 +1093,9 @@ final class SampleShowcase {
                                 inputPreview = body;
                                 output = reply;
                                 generateCost.add(
-                                        day, inputTokens * GENERATE_PRICE_IN + outputTokens * GENERATE_PRICE_OUT, traceId);
+                                        day,
+                                        inputTokens * GENERATE_PRICE_IN + outputTokens * GENERATE_PRICE_OUT,
+                                        traceId);
                                 totalInputTokens += inputTokens;
                                 totalOutputTokens += outputTokens;
                                 totalInputCost = totalInputCost.add(inC);
@@ -1234,7 +1239,8 @@ final class SampleShowcase {
                             threadRetrieved = true;
                         }
                         if (GENERATE.equals(callSite) && threadRetrieved) {
-                            answers.add(scoredAnswer(rnd, traceId, spanId, sessionId, spanStart, output, flaggedPromise));
+                            answers.add(
+                                    scoredAnswer(rnd, traceId, spanId, sessionId, spanStart, output, flaggedPromise));
                         }
 
                         if (attachedMediaId != null) {
@@ -1437,8 +1443,7 @@ final class SampleShowcase {
             @Nullable Promise promise) {
         if (promise == null) {
             double unsupported = Math.pow(rnd.nextDouble(), 3) * 0.9;
-            return new ScoredAnswer(
-                    traceId, spanId, sessionId, startedAt, unsupported, unsupported * 0.3, null);
+            return new ScoredAnswer(traceId, spanId, sessionId, startedAt, unsupported, unsupported * 0.3, null);
         }
         int start = answer.indexOf(promise.sentence());
         double unsupported = GROUNDEDNESS_THRESHOLD + 0.001 + rnd.nextDouble() * 0.022;
@@ -1495,7 +1500,8 @@ final class SampleShowcase {
     }
 
     /** One trial of a rate test: when it counts, its member ref, and its witness refs when it failed. */
-    private record Trial(Instant at, FindingEvidenceRepository.Ref member, List<FindingEvidenceRepository.Ref> witness) {}
+    private record Trial(
+            Instant at, FindingEvidenceRepository.Ref member, List<FindingEvidenceRepository.Ref> witness) {}
 
     private static RateStat rate(String callSiteId, List<Trial> trials, Instant onset) {
         long baselineTrials = 0;
