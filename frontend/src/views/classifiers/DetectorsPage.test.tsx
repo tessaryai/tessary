@@ -334,12 +334,21 @@ describe("DetectorsPage, Groundedness", () => {
     await screen.findByText("Setting up...");
   });
 
-  it("keeps the detection count while on in dev", async () => {
+  it("keeps the detection count while on in dev, and drops the setting-up flag", async () => {
+    // A dev row can carry a caught-up time too, and this browser copied a setup prompt earlier.
+    window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
     listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "on", configured: true, available: true, ever_swept: true, last_caught_up_at: todayAt(14, 3) }),
+    );
     renderPage();
 
-    await screen.findByText("quiet 7d");
+    // The flag is cleared once the status reads on, so the row below is drawn from that status.
+    await waitFor(() => expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).toBeNull());
+    const g = await row("Groundedness");
+    within(g).getByText("quiet 7d");
+    expect(within(g).queryByText(/last run/)).toBeNull();
+    expect(within(g).queryByText("Setting up...")).toBeNull();
   });
 
   it("names the last run while on in production", async () => {
@@ -365,10 +374,16 @@ describe("DetectorsPage, Groundedness", () => {
     await screen.findByText("No scores since 2:02 PM");
   });
 
-  it("shows the restart notice in the rail while not scoring", async () => {
+  it("shows the restart notice in the rail while not scoring, and links it at the running version", async () => {
     listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
     getGroundednessStatus.mockResolvedValue(
-      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: todayAt(14, 2) }),
+      status({
+        state: "not_scoring",
+        configured: true,
+        ever_swept: true,
+        last_scored_at: todayAt(14, 2),
+        setup_ref: "v1.3.0",
+      }),
     );
     renderPage();
 
@@ -377,6 +392,9 @@ describe("DetectorsPage, Groundedness", () => {
 
     await screen.findByText("Restart model", { selector: "h2" });
     await screen.findByText(/Restart the Groundedness model on this Mac by following/);
+    screen.getByText(
+      "https://github.com/tessaryai/tessary/blob/v1.3.0/classifiers/groundedness/setup/groundedness-setup-mac.md#restart",
+    );
   });
 
   it("says off for a disabled row that was set up, and switching it on enables it directly", async () => {
