@@ -70,39 +70,21 @@ const iso = (hrTime) => new Date(hrTime[0] * 1000 + hrTime[1] / 1e6).toISOString
 const ms = (span) =>
   (span.endTime[0] - span.startTime[0]) * 1000 + (span.endTime[1] - span.startTime[1]) / 1e6;
 
-// `StructuralEnricher.usageJson`'s mapping, reproduced: ingest does NOT carry the `gen_ai.usage.*`
-// attribute names into the `usage` jsonb column, it renames them to the bare Anthropic-shaped keys
-// TokenUsage parses, and computes `total_tokens` when the source omits it.
-//
-// This is copied rather than invented, and it is worth saying why the first version of this file got
-// it wrong in a way that cost nothing to find and would have cost everything to miss: shipping the
-// `gen_ai.usage.*` names through meant `TokenUsage` matched none of them, every turn priced at zero,
-// and all 3,864 cost samples landed in the sketch's underflow bin. The cost run was silent — not
-// because the corpus was quiet, but because it was measuring nothing. The values are passed through
-// untouched; only the names change, exactly as ingest changes them.
-const USAGE_NAMES = [
-  ['gen_ai.usage.input_tokens', 'input_tokens'],
-  ['gen_ai.usage.output_tokens', 'output_tokens'],
-  ['gen_ai.usage.cache_read.input_tokens', 'cache_read_input_tokens'],
-  ['gen_ai.usage.cache_creation.input_tokens', 'cache_creation_input_tokens'],
-];
+// The span's four typed token columns, derived as ingest derives them (IngestPricer.freshInput):
+// `gen_ai.usage.input_tokens` is cache-INCLUSIVE per the OTel convention, so both cache buckets are
+// carved out of it, unless it is smaller than their sum, which proves the producer already sent it
+// disjoint. The bridge prices these columns as they are, exactly as MetricSource does.
+const long = (v) => (v === undefined || v === null ? null : Number(v));
 
-function usageOf(attrs) {
-  const usage = {};
-  for (const [from, to] of USAGE_NAMES) if (attrs[from] !== undefined) usage[to] = attrs[from];
-  if (!Object.keys(usage).length) return null;
-  // Key order matches usageJson's insertion order, total_tokens third — cosmetic for the parser,
-  // but it makes a corpus row and a production row diffable by eye.
-  const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
-  return {
-    ...(usage.input_tokens !== undefined ? { input_tokens: usage.input_tokens } : {}),
-    ...(usage.output_tokens !== undefined ? { output_tokens: usage.output_tokens } : {}),
-    total_tokens: total,
-    ...(usage.cache_read_input_tokens !== undefined ? { cache_read_input_tokens: usage.cache_read_input_tokens } : {}),
-    ...(usage.cache_creation_input_tokens !== undefined
-      ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
-      : {}),
-  };
+function tokensOf(attrs) {
+  const input = long(attrs['gen_ai.usage.input_tokens']);
+  const output = long(attrs['gen_ai.usage.output_tokens']);
+  const cacheRead = long(attrs['gen_ai.usage.cache_read.input_tokens']);
+  const cacheWrite = long(attrs['gen_ai.usage.cache_creation.input_tokens']);
+  if (input === null && output === null && cacheRead === null && cacheWrite === null) return null;
+  const cached = Math.max(0, cacheRead ?? 0) + Math.max(0, cacheWrite ?? 0);
+  const fresh = input === null || cached <= 0 || input < cached ? input : input - cached;
+  return { input_tokens: fresh, output_tokens: output, cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite };
 }
 
 /** One run's spans → one turn row, with its tool spans nested. */
@@ -118,11 +100,11 @@ function turnOf(spans) {
   for (const span of spans) {
     const op = span.attributes['gen_ai.operation.name'];
     if (op === 'chat') {
-      const usage = usageOf(span.attributes);
-      // A chat span with no usage is a turn that reported none — carried as a leaf with a null
-      // usage would be indistinguishable from a priced zero, so it is simply not a leaf. The turn
+      const tokens = tokensOf(span.attributes);
+      // A chat span with no usage is a turn that reported none: carried as a leaf with null tokens
+      // it would be indistinguishable from a priced zero, so it is simply not a leaf. The turn
       // still costs what its other leaves cost.
-      if (usage) leaves.push({ model: span.attributes['gen_ai.request.model'] ?? null, usage });
+      if (tokens) leaves.push({ model: span.attributes['gen_ai.request.model'] ?? null, ...tokens });
     } else if (op === 'execute_tool') {
       tools.push({
         // `mcp` and `tool` are two of MEASURED_KINDS and ActionSymbol buckets them differently;

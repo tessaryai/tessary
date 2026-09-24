@@ -28,11 +28,10 @@ population is not the shipped detector's false-positive rate:
   production bucket, and so are `tool:search_docs_3` and `tool:search_docs_4`. Reproducing that in SQL
   is not worth attempting; the export ships `kind` and `name` raw and `_resolve` mints the symbols
   through the shipping Java class.
-- **Cost** is summed over llm leaves through `TokenUsage.nonOverlapping()` and priced through
-  `TokenPriceBook`. Both live in the JVM, and both matter: the raw blob keys lie about their own
-  semantics across providers, and an unpriced model is unpriced rather than free. The export ships the
-  leaves' `(model, usage)` pairs and `_resolve` prices them, so `cost_usd` is null exactly where the
-  sweep would abstain.
+- **Cost** is summed over llm leaves as `TokenUsage` and priced through `TokenPriceBook`, both in the
+  JVM: an unpriced model is unpriced rather than free. The export ships each leaf's model and the span's
+  four typed token columns, which ingest already made disjoint, and `_resolve` prices them, so
+  `cost_usd` is null exactly where the sweep would abstain.
 
 Both resolutions ride one batched `bridge` call at load time. `write_turns_jsonl` round-trips the
 RESOLVED values, so a corpus written back out loads again without a JVM.
@@ -76,13 +75,11 @@ SELECT tr.id                                            AS trace_id,
        -- cost_drift, and cost_drift's w1_floor would stay a guess behind a run that structurally could
        -- not produce its number.
        tr.total_cost                                    AS cost_usd,
-       -- The llm leaves' (model, usage) pairs, priced and summed on the Java side through
-       -- TokenUsage.nonOverlapping() + TokenPriceBook. Scoped to kind='llm' alone, as MetricSource is:
-       -- an agent span carries the CUMULATIVE usage of its subtree, so summing across kinds roughly
-       -- doubles every figure. The blob is shipped RAW rather than pre-summed in SQL because the key
-       -- names lie about their own semantics across providers — an OpenAI generation arrives wearing
-       -- Anthropic key names while still carrying a cache-INCLUSIVE input count, and nothing in SQL can
-       -- tell the two families apart. Adding them here would bill cache reads twice.
+       -- The llm leaves' model and typed token columns, read as MetricSourceRepository.leafUsage
+       -- reads them and priced on the Java side through TokenPriceBook. Scoped to kind='llm' alone, as
+       -- MetricSource is: an agent span carries the CUMULATIVE usage of its subtree, so summing across
+       -- kinds roughly doubles every figure. Ingest already carved the cache buckets out of the input
+       -- count, so the four columns are disjoint and sum as they are.
        leaves.usage_leaves                              AS usage_leaves,
        length(root.input)                               AS user_msg_chars
 FROM trace tr
@@ -135,13 +132,18 @@ LEFT JOIN LATERAL (
      LIMIT 1
 ) root ON TRUE
 LEFT JOIN LATERAL (
-    SELECT json_agg(json_build_object('model', o.model, 'usage', o.usage)
-                    ORDER BY o.started_at ASC NULLS LAST, o.id ASC) AS usage_leaves
-      FROM observation o
-     WHERE o.trace_id = tr.id
-       AND COALESCE(o.is_deleted, false) = false
-       AND o.kind = 'llm'
-       AND o.usage IS NOT NULL
+    SELECT json_agg(json_build_object('model', s.provided_model_name,
+                                      'input_tokens', s.input_tokens,
+                                      'output_tokens', s.output_tokens,
+                                      'cache_read_tokens', s.cache_read_tokens,
+                                      'cache_write_tokens', s.cache_write_tokens)
+                    ORDER BY s.started_at ASC NULLS LAST, s.id ASC) AS usage_leaves
+      FROM span s
+     WHERE s.project_id = tr.project_id
+       AND s.trace_id = tr.id
+       AND s.is_deleted IS NOT TRUE
+       AND s.kind = 'llm'
+       AND s.total_tokens IS NOT NULL
 ) leaves ON TRUE
 WHERE tr.project_id = :project_id
   AND COALESCE(tr.is_deleted, false) = false
@@ -243,7 +245,7 @@ class Turn:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     tools: list[ToolCall] = field(default_factory=list)
-    #: The llm leaves' `(model, usage)` pairs, kept only until `_resolve` has priced them into
+    #: The llm leaves' model and typed token columns, kept only until `_resolve` has priced them into
     #: `cost_usd` and the four bucket sums. Never written back out — the resolved numbers are.
     usage_leaves: list[dict] | None = None
 
