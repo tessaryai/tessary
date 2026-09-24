@@ -149,7 +149,9 @@ Per-bucket figures win over any total. A lone total lands in `input_cost`, becau
 
 | Field | Consumed for | Applies to | Origin |
 | --- | --- | --- | --- |
-| `retrieval.documents.<N>.document.id`, `.content`, `.score`, `.metadata` | First-class retrieved-document rows, ranked from 1 | Any span carrying these indexed attributes. There is no kind gate: extraction runs on every span and is a no-op when the prefix is absent | OpenInference |
+| `retrieval.documents.<N>.document.id`, `.content`, `.score`, `.metadata` | First-class retrieved-document rows, ranked from 1. `.content` is also the text the groundedness classifier checks an answer against | Any span carrying these indexed attributes. There is no kind gate: extraction runs on every span and is a no-op when the prefix is absent | OpenInference |
+
+Ingest needs none of these fields. Groundedness needs `.content` to compare an answer against retrieved documents. Without it, an answer on a `rag_answer` call site whose session called a tool or a retriever is not scored. See [Which answers are scored](/classifiers/groundedness#which-answers-are-scored).
 
 ## Call site
 

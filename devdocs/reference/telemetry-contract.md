@@ -121,7 +121,7 @@ Not yet implemented. Shapes only:
 |---|---|---|---|
 | `status` | enum: `valid` \| `invalid` \| `unreachable` | `"valid"` | License validity as of this check. |
 | `expires_at` | ISO-8601 UTC or null | `"2027-03-01T00:00:00Z"` | When the license expires; null for perpetual/open. |
-| `entitlements` | string[] | `["paid-conformance", "paid-groundedness"]` | Which paid capabilities this license unlocks. |
+| `entitlements` | string[] | `["paid-conformance"]` | Which paid capabilities this license unlocks. |
 
 `unreachable` degrades to "never blocks" — a self-hosted instance that cannot
 reach `home.tessary.ai` keeps running exactly as it was (price-book sync

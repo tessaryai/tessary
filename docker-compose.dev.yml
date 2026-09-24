@@ -214,8 +214,8 @@ services:
       # `environment:` overrides `env_file:`, so a hardcoded value would hide the lines the setup
       # guide (classifiers/groundedness/setup/) writes. On a Mac that is serve.py running natively,
       # reached as http://host.docker.internal:<port>. Blank means groundedness is not set up and
-      # its sweeps are skipped. To use the classify service below instead, set the URL to
-      # http://classify:8080 and the key in .env; the service reads the same key variable.
+      # its sweeps are skipped. The classify service below cannot stand in for it: in the open
+      # edition it serves no classifier head, and groundedness sends a request shape it does not accept.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
       TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
@@ -478,17 +478,18 @@ services:
       - sandbox-work:/launcher-work
     restart: "no"
 
-  # Encoder classification for the built-in signal heads — the SAME service that runs on
-  # ECS Fargate in production (classify-service/). First build downloads ~3.6 GB of model
-  # weights into the image layer — the 2 heads, plus the conformance encoder /embed serves
-  # because this dev build passes BAKE_EMBEDDERS=1, as production now does too (see below);
-  # subsequent builds reuse it unless models.json / embedders.json / download.js, the build
-  # args or the lockfile change.
+  # The encoder service, the SAME one that runs on ECS Fargate in production (classify-service/).
+  # In the open edition models.json is {}, so it serves no classifier head: what it serves is the
+  # conformance encoder /embed uses, baked because this dev build passes BAKE_EMBEDDERS=1, as
+  # production now does too (see below). Groundedness does not use this service; its model runs on
+  # a GPU outside Docker (classifiers/groundedness/serve.py). Subsequent builds reuse the weights
+  # layer unless models.json / embedders.json / download.js, the build args, or the lockfile change.
   classify:
     build:
       context: ./classify-service
-      # The groundedness head's weights are a private HF repo — the build needs read access.
-      # `export HF_TOKEN=...` in the SAME shell before building (or any build.secrets/no-cache
+      # A head marked "gated" in models.json has its weights in a private HF repo, and the build
+      # needs read access to bake it. The open edition names no head, so it needs no token.
+      # When one does, `export HF_TOKEN=...` in the SAME shell before building (or any build.secrets/no-cache
       # rebuild); the token never lands in the image (BuildKit secret mount, not a build ARG).
       # Putting it in .env is NOT enough on its own: Compose only auto-loads .env for ${...}
       # substitution in this file's text, not as a real process env var — and the `environment:`
@@ -681,8 +682,9 @@ volumes:
   mlflow-data:
 
 secrets:
-  # Sourced from the HF_TOKEN env var at BUILD time — read access to the private
-  # tessaryai/MiniCheck-RoBERTa-Large-onnx repo backing classify-service's groundedness head.
+  # Sourced from the HF_TOKEN env var at BUILD time: read access to the private HF repo of any
+  # gated head a populated models.json names. The open edition names none, and groundedness is
+  # not a classify-service head.
   # Only needed for a classify image build/rebuild, not for `docker compose up` on an
   # already-built image. MUST be a real exported shell variable (`export HF_TOKEN=...`) in the
   # same shell running `docker compose build`/`up --build` — Compose's `environment:` secret

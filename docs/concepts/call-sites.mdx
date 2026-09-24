@@ -39,6 +39,7 @@ The same gap closes other checks quietly:
 | `duration_drift`, `cost_drift` at turn grain | The trace is skipped. The unattributed pile is not a bucket. |
 | `duration_drift` at tool grain | The trace still contributes. A tool's latency is that tool's latency whichever entry point dispatched it. |
 | `malformed_output` | The span is skipped: with no call site there is no declared output schema to validate against. |
+| `groundedness` | The answer is not scored. Groundedness scores only answers at a call site whose shape is `rag_answer`, `summarize`, or `extract`, and a span with no call site has no shape. |
 
 This is also what the connect gate in [Set up Tessary](/self-hosting/setup#sign-up-and-connect-your-traces) is testing. The gate does not open when spans arrive. It opens when a **tagged** span arrives, and until then it shows a live count of spans received against spans tagged, because the only useful fix in that state is to tag the traffic that is already arriving.
 

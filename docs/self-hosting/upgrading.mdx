@@ -175,6 +175,10 @@ is not part of this rename.
 
 Every project gains a `frustration` classifier, and it starts switched off because it scores messages on your own OpenRouter or TypeSafe key. Nothing changes until you turn it on under **Classifiers**. See [Watch for frustrated users](/classifiers/frustration).
 
+## One-time: a groundedness classifier appears, switched off
+
+From v1.3.0, every project gains a `groundedness` classifier, and it starts switched off because it needs a model running on a GPU you provide: a Mac with Apple silicon, or a GPU instance on AWS. Nothing changes until you turn it on under **Classifiers** and set up the model. See [Catch answers your documents don't support](/classifiers/groundedness).
+
 ## How migrations work
 
 Postgres schema migrations run automatically through Liquibase when the backend container starts. There's no separate migrate command to run, and no cloud account or external migration tool is involved.

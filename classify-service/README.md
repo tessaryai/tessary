@@ -1,8 +1,13 @@
 # classify-service
 
-Standalone serving for the platform's built-in encoder heads: one pair head, `groundedness`
-(claim-vs-premise contradiction scoring with `Xenova/bart-large-mnli`), plus the `/embed` sentence
-encoder SOP conformance uses. Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
+Standalone serving for the `/embed` sentence encoder SOP conformance uses, and for any `/classify`
+head a populated `models.json` names. The open edition ships `models.json` as `{}`, so this service
+serves no classifier head there: `classify.js` still carries the old `groundedness` pair-head scorer
+(`Xenova/bart-large-mnli`), but it is registered as unbacked and answers
+`UNAVAILABLE_IN_OPEN_EDITION`. The `groundedness` classifier does not use this service. Its model,
+`tessaryai/groundedness-classifier-v1`, runs on a GPU outside Tessary's containers in
+[`classifiers/groundedness/serve.py`](../classifiers/groundedness/serve.py), with a different
+request shape. Extracted from the sandbox-runner launcher after the 2026-07-12 incident, where a classification
 burst OOM-looped the shared production host: CPU inference with model weights now runs in its
 own resource envelope (ECS Fargate, ARM64, **2 vCPU / 6 GB** — `classify_cpu` / `classify_memory`
 in the infrastructure repo; see the 2026-08-11 note, which raises the memory) and can only ever

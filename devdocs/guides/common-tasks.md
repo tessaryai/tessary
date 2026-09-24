@@ -73,6 +73,16 @@ seeded with `defaultEnabled = false`, pausing through `ClassifierPause` (surface
 `readiness`), and lifted by `ProviderCredentialListener` when a key is saved. It must also meet the
 five conditions [`principles.md`](../reference/principles.md) records for a per-event model call.
 
+A classifier scored by a model the self-hoster runs outside Tessary's containers has a third shape,
+and `classifier/detector/groundedness/` is the example: a `BuiltInDetector` supplied through a
+`DetectorSupplier` that calls the model through `EncoderScorer`, listed in
+`BuiltInDetector.Kind.ENCODER_BACKED`, and seeded with `defaultEnabled = false` because a person sets
+up the model first. `EncoderAvailability` probes the model's `/healthz`; while it is down,
+`ClassifierService` enqueues no sweep and `ClassifierWorker` hands a claimed one back without
+spending an attempt, so scoring pauses and resumes from the cursor. The model server and its setup
+files live in `classifiers/groundedness/`, and the rate test runs as a `ClassifierCatchUp`
+(`GroundednessRateService`) once the sweep reaches the head of the stream.
+
 (This heading replaced *New curation kind*. Curation — the accept/edit/reject overlay over an
 imported pipeline — was removed on the backend along with graders,
 `CurationController` and the `curation_entry` table. Frontend still carries dead `Curation`/

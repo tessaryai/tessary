@@ -29,7 +29,7 @@ Either way, open `http://localhost` once `docker compose -p tessary ps` reports 
 
 ## What the open edition includes
 
-Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. A sixth, [`frustration`](/classifiers/frustration), is included and starts switched off; it needs an OpenRouter or TypeSafe key. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. Two more are included and start switched off: [`frustration`](/classifiers/frustration), which needs an OpenRouter or TypeSafe key, and [`groundedness`](/classifiers/groundedness), which needs its model running on a Mac with Apple silicon or a GPU instance on AWS. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
 
 <Card title="Open edition" icon="box-open" href="/open-edition">
   What is included, what needs configuring, what is unavailable here, and where the product's boundaries are today.

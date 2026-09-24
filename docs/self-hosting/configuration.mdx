@@ -206,6 +206,9 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
 | The provider, alert and Git endpoints you configure | Only after you enter a credential in Settings | Your own integrations. A default boot has none. |
+| The groundedness model server you set up | Only when `TESSARY_OBSERVER_ENCODER_URL` is set: a health check every `TESSARY_OBSERVER_ENCODER_PROBE_INTERVAL_MS`, and a scoring request for each answer while the groundedness classifier is on | Your own Mac or AWS instance. Tessary sends each answer with its retrieved documents and the user's question, or with its prompt when it has no documents. The variable ships blank, so a default boot never contacts it. |
+
+The machine that runs the groundedness model makes its own downloads, separate from Tessary's containers: `serve.py` from GitHub, the Python packages it runs on, and the model's weights from Hugging Face. See [What is sent, and to whom](/classifiers/groundedness#what-is-sent-and-to-whom).
 
 **Turning it off costs one thing: price updates between releases.** `TESSARY_TELEMETRY_ENABLED=false`
 gives Tessary no install-count or activation visibility into your deployment, and your instance stops

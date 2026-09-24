@@ -94,6 +94,31 @@ Use:
 
 Do not use “conversation” as a synonym for session, and do not use “session” for a single trace or a single message.
 
+## Groundedness
+
+The classifier that checks whether an agent’s answers are supported by their source: the documents the agent retrieved, or the prompt when it retrieved none. A model scores each sentence of an answer against that source.
+
+A flagged answer is not a finding on its own. Tessary tracks each call site’s share of traces with a flagged answer and creates a finding when that share rises above the call site’s normal. A groundedness finding goes through triage.
+
+Use:
+
+- The groundedness classifier flagged two sentences in the answer.
+- Answers on this call site became less grounded.
+
+Groundedness measures whether the source supports a statement, not whether the statement is true.
+
+## Flagged answer
+
+An answer in which the groundedness classifier marked at least one sentence as unsupported by the answer’s source.
+
+Use:
+
+- Review the flagged answers to see the marked sentences beside the retrieved documents.
+
+Do not use “flagged answer” for a finding or a case. A finding counts traces with a flagged answer; one flagged answer does not create a finding.
+
+Do not describe a flagged answer as a confirmed error. A flag says the model found a sentence unsupported; the reader checks it against the source.
+
 ## Disposition
 
 What a person says a resolved frustration case turned out to be: **Fixed** or **False alarm**.
