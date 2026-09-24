@@ -47,7 +47,7 @@ The dev stack runs like the one `docker compose -f oci://docker.io/tessaryai/tes
 | Question | Options | Recommended | Without a terminal |
 |---|---|---|---|
 | Where should triage and RCA agents run? | `docker` (a sandbox container per run, built from this checkout's `sandbox-runner/agent-sandbox/` — always up to date with your changes), `e2b` (microVMs, from the published `tessary/tessary-agent-sandbox` template; needs `E2B_API_KEY` and a public MCP URL), `off` | `docker` | `off` |
-| Run the encoder classifier service? | No (every classifier runs; frustration on your OpenRouter or TypeSafe key), Yes (8 GB container, gated weight download) | No | Yes |
+| Run the encoder classifier service? | No (every classifier runs; frustration on your OpenRouter or TypeSafe key), Yes (8 GB container, ~1.7 GB weight download) | No | Yes |
 | Enforce sign-in? | Yes, No | Yes | Yes |
 
 An answer is taken from the first of these that has one: the environment (including a preset like `task dev:slim`), `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it. Presets are never saved, so running `task dev:slim` once does not turn later plain `task dev` runs into slim ones.
@@ -71,14 +71,14 @@ Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and 
 | `frontend` | ✅ | Vite dev server, HMR over the bind mount |
 | `caddy` | ✅ | Reverse proxy on `TESSARY_DEV_PORT` (default 80) — the entry point, unchanged |
 | `alloy` | ❌ | Opt-in: behind the `observability` Compose profile, off by default. `COMPOSE_PROFILES=observability` to forward `gen_ai` judge spans to Langfuse |
-| `classify` | ❌ | Encoder service. Build downloads gated HF weights (`BAKE_EMBEDDERS` bakes ~1.7 GB into the dev image); container capped at 8 GB |
+| `classify` | ❌ | Encoder service. Build downloads ~1.7 GB of encoder weights into the dev image (`BAKE_EMBEDDERS`); container capped at 8 GB |
 | `compile` | ❌ | SOP-conformance fitter. `depends_on: classify`, and every fit calls its `/embed` — without classify it can only dead-letter, so it goes too |
 
 So the product is whole in slim mode: the browser, every page, ingestion, triage, RCA. The one thing dormant is anything encoder-backed — classifier heads and SOP-conformance fits — which stays dormant until a full `task dev`. Frustration is not encoder-backed: it runs in slim mode once an OpenRouter or TypeSafe key is saved. Groundedness does not use `classify` either: its model runs on the Mac's GPU outside Docker, set up by [`groundedness-setup-mac.md`](../../classifiers/groundedness/setup/groundedness-setup-mac.md), and runs the same in either mode.
 
 The classifier-training tooling (Argilla, MLflow) is behind the `classifiers` compose profile and never starts in either mode; `task classifiers:up` brings it up alongside.
 
-Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in. Without HuggingFace credentials the classify build fails on its gated encoder-weight download and leaves you with zero containers, so reach for `task dev:up:slim` there.
+Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in.
 
 The tmux session opens four tabbed windows: `[0] shell` (cheat-sheet + common commands; you land here), `[1] backend`, `[2] frontend`, `[3] caddy`. Session-local no-prefix bindings (defined in `.tmux.conf` at the repo root) jump with bare `0`/`1`/`2`/`3` and cycle with `Tab`/`Shift+Tab`; the standard `C-b 0`/`1`/`2`/`3` and `C-b n`/`p` still work as fallbacks.
 

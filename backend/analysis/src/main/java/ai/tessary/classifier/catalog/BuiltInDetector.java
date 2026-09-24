@@ -187,13 +187,14 @@ public interface BuiltInDetector {
         public static final String INERT = "inert";
 
         /**
-         * The kinds that cannot run without the standalone classify-service, because their score
-         * comes from a model resident in it rather than from anything this process can compute.
-         * Kept as one set because which debug family a classifier belongs to and whether the
-         * encoder deployment can be scaled to zero both need the same answer.
+         * The kinds that cannot run without the external groundedness model server
+         * ({@code classifiers/groundedness/serve.py}), because their score comes from that model
+         * rather than from anything this process can compute. Kept as one set because which debug
+         * family a classifier belongs to and whether that model can be turned off both need the
+         * same answer.
          *
          * <p>{@link #SOP_CONFORMANCE} is deliberately not here despite its default
-         * {@code encoder-mode=http} reaching the service's {@code /embed}: it needs the service
+         * {@code encoder-mode=http} reaching classify-service's {@code /embed}: it needs that service
          * only when an enabled project has a head-carrying bundle deployed, and its capability flag
          * is off for everyone. Revisit this membership when that flag first turns on.
          */
