@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 
 /** Error codes for Settings → Data retention. */
 public enum RetentionError implements ErrorCode {
-    ABOVE_PLAN_CEILING(HttpStatus.UNPROCESSABLE_ENTITY, "Retention of %s days exceeds this plan's ceiling of %s days");
+    ABOVE_CEILING(HttpStatus.UNPROCESSABLE_ENTITY, "Retention of %s is above the %s-day ceiling for this project");
 
     private final HttpStatus status;
     private final String template;

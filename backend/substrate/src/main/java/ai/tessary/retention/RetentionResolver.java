@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -56,11 +55,6 @@ public class RetentionResolver {
     private final RetentionProperties props;
     private final RetentionCeiling ceiling;
 
-    public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props) {
-        this(policies, props, RetentionCeiling.none());
-    }
-
-    @Autowired
     public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props, RetentionCeiling ceiling) {
         this.policies = policies;
         this.props = props;

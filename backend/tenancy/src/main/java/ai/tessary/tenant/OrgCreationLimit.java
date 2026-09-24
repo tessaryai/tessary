@@ -17,6 +17,6 @@ package ai.tessary.tenant;
  */
 public interface OrgCreationLimit {
 
-    /** The maximum number of organizations one user may own at a time. */
-    int maxOwnedOrgsPerUser();
+    /** The maximum number of organizations this user may own at a time. */
+    int maxOwnedOrgsFor(String userId);
 }

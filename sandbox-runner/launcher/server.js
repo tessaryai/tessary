@@ -134,6 +134,7 @@
  *     api_key, base_url?, custom_model_name? }             -- an OpenAI-compat provider's own key,
  *                                                             optional base-URL override, and (CUSTOM
  *                                                             only) the free-text model id
+ *   platform_funded (either shape)                         -- backend-only ledger flag; ignored here
  *
  *   MANTLE_PROJECT_ID             the Bedrock Project (proj_…) mantle inference is attributed to
  *                                 and authorized against; blank = the account default project. Not a

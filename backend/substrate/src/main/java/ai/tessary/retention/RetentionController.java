@@ -92,7 +92,7 @@ public class RetentionController {
         }
         int max = resolver.maxTtlDays(projectId, dataClass);
         if (max > 0 && (ttlDays == 0 || ttlDays > max)) {
-            throw new TessaryException(RetentionError.ABOVE_PLAN_CEILING, ttlDays, max);
+            throw new TessaryException(RetentionError.ABOVE_CEILING, ttlDays == 0 ? "forever" : ttlDays + " days", max);
         }
         policies.upsert(new RetentionPolicyRow(
                 Ids.ulid(),
