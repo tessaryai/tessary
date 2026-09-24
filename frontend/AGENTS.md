@@ -149,8 +149,8 @@ When to add one: root [`AGENTS.md`](../AGENTS.md#tests). The backend rules on ex
 
 - **Test what the user sees.** `render`, query with `getByRole` / `getByLabelText`, act with `fireEvent`.
   No component internals, no `container.querySelector`, no whole-tree snapshots.
-- **Mock at the API seam only** (`useTenant` / `projectApi`, as the existing tests do). Never mock our own
-  child components or hooks.
+- **Mock at the API seam only** (`useTenant` / `projectApi`, as the existing tests do). Never mock our
+  other hooks or child components.
 - **Fixtures must be able to fail the test.** A "no secret in the DOM" test needs a secret in the fixture;
   a page test needs real data, not a 404.
 - **Absence needs a settled query.** `await` something rendered from the same response, then assert
@@ -161,7 +161,8 @@ When to add one: root [`AGENTS.md`](../AGENTS.md#tests). The backend rules on ex
 
 Run `task check -- frontend` from the repo root (type-check + all-routes render
 smoke test + production bundle; no Maven, no Docker). CI runs the same gate
-on every ready PR, but nothing blocks a merge, so your local run comes first.
+([test-suite.md](../devdocs/reference/test-suite.md)), but nothing blocks a merge, so your local run
+comes first.
 
 **The gate does not check design tokens.** A hardcoded hex, an off-scale font
 size and a `tracking-wider` fighting its token all compile and all bundle

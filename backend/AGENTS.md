@@ -183,4 +183,4 @@ Record constructors/getters; constants, enum values, or config defaults restated
 
 ## Before you commit
 
-Run `task check -- <areas>` from the repo root for the packages you touched — `task check -- rca,metering` runs both their unit and integration tests. CI runs the same gate on every ready PR, but nothing blocks a merge, so **your local run comes first**. Bare `task check` runs the same scripts CI does, and `backend:check` alone is `mvn -B verify` (tests + the full static-analysis gate). Docker must be reachable (Testcontainers). See [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).
+Run `task check -- <areas>` from the repo root for the packages you touched — `task check -- rca,metering` runs both their unit and integration tests. CI runs the same gate, but nothing blocks a merge, so **your local run comes first**. Bare `task check` runs the same scripts CI does, and `backend:check` alone is `mvn -B verify` (tests + the full static-analysis gate). Docker must be reachable (Testcontainers). See [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).

@@ -34,13 +34,13 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (18 checks in the open edition): backend `mvn verify`, then `classifiers` after it, frontend, classify-service, sandbox-runner, mcp-bridge, vendored-plugin-rules, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (22 checks in the open edition): backend `mvn verify`, then `classifiers` after it, frontend, classify-service, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
@@ -61,7 +61,7 @@ module-hygiene
 (`scripts/check-pipeline-vocabulary.sh`), the classifier-quality doc gate
 (`scripts/check-classifier-quality-doc.sh`, which pins
 the classifier-quality reference page to the served model revisions and catalog
-thresholds, and skips with a named reason where that page is absent), and root-package tests such as `ContextLoadsTest` run
+thresholds, and fails when that page is missing), and root-package tests such as `ContextLoadsTest` run
 only on bare `task check` / `backend:check`. Error Prone and NullAway are compiler-plugin checks
 bound to the `compile` phase instead, so they run on every narrowed slice too — any
 `mvn test-compile`/`test` triggers `compile` first. Prefer the slices you touched for the inner
@@ -158,10 +158,10 @@ inner-loop speed is not.
 ## Coverage posture (intentional coldspots)
 
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
-(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build) — a handful of
+(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
 (and the case, finding and RCA pages once more on real payloads, since the manifest pass only
-reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Coverage is thin (14 test files); the
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Coverage is thin (23 test files); the
 gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with

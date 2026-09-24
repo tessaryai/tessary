@@ -24,7 +24,7 @@ command -v uv >/dev/null 2>&1 || {
 # import; `dev` carries pytest. --frozen: the lock is the dependency set, never re-resolved here.
 uv sync --frozen --group dev --extra quality
 
-uv run python - <<'PY'
+uv run --frozen python - <<'PY'
 import sys
 
 from metric_drift import bridge as metric_drift_bridge
@@ -39,4 +39,4 @@ for name, bridge in (("tool_error", tool_error_bridge), ("metric_drift", metric_
         sys.exit(f"classifiers: no jshell for the {name} bridge; set JAVA_HOME to a JDK 25")
 PY
 
-uv run pytest tests -q -p no:cacheprovider
+uv run --frozen pytest tests -q -p no:cacheprovider
