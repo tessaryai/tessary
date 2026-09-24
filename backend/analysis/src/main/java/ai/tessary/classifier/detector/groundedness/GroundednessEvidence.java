@@ -129,7 +129,7 @@ public final class GroundednessEvidence {
     }
 
     /** The payload a spell's finding carries. {@code cause_kind} is added by the finding writer. */
-    static String payload(
+    public static String payload(
             ObjectMapper mapper, String callSite, Decision d, long baselineFlagged, GroundednessConfig config) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("call_site_id", callSite);
