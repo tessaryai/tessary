@@ -202,7 +202,19 @@ describe("FlaggedAnswers", () => {
     expect(screen.queryByText("refund-policy.md")).toBeNull();
   });
 
-  it("says so when the trace is no longer stored, even though the flag kept its answer", () => {
+  it("says so when the trace aged out, and names its row by trace id", () => {
+    // The shape the server sends once the payload ages out: the flag keeps its sentences, the text is gone.
+    renderList([answer({ stored: false, answer: null, question: null, documents: null })]);
+
+    const row = screen.getByRole("button", { pressed: true });
+    expect(within(row).getByText("4f1c9a07e2b84d0f")).toBeTruthy();
+    expect(row.textContent).not.toContain("more");
+    expect(screen.getByText("This trace is no longer stored, so its answer can't be shown.")).toBeTruthy();
+    expect(screen.getByText(/2 sentences marked\./)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Answer" })).toBeNull();
+  });
+
+  it("hides the answer of a trace marked not stored, whatever text the row carries", () => {
     renderList([answer({ stored: false })]);
 
     expect(screen.getByText("This trace is no longer stored, so its answer can't be shown.")).toBeTruthy();
