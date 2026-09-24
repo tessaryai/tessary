@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.cases;
 
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
@@ -276,6 +277,8 @@ public final class CaseDtos {
      *     and the per-key and per-leak breakdowns. Null for every other detector.
      * @param frustration the rate and the conversations it cites for a {@code frustration_rate} case, the
      *     same block the finding page shows. Null for every other detector.
+     * @param groundedness the rate and the flagged answers it cites for a {@code groundedness_rate} case, the
+     *     same block the finding page shows. Null for every other detector.
      */
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
@@ -294,6 +297,7 @@ public final class CaseDtos {
             @JsonProperty("malformed_output") @Nullable MalformedDetail malformedOutput,
             @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
             @Nullable FrustrationDetail frustration,
+            @Nullable GroundednessDetail groundedness,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}
@@ -301,9 +305,9 @@ public final class CaseDtos {
     /**
      * Closing a case. The reason is required and is the point of the record.
      *
-     * @param disposition only on a frustration case: {@code fixed} (the call site re-learns its normal rate from
-     *     here) or {@code false_alarm} (the same, and the conversations the case cites stop counting as
-     *     frustrated). Refused on any other case.
+     * @param disposition only on a frustration or groundedness case: {@code fixed} (the call site re-learns its
+     *     normal rate from here) or {@code false_alarm} (the same, and the conversations or answers the case
+     *     cites stop counting as flagged). Refused on any other case.
      */
     public record ResolveCaseRequest(
             @NotBlank @Size(max = 500) String reason,

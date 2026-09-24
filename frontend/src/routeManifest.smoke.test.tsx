@@ -41,17 +41,17 @@ import { DensityProvider } from "./ui/density";
 import { ApiError } from "./api/types";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
+import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
 // Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT
 // (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java): every wire key is true
-// except these four, which this deployment reports unavailable/off.
+// except these three, which this deployment reports unavailable/off.
 const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
   "triage_automatic_enabled",
   "behavior_drift_enabled",
   "sop_conformance_enabled",
-  "groundedness_enabled",
 ];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
@@ -382,9 +382,26 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     listClassifiers: EMPTY,
     getClassifierDailyVolume: EMPTY,
     listClassifierHealth: EMPTY,
+    // Read only for a listed Groundedness row: a new project's, off and never set up.
+    getGroundednessStatus: () =>
+      Promise.resolve({
+        state: "off",
+        mode: "dev",
+        configured: false,
+        available: false,
+        reason: "no encoder URL configured",
+        checked_at: null,
+        ever_swept: false,
+        last_scored_at: null,
+        last_caught_up_at: null,
+        setup_ref: "main",
+      }),
   },
+  // A groundedness finding, so the route renders a whole story (rate, pins, flagged answers with their
+  // marks) rather than only its not-found state, which every other detail route already covers.
   "classifiers/findings/:findingId": {
-    getBehaviorFinding: NOT_FOUND("behavior finding"),
+    getBehaviorFinding: () => Promise.resolve(GROUNDEDNESS_FINDING_DETAIL),
+    getFlaggedAnswers: () => Promise.resolve({ rows: [], total: 0, nextCursor: null }),
   },
   vitals: {
     getVitals: () => Promise.resolve(EMPTY_VITALS),

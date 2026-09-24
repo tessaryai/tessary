@@ -3,6 +3,7 @@ package ai.tessary.telemetry;
 
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.classifier.finding.FindingRepository;
+import ai.tessary.config.AppVersion;
 import ai.tessary.edition.Edition;
 import ai.tessary.pricing.PriceBook;
 import ai.tessary.pricing.PriceBookFetcher;
@@ -209,13 +210,10 @@ public class TelemetryHeartbeat {
         return value.length() <= max ? value : value.substring(0, max);
     }
 
-    /** The running app's version, from the packaged jar's manifest ({@code Implementation-Version},
-     *  set from {@code ${project.version}} by the Spring Boot repackage). Null outside a packaged
-     *  jar (an IDE run, a test) — {@code "dev"} covers that case rather than sending a null field the
-     *  contract does not mark optional. */
+    /** The running app's version ({@link AppVersion#current()}): {@code "dev"} outside a packaged jar
+     *  rather than a null field the contract does not mark optional. */
     private static String appVersion() {
-        String v = TelemetryHeartbeat.class.getPackage().getImplementationVersion();
-        return (v == null || v.isBlank()) ? "dev" : v;
+        return AppVersion.current();
     }
 
     /** A coarse host OS family, not the full {@code os.name} string (which carries version numbers,

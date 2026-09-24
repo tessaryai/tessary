@@ -6,18 +6,23 @@
  *
  * The catalog: switching Frustration on opens its enable modal instead of flipping the switch, since
  * enabling it spends the org's own provider credit, and a paused Frustration names why on its row.
+ *
+ * Groundedness: the row says what its model is doing in each state, switching it on opens the setup
+ * modal until the model has answered once, and switching it off asks first.
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { Classifier, ClassifierEvent } from "../../api/types";
+import type { Classifier, ClassifierEvent, GroundednessStatus } from "../../api/types";
 import { DetectionRow, DetectorsPage } from "./DetectorsPage";
 import { ago } from "./shared";
+import { clockTime } from "./groundedness";
 
 const listClassifiers = vi.fn<() => Promise<Classifier[]>>();
 const setClassifierEnabled = vi.fn();
+const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
@@ -32,6 +37,8 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
         getClassifierDailyVolume: async () => ({ days: [], trace_totals: [], classifiers: [] }),
         listClassifierHealth: async () => [],
         setClassifierEnabled,
+        getGroundednessStatus,
+        listClassifierEvents: async () => [],
         getModelSettings: () => new Promise(() => {}),
       },
       orgApi: { base: "/api/orgs/acme", listProviderCredentials: () => new Promise(() => {}) },
@@ -53,6 +60,8 @@ afterEach(() => {
   cleanup();
   listClassifiers.mockReset();
   setClassifierEnabled.mockReset();
+  getGroundednessStatus.mockReset();
+  window.localStorage.clear();
 });
 
 function classifier(overrides: Partial<Classifier>): Classifier {
@@ -176,5 +185,131 @@ describe("DetectionRow", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByText(ago(OLD))).not.toBeNull();
+  });
+});
+
+function groundednessRow(overrides: Partial<Classifier> = {}): Classifier {
+  return classifier({
+    id: "clf-g",
+    classifier_key: "groundedness",
+    name: "Groundedness",
+    description: "Answers that state things the retrieved documents don't support.",
+    detector: "groundedness",
+    ...overrides,
+  });
+}
+
+function status(overrides: Partial<GroundednessStatus>): GroundednessStatus {
+  return {
+    state: "off",
+    mode: "dev",
+    configured: false,
+    available: false,
+    reason: "no encoder URL configured",
+    checked_at: null,
+    ever_swept: false,
+    last_scored_at: null,
+    last_caught_up_at: null,
+    setup_ref: "main",
+    ...overrides,
+  };
+}
+
+/** Today at 2:02 PM local time, so the row's 12-hour clock reads the same wherever the test runs. */
+function todayAt(hour: number, minute: number): string {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+}
+
+describe("DetectorsPage, Groundedness", () => {
+  it("says a disabled row that was never set up needs setup, and switching it on opens the setup modal", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow()]);
+    getGroundednessStatus.mockResolvedValue(status({}));
+    renderPage();
+
+    await screen.findByText("needs setup");
+    fireEvent.click(screen.getByRole("switch", { name: "Enable Groundedness" }));
+
+    await screen.findByText("Enable Groundedness", { selector: "h2" });
+    expect(setClassifierEnabled).not.toHaveBeenCalled();
+  });
+
+  it("says setting up once a setup prompt was copied in this browser", async () => {
+    window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
+    listClassifiers.mockResolvedValue([groundednessRow()]);
+    getGroundednessStatus.mockResolvedValue(status({}));
+    renderPage();
+
+    await screen.findByText("Setting up...");
+  });
+
+  it("keeps the detection count while on in dev", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    renderPage();
+
+    await screen.findByText("quiet 7d");
+  });
+
+  it("names the last run while on in production", async () => {
+    const caughtUp = todayAt(14, 3);
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "on", mode: "production", configured: true, ever_swept: true, last_caught_up_at: caughtUp }),
+    );
+    renderPage();
+
+    await screen.findByText(`last run ${clockTime(caughtUp)}`);
+    expect(clockTime(caughtUp)).toBe("2:03 PM");
+  });
+
+  it("says since when nothing was scored while the model is down", async () => {
+    const scored = todayAt(14, 2);
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: scored }),
+    );
+    renderPage();
+
+    await screen.findByText("No scores since 2:02 PM");
+  });
+
+  it("shows the restart notice in the rail while not scoring", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: todayAt(14, 2) }),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Groundedness"));
+    fireEvent.click(await screen.findByRole("button", { name: "Restart model" }));
+
+    await screen.findByText("Restart model", { selector: "h2" });
+    await screen.findByText(/Restart the Groundedness model on this Mac by following/);
+  });
+
+  it("says off for a disabled row that was set up, and switching it on enables it directly", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow()]);
+    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true, ever_swept: true }));
+    setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
+    renderPage();
+
+    await screen.findByText("off");
+    fireEvent.click(screen.getByRole("switch", { name: "Enable Groundedness" }));
+
+    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
+    expect(screen.queryByText("Enable Groundedness", { selector: "h2" })).toBeNull();
+  });
+
+  it("asks before switching it off", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
+
+    await screen.findByText("Turn off Groundedness?", { selector: "h2" });
+    expect(setClassifierEnabled).not.toHaveBeenCalled();
   });
 });

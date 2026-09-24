@@ -12,9 +12,10 @@ import org.springframework.stereotype.Component;
  * Pins a capability ON (or OFF) for one org, for tests whose subject sits behind one.
  *
  * <p>The default edition has every capability on except {@code behavior_drift}, {@code
- * sop_conformance}, {@code frustration}, {@code groundedness}, and {@code triage_automatic}
- * (opt-in). A test exercising any of those is testing the default rather than its own subject
- * unless it grants the capability first.
+ * sop_conformance}, and {@code triage_automatic} (opt-in). A test exercising any of those is testing
+ * the default rather than its own subject unless it grants the capability first. {@code groundedness}
+ * is on here whether or not its model answers; a test that sweeps it needs the encoder up too
+ * ({@link EncoderFixture}), because a down model pauses the sweep.
  *
  * <p>Writing a real {@code org_feature_flag} row rather than stubbing {@code FeatureFlags} keeps the
  * resolution path under test end to end: the row, {@code DbFeatureFlags}, and {@code CapabilityService}'s

@@ -13,6 +13,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,12 +61,12 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(9, service.list(pid).size(), "all built-ins are listable");
         assertTrue(defs.stream().allMatch(ClassifierRow::builtIn), "all seeded signals are marked built_in");
         // Every built-in seeds enabled except Frustration, whose sweep spends the org's own provider
-        // credit, so a person turns it on. Otherwise whether a classifier runs for an org is a
-        // capability-flag decision, not something the seeded row encodes. What reaches a project at
-        // all is asserted in PartnerCatalogTest.
+        // credit, and Groundedness, which needs a model server set up first, so a person turns each on.
+        // Otherwise whether a classifier runs for an org is a capability-flag decision, not something the
+        // seeded row encodes. What reaches a project at all is asserted in PartnerCatalogTest.
         for (ClassifierRow def : defs) {
             assertEquals(
-                    !"frustration".equals(def.classifierKey()),
+                    !Set.of("frustration", "groundedness").contains(def.classifierKey()),
                     def.enabled(),
                     def.classifierKey() + " seeds with the wrong switch");
         }
@@ -223,10 +224,10 @@ class ClassifierDefinitionIntegrationTest {
      * Bootstrap a tenant whose org has all four capability-gated classifiers switched on before its
      * project is created.
      *
-     * <p>Two things make this necessary. {@code behavior_drift}, {@code sop_conformance} and {@code
-     * groundedness} are unavailable in this build, so without a grant these cases would assert the
-     * capability default rather than the behavior they name ({@code frustration} is granted too, so the
-     * set does not depend on which edition's default it has). And the grant has to
+     * <p>Two things make this necessary. {@code behavior_drift} and {@code sop_conformance} are
+     * unavailable in this build, so without a grant these cases would assert the capability default
+     * rather than the behavior they name ({@code frustration} and {@code groundedness} are granted too,
+     * so the set does not depend on which edition's default it has). And the grant has to
      * precede the project, because project creation is what seeds the built-in classifiers: grant
      * afterwards and the classifier row is never inserted, leaving the test hunting findings from a
      * classifier the project doesn't have.

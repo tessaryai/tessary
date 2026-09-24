@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, CodeXml, Copy } from "lucide-react";
+import { ChevronRight, Copy } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import { auth } from "../../api/client";
@@ -16,7 +16,8 @@ import {
   ListeningBanner,
   useIngestToken,
 } from "../components/SourceConnect";
-import { Button, CopyButton, Spinner, useToast, writeClipboard } from "../../ui";
+import { PromptBlock } from "../components/PromptBlock";
+import { Button, Spinner, useToast, writeClipboard } from "../../ui";
 
 /**
  * The first-run gate: stands in place of the whole shell
@@ -138,7 +139,12 @@ export function ConnectGate() {
         <h1 className="text-[28px] leading-[1.3] font-semibold tracking-[-0.01em]">Connect your traces</h1>
       </div>
 
-      <PromptBlock label="Paste into your coding agent" prompt={OTLP_PROMPT} onCopy={() => toast.success("Prompt copied")} />
+      <PromptBlock
+        label="Paste into your coding agent"
+        prompt={OTLP_PROMPT}
+        highlight={INSTRUMENT_DOC_URL}
+        onCopy={() => toast.success("Prompt copied")}
+      />
 
       <div className="flex flex-col gap-3">
         <CopyField label="Endpoint" value={endpoint} onCopy={() => toast.success("Copied")} />
@@ -271,6 +277,7 @@ function UntaggedScreen({
       <PromptBlock
         label="Paste into your coding agent"
         prompt={TAG_REPAIR_PROMPT}
+        highlight={INSTRUMENT_DOC_URL}
         onCopy={() => toast.success("Prompt copied")}
       />
     </GateShell>
@@ -290,43 +297,6 @@ function GateShell({ email, children }: { email?: string; children: React.ReactN
       <div className="flex-1 flex justify-center px-6 pb-16" style={{ paddingTop: "64px" }}>
         <div className="w-full max-w-[560px] flex flex-col gap-7">{children}</div>
       </div>
-    </div>
-  );
-}
-
-/**
- * The connect/repair prompt anatomy — eyebrow + code surface (the guide's URL bright) + Copy button.
- *
- * The bright token used to be `tessary.call_site.id`, back when the prompt spelled the whole ask out
- * inline. Both prompts are now one sentence pointing at `instrument.md`, so the URL is the part a
- * reader's eye should land on: it is the only thing in the sentence they can go and check.
- */
-function PromptBlock({ label, prompt, onCopy }: { label: string; prompt: string; onCopy: () => void }) {
-  const parts = prompt.split(INSTRUMENT_DOC_URL);
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 text-label uppercase text-muted mb-2.5">
-        <CodeXml size={13} strokeWidth={1.8} aria-hidden="true" />
-        {label}
-      </div>
-      <div className="rounded-card border border-border-strong bg-surface p-4">
-        <code className="font-mono text-small text-fg-secondary leading-[1.75] whitespace-pre-wrap">
-          {parts.map((part, i) => (
-            <span key={i}>
-              {part}
-              {i < parts.length - 1 && <span className="text-fg">{INSTRUMENT_DOC_URL}</span>}
-            </span>
-          ))}
-        </code>
-      </div>
-      <CopyButton
-        value={prompt}
-        label="Copy prompt"
-        variant="primary"
-        size="md"
-        className="mt-3 font-medium"
-        onCopied={onCopy}
-      />
     </div>
   );
 }

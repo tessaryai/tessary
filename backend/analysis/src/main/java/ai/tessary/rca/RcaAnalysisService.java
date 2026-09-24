@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.DossierPayload;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -76,6 +77,7 @@ public class RcaAnalysisService {
     private final RcaChecklist checklist;
     private final RcaReportRepository reports;
     private final AgenticRcaEngine agenticEngine;
+    private final GroundednessDetailService groundedness;
     private final ObjectMapper mapper;
 
     public RcaAnalysisService(
@@ -84,12 +86,14 @@ public class RcaAnalysisService {
             RcaChecklist checklist,
             RcaReportRepository reports,
             AgenticRcaEngine agenticEngine,
+            GroundednessDetailService groundedness,
             ObjectMapper mapper) {
         this.findings = findings;
         this.evidence = evidence;
         this.checklist = checklist;
         this.reports = reports;
         this.agenticEngine = agenticEngine;
+        this.groundedness = groundedness;
         this.mapper = mapper;
     }
 
@@ -108,12 +112,12 @@ public class RcaAnalysisService {
         }
 
         // ---- 2. measure the structural checklist (no thresholds, no judgment) -------------------
-        // A frustration finding has no baseline side, so serving_model, which compares two, has nothing to
-        // compare and is not measured rather than reported empty. failing_cohort_shape still reads the
-        // turns that fired.
-        boolean frustration = RcaReportRow.ReportKind.FRUSTRATION_CAUSES.equals(report.reportKind());
+        // A frustration or groundedness finding has no baseline side, so serving_model, which compares two,
+        // has nothing to compare and is not measured rather than reported empty. failing_cohort_shape still
+        // reads the traces that fired.
+        boolean causes = RcaReportRow.ReportKind.namesCauses(report.reportKind());
         List<Measurement> measurements = new ArrayList<>();
-        if (!frustration) {
+        if (!causes) {
             measurements.addAll(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
         }
         measurements.add(checklist.failingCohortShape(job.projectId(), new LinkedHashSet<>(sides.flagged())));
@@ -298,6 +302,19 @@ public class RcaAnalysisService {
                 .orElseGet(() -> DossierPayload.forAgent(mapper, finding.payloadJson()));
         if (payload != null && !payload.isBlank()) {
             files.put("evidence.json", payload);
+        }
+        // A groundedness cause is found by reading a flagged sentence against its documents, so the answers
+        // themselves ride along, as the triage dossier's do; everything else is read through MCP.
+        if (RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES.equals(report.reportKind())) {
+            files.put(
+                    GroundednessAnswersFile.NAME,
+                    GroundednessAnswersFile.render(groundedness.page(
+                            finding.projectId(),
+                            finding.subjectId(),
+                            finding.id(),
+                            null,
+                            GroundednessAnswersFile.CAP,
+                            null)));
         }
         files.put("checklist.md", checklistDoc(checks));
         return files;

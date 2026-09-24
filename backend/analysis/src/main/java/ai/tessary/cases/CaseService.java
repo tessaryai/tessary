@@ -11,6 +11,9 @@ import ai.tessary.cases.CaseDtos.TriageView;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
+import ai.tessary.classifier.detector.groundedness.GroundednessAnswerClearer;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -93,12 +96,18 @@ public class CaseService {
     private final FrustrationRateRepository frustrationRates;
     /** Clears the conversations a frustration case cites when it is resolved as a false alarm. */
     private final FrustrationSessionClearer frustrationSessions;
+    /** A groundedness case's call-site state: a resolve restarts it and re-learns its reference, as frustration's. */
+    private final GroundednessRateRepository groundednessRates;
+    /** Clears the answers a groundedness case cites when it is resolved as a false alarm. */
+    private final GroundednessAnswerClearer groundednessAnswers;
     /** "How outputs broke" — the same builder the malformed-output finding page reads. */
     private final MalformedOutputDetailService malformedOutputDetail;
     /** "When it leaked" — the same builder the secret-leak finding page reads. */
     private final SecretLeakDetailService secretLeakDetail;
 
     private final FrustrationDetailService frustrationDetail;
+
+    private final GroundednessDetailService groundednessDetail;
 
     public CaseService(
             CaseRepository cases,
@@ -117,9 +126,12 @@ public class CaseService {
             MalformedOutputRateRepository malformedOutputRates,
             FrustrationRateRepository frustrationRates,
             FrustrationSessionClearer frustrationSessions,
+            GroundednessRateRepository groundednessRates,
+            GroundednessAnswerClearer groundednessAnswers,
             MalformedOutputDetailService malformedOutputDetail,
             SecretLeakDetailService secretLeakDetail,
-            FrustrationDetailService frustrationDetail) {
+            FrustrationDetailService frustrationDetail,
+            GroundednessDetailService groundednessDetail) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -136,9 +148,12 @@ public class CaseService {
         this.malformedOutputRates = malformedOutputRates;
         this.frustrationRates = frustrationRates;
         this.frustrationSessions = frustrationSessions;
+        this.groundednessRates = groundednessRates;
+        this.groundednessAnswers = groundednessAnswers;
         this.malformedOutputDetail = malformedOutputDetail;
         this.secretLeakDetail = secretLeakDetail;
         this.frustrationDetail = frustrationDetail;
+        this.groundednessDetail = groundednessDetail;
     }
 
     // ---- reads -------------------------------------------------------------------------------
@@ -276,6 +291,7 @@ public class CaseService {
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding == null ? null : frustrationDetail.detail(finding),
+                finding == null ? null : groundednessDetail.detail(finding),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
@@ -344,7 +360,9 @@ public class CaseService {
      * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
      * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
      * than left to no-op silently: a case page is not worth a button that does nothing. A frustration case is
-     * excluded for the same reason: its reference is learned, never re-pinned.
+     * excluded for the same reason: its reference is learned, never re-pinned. A groundedness case's reference
+     * is learned too, but absorbing it re-learns the reference from the traffic after the press, which does
+     * move the bar, so it keeps the button.
      */
     private static boolean absorbable(CaseRow row) {
         return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
@@ -424,7 +442,10 @@ public class CaseService {
 
     // ---- lifecycle ---------------------------------------------------------------------------
 
-    /** {@link #resolve(String, String, String, String, String)} with no disposition, as every case but frustration's. */
+    /**
+     * {@link #resolve(String, String, String, String, String)} with no disposition, as every case but frustration's
+     * and groundedness's.
+     */
     @Transactional
     public CaseView resolve(String projectId, String id, String reason, @Nullable String actor) {
         return resolve(projectId, id, reason, actor, null);
@@ -434,9 +455,9 @@ public class CaseService {
      * Close a case with the human's one-line reason. The reason is required by the wire contract and
      * by the table; it is the only thing that makes a closed case worth reading later.
      *
-     * @param disposition only on a frustration case ({@link CaseRow.Disposition}): {@code fixed} or {@code
-     *     false_alarm}, stored on the case and in the trail line's detail. Null is allowed there too and restarts
-     *     the call site without clearing anything. Any other case refuses one.
+     * @param disposition only on a frustration or groundedness case ({@link CaseRow.Disposition}): {@code fixed}
+     *     or {@code false_alarm}, stored on the case and in the trail line's detail. Null is allowed there too and
+     *     restarts the call site without clearing anything. Any other case refuses one.
      */
     @Transactional
     public CaseView resolve(
@@ -445,7 +466,8 @@ public class CaseService {
         if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
         if (reason.isBlank()) throw new TessaryException(CaseError.REASON_REQUIRED);
         boolean frustration = CaseRow.Detector.FRUSTRATION.equals(row.detector());
-        if (disposition != null && !frustration) {
+        boolean groundedness = CaseRow.Detector.GROUNDEDNESS.equals(row.detector());
+        if (disposition != null && !frustration && !groundedness) {
             throw new TessaryException(CaseError.DISPOSITION_NOT_APPLICABLE, row.reference());
         }
 
@@ -467,6 +489,18 @@ public class CaseService {
             detail = disposition == null
                     ? null
                     : "{\"disposition\":\"" + disposition + "\",\"sessions_cleared\":" + cleared + "}";
+        }
+        // A groundedness case the same way, for the same reasons: its reference is learned, so a fix or a false
+        // alarm both mean the normal is re-learned from here. A false alarm clears the flag on every answer the
+        // case cites, so their traces stop counting as failures.
+        if (groundedness) {
+            groundednessRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
+                    ? groundednessAnswers.clear(projectId, row.id(), now.toString())
+                    : 0;
+            detail = disposition == null
+                    ? null
+                    : "{\"disposition\":\"" + disposition + "\",\"answers_cleared\":" + cleared + "}";
         }
         events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, detail, now);
 

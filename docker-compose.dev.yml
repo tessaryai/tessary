@@ -60,13 +60,23 @@ services:
     # JVM) — no double-bind on 5005. suspend=n: boot normally so the healthcheck
     # still passes; switch to suspend=y to debug startup itself. The agent survives
     # devtools in-process restarts (task dev:reload-backend).
-    # Two steps (see Dockerfile.dev): install app's whole dependency chain into the cached
-    # local repo, then run ONLY the app module (spring-boot:run can't run reactor-wide — it dies on
-    # the non-executable parent pom — and app-only can't resolve its siblings unless installed).
+    # Three steps (see Dockerfile.dev). First install the reactor root POM alone (-N): a module that
+    # lives OUTSIDE the root's directory — the paid overlay, mounted at /tessary-paid with
+    # <relativePath>../backend/pom.xml</relativePath> — has its parent resolved from the local
+    # repository, not from that path, because inside the container the path is not the file the
+    # reactor was started from (/app/pom.xml). On a cold maven-cache volume the parent is absent and
+    # the reactor cannot even be read ("Non-resolvable parent POM for ai.tessary.paid:tessary-paid").
+    # The host never shows this because ~/.m2 already holds the root POM from an earlier install.
+    # Harmless with no overlay: one POM, no compilation. Then install app's whole dependency chain
+    # into the cached local repo, then run ONLY the app module (spring-boot:run can't run
+    # reactor-wide — it dies on the non-executable parent pom — and app-only can't resolve its
+    # siblings unless installed).
     command:
       - sh
       - -c
       - >-
+        mvn -B -q -N install
+        -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -q -pl app -am install -DskipTests
         -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -pl app spring-boot:run
@@ -200,10 +210,15 @@ services:
       # the service network, so point this at a public tunnel.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}}
-      # Encoder classification — the classify service below. Same service that runs on
-      # ECS Fargate in production; the dev key just has a working default.
-      TESSARY_OBSERVER_ENCODER_URL: http://classify:8080
-      TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
+      # The groundedness model server, from .env. Read here rather than left to env_file because
+      # `environment:` overrides `env_file:`, so a hardcoded value would hide the lines the setup
+      # guide (classifiers/groundedness/setup/) writes. On a Mac that is serve.py running natively,
+      # reached as http://host.docker.internal:<port>. Blank means groundedness is not set up and
+      # its sweeps are skipped. To use the classify service below instead, set the URL to
+      # http://classify:8080 and the key in .env; the service reads the same key variable.
+      TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
+      TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
+      TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
     volumes:
       # The reactor is twelve modules under backend/. The dev boot installs app's whole dependency
       # chain into the cached .m2 and then runs app alone, so EVERY module's src must be mounted —

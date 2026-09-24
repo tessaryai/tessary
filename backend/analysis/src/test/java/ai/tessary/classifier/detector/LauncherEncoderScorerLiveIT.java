@@ -30,7 +30,7 @@ class LauncherEncoderScorerLiveIT {
         ObserverProperties props = new ObserverProperties();
         props.getEncoder().setUrl(System.getenv("ENCODER_LIVE_URL"));
         props.getEncoder().setApiKey(apiKey);
-        return new LauncherEncoderScorer(props, new ObjectMapper());
+        return new LauncherEncoderScorer(props, new ObjectMapper(), reason -> {});
     }
 
     private LauncherEncoderScorer scorer() {

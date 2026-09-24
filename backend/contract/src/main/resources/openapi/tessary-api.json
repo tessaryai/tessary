@@ -714,6 +714,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseFlaggedAnswerPage" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FlaggedAnswerPage"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseFrustratedSessionPage" : {
         "properties" : {
           "data" : {
@@ -783,6 +804,27 @@
             "anyOf" : [
               {
                 "$ref" : "#/components/schemas/GlobalSearchView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseGroundednessStatusView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/GroundednessStatusView"
               },
               {
                 "type" : "null"
@@ -2486,6 +2528,16 @@
               }
             ]
           },
+          "groundedness" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/GroundednessDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "malformedOutput" : {
             "anyOf" : [
               {
@@ -2532,6 +2584,7 @@
           "baseline",
           "finding",
           "frustration",
+          "groundedness",
           "malformedOutput",
           "metric",
           "secretLeak",
@@ -3079,6 +3132,16 @@
               }
             ]
           },
+          "groundedness" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/GroundednessDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "latest_finding_id" : {
             "type" : [
               "string",
@@ -3162,6 +3225,7 @@
           "events",
           "exemplars",
           "frustration",
+          "groundedness",
           "latest_finding_id",
           "malformed_output",
           "metric",
@@ -3617,6 +3681,10 @@
           "title" : {
             "type" : "string"
           },
+          "traces_affected" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "what_the_agent_did" : {
             "type" : "string"
           }
@@ -3629,6 +3697,7 @@
           "fix_suggestion",
           "sessions_affected",
           "title",
+          "traces_affected",
           "what_the_agent_did"
         ],
         "type" : "object"
@@ -5191,6 +5260,134 @@
         ],
         "type" : "object"
       },
+      "FlaggedAnswerPage" : {
+        "properties" : {
+          "nextCursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "rows" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FlaggedAnswerView"
+            },
+            "type" : "array"
+          },
+          "total" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "nextCursor",
+          "rows",
+          "total"
+        ],
+        "type" : "object"
+      },
+      "FlaggedAnswerView" : {
+        "properties" : {
+          "answer" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "cleared" : {
+            "type" : "boolean"
+          },
+          "documents" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetrievedDocumentView"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "flaggedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "flaggedSentences" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FlaggedSentenceView"
+            },
+            "type" : "array"
+          },
+          "premiseHadEvidence" : {
+            "type" : "boolean"
+          },
+          "question" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "score" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "sessionId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "spanId" : {
+            "type" : "string"
+          },
+          "stored" : {
+            "type" : "boolean"
+          },
+          "traceId" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "answer",
+          "cleared",
+          "documents",
+          "flaggedAt",
+          "flaggedSentences",
+          "premiseHadEvidence",
+          "question",
+          "score",
+          "sessionId",
+          "spanId",
+          "stored",
+          "traceId"
+        ],
+        "type" : "object"
+      },
+      "FlaggedSentenceView" : {
+        "properties" : {
+          "end" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "score" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "start" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "end",
+          "score",
+          "start"
+        ],
+        "type" : "object"
+      },
       "FrustratedConversationView" : {
         "properties" : {
           "callSiteId" : {
@@ -5504,6 +5701,107 @@
         },
         "required" : [
           "hits"
+        ],
+        "type" : "object"
+      },
+      "GroundednessDetail" : {
+        "properties" : {
+          "answers" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FlaggedAnswerView"
+            },
+            "type" : "array"
+          },
+          "answersNextCursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "arlTarget" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "baselineTraces" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "flagThreshold" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "learningUntil" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "rate" : {
+            "$ref" : "#/components/schemas/RateDetail"
+          }
+        },
+        "required" : [
+          "answers",
+          "answersNextCursor",
+          "arlTarget",
+          "baselineTraces",
+          "flagThreshold",
+          "learningUntil",
+          "rate"
+        ],
+        "type" : "object"
+      },
+      "GroundednessStatusView" : {
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "checked_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "configured" : {
+            "type" : "boolean"
+          },
+          "ever_swept" : {
+            "type" : "boolean"
+          },
+          "last_caught_up_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "last_scored_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "mode" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "setup_ref" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "available",
+          "checked_at",
+          "configured",
+          "ever_swept",
+          "last_caught_up_at",
+          "last_scored_at",
+          "mode",
+          "reason",
+          "setup_ref",
+          "state"
         ],
         "type" : "object"
       },
@@ -8085,6 +8383,24 @@
           "doc_id",
           "score",
           "seq"
+        ],
+        "type" : "object"
+      },
+      "RetrievedDocumentView" : {
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "text",
+          "title"
         ],
         "type" : "object"
       },
@@ -13965,6 +14281,60 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status" : {
+      "get" : {
+        "operationId" : "ClassifierController_getGroundednessStatus",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseGroundednessStatusView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics" : {
       "get" : {
         "operationId" : "ClassifierController_metrics",
@@ -14619,6 +14989,95 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseFindingEvidenceSpanPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "finding-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/flagged-answers" : {
+      "get" : {
+        "operationId" : "FindingController_flaggedAnswers",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "rcaReport",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "cause",
+            "required" : false,
+            "schema" : {
+              "format" : "int32",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "limit",
+            "required" : false,
+            "schema" : {
+              "default" : 50,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "cursor",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseFlaggedAnswerPage"
                 }
               }
             },

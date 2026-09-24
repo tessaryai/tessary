@@ -38,6 +38,7 @@ import {
   type ClassifierDebug,
   type ClassifierEvent,
   type ClassifierHealth,
+  type GroundednessStatus,
   type ClassifierTuning,
   type SetClassifierTuningRequest,
   type BehaviorBaselineEvent,
@@ -46,6 +47,7 @@ import {
   type EvidenceSpanPage,
   type MalformedOutputPage,
   type FrustratedSessionPage,
+  type FlaggedAnswerPage,
   type BehaviorAnalysis,
   type BehaviorFindings,
   type BehaviorFindingStatus,
@@ -563,6 +565,9 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      * drift). Not part of the product surface; see `views/classifiers/debug`.
      */
     getClassifierDebug: (id: string) => http<ClassifierDebug>(`${base}/classifiers/${enc(id)}/debug`),
+    /** The Groundedness row's status: the model's health, the mode, and when it last scored. 422s for any other classifier. */
+    getGroundednessStatus: (id: string) =>
+      http<GroundednessStatus>(`${base}/classifiers/${enc(id)}/groundedness-status`),
     /** The window/threshold operating point for a metric-drift classifier (cost_drift, duration_drift). */
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
@@ -633,6 +638,25 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       }
       const qs = q.toString();
       return http<FrustratedSessionPage>(`${base}/findings/${enc(id)}/frustrated-sessions${qs ? `?${qs}` : ""}`);
+    },
+
+    /**
+     * One page of the flagged answers a `groundedness_rate` finding cites, newest flag first. `cause` narrows
+     * it to one RCA cause's share: the report that found it and its 0-based position there.
+     */
+    getFlaggedAnswers: (
+      id: string,
+      params?: { limit?: number; cursor?: string | null; cause?: { rcaReport: string; index: number } },
+    ) => {
+      const q = new URLSearchParams();
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.cursor) q.set("cursor", params.cursor);
+      if (params?.cause) {
+        q.set("rcaReport", params.cause.rcaReport);
+        q.set("cause", String(params.cause.index));
+      }
+      const qs = q.toString();
+      return http<FlaggedAnswerPage>(`${base}/findings/${enc(id)}/flagged-answers${qs ? `?${qs}` : ""}`);
     },
 
     /**

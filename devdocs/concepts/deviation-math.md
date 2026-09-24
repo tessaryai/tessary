@@ -338,7 +338,9 @@ hour it arrived. A call with no start time is skipped and counted, never guessed
 rate because a missing timestamp is a property of the producer rather than of the call's outcome, so
 numerator and denominator drop together. The reference is built from the leading buckets until it holds
 `min_baseline_calls`, then **frozen** — a reference that moved with the traffic would drift along with
-a slow degradation and never notice it.
+a slow degradation and never notice it. A classifier may set `freeze_baseline_calls` above the minimum:
+judging still starts at `min_baseline_calls`, and each later hour is judged against the reference and
+then added to it, until the reference holds `freeze_baseline_calls` and stops moving.
 
 Recompute-per-read deletes the cursor/watermark/double-count bug class rather than defending against
 it, and a retuned threshold takes effect on the next pass instead of invalidating stored state. The

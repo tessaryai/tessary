@@ -192,10 +192,13 @@ Once you are past the gate, Tessary tracks the project's progress through a mile
 
 Connecting a GitHub repository is optional and not required to complete setup. It gives Tessary source code to ground root-cause analysis and triage in, which improves both. Connect one from **Settings > Git integration**, either through the in-app manifest wizard or with a personal access token.
 
-## The encoder-based classifier is unavailable in the open edition
+## Groundedness needs a GPU
 
-<Note>
-  The groundedness classifier depends on a separate `classify-service`, and it is **not available in the open edition**. The self-hosting configuration does not start that service, its encoder URL and API key environment variables ship blank, and the model weights the service loads are gated and not published, so standing it up yourself is not a path this documentation can offer. Every other classifier runs without it; setup reaches connected traces and a first case without groundedness.
-</Note>
+The `groundedness` classifier scores answers with a model that runs on a GPU, outside Tessary's containers: on a Mac with Apple silicon for development, or, for production, on a GPU instance beside a Tessary that runs on AWS. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows one of these files:
 
-The frustration classifier does not need that service. It sends eligible user messages to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key, so it starts switched off and asks for the key when you turn it on. [Watch for frustrated users](/classifiers/frustration) covers what it sends and when a case opens.
+- [Set up on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md)
+- [Deploy on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md)
+
+A stack without a GPU runs every other classifier and reaches connected traces and a first case without groundedness.
+
+The frustration classifier does not need a GPU. It sends eligible user messages to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key, so it starts switched off and asks for the key when you turn it on. [Watch for frustrated users](/classifiers/frustration) covers what it sends and when a case opens.

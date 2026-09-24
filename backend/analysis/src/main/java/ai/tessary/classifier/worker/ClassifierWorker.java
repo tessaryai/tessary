@@ -11,6 +11,7 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.catalog.PagedDetector;
 import ai.tessary.classifier.catalog.PagedDetector.PageAction;
 import ai.tessary.classifier.detector.Detection;
+import ai.tessary.classifier.detector.EncoderUnreachableException;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
@@ -77,11 +78,16 @@ public class ClassifierWorker {
      * <p>A backlog for these arrives all at once rather than a page a minute: a backfill upload lands months
      * of spans in one go, and Malformed Output rewinds to the start of history the moment a call site's schema
      * arrives. At one page a tick, a 250,000-span project takes most of a day to catch up. Both are
-     * deterministic and cheap per span. The encoder-backed kinds are left at one page a tick on purpose:
-     * draining them would put a whole backlog of scoring calls on the classify service in a single tick.
+     * deterministic and cheap per span.
+     *
+     * <p>The encoder-backed kind (groundedness) drains too, but at {@code encoder-batch-size} a page rather than
+     * {@code batch-size}: each observation is a model call, so a page is sized to finish well inside the
+     * lease on a CPU encoder, the cursor lands after every page, and the scorer holds at most {@code
+     * tessary.observer.encoder.max-inflight} requests open and backs off on a 429 — so a backlog reaches
+     * the classify service at the pace it can take, never as one tick's worth of calls.
      */
-    private static final Set<String> DRAIN_TO_HEAD =
-            Set.of(BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT);
+    private static final Set<String> DRAIN_TO_HEAD = Set.of(
+            BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT, BuiltInDetector.Kind.GROUNDEDNESS);
 
     // A job stuck failing every tick gets one full stacktrace, then a "still failing" summary
     // every 30 occurrences (~30 ticks at the default 60s heartbeat) instead of one per tick.
@@ -211,6 +217,20 @@ public class ClassifierWorker {
         }
     }
 
+    /** Whether {@code e}, or anything it wraps, is the scorer finding the model unreachable. */
+    private static boolean isEncoderUnreachable(Throwable e) {
+        Throwable t = e;
+        for (int depth = 0; t != null && depth < 8; depth++, t = t.getCause()) {
+            if (t instanceof EncoderUnreachableException) return true;
+        }
+        return false;
+    }
+
+    /** Test seam: the lease owner this worker claims as, for tests that claim a job on its behalf. */
+    String leaseOwnerForTest() {
+        return leaseOwner;
+    }
+
     /** Test seam: run the production {@link #sweep} for one job directly (mirrors MeteringWorker's analogous seam). */
     void sweepForTest(ClassifierJobRow job) {
         sweep(job);
@@ -247,6 +267,20 @@ public class ClassifierWorker {
             }
             ClassifierRow signal = maybe.get();
             classifierKey = signal.classifierKey();
+            if (signalService.encoderDown(signal)) {
+                // Pending from before the model went away: hand it back unrun and uncounted. The
+                // enqueue gate keeps it from coming back until the model answers again.
+                jobs.releaseWithoutAttempt(job.id(), leaseOwner);
+                sweepFailures.clear(job.id());
+                StructuredLog.debug(log, "groundedness.sweep.skipped")
+                        .message("released %s unrun: its model is down", signal.classifierKey())
+                        .field("job", job.id())
+                        .field("signal", signal.classifierKey())
+                        .field("classifierId", signal.id())
+                        .field("reason", "model down")
+                        .log();
+                return;
+            }
             try (LogContext ignoredSignal = LogContext.with(LogContext.CLASSIFIER_KEY, signal.classifierKey())) {
                 // DEBUG, not INFO: this announces intent, not state. It was 45% of production log
                 // volume (168 lines / 10 min) and every fact in it also appears on the completion
@@ -262,6 +296,23 @@ public class ClassifierWorker {
                 sweepSignal(job, signal, start);
             }
         } catch (RuntimeException e) {
+            if (isEncoderUnreachable(e)) {
+                // The model is asleep or stopped, not broken: the scorer has already marked it down,
+                // so hand the job back without spending an attempt. Five of these in a row must never
+                // dead-letter the sweep; a 5xx or a 401 still does.
+                jobs.releaseWithoutAttempt(job.id(), leaseOwner);
+                sweepFailures.clear(job.id());
+                StructuredLog.info(log, Markers.OPS, "signal.sweep.encoder-unreachable")
+                        .message(
+                                "%s paused: its model is not answering",
+                                classifierKey != null ? classifierKey : job.classifierId())
+                        .field("job", job.id())
+                        .field("signal", classifierKey)
+                        .field("classifierId", job.classifierId())
+                        .durationMs(start)
+                        .log();
+                return;
+            }
             // One sweep failing is a WARN, deduped: the first of a streak carries the stacktrace,
             // repeats collapse to a summary. The alertable ERROR is reserved for the budget-exhausted
             // dead-letter transition. Clearing the streak on dead-letter means each post-cooldown
@@ -454,6 +505,9 @@ public class ClassifierWorker {
         String detectorConfig = signal.configJson();
         boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
         Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
+        int pageSize = BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())
+                ? props.getEncoderBatchSize()
+                : props.getBatchSize();
 
         String cursorAt = job.cursorAt();
         String cursorId = job.cursorId();
@@ -467,7 +521,7 @@ public class ClassifierWorker {
         // when a whole drain fires.
         NewDetection firstNew = null;
         while (true) {
-            Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId);
+            Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId, pageSize);
             if (page == null) {
                 jobs.markSwept(job.id(), null, null);
                 atHead = true;
@@ -490,13 +544,13 @@ public class ClassifierWorker {
             cursorAt = page.cursorAt();
             cursorId = page.cursorId();
             boolean more = drain
-                    && page.windowSize() >= props.getBatchSize()
+                    && page.windowSize() >= pageSize
                     && Duration.between(start, Instant.now()).compareTo(budget) < 0;
             if (more) {
                 leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.getLeaseSeconds());
             } else {
                 jobs.markSwept(job.id(), cursorAt, cursorId);
-                atHead = page.windowSize() < props.getBatchSize();
+                atHead = page.windowSize() < pageSize;
             }
             // The classifier's own arming, evaluated here rather than by an alerting worker reading the
             // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
@@ -506,7 +560,15 @@ public class ClassifierWorker {
             if (!more || leaseLost) break;
         }
         sweepFailures.clear(job.id());
-        if (atHead) catchUp(job, signal, cursorAt);
+        if (atHead) {
+            // Encoder-backed: remember when the sweep reached the head, so production mode can sleep
+            // after it and the status can say when the last run was. Before the population work, so a
+            // failure there cannot lose it.
+            if (BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())) {
+                jobs.recordCaughtUp(job.id(), leaseOwner, Instant.now());
+            }
+            catchUp(job, signal, cursorAt);
+        }
 
         if (pages == 0) {
             // DEBUG: a sweep with no new observations is the steady state, not news. Together with
@@ -595,7 +657,8 @@ public class ClassifierWorker {
             @Nullable BuiltInDetector detector,
             @Nullable String detectorConfig,
             @Nullable String cursorAt,
-            @Nullable String cursorId) {
+            @Nullable String cursorId,
+            int pageSize) {
         // The window is what the cursor advances over, the same unfiltered stream at both grains so
         // the cursor always moves. `obs`, what actually gets scored, is the window minus the rows the
         // grain rejects, so a dropped row is never re-offered on a later tick.
@@ -603,7 +666,7 @@ public class ClassifierWorker {
         List<SubstrateObservation> obs;
         if (grain == Grain.TURN) {
             List<SubstrateReadRepository.TurnCandidate> candidates =
-                    substrate.turnCandidatesAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
+                    substrate.turnCandidatesAfter(job.projectId(), cursorAt, cursorId, pageSize);
             window = candidates.stream()
                     .map(SubstrateReadRepository.TurnCandidate::observation)
                     .toList();
@@ -616,7 +679,7 @@ public class ClassifierWorker {
                             .map(SubstrateReadRepository.TurnCandidate::observation)
                             .toList()));
         } else {
-            window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, props.getBatchSize());
+            window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, pageSize);
             obs = window;
         }
         if (window.isEmpty()) return null;
@@ -633,7 +696,7 @@ public class ClassifierWorker {
             // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier
             // scores the whole batch in one serving call. Inert/unknown kinds (detector == null)
             // advance the cursor only.
-            List<Detection> scored = detector.detectBatch(obs, detectorConfig);
+            List<Detection> scored = detector.sweepBatch(signal, obs, detectorConfig);
             StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
                     .field("job", job.id())
                     .field("signal", signal.classifierKey())

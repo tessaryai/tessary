@@ -228,6 +228,7 @@ class RcaSynthesisOutputTest {
         RcaDtos.Cause c = out.causes().get(0);
         assertEquals(List.of("s-1"), c.evidenceSessionIds(), "unknown and repeated session ids are dropped");
         assertEquals(List.of("tr-1"), c.evidenceTraceIds(), "a trace outside the flagged turns is dropped");
+        assertEquals(1, c.tracesAffected(), "the flagged turns it cites");
         assertEquals("prompt", c.attribution().kind());
         assertEquals("agent/prompt.md", c.attribution().path());
         assertNull(out.verdictNote());
@@ -324,5 +325,90 @@ class RcaSynthesisOutputTest {
         assertEquals(RcaDtos.Attribution.UNKNOWN, c.attribution().kind());
         assertNull(c.attribution().path(), "a blank path is no path");
         assertEquals("low", c.confidence());
+    }
+
+    // ---- groundedness -------------------------------------------------------------------------
+
+    /** The finding's traces with a flagged answer: a groundedness report's only receipts. */
+    private static final Set<String> FLAGGED = Set.of("tr-1", "tr-2", "tr-3");
+
+    private static String groundedCause(String title, int affected, String traces) {
+        return "{\"title\":\"" + title + "\",\"what_the_agent_did\":\"w\",\"traces_affected\":" + affected
+                + ",\"evidence_trace_ids\":[" + traces + "],"
+                + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
+                + "\"excerpt\":\"top_k=1\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}";
+    }
+
+    @Test
+    void groundednessCausesKeepOnlyThisFindingsFlaggedTraces() {
+        String text = frustration(
+                "causes_identified", groundedCause("Retrieves one document", 2, "\"tr-1\",\"tr-9\",\"tr-1\""));
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
+
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
+        assertTrue(out.hypotheses().isEmpty(), "a groundedness report writes causes, not hypotheses");
+        RcaDtos.Cause c = out.causes().get(0);
+        assertEquals(List.of("tr-1"), c.evidenceTraceIds(), "unknown and repeated trace ids are dropped");
+        assertTrue(c.evidenceSessionIds().isEmpty(), "a groundedness cause cites no sessions");
+        assertEquals(0, c.sessionsAffected());
+        assertEquals(2, c.tracesAffected());
+        assertEquals("code", c.attribution().kind());
+        assertEquals("rag/retrieve.py", c.attribution().path());
+        assertNull(out.verdictNote());
+    }
+
+    @Test
+    void aGroundednessCauseCitingNoFlaggedTraceIsDroppedEvenWithSessions() {
+        String text = frustration(
+                "causes_identified",
+                "{\"title\":\"Sessions only\",\"what_the_agent_did\":\"w\",\"traces_affected\":4,"
+                        + "\"evidence_session_ids\":[\"s-1\"],\"evidence_trace_ids\":[\"tr-9\"],"
+                        + "\"fix_suggestion\":\"f\",\"confidence\":\"high\"}",
+                groundedCause("Real", 1, "\"tr-2\""));
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
+
+        assertEquals(
+                List.of("Real"), out.causes().stream().map(RcaDtos.Cause::title).toList());
+    }
+
+    @Test
+    void groundednessCausesIdentifiedWithNoSurvivingCauseIsDowngraded() {
+        String text = frustration("causes_identified", groundedCause("Invented", 5, "\"tr-9\""));
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
+
+        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict());
+        assertTrue(out.causes().isEmpty());
+        assertNotNull(out.verdictNote());
+        assertTrue(out.verdictNote().contains("trace with a flagged answer"), out.verdictNote());
+        assertTrue(out.verdictNote().contains("`witness` trace refs"), out.verdictNote());
+    }
+
+    @Test
+    void groundednessCausesRankByTracesAffectedAndNeverUnderCountTheirOwnCitations() {
+        String text = frustration(
+                "causes_identified",
+                groundedCause("Small", 1, "\"tr-1\""),
+                groundedCause("Undercounted", 0, "\"tr-1\",\"tr-2\",\"tr-3\""),
+                groundedCause("Big", 9, "\"tr-2\""));
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
+
+        assertEquals(
+                List.of("Big", "Undercounted", "Small"),
+                out.causes().stream().map(RcaDtos.Cause::title).toList());
+        assertEquals(3, out.causes().get(1).tracesAffected(), "a cause affects at least the traces it cites");
+    }
+
+    @Test
+    void groundednessVerdictsNormaliseToTheCausesPair() {
+        for (String raw : List.of("behavior_change", "inconclusive", "vibes")) {
+            RcaSynthesisOutput.Parsed out =
+                    RcaSynthesisOutput.parseGroundedness(MAPPER, frustration(raw), FLAGGED, COHORT, "proj");
+            assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict(), raw);
+            assertNull(out.verdictNote(), "an unknown verdict is normalised, not downgraded: " + raw);
+        }
     }
 }

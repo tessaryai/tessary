@@ -22,6 +22,15 @@ public class ClassifierProperties {
     /** Max observations swept per signal-job claim round (the cursor advances by this window). */
     private int batchSize = 200;
 
+    /**
+     * The page an ENCODER-BACKED classifier (groundedness) sweeps at a time, in place of
+     * {@link #batchSize}. Each such observation is a model call whose cost grows with the evidence it
+     * carries, so a page is sized to finish well inside the lease on a CPU encoder; the sweep drains
+     * page by page within the lease budget, persisting the cursor after each, so a backlog drains at
+     * the encoder's own pace and a failure loses at most one page of work, never the whole window.
+     */
+    private int encoderBatchSize = 32;
+
     /** Lease duration for a claimed signal job; a worker that dies mid-sweep is reclaimed after this. */
     private long leaseSeconds = 300;
 
@@ -307,6 +316,14 @@ public class ClassifierProperties {
 
     public int getBatchSize() {
         return batchSize;
+    }
+
+    public int getEncoderBatchSize() {
+        return encoderBatchSize;
+    }
+
+    public void setEncoderBatchSize(int v) {
+        this.encoderBatchSize = v;
     }
 
     public void setBatchSize(int v) {

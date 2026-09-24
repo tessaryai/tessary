@@ -33,14 +33,19 @@ Two notes on the deterministic pair.
 
 A flagged message is not a finding on its own. Each call site learns its normal rate of frustrated sessions, and a finding and its case open together when that rate rises. [Watch for frustrated users](/classifiers/frustration) covers turning it on, what it sends, and reading the case.
 
+### Groundedness, on a separate model service
+
+`groundedness` is in this build and starts switched off on every project. It checks whether an answer is supported by the documents the call retrieved: a public model (`tessaryai/groundedness-classifier-v1`) reads the documents and the whole answer in one pass and flags the sentences they don't support. The model needs a GPU and runs outside Tessary's containers, on a Mac with Apple silicon for development or on a GPU instance on AWS for production. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md).
+
+A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md).
+
 ### What is not available in the open edition
 
-Three classifiers exist in the product and cannot run here:
+Two classifiers exist in the product and cannot run here:
 
-- `groundedness` depends on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
 - `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
 
-The capability API refuses an override for any of the three rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#the-encoder-based-classifier-is-unavailable-in-the-open-edition) states the same boundary from the install side.
+The capability API refuses an override for either rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear.
 
 ## Fitting a baseline, and why a new project waits
 

@@ -8,10 +8,11 @@ This is **local-first**: evaluation runs on your own machine, so you can iterate
 anything touches classify-service.
 
 > **What is here and what is not.** This tree is split along the open/paid boundary. The open
-> edition ships `framework/`, `tool_error/`, `metric_drift/` and `data_gen/` — the modules whose
-> classifiers are pure Java in the open backend, plus the harness and the corpus emitters. The
-> paid classifier modules (the encoder-head classifiers and the SOP-conformance work) are not
-> part of this export. `pyproject.toml`'s `pythonpath` carries
+> edition ships `framework/`, `tool_error/`, `metric_drift/`, `groundedness/` and `data_gen/` — the
+> modules whose classifiers run in the open backend (three pure-Java detectors and the groundedness
+> token head, whose model is public), plus the harness and the corpus emitters. The remaining paid
+> classifier modules (the frustration heads and the SOP-conformance work) are not part of this
+> export. `pyproject.toml`'s `pythonpath` carries
 > an overlay entry for that reason; with the overlay absent it is a directory that does not exist,
 > which pytest ignores.
 
@@ -22,6 +23,7 @@ classifiers/
   framework/      # shared contracts — schema, judge, metrics, harness, scorers, agreement, audit
   tool_error/     # windowed tool-error rate detector: corpus + null eval + jshell bridge
   metric_drift/   # duration_drift / cost_drift: corpus, injection, windows + jshell bridge
+  groundedness/   # the groundedness model server (serve.py) and its setup files; training lives in the experiments repo
   data_gen/       # OTLP corpus emitters — the trace generators the boot gates and demos run on
   tests/          # the open test suite
   data/           # generated datasets + eval sets   (gitignored)

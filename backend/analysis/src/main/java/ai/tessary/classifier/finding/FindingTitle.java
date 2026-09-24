@@ -51,6 +51,7 @@ public final class FindingTitle {
             case FindingRow.Cause.ARMED_WINDOW -> armed(finding);
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
             case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
+            case FindingRow.Cause.GROUNDEDNESS_RATE -> groundednessRate(finding);
             // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
             // much" to put in a sentence, and the cause key already reads as the action sequence.
             default -> finding.nativeCauseKey();
@@ -133,6 +134,16 @@ public final class FindingTitle {
         return "Frustrated sessions increased from "
                 + pct(body.path("baseline_rate").asDouble()) + " to "
                 + pct(body.path("current_rate").asDouble()) + " on " + callSite;
+    }
+
+    /**
+     * {@code "Answers on rag-answer became less grounded"}. The direction only, with no rates: the flagged
+     * rate counts the model's false alarms and misses its real ones, so the direction is reliable where the
+     * size is not. The finding's body carries the numbers, labelled as flagged.
+     */
+    private static String groundednessRate(FindingRow finding) {
+        String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
+        return "Answers on " + callSite + " became less grounded";
     }
 
     /**

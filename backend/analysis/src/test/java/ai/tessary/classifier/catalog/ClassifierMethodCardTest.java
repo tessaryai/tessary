@@ -46,11 +46,18 @@ class ClassifierMethodCardTest {
         assertNull(ClassifierMethodCard.forClassifier(""));
     }
 
-    /** The armed-signal family shares one card, rendered with the key of the classifier that fired. */
+    /**
+     * Groundedness's card describes the rate test it files through, and none of the contradiction-only
+     * method it replaced. Public numbers are RAGTruth's only.
+     */
     @Test
-    void anArmedSignalCardNamesItsOwnClassifier() {
+    void theGroundednessCardDescribesItsRateTest() {
         String card = cardOf(BuiltInDetector.Kind.GROUNDEDNESS);
-        assertTrue(card.contains(BuiltInDetector.Kind.GROUNDEDNESS), "the shared card is rendered with its own key");
+        assertTrue(card.contains("Bernoulli CUSUM"), card);
+        assertTrue(card.contains("RAGTruth"), card);
+        assertFalse(card.contains("RAGBench"), "public numbers are RAGTruth's only");
+        assertFalse(card.contains("three-way NLI"), "the contradiction-only method is gone");
+        assertFalse(card.contains("armedWindow"), "it files no armed window");
     }
 
     /**
@@ -64,7 +71,7 @@ class ClassifierMethodCardTest {
         assertTrue(cardOf(BuiltInDetector.Kind.COST_DRIFT).contains("### Cause: `distribution_shift`"));
         assertTrue(cardOf(BuiltInDetector.Kind.MALFORMED_OUTPUT).contains("### Cause: `malformed_rate`"));
         assertTrue(cardOf(BuiltInDetector.Kind.SECRET_LEAK).contains("### Cause: `armed_window`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.GROUNDEDNESS).contains("### Cause: `armed_window`"));
+        assertTrue(cardOf(BuiltInDetector.Kind.GROUNDEDNESS).contains("### Cause: `groundedness_rate`"));
         assertTrue(cardOf(BuiltInDetector.Kind.FRUSTRATION).contains("### Cause: `frustration_rate`"));
 
         String behaviorDrift = cardOf(BuiltInDetector.Kind.BEHAVIOR_DRIFT);
@@ -88,7 +95,8 @@ class ClassifierMethodCardTest {
                 BuiltInDetector.Kind.SOP_CONFORMANCE,
                 BuiltInDetector.Kind.SECRET_LEAK,
                 BuiltInDetector.Kind.MALFORMED_OUTPUT,
-                BuiltInDetector.Kind.FRUSTRATION)) {
+                BuiltInDetector.Kind.FRUSTRATION,
+                BuiltInDetector.Kind.GROUNDEDNESS)) {
             String card = cardOf(key);
             assertFalse(card.contains("state.json"), key + "'s card still names the retired dossier file");
             assertFalse(card.contains("recompute"), key + "'s card still asks the agent to recompute a number");

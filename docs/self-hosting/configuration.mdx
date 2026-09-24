@@ -132,10 +132,12 @@ The one exception is an ambient region for Bedrock:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `TESSARY_OBSERVER_ENCODER_URL` | URL of the classify-service encoder endpoint. | Blank |
-| `TESSARY_OBSERVER_ENCODER_API_KEY` | API key for the encoder endpoint. | Blank |
+| `TESSARY_OBSERVER_ENCODER_URL` | URL of the groundedness model server. | Blank |
+| `TESSARY_OBSERVER_ENCODER_API_KEY` | API key for the groundedness model server. | Blank |
+| `TESSARY_GROUNDEDNESS_CLASSIFIER_MODE` | `dev` scores whenever the model answers. `production` is a GPU instance that wakes on a schedule and stops when idle, so Tessary waits 30 minutes after it catches up before scoring again. | `dev` |
+| `TESSARY_OBSERVER_ENCODER_PROBE_INTERVAL_MS` | How often the backend checks the model server's `/healthz`. While it doesn't answer, groundedness pauses and picks up where it left off once it does. | `60000` |
 
-Both ship blank, and in the open edition they stay blank: the model weights classify-service loads are gated and not published, so the groundedness classifier is unavailable rather than merely unconfigured. The frustration classifier does not use this service; it needs an OpenRouter or TypeSafe key, stored under **Settings** then **Providers**. See [The encoder-based classifier is unavailable in the open edition](/self-hosting/setup#the-encoder-based-classifier-is-unavailable-in-the-open-edition) in Setup, and the classifier sections of [Troubleshooting](/self-hosting/troubleshooting).
+The groundedness model needs a GPU: a Mac with Apple silicon for development, or a GPU instance on AWS for production. The setup file your coding agent follows sets these on a Mac, or prints them for you to add on AWS: [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). The frustration classifier does not use this server; it needs an OpenRouter or TypeSafe key, stored under **Settings** then **Providers**. See [Groundedness needs a GPU](/self-hosting/setup#groundedness-needs-a-gpu) in Setup.
 
 ## Agentic launcher and sandbox-runner
 

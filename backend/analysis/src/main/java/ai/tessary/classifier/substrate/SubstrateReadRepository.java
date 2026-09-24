@@ -376,7 +376,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .map(GroundingEvidenceReads.SpanRef::spanId)
                 .distinct()
                 .toList();
-        java.util.Map<String, StringBuilder> acc = new java.util.HashMap<>();
+        java.util.Map<String, List<String>> acc = new java.util.HashMap<>();
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
@@ -465,9 +465,10 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .query((rs, n) -> {
                     String txt = rs.getString("txt");
                     if (txt != null && !txt.isBlank()) {
-                        acc.computeIfAbsent(rs.getString("span_id"), k -> new StringBuilder())
-                                .append(txt)
-                                .append('\n');
+                        // One list entry per retrieved row, in rank order: the document boundary is
+                        // part of what the groundedness head reads (see Evidence#documents).
+                        acc.computeIfAbsent(rs.getString("span_id"), k -> new java.util.ArrayList<>())
+                                .add(txt.strip());
                     }
                     return Boolean.TRUE; // the row mapper's value is unused; the accumulator is the result
                 })
@@ -475,10 +476,9 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Map<String, GroundingEvidenceReads.Evidence> out = new java.util.HashMap<>();
         for (GroundingEvidenceReads.SpanRef ref : spans) {
             String id = ref.spanId();
-            StringBuilder sb = acc.get(id);
-            String text = sb == null ? "" : sb.toString().strip();
+            List<String> docs = acc.getOrDefault(id, List.of());
             boolean outside = reachedOutside.contains(id);
-            if (!text.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(text, outside));
+            if (!docs.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(docs, outside));
         }
         return java.util.Map.copyOf(out);
     }
@@ -644,6 +644,37 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .param("sid", spanId)
                 .query((rs, n) -> map(rs))
                 .optional();
+    }
+
+    /**
+     * The spans {@code spans} names, in no order: a finding page reading back the answers it cites. A span
+     * that is gone is absent. The two id halves are bound as sets and the pairs kept here, as {@link
+     * #groundingEvidence} does, so a span id that recurs in another listed trace is not read for it.
+     */
+    public List<SubstrateObservation> observationsByIds(
+            String projectId, java.util.Collection<GroundingEvidenceReads.SpanRef> spans) {
+        if (spans.isEmpty()) return List.of();
+        java.util.Set<GroundingEvidenceReads.SpanRef> wanted = new java.util.HashSet<>(spans);
+        return jdbc
+                .sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id IN (:tids) AND s.id IN (:sids)")
+                .param("pid", projectId)
+                .param(
+                        "tids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::traceId)
+                                .distinct()
+                                .toList())
+                .param(
+                        "sids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::spanId)
+                                .distinct()
+                                .toList())
+                .query((rs, n) -> map(rs))
+                .list()
+                .stream()
+                .filter(o -> wanted.contains(new GroundingEvidenceReads.SpanRef(o.traceId(), o.observationId())))
+                .toList();
     }
 
     /**

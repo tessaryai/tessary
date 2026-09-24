@@ -229,6 +229,13 @@ public record FindingRow(
         public static final String FRUSTRATION_RATE = "frustration_rate";
 
         /**
+         * A call site's share of traces with an answer the groundedness model flagged rose above the rate it
+         * learned as its normal. Recomputed through tool_error's engine with a trace as the trial, and filed
+         * unruled for triage, as {@link #MALFORMED_RATE} is.
+         */
+        public static final String GROUNDEDNESS_RATE = "groundedness_rate";
+
+        /**
          * A tool's failure rate moved against its own in-control level: the {@code tool_error}
          * classifier's only cause. Deliberately not filed under {@link #DISTRIBUTION_SHIFT}, since
          * a tool-error finding under that kind would open a case labelled metric_drift and name the

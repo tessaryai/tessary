@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.detector;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -44,7 +45,11 @@ public interface GroundingEvidenceReads {
     record SpanRef(String traceId, String spanId) {}
 
     /**
-     * @param text the concatenated source material, empty when none was captured.
+     * @param documents the source material as the retriever returned it: one entry per {@code retrieved_doc}
+     *     row, best rank first, each capped per row, never joined. The groundedness model server
+     *     ({@code classifiers/groundedness/serve.py}) lays these out as numbered passages — the layout the
+     *     model was trained on — so the boundary between two documents is information the model uses, and a
+     *     head handed one joined string cannot recover it. Empty when none was captured.
      * @param conversationDidExternalWork whether the conversation (up to and including this turn)
      *     contains any tool/mcp/retrieval/reranker span. This is what separates BLIND from GROUNDLESS: a
      *     turn whose conversation retrieved nothing and called nothing has no source by design, so the
@@ -53,5 +58,17 @@ public interface GroundingEvidenceReads {
      *     tool result object — is one we cannot judge, and scoring it would report our own blind spot as
      *     the agent's fault.
      */
-    record Evidence(String text, boolean conversationDidExternalWork) {}
+    record Evidence(List<String> documents, boolean conversationDidExternalWork) {
+        public Evidence {
+            documents = List.copyOf(documents);
+        }
+
+        /**
+         * The documents joined with a newline — the pair head's premise shape, kept for the caller that
+         * still builds one. New callers pass {@link #documents()} through as passages instead.
+         */
+        public String text() {
+            return String.join("\n", documents);
+        }
+    }
 }

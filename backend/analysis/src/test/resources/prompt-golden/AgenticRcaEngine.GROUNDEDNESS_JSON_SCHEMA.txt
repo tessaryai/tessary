@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {"type": "string", "description": "One short paragraph: why these answers went beyond their documents, or that they share no cause."},
+    "verdict": {"type": "string", "enum": ["causes_identified", "no_cause_found"]},
+    "checklist": {
+      "type": "array",
+      "description": "One entry per check id in dossier/checklist.md, your own call on each measurement.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {"type": "string", "description": "The check id, exactly as it appears in dossier/checklist.md."},
+          "assessment": {"type": "string", "enum": ["ruled_out", "contributing", "explains", "unknown"]},
+          "detail": {"type": "string", "description": "Why you assessed it that way, citing what you checked."}
+        },
+        "required": ["check", "assessment", "detail"]
+      }
+    },
+    "causes": {
+      "type": "array",
+      "description": "Why the answers went beyond their documents, one entry per group, most traces first. Empty when no cause is found.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "what_the_agent_did": {"type": "string", "description": "What the agent did that left its answers unsupported."},
+          "traces_affected": {"type": "integer", "description": "How many of the traces with a flagged answer show it."},
+          "evidence_trace_ids": {"type": "array", "items": {"type": "string"}, "description": "Trace ids from this finding's witness refs. At least one; unknown ids are dropped."},
+          "attribution": {
+            "type": ["object", "null"],
+            "properties": {
+              "kind": {"type": "string", "enum": ["prompt", "code", "tool", "model", "unknown"]},
+              "path": {"type": ["string", "null"]},
+              "commit": {"type": ["string", "null"]},
+              "excerpt": {"type": ["string", "null"]}
+            },
+            "required": ["kind"]
+          },
+          "fix_suggestion": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+        },
+        "required": ["title", "what_the_agent_did", "traces_affected", "evidence_trace_ids", "attribution", "fix_suggestion", "confidence"]
+      }
+    },
+    "detailed_report": {
+      "type": "string",
+      "description": "The full investigation as markdown. Must end with an '## Evidence audit' section, a table mapping every load-bearing claim to its evidence (a trace id, a repo path/commit, or a query), and a '## What would settle it' section."
+    }
+  },
+  "required": ["summary", "verdict", "checklist", "causes", "detailed_report"]
+}

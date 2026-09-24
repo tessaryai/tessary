@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
@@ -18,6 +20,9 @@ import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -81,6 +86,7 @@ public class BehaviorTriageEngine {
     private final ProjectRepository projects;
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
+    private final ClassifierDetectionWriteRepository detections;
 
     public BehaviorTriageEngine(
             List<TriageSandbox> sandboxList,
@@ -89,7 +95,8 @@ public class BehaviorTriageEngine {
             ApiKeyService apiKeys,
             ProjectRepository projects,
             OrgMembershipRepository memberships,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            ClassifierDetectionWriteRepository detections) {
         Map<String, TriageSandbox> byKey = new HashMap<>();
         for (TriageSandbox s : sandboxList) byKey.put(s.key(), s);
         this.sandboxes = Map.copyOf(byKey);
@@ -99,6 +106,7 @@ public class BehaviorTriageEngine {
         this.projects = projects;
         this.memberships = memberships;
         this.mapper = mapper;
+        this.detections = detections;
     }
 
     /**
@@ -241,7 +249,102 @@ public class BehaviorTriageEngine {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("finding.md", findingFile(finding));
         methodCard(finding.classifierKey()).ifPresent(card -> files.put("method.md", card));
+        detectionsFile(finding).ifPresent(text -> files.put(DETECTIONS_FILE, text));
         return files;
+    }
+
+    /** The dossier file listing a groundedness rate finding's flagged answers, one per flagged span. */
+    static final String DETECTIONS_FILE = "detections.md";
+
+    /** Rows listed before the file says there are more: enough to read the pattern, bounded for the budget. */
+    static final int DETECTIONS_CAP = 50;
+
+    /**
+     * For a groundedness rate finding, what the classifier wrote about each answer it flagged at the
+     * finding's call site since onset: the score and the sentences it marked. The evidence enumeration says
+     * WHICH answers; this says WHERE in each the model saw an unsupported sentence, which is what a ruling
+     * on a groundedness finding is made of, and handing it over saves the agent a page of MCP reads per
+     * answer. Empty for every other cause kind.
+     */
+    private Optional<String> detectionsFile(FindingRow finding) {
+        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Optional.empty();
+        String callSite = finding.callSiteId() != null ? finding.callSiteId() : finding.nativeCauseKey();
+        List<ClassifierDetectionWriteRepository.DetectionInWindow> rows = detections.listWitnessDetections(
+                BuiltInDetector.Kind.GROUNDEDNESS,
+                finding.projectId(),
+                finding.subjectId(),
+                callSite,
+                finding.onsetAt(),
+                endOfLastHour(finding.lastSeenAt()),
+                DETECTIONS_CAP + 1);
+        StringBuilder sb = new StringBuilder("# Flagged answers since onset\n\n")
+                .append("One line per answer the classifier flagged at this call site, newest first: trace and")
+                .append(" span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's")
+                .append(" score (P(unsupported) of its strongest sentence), and each flagged sentence as")
+                .append(" `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The")
+                .append(" strongest sentence's text follows in quotes. A flagged sentence is where the model")
+                .append(" saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n");
+        int shown = Math.min(rows.size(), DETECTIONS_CAP);
+        for (int i = 0; i < shown; i++) {
+            ClassifierDetectionWriteRepository.DetectionInWindow d = rows.get(i);
+            sb.append("- trace `")
+                    .append(d.traceId())
+                    .append("` span `")
+                    .append(d.spanId())
+                    .append("` at ")
+                    .append(d.subjectStartedAt())
+                    .append(": ")
+                    .append(flaggedAnswerLine(d.evidenceJson()))
+                    .append('\n');
+        }
+        if (rows.size() > DETECTIONS_CAP) {
+            sb.append("\nThe newest ")
+                    .append(DETECTIONS_CAP)
+                    .append(" shown; page the rest through `get_finding_evidence`.\n");
+        } else {
+            sb.append("\n").append(shown).append(" flagged answer(s), every one since onset.\n");
+        }
+        return Optional.of(sb.toString());
+    }
+
+    /** {@code score 0.991; flagged [0, 42) 0.991, [80, 131) 0.978; strongest: "..."}, from a detection's evidence. */
+    private String flaggedAnswerLine(@Nullable String evidenceJson) {
+        if (evidenceJson == null) return "(no evidence recorded)";
+        JsonNode ev;
+        try {
+            ev = mapper.readTree(evidenceJson);
+        } catch (Exception e) {
+            return evidenceJson;
+        }
+        StringBuilder line =
+                new StringBuilder("score ").append(ev.path("unsupported").asText("?"));
+        JsonNode sentences = ev.path("flagged_sentences");
+        if (sentences.isArray() && !sentences.isEmpty()) {
+            line.append("; flagged ");
+            for (int i = 0; i < sentences.size(); i++) {
+                JsonNode s = sentences.get(i);
+                if (i > 0) line.append(", ");
+                line.append('[')
+                        .append(s.path("start").asInt())
+                        .append(", ")
+                        .append(s.path("end").asInt())
+                        .append(") ")
+                        .append(s.path("unsupported").asText("?"));
+            }
+        }
+        String claim = ev.path("claim").asText("");
+        if (!claim.isBlank())
+            line.append("; strongest: \"").append(claim.replace('\n', ' ')).append('"');
+        return line.toString();
+    }
+
+    /** The end of the hour a finding was last seen in, where its counts stop; now when it cannot be read. */
+    private static String endOfLastHour(String lastSeenAt) {
+        try {
+            return Instant.parse(lastSeenAt).plus(Duration.ofHours(1)).toString();
+        } catch (DateTimeParseException e) {
+            return Instant.now().toString();
+        }
     }
 
     /**

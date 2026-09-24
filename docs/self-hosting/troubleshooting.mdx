@@ -60,13 +60,13 @@ Run both operations through the `postgres` service in your compose deployment, u
   This is expected behavior for a new project, not a malfunction. If findings still don't appear after traces have been flowing for an extended period, treat it as a separate problem rather than assuming the baseline period is still in progress.
 </Note>
 
-## Groundedness classifier never fires
+## The groundedness classifier never fires
 
-**Symptom:** Every classifier except groundedness produces findings. It never fires, even on projects with active traffic.
+**Symptom:** The `groundedness` row under **Classifiers** reads "needs setup" or "No scores since" a time, and no groundedness findings appear, even on projects whose call sites declare a retrieval shape (`rag_answer`, `summarize`, `extract`) and carry retrieved documents.
 
-**Cause:** Groundedness is served by a separate `classify-service` that the default `docker-compose.yml` does not start. `.env.example` ships `TESSARY_OBSERVER_ENCODER_URL` and `TESSARY_OBSERVER_ENCODER_API_KEY` blank, so there is no encoder for it to call.
+**Cause:** Groundedness scores with a model that runs on a GPU, outside Tessary's containers. "needs setup" means it has never scored; "No scores since" means the model server stopped answering, or, on AWS, missed its hourly run. While it doesn't answer, groundedness pauses and keeps its place.
 
-**Resolution:** None in the open edition. The model weights `classify-service` loads are gated and not published, so there is no self-host path to this classifier. This is expected behavior, not a misconfiguration: every other classifier runs without it. See the encoder section of [configuration](/self-hosting/configuration) for the variables involved.
+**Resolution:** Under **Classifiers**, turn it on, or open it and choose **Restart model**, then paste the prompt into your coding agent. It follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). A host without a GPU can't run it. Once the model answers, groundedness scores what arrived while it was down. Two further conditions are by design, not faults: it only scores turns whose call site shape declares verifiable source content, and it is quiet on a turn that reached no evidence.
 
 ## Frustration classifier produces nothing
 

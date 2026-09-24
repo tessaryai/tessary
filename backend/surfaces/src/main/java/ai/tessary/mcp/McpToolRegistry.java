@@ -6,6 +6,7 @@ import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
@@ -833,6 +834,7 @@ public class McpToolRegistry {
         MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
         SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
         FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
+        GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
@@ -841,7 +843,8 @@ public class McpToolRegistry {
                 malformedOutput == null ? null : withoutIds(malformedOutput),
                 secretLeak == null ? null : withoutIds(secretLeak),
                 detail.armedWindow(),
-                frustration == null ? null : frustration.withoutIds());
+                frustration == null ? null : frustration.withoutIds(),
+                groundedness == null ? null : groundedness.withoutIds());
     }
 
     private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {
@@ -1197,6 +1200,7 @@ public class McpToolRegistry {
             MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
             SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
             FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
+            GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
@@ -1210,6 +1214,7 @@ public class McpToolRegistry {
                     malformedOutput == null ? null : withoutIds(malformedOutput),
                     secretLeak == null ? null : withoutIds(secretLeak),
                     frustration == null ? null : frustration.withoutIds(),
+                    groundedness == null ? null : groundedness.withoutIds(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());

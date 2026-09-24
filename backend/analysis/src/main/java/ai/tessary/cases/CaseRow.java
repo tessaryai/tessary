@@ -51,7 +51,7 @@ public record CaseRow(
         @Nullable String resolution,
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
-        /** What a person said a resolved frustration case was ({@link Disposition}); null on every other case. */
+        /** What a person said a resolved frustration or groundedness case was ({@link Disposition}); null otherwise. */
         @Nullable String disposition,
         @Nullable String mutedAt,
         @Nullable String mutedBy,
@@ -121,6 +121,13 @@ public record CaseRow(
          * in the same transaction. See {@link FrustrationCaseSource}.
          */
         public static final String FRUSTRATION = "frustration";
+
+        /**
+         * A call site whose share of traces with a flagged answer rose above the rate it learned. Same gate
+         * as {@link #MALFORMED_OUTPUT}: triage rules on the finding, and only a ruling of {@code positive},
+         * or a human pressing <em>Real deviation</em>, reaches Triage. See {@link GroundednessCaseSource}.
+         */
+        public static final String GROUNDEDNESS = "groundedness";
     }
 
     /** {@code subject_kind} values: what the case is about. */
@@ -200,9 +207,9 @@ public record CaseRow(
     }
 
     /**
-     * {@code disposition} values: what a person said a resolved frustration case turned out to be. Both restart
-     * the call site's CUSUM and re-learn its normal rate from the traffic after the resolve; {@link #FALSE_ALARM}
-     * also clears the frustration flag on every conversation the case cites.
+     * {@code disposition} values: what a person said a resolved frustration or groundedness case turned out to
+     * be. Both restart the call site's CUSUM and re-learn its normal rate from the traffic after the resolve;
+     * {@link #FALSE_ALARM} also clears the flag on every conversation, or every answer, the case cites.
      */
     public static final class Disposition {
         private Disposition() {}
@@ -210,7 +217,7 @@ public record CaseRow(
         /** The agent was changed; the rate after the resolve is the normal to learn. */
         public static final String FIXED = "fixed";
 
-        /** The cited conversations were not frustration with the agent: they stop counting as frustrated. */
+        /** The cited conversations or answers were not what was flagged: they stop counting as failures. */
         public static final String FALSE_ALARM = "false_alarm";
     }
 

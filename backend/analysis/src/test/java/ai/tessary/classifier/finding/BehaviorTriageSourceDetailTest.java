@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
@@ -86,7 +87,9 @@ class BehaviorTriageSourceDetailTest {
                 null,
                 mock(MalformedOutputDetailService.class),
                 mock(SecretLeakDetailService.class),
-                mock(FrustrationDetailService.class));
+                mock(FrustrationDetailService.class),
+                null,
+                mock(GroundednessDetailService.class));
     }
 
     private static FindingRow escalatedRow(String id) {

@@ -246,11 +246,14 @@ services:
       # PublicOriginGuard rejects the value if they set it to something an outside caller can't reach.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
-      # Encoder classification endpoint — the standalone classify-service on ECS Fargate
-      # (both values delivered via SSM -> .env). Required: signal sweeps fail loudly
-      # without it; there is no fallback endpoint.
+      # The groundedness model server (classifiers/groundedness/serve.py), which runs on a GPU
+      # outside this stack. A blank URL means groundedness is not set up: its sweeps are skipped,
+      # not failed. The setup guides in classifiers/groundedness/setup/ write all three values to
+      # .env. The mode is `dev` (a Mac running serve.py) or `production` (a GPU instance that stops
+      # itself when idle); blank means dev.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
+      TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
       # The ingest spool: `memory` (default, no broker) or `kafka`, the opt-in durable buffer
       # served by the `redpanda` service below under `--profile kafka`. Nothing depends_on it on
       # purpose: with the mode left at memory the profile never starts, and with it set to kafka a

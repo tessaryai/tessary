@@ -368,6 +368,7 @@ class McpCaseToolsTest {
                 null,
                 secretLeak,
                 null,
+                null,
                 true,
                 true,
                 true);

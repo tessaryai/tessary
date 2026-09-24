@@ -80,10 +80,12 @@ two hardcoded instances, and `detectorFor` read only that map. `DetectorSupplier
 (`classifier/catalog/DetectorSupplier.java`) changed that: any `@Component` implementing it — a small,
 `Deps`-taking factory shaped exactly like `ClassifierModelModule.DetectorFactory` — is discovered by
 Spring `ObjectProvider` collection injection and folded into the SAME detector map `MODULES`'
-factories populate, keyed by whatever `kind()` the detector it builds reports. Groundedness is the
-worked example: its catalog entry stays in-tree (`detectorFactory: null`), and
-the groundedness classifier's own `GroundednessAutoConfiguration` supplies the real `GroundednessDetector`
-through this seam.
+factories populate, keyed by whatever `kind()` the detector it builds reports. Groundedness WAS the
+worked example — its catalog entry sat in-tree with `detectorFactory: null` and the paid
+`GroundednessAutoConfiguration` supplied the real `GroundednessDetector` through this seam — until
+2026-09-21, when the model went public and the detector moved in-tree
+(`classifier/detector/groundedness/`). No shipped manifest entry has a null factory today; the seam
+stays, proven by `ClassifierModelModuleCatalogTest`'s two discovery tests.
 
 **What still constrains it, and it is sharp enough to be a live trap, not a footnote.**
 `BuiltInClassifierCatalog#builtIns()` and `ClassifierService`'s seeding both still read only the
@@ -293,22 +295,27 @@ into the paid tree, and there are three of those.
 so `BehaviorProfileSource` now implements a port-shaped interface that is purely internal wiring
 between two classes in the same module, not a cross-boundary extension point.
 
-**Groundedness** (package `ai.tessary.paid.classifier.groundedness`):
+**Groundedness** (package `ai.tessary.classifier.detector.groundedness`, open since 2026-09-21):
 
 | Port | Implementation |
 |---|---|
-| `DetectorSupplier` for `groundedness` (OBSERVATION) | `GroundednessAutoConfiguration`'s `groundednessDetectorSupplier` bean, building `GroundednessDetector` |
+| none — in-tree `detectorFactory` closure | `GroundednessDetector` with its `VerifiableClaims` pre-filter, built by `BuiltInClassifierCatalog.MODULES` like frustration's |
 
-**Groundedness is a PARTIAL extraction, the first one this page has, and worth reading as its own
-shape rather than reusing behaviour drift's or conformance's framing.** Only the compute moves —
-`GroundednessDetector` and its `VerifiableClaims` deterministic pre-filter. The substrate-facing port,
-`GroundingEvidenceReads` (`classifier/detector/`), STAYS OPEN: it is implemented by the open
-`SubstrateReadRepository`, and moving the interface would force that open class to implement a paid
-type, which the `enforce-open-to-paid-direction` enforcer bans outright. So the catalog entry stays
-in-tree (metadata only, `detectorFactory: null`), the port stays open, and only the detector object
-itself crosses the boundary — through `DetectorSupplier`, §2's new seam, not
-`ClassifierSweepRegistry`, which only covers trace/window-grain `ClassifierSweep` and never touches
-observation-grain dispatch.
+**Groundedness was a PARTIAL extraction while its weights were private, and the shape is worth
+keeping on record because it is the one a future partial extraction would reuse.** Only the compute
+moved — `GroundednessDetector` and its `VerifiableClaims` deterministic pre-filter — into a paid
+module. The substrate-facing port, `GroundingEvidenceReads` (`classifier/detector/`), stayed open: it
+is implemented by the open `SubstrateReadRepository`, and moving the interface would force that
+open class to implement a paid type, which the `enforce-open-to-paid-direction` enforcer bans
+outright. So the catalog entry stayed in-tree (metadata only, `detectorFactory: null`), the port
+stayed open, and only the detector object crossed the boundary — through `DetectorSupplier`, §2's
+seam, not `ClassifierSweepRegistry`, which only covers trace/window-grain `ClassifierSweep` and never
+touches observation-grain dispatch. With the model public (`tessaryai/groundedness-classifier-v1`,
+MIT) the detector, its tables (`groundedness_detection`, migration 0024; `groundedness_assessment`
+and `groundedness_state`, 0025) and its revision pin all live in the open tree and the capability
+left `UNAVAILABLE_IN_OPEN_EDITION`. The model is not a classify-service head: it runs on a GPU in
+`classifiers/groundedness/serve.py`, outside Tessary's containers, at
+`tessary.observer.encoder.url`.
 
 **SOP conformance** (package `ai.tessary.paid.classifier.conformance`, with `intent/`, `scoring/` and `store/` subpackages):
 
@@ -403,19 +410,18 @@ lease and dead-letter budget — but in the builds this repo produces today **th
 an out-of-tree sweep to claim**, so nothing of yours actually runs yet. Two closed doors, and it is
 worth knowing which one you are at:
 
-**A third door is narrower but genuinely usable today: `DetectorSupplier` for an
-existing observation/turn-grain kind whose in-tree manifest entry has `detectorFactory: null`.**
-`groundedness` is that kind in a self-hosted OPEN build — the paid groundedness module is not on an
-open classpath, so nothing claims it, and a self-hoster's own `@Component DetectorSupplier` for
-`Kind.GROUNDEDNESS` is discovered and dispatched exactly like our own paid implementation would be.
-This is real, working substitution, not a read-side adapter. It does not generalise past that one
-kind, though: every OTHER observation/turn-grain kind already has an in-tree detector
-(`secret_leak` and `malformed_output` through their `detectorFactory`, `frustration` through its own
-in-tree `DetectorSupplier`), and a `DetectorSupplier` claiming one of those collides with it — the same
-fail-loud `IllegalStateException` the sweep story hits, not a silent override. And on a build that DOES carry the paid groundedness module, a self-hoster's own
-`DetectorSupplier` for `groundedness` collides with OUR implementation the same way. So the honest
-statement is: one kind, one edition, until a future manifest entry ships with `detectorFactory: null`
-on purpose for extensibility rather than as a byproduct of one detector's own extraction.
+**A third door exists but is currently closed: `DetectorSupplier` for an existing
+observation/turn-grain kind whose in-tree manifest entry has `detectorFactory: null`.** Until
+2026-09-21 `groundedness` was that kind in a self-hosted OPEN build — the paid groundedness module was
+not on an open classpath, so nothing claimed it, and a self-hoster's own `@Component
+DetectorSupplier` for `Kind.GROUNDEDNESS` was discovered and dispatched exactly like the paid
+implementation. With the detector now in-tree, every observation/turn-grain kind already has an
+in-tree detector (`groundedness`, `secret_leak` and `malformed_output` through their
+`detectorFactory`, `frustration` through its own in-tree `DetectorSupplier`), and a
+`DetectorSupplier` claiming one of them collides with it — the same fail-loud
+`IllegalStateException` the sweep story hits, not a silent override. So the honest statement is: no
+kind today, until a future manifest entry ships with `detectorFactory: null` on purpose for
+extensibility rather than as a byproduct of one detector's extraction.
 
 - **The five fitting-tier kinds are already taken.** `behavior_drift` (TRACE) and `duration_drift`,
   `cost_drift`, `tool_error`, `sop_conformance` (WINDOW) are the whole of what
@@ -454,8 +460,9 @@ the roadmap with owners; naming them here is the honest version of the promise:
    in full for a BRAND-NEW entry** — a kind, name, capability and config `MODULES` has never
    declared is still catalog-authorship, and still closed, for exactly the reason above. **What it no
    longer blocks is supplying the DETECTOR for a kind the in-tree manifest already claims** —
-   groundedness is exactly this case: its catalog entry is unchanged and in-tree, only the object that
-   scores each observation is external, through `DetectorSupplier` (§2). Say both halves, because a
+   groundedness was exactly this case until its detector moved in-tree: its catalog entry was
+   unchanged and in-tree, only the object that scored each observation was external, through
+   `DetectorSupplier` (§2). Say both halves, because a
    reader who only reads "hard stop 3" would otherwise conclude the whole door is gone; it is ajar for
    one specific, narrower thing.
 

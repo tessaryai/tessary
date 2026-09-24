@@ -1,0 +1,19 @@
+{
+  "head": "groundedness",
+  "responses": [
+    {
+      "passages": [
+        "Refund 4417 was issued on March 3 to the card ending 0042.",
+        "Card refunds reach the customer within five to ten business days."
+      ],
+      "question": "When will my refund arrive?",
+      "answer": "The refund was issued on March 3. It arrives within two business days by bank transfer."
+    },
+    {
+      "passages": [
+        "Quarterly revenue grew 12 percent on strong cloud sales. Operating costs fell after the company closed two regional offices."
+      ],
+      "answer": "The report says revenue grew 12 percent in the quarter. Ok. Costs fell after two offices closed."
+    }
+  ]
+}

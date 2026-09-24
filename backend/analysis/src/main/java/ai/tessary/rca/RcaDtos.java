@@ -76,19 +76,26 @@ public final class RcaDtos {
             @JsonProperty("evidence_trace_ids") List<String> evidenceTraceIds) {}
 
     /**
-     * One cause a frustration report found: something the agent did that frustrated users, with the
-     * frustrated sessions that show it and the line in the repo behind it when one lines up.
+     * One cause a frustration or groundedness report found: something the agent did that frustrated users,
+     * or that left its answers unsupported by the documents it retrieved, with the sessions or traces that
+     * show it and the line in the repo behind it when one lines up.
      *
      * @param sessionsAffected how many of the frustrated sessions show this behaviour — never fewer than
-     *     it cites, and the order causes are ranked in
-     * @param evidenceSessionIds frustrated sessions from the finding's own evidence refs; at least one
-     * @param evidenceTraceIds the flagged turns from the finding's own evidence refs
+     *     it cites, and the order a frustration report's causes are ranked in; 0 on a groundedness cause
+     * @param tracesAffected how many of the traces with a flagged answer show it — never fewer than it cites,
+     *     and the order a groundedness report's causes are ranked in; on a frustration cause, the flagged
+     *     turns it cites
+     * @param evidenceSessionIds frustrated sessions from the finding's own evidence refs; at least one on a
+     *     frustration cause, none on a groundedness one
+     * @param evidenceTraceIds the flagged turns, or the traces with a flagged answer, from the finding's own
+     *     evidence refs; at least one on a groundedness cause
      * @param attribution null when the analysis attributed nothing
      */
     public record Cause(
             String title,
             @JsonProperty("what_the_agent_did") String whatTheAgentDid,
             @JsonProperty("sessions_affected") int sessionsAffected,
+            @JsonProperty("traces_affected") int tracesAffected,
             @JsonProperty("evidence_session_ids") List<String> evidenceSessionIds,
             @JsonProperty("evidence_trace_ids") List<String> evidenceTraceIds,
             @Nullable Attribution attribution,
@@ -120,7 +127,8 @@ public final class RcaDtos {
             @JsonProperty("subject_label") String subjectLabel,
             @JsonProperty("call_site_id") @Nullable String callSiteId,
             String metric,
-            /** {@code metric_movement} or {@code frustration_causes}: which question the report answers. */
+            /** {@code metric_movement}, {@code frustration_causes} or {@code groundedness_causes}: which
+             *  question the report answers. */
             @JsonProperty("report_kind") String reportKind,
             @JsonProperty("window_from") String windowFrom,
             @JsonProperty("window_split") String windowSplit,
@@ -133,7 +141,7 @@ public final class RcaDtos {
             @Nullable String summary,
             @JsonProperty("ruled_out") List<RuledOutCheck> ruledOut,
             List<Hypothesis> hypotheses,
-            /** Ranked by sessions affected; empty on every {@code metric_movement} report. */
+            /** Ranked by sessions or traces affected; empty on every {@code metric_movement} report. */
             List<Cause> causes,
             @JsonProperty("detailed_report") @Nullable String detailedReport,
             String engine,

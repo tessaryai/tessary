@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.catalog;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
@@ -41,6 +42,17 @@ public interface BuiltInDetector {
         List<Detection> out = new ArrayList<>(batch.size());
         for (SubstrateObservation obs : batch) out.add(detect(obs, config));
         return out;
+    }
+
+    /**
+     * {@link #detectBatch} as {@code signal}'s sweep runs it: the one call the {@link ClassifierWorker}
+     * makes per page. The default is {@link #detectBatch}. A detector that records every item it scored,
+     * not only the ones that fire, overrides this to write those rows under {@code signal}'s id, which
+     * is why the signal is passed; {@link #detect} and {@link #detectBatch} stay side-effect-free.
+     */
+    default List<Detection> sweepBatch(
+            ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+        return detectBatch(batch, config);
     }
 
     /**
@@ -92,12 +104,11 @@ public interface BuiltInDetector {
         public static final String MALFORMED_OUTPUT = "malformed_output";
 
         /**
-         * Output-vs-source correctness behind the Groundedness built-in: a three-way NLI-style
-         * entailment head scores the output's support against the observation's input text, gated
-         * to call sites whose declared {@code shape} carries verifiable source content. Its {@link
-         * BuiltInDetector} reaches the dispatch map through the {@link DetectorSupplier} seam
-         * rather than a {@code detectorFactory} closure; see {@link BuiltInClassifierCatalog}'s
-         * manifest entry for this key.
+         * Output-vs-source correctness behind the Groundedness built-in: a long-context token head
+         * (classify-service's {@code groundedness}) marks the words of the output the retrieved
+         * evidence does not support, gated to call sites whose declared {@code shape} carries
+         * verifiable source content. In-tree ({@code detector.groundedness.GroundednessDetector})
+         * since the model went public; see {@link BuiltInClassifierCatalog}'s manifest entry.
          */
         public static final String GROUNDEDNESS = "groundedness";
 

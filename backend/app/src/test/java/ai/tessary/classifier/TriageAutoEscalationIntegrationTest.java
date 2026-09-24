@@ -280,8 +280,10 @@ class TriageAutoEscalationIntegrationTest {
         TenantFixture.Setup setup = TenantFixture.bootstrap(tenants, slug);
         // Behaviour drift and SOP conformance are off by default, so the org has to state that
         // it has them or there are no drift/conformance findings for the escalator to act on and
-        // every case here would pass or fail on the wrong flag. Frustration and groundedness are
-        // irrelevant here: this escalator never schedules them. `triage_automatic` is
+        // every case here would pass or fail on the wrong flag. Frustration is irrelevant here: this
+        // escalator never schedules it. Groundedness is scheduled since 2026-09-21, but its fixture
+        // (an armed-window finding) is not built here — every case below is a metric-drift finding. `triage_automatic`
+        // is
         // deliberately not granted here: it is this class's actual subject and stays at its
         // default until `automaticOn` says otherwise. Stubbed after `flagsSilent()` by every
         // caller, so these specific stubs win.

@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
@@ -16,6 +18,7 @@ import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -55,6 +58,11 @@ class BehaviorTriagePromptTest {
     }
 
     private static BehaviorTriageEngine engine(ObserverProperties observerProps) {
+        return engine(observerProps, mock(ClassifierDetectionWriteRepository.class));
+    }
+
+    private static BehaviorTriageEngine engine(
+            ObserverProperties observerProps, ClassifierDetectionWriteRepository detections) {
         return new BehaviorTriageEngine(
                 List.of(),
                 new ClassifierProperties(),
@@ -62,7 +70,8 @@ class BehaviorTriagePromptTest {
                 mock(ApiKeyService.class),
                 mock(ProjectRepository.class),
                 mock(OrgMembershipRepository.class),
-                new ObjectMapper());
+                new ObjectMapper(),
+                detections);
     }
 
     private static FindingRow finding(
@@ -154,6 +163,50 @@ class BehaviorTriagePromptTest {
 
         assertEquals(
                 Set.of("finding.md", "method.md"), engine().dossier(JOB, row).keySet());
+    }
+
+    /**
+     * A groundedness rate finding also ships {@code detections.md}: each flagged answer at its call site since
+     * onset, with the score, the flagged sentences' offsets and the strongest one's text.
+     */
+    @Test
+    void aGroundednessRateFindingShipsItsFlaggedAnswers() {
+        ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
+        when(detections.listWitnessDetections(
+                        BuiltInDetector.Kind.GROUNDEDNESS,
+                        "proj-1",
+                        "search_docs",
+                        "rag-answer",
+                        "2026-08-01T00:00:00Z",
+                        "2026-08-02T01:00:00Z",
+                        BehaviorTriageEngine.DETECTIONS_CAP + 1))
+                .thenReturn(List.of(new ClassifierDetectionWriteRepository.DetectionInWindow(
+                        "tr-1",
+                        "sp-1",
+                        null,
+                        "warn",
+                        "high",
+                        "{\"unsupported\":0.991,\"flagged_sentences\":[{\"start\":0,\"end\":24,"
+                                + "\"unsupported\":0.991},{\"start\":25,\"end\":40,\"unsupported\":0.98}],"
+                                + "\"claim\":\"The refund window is 90 days.\"}",
+                        "2026-08-01T12:00:00Z")));
+        FindingRow row = finding(
+                BuiltInDetector.Kind.GROUNDEDNESS,
+                "sig-1:rag-answer",
+                "rag-answer",
+                "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}",
+                null);
+
+        Map<String, String> dossier =
+                engine(new ObserverProperties(), detections).dossier(JOB, row);
+
+        assertEquals(Set.of("finding.md", "method.md", "detections.md"), dossier.keySet());
+        String md = dossier.get("detections.md");
+        assertNotNull(md);
+        assertTrue(md.contains("trace `tr-1` span `sp-1` at 2026-08-01T12:00:00Z"), md);
+        assertTrue(md.contains("score 0.991; flagged [0, 24) 0.991, [25, 40) 0.98"), md);
+        assertTrue(md.contains("strongest: \"The refund window is 90 days.\""), md);
+        assertTrue(md.contains("1 flagged answer(s), every one since onset."), md);
     }
 
     @Test

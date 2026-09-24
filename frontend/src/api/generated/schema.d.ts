@@ -708,6 +708,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getGroundednessStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics": {
         parameters: {
             query?: never;
@@ -860,6 +876,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["FindingController_findingEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/flagged-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_flaggedAnswers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2132,6 +2164,10 @@ export interface components {
             data?: components["schemas"]["FindingEvidenceSpanPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFlaggedAnswerPage: {
+            data?: components["schemas"]["FlaggedAnswerPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFrustratedSessionPage: {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2146,6 +2182,10 @@ export interface components {
         };
         ApiResponseGlobalSearchView: {
             data?: components["schemas"]["GlobalSearchView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseGroundednessStatusView: {
+            data?: components["schemas"]["GroundednessStatusView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseImportResult: {
@@ -2516,6 +2556,7 @@ export interface components {
             baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
             frustration: components["schemas"]["FrustrationDetail"] | null;
+            groundedness: components["schemas"]["GroundednessDetail"] | null;
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             secretLeak: components["schemas"]["SecretLeakDetail"] | null;
@@ -2626,6 +2667,7 @@ export interface components {
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
             frustration: components["schemas"]["FrustrationDetail"] | null;
+            groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
             malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
@@ -2729,6 +2771,8 @@ export interface components {
             /** Format: int32 */
             sessions_affected: number;
             title: string;
+            /** Format: int32 */
+            traces_affected: number;
             what_the_agent_did: string;
         };
         Chain: {
@@ -3104,6 +3148,35 @@ export interface components {
             };
             rows: components["schemas"]["EvidenceSpanView"][];
         };
+        FlaggedAnswerPage: {
+            nextCursor: string | null;
+            rows: components["schemas"]["FlaggedAnswerView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        FlaggedAnswerView: {
+            answer: string | null;
+            cleared: boolean;
+            documents: components["schemas"]["RetrievedDocumentView"][] | null;
+            flaggedAt: string | null;
+            flaggedSentences: components["schemas"]["FlaggedSentenceView"][];
+            premiseHadEvidence: boolean;
+            question: string | null;
+            /** Format: double */
+            score: number | null;
+            sessionId: string | null;
+            spanId: string;
+            stored: boolean;
+            traceId: string;
+        };
+        FlaggedSentenceView: {
+            /** Format: int32 */
+            end: number;
+            /** Format: double */
+            score: number;
+            /** Format: int32 */
+            start: number;
+        };
         FrustratedConversationView: {
             callSiteId: string | null;
             cleared: boolean;
@@ -3183,6 +3256,31 @@ export interface components {
         };
         GlobalSearchView: {
             hits: components["schemas"]["SearchHit"][];
+        };
+        GroundednessDetail: {
+            answers: components["schemas"]["FlaggedAnswerView"][];
+            answersNextCursor: string | null;
+            /** Format: int64 */
+            arlTarget: number;
+            /** Format: int64 */
+            baselineTraces: number;
+            /** Format: double */
+            flagThreshold: number;
+            /** Format: int64 */
+            learningUntil: number;
+            rate: components["schemas"]["RateDetail"];
+        };
+        GroundednessStatusView: {
+            available: boolean;
+            checked_at: string | null;
+            configured: boolean;
+            ever_swept: boolean;
+            last_caught_up_at: string | null;
+            last_scored_at: string | null;
+            mode: string;
+            reason: string;
+            setup_ref: string;
+            state: string;
         };
         Group: {
             cost: components["schemas"]["Cost"];
@@ -3771,6 +3869,10 @@ export interface components {
             score: number | null;
             /** Format: int32 */
             seq: number | null;
+        };
+        RetrievedDocumentView: {
+            text: string;
+            title: string | null;
         };
         RuleListView: {
             rules: components["schemas"]["RuleView"][];
@@ -6003,6 +6105,32 @@ export interface operations {
             };
         };
     };
+    ClassifierController_getGroundednessStatus: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGroundednessStatusView"];
+                };
+            };
+        };
+    };
     ClassifierController_metrics: {
         parameters: {
             query: {
@@ -6299,6 +6427,36 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFindingEvidenceSpanPage"];
+                };
+            };
+        };
+    };
+    FindingController_flaggedAnswers: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                rcaReport?: string;
+                cause?: number;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFlaggedAnswerPage"];
                 };
             };
         };

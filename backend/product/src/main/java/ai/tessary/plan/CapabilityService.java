@@ -44,16 +44,16 @@ public class CapabilityService {
 
     /**
      * Capabilities this build cannot honour, because the classifier code behind them is not on this
-     * classpath. All three are reported separately from "off" by {@link #unavailable} so a client can
-     * say "not available" rather than offering a switch that would do nothing, and the write path
-     * refuses to set an override for one.
+     * classpath. Both are reported separately from "off" by {@link #unavailable} so a client can say
+     * "not available" rather than offering a switch that would do nothing, and the write path refuses
+     * to set an override for one.
      *
      * <p>This stays a constant rather than something derived from what is registered. The {@link
      * Edition} bean decides whether this set applies at all; the edition is derived from the classpath,
      * never from a property, for the reason {@link Edition}'s javadoc gives.
      */
     private static final Set<Capability> UNAVAILABLE_IN_OPEN_EDITION =
-            EnumSet.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.GROUNDEDNESS);
+            EnumSet.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE);
 
     /**
      * Capabilities that are present but start off. Exactly one: automatic Layer-2 triage drives LLM

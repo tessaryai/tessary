@@ -42,7 +42,10 @@
 # STANDING RULE: NO GATE IN THIS PIPELINE READS A .md OR .mdx FILE.
 # ---------------------------------------------------------------------------------------------
 # Not to check a link, not a heading, not that a documented command matches a published one, not to
-# read a table for a list of things to then assert structurally. Flat rule, no exceptions.
+# read a table for a list of things to then assert structurally. Two named exceptions, both reading
+# machine text a coding agent follows rather than prose a person rewrites: check-blob-links.sh reads
+# only the paths of `blob/main` links (a moved file 404s every prompt and skill that names it), and
+# check-groundedness-setup.sh reads the setup MDs' checksum lines, download URLs and `## Restart`.
 #
 # Documentation is prose that people rewrite, and a gate keyed on prose reds when the prose is
 # edited, not when anything breaks. That happened: check.yml was armed per PR and went red
@@ -72,7 +75,8 @@
 # this line has to assemble all of them:
 #   actions/setup-java java-version 25      -- check-backend.sh hard-fails on any other JDK
 #   pnpm/action-setup + actions/setup-node  -- check-frontend.sh runs tsc and a real vite build
-#   astral-sh/setup-uv                      -- check-classifier-parity.sh, and the Python gates
+#   astral-sh/setup-uv                      -- check-classifier-parity.sh, the Python gates, and
+#                                               cfn-lint in check-groundedness-setup.sh
 #   actions/setup-python                    -- check-classify-service.sh, and the overlay's own
 #                                               Python gate when it's present
 #   caddy on PATH                           -- check-caddy.sh
@@ -145,6 +149,18 @@
 #                                          it takes --edition and runs 3 or 6; see its own header.)
 #   scripts/check-no-bedrock.sh            (hard ban on AWS Bedrock in Python tooling; runs on every
 #                                          slice and in every edition, deliberately; see below)
+#   scripts/check-groundedness-serve.sh    (classifiers/groundedness/serve.py runs as one file from
+#                                          its URL: pytest over its standalone import, PEP 723 header,
+#                                          encoding answer key and contract fixtures. Needs uv, and
+#                                          installs pytest only)
+#   scripts/check-blob-links.sh            (every github.com/tessaryai/tessary/blob/main/<path> link
+#                                          in frontend/src, skills/, docs/, the groundedness setup
+#                                          MDs, setup.md, instrument.md and README.md names a file
+#                                          in the tree, and a #anchor names a heading)
+#   scripts/check-groundedness-setup.sh    (the groundedness setup MDs' checksum lines equal serve.py
+#                                          and the template, downloads are at <ref>, the template
+#                                          lints and checks serve.py before running it. Needs uv
+#                                          for cfn-lint)
 #
 # Two gates are deliberately NOT in this pipeline, in either edition, and carry EXCLUDED rows so
 # that fact is declared rather than implied by absence:
@@ -283,7 +299,7 @@ _manifest() {
     cat <<'MANIFEST'
 docs-links|scripts/check-docs-links.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It WAS markdown: it resolved relative links across 81 markdown files. Nothing survives the no-markdown rule|EXCLUDED:same|declared here only so the completeness assertion can see it
 version-consistency|scripts/check-version-consistency.sh|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. VERSION_LITERAL_EXEMPT covers dated literals this script can't name directly (boundary rule 5). Pure text; unlike check-selfhost-images.sh, no Docker or registry call.
-classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV:CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md CQ_MODELS=tessary-paid/classify-service/models.json|SKIP:this edition has neither of the gate's two inputs: the measured-quality page and the populated model manifest live in the overlay, and the manifest shipped here is the empty `{}`|Both inputs are overlay paths the script may not name itself (boundary rule 5), so the paid column passes them in. A bare RUN would take the script's own defaults, find neither, and self-skip green in the paid checkout too: silent coverage loss, which is what RUN_ENV exists to prevent. If the overlay is missing from an all-edition checkout, the script's own guard still prints a reasoned skip.
+classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV:CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree. The paid column passes the overlay's page, which also pins frustration; the page is an overlay path the script may not name itself (boundary rule 5)
 module-hygiene|scripts/check-module-hygiene.sh|RUN|RUN|self-scoping on the overlay pom; see the note below the manifest
 open-boundary|scripts/check-open-boundary.sh|RUN|RUN|the open/paid direction check itself
 license-headers|scripts/check-license-headers.sh|RUN|RUN|SPDX header presence over the publishable tree (derived from export-denylist.txt's own `delete` rows, so private trees are out of scope for both editions the same way); the script's own header names the interim manual-audit + weekly-CI posture it runs under until branch protection is available
@@ -304,6 +320,9 @@ compile-service|tessary-paid/scripts/check-compile-service.sh|RUN_IF_PRESENT:no 
 overlay-schema|tessary-paid/scripts/check-overlay-schema.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no overlay changelog to lint|a gate that lives in the overlay
 classifier-parity|scripts/check-classifier-parity.sh|EXCLUDED:dropped 2026-09-09. In the OPEN edition it asserts NOTHING: #1293 moved all six of its pins into the overlay, so it prints a named skip and returns OK. It was the only reason this pipeline needed uv. See the standing rule in this file's header|EXCLUDED:same|declared here only so the completeness assertion can see it
 no-bedrock|scripts/check-no-bedrock.sh|RUN|RUN|repo-wide invariant, every slice and every edition
+groundedness-serve|scripts/check-groundedness-serve.sh|RUN|RUN|open on both sides; setup runs serve.py from its URL, so this is the only place an import, header or encoding break shows up before a user runs it
+groundedness-setup|scripts/check-groundedness-setup.sh|RUN|RUN|open on both sides; a setup MD whose checksum line lags serve.py or the template stops every install at the checksum, and nothing else reads that line before a user does. A named exception to the no-markdown rule: it reads checksum lines, URLs and one heading, not prose
+blob-links|scripts/check-blob-links.sh|RUN|RUN|open on both sides; the in-app prompts, skills and docs send people and agents to files by their GitHub path, so a move 404s them all. A named exception to the no-markdown rule: it reads link paths and, for an anchor, headings, never prose
 price-book-contract|scripts/check-price-book-contract.sh|RUN|RUN|the vendored price book's path and shape are a contract tessary-home fetches by raw URL; nothing in this repo reads that URL, so this gate is the only place a move, rename or reshape shows up. Repo-wide and cheap (one JSON parse, a few greps), so it runs on every slice too
 frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction ('@paid' resolves to the in-tree stub)
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
@@ -538,11 +557,14 @@ if [ -z "$SLICES" ]; then
     _gate export-denylist
     _gate pipeline-vocabulary
     _gate contract-consistency
+    _gate blob-links
     _gate caddy
     _gate paid-caddy
     _gate version-consistency
     _gate compose-artifact
     _gate classify-service
+    _gate groundedness-serve
+    _gate groundedness-setup
     _gate slack-service
     _gate sandbox-runner
     _gate compile-service

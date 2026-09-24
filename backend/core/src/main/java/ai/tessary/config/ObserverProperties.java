@@ -67,6 +67,38 @@ public class ObserverProperties {
         /** Bearer secret the classify service requires. */
         private String apiKey = "";
 
+        /**
+         * How many {@code /classify} requests this backend has in flight at once, across every sweep
+         * and every head. Must not exceed the encoder's own ceiling (classify-service's
+         * {@code MAX_INFLIGHT}, default 2; the native service's {@code --max-inflight}): over it the
+         * encoder queues and then answers 429, under it sweeps wait here, in-process, and the
+         * encoder never sees a burst it has to shed.
+         */
+        private int maxInflight = 2;
+
+        /**
+         * How often the backend asks the encoder's {@code /healthz} whether it is there. The answer
+         * gates sweeping the encoder-backed classifiers ({@code EncoderAvailability}); sweeps are
+         * enqueued on their own minute, so a faster probe buys little.
+         */
+        private long probeIntervalMs = 60_000;
+
+        public long getProbeIntervalMs() {
+            return probeIntervalMs;
+        }
+
+        public void setProbeIntervalMs(long v) {
+            this.probeIntervalMs = v;
+        }
+
+        public int getMaxInflight() {
+            return maxInflight;
+        }
+
+        public void setMaxInflight(int v) {
+            this.maxInflight = v;
+        }
+
         public String getUrl() {
             return url;
         }

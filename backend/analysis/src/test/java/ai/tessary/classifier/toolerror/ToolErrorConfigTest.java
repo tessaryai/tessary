@@ -2,6 +2,7 @@
 package ai.tessary.classifier.toolerror;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -53,5 +54,51 @@ class ToolErrorConfigTest {
         ToolErrorConfig four = new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
         assertEquals(4.0, four.decisionIntervalFor(0.01), "below the fit the per-classifier floor binds");
         assertEquals(4.0, four.decisionIntervalFor(0.0));
+    }
+
+    @Test
+    void freezeIsClampedToAtLeastTheMinimum() {
+        ToolErrorConfig below = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 100);
+        assertEquals(200, below.freezeBaselineCalls(), "a reference cannot stop learning before judging starts");
+        ToolErrorConfig unset = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+        assertEquals(200, unset.freezeBaselineCalls(), "unset freezes it the moment judging starts");
+        ToolErrorConfig huge = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 5_000_000);
+        assertEquals(1_000_000, huge.freezeBaselineCalls());
+        assertEquals(
+                ToolErrorConfig.DEFAULT_MIN_BASELINE_CALLS,
+                ToolErrorConfig.defaults().freezeBaselineCalls(),
+                "every existing classifier freezes where it always did");
+
+        ToolErrorConfig parsed =
+                ToolErrorConfig.of(MAPPER, "{\"min_baseline_calls\": 200, \"freeze_baseline_calls\": 1000}");
+        assertEquals(200, parsed.minBaselineCalls());
+        assertEquals(1000, parsed.freezeBaselineCalls());
+        assertEquals(
+                700, ToolErrorConfig.of(MAPPER, "{\"min_baseline_calls\": 700}").freezeBaselineCalls());
+    }
+
+    @Test
+    void theFreezeIsInTheEpoch() {
+        String schema = ToolErrorTrend.STATE_SCHEMA_VERSION;
+        ToolErrorConfig toOneThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 1000);
+        ToolErrorConfig toTwoThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 2000);
+        ToolErrorConfig judgedFromThree = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 300, 0.01, 300, 8, 4.0, 1000);
+        ToolErrorConfig frozen = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+
+        assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(toTwoThousand, schema));
+        assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(judgedFromThree, schema));
+        assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(frozen, schema));
+
+        // A reference frozen when judging starts leaves the epoch as it was, so no stored row rebuilds for it.
+        ToolErrorConfig d = ToolErrorConfig.defaults();
+        assertEquals(
+                String.join(
+                        "|",
+                        schema,
+                        Long.toString(d.arlTarget()),
+                        Double.toString(d.shiftMultiple()),
+                        Double.toString(d.shiftFloor()),
+                        Double.toString(d.downArmMinRate())),
+                CarriedState.epochOf(d, schema));
     }
 }

@@ -12,6 +12,8 @@ import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.EncoderScorer;
+import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetectorSupplier;
 import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
@@ -33,29 +35,26 @@ import org.mockito.Mockito;
 class ClassifierModelModuleCatalogTest {
 
     /**
-     * The catalog every other test in this file builds against, with discovered {@link
-     * DetectorSupplier}s stubbed in for {@code groundedness} and {@code frustration}, standing in for the
-     * beans that supply the real detectors in a running backend. Stubbed rather than real: groundedness's
-     * detector lives outside this module's test classpath, frustration's is a Spring bean with its own
-     * collaborators, and this file's job is to pin the
-     * catalog's wiring, not re-prove the detector's own behavior. The stub answers {@code
-     * callSiteFactsRead()} with the real detector's declared set so {@link
-     * #callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem} still exercises a true fact.
+     * The catalog every other test in this file builds against, with the two discovered {@link
+     * DetectorSupplier}s a running backend has. Frustration's is a stub: its detector is a Spring bean
+     * with its own collaborators, and this file's job is to pin the catalog's wiring, not re-prove the
+     * detector's own behavior. Groundedness's is the real supplier over a mocked repository, so the
+     * call-site facts it declares are the shipped detector's. Every other observation-grain detector is
+     * closed over in {@code MODULES}.
      */
     private BuiltInClassifierCatalog catalog() {
-        BuiltInDetector groundednessStub = Mockito.mock(BuiltInDetector.class);
-        Mockito.when(groundednessStub.kind()).thenReturn(BuiltInDetector.Kind.GROUNDEDNESS);
-        Mockito.when(groundednessStub.callSiteFactsRead()).thenReturn(Set.of(CallSiteFact.SHAPE));
         BuiltInDetector frustrationStub = Mockito.mock(BuiltInDetector.class);
         Mockito.when(frustrationStub.kind()).thenReturn(BuiltInDetector.Kind.FRUSTRATION);
         Mockito.when(frustrationStub.callSiteFactsRead()).thenReturn(Set.of());
-        return catalogWithDiscovered(deps -> groundednessStub, deps -> frustrationStub);
+        return catalogWithDiscovered(
+                deps -> frustrationStub,
+                new GroundednessDetectorSupplier(Mockito.mock(GroundednessAssessmentRepository.class)));
     }
 
     /**
      * A catalog built with whatever {@link DetectorSupplier}s the test wants to prove something about
      * the discovery seam itself. The two tests below construct one directly rather than going through
-     * {@link #catalog()}'s groundedness stub, since they are pinning the seam's own contract (no
+     * {@link #catalog()}'s two suppliers, since they are pinning the seam's own contract (no
      * membership guard, fail-loud on a duplicate kind) rather than the shipped catalog's shape.
      */
     private BuiltInClassifierCatalog catalogWithDiscovered(DetectorSupplier... discovered) {
@@ -258,8 +257,14 @@ class ClassifierModelModuleCatalogTest {
         // "supported yes/no" model to a three-way one, so a finding now means contradicted rather
         // than "not supported", and a claim the source is silent on is exempt instead of flagged.
         // That is a change in what the classifier asserts, not a threshold move, which is exactly
-        // when the user-facing description has to re-sync onto already-seeded projects.
-        assertEquals(4, versionOf(builtIns, "groundedness"));
+        // when the user-facing description has to re-sync onto already-seeded projects. 5: the pair
+        // head gave way to the long-context token head and the contract widened from "contradicted"
+        // to "unsupported" (contradicted or baseless); the band is the new model's own. 6: the entry
+        // gained a default arming block (3 detections / 24 h), so already-seeded projects start
+        // filing findings — a config-blob change, which is exactly what the version gate re-syncs. 7: the
+        // arming block gave way to a rate test per call site and the two bands to one threshold; the bump
+        // is what drops both from projects seeded before it.
+        assertEquals(7, versionOf(builtIns, "groundedness"));
         // 2: tool_duration joined the measure list. The bump is not cosmetic: resyncBuiltIns rewrites
         // an already-seeded project's definition only when the catalog version exceeds the stored
         // one, so without it the second grain would reach fresh installs and nothing else. 3: the
@@ -278,7 +283,11 @@ class ClassifierModelModuleCatalogTest {
         // frustration and groundedness carry a shifted operating point; secret_leak carries its arming bar,
         // which its detector ignores and ClassifierArming reads.
         assertNotNull(configOf(builtIns, "frustration"));
-        assertNotNull(configOf(builtIns, "groundedness"));
+        String groundednessConfig = configOf(builtIns, "groundedness");
+        assertNotNull(groundednessConfig);
+        assertFalse(groundednessConfig.contains("\"arming\""), "groundedness files through its rate test");
+        assertTrue(groundednessConfig.contains("\"threshold\":0.975"), groundednessConfig);
+        assertFalse(groundednessConfig.contains("threshold_low"), "one threshold, no review band");
         String secretLeakConfig = configOf(builtIns, "secret_leak");
         assertTrue(secretLeakConfig != null && secretLeakConfig.contains("\"arming\""), "secret_leak ships armed");
     }
@@ -403,12 +412,12 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void frustrationSeedsDisabledAndNoOtherBuiltInDoes() {
-        // Enabling frustration spends the org's own provider credit, so a person turns it on. Every
-        // other built-in costs nothing per observation and seeds enabled.
+    void frustrationAndGroundednessSeedDisabledAndNoOtherBuiltInDoes() {
+        // Enabling frustration spends the org's own provider credit, and groundedness needs a model server
+        // set up first, so a person turns each on. Every other built-in seeds enabled.
         for (BuiltInClassifierCatalog.BuiltIn b : catalog().builtIns()) {
             assertEquals(
-                    !"frustration".equals(b.classifierKey()),
+                    !Set.of("frustration", "groundedness").contains(b.classifierKey()),
                     b.defaultEnabled(),
                     b.classifierKey() + " seeds with the wrong switch");
         }
@@ -431,16 +440,17 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void frustrationSeedsAtTheTrackingBarAndEveryOtherBuiltInStaysWide() {
+    void frustrationAndGroundednessSeedAtTheTrackingBarAndEveryOtherBuiltInStaysWide() {
         // `mode` is the operating point a signal is read at: discovery surfaces the high+low union,
         // tracking the high band alone. Discovery is the right default for a classifier nobody has
-        // characterized, since you cannot narrow a band you have never seen fire, and frustration is
-        // the one that has been.
+        // characterized, since you cannot narrow a band you have never seen fire. Frustration and
+        // groundedness each write one band, at a threshold set on labelled data, so both read the same
+        // rows in either mode and seed at tracking.
         //
-        // The assertion is deliberately two-sided: it fails if a future edit widens frustration or
+        // The assertion is deliberately two-sided: it fails if a future edit widens either of them or
         // quietly narrows a built-in that has no numbers behind it.
         for (BuiltInClassifierCatalog.BuiltIn b : catalog().builtIns()) {
-            String expected = "frustration".equals(b.classifierKey())
+            String expected = Set.of("frustration", "groundedness").contains(b.classifierKey())
                     ? ClassifierRow.Mode.TRACKING
                     : ClassifierRow.Mode.DISCOVERY;
             assertEquals(

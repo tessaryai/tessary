@@ -46,7 +46,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`classify-service/`](./classify-service/) | Standalone encoder `/classify` service (ECS Fargate) — see its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| [`classifiers/`](./classifiers/) | The Python classifier tree: the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`), the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters. Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
@@ -127,9 +127,9 @@ Rules that keep this working:
 - **Same-PR co-update.** A code change that invalidates any of these docs updates the doc in
   the same PR (schema changes update `devdocs/reference/data-model.md`; package-set changes
   update the architecture inventory; controller/DTO changes regenerate the OpenAPI spec). The
-  classifier-quality reference page lives outside this tree; its gate
-  `scripts/check-classifier-quality-doc.sh` stays here and skips with a named reason wherever the
-  page is absent.
+  classifier-quality reference page is `devdocs/reference/classifier-quality.md`; its gate
+  `scripts/check-classifier-quality-doc.sh` pins the page's model revision and threshold to
+  `classifiers/groundedness/serve.py` and the catalog.
 - **Size budgets.** This file stays ≤ ~150 lines; a scoped `AGENTS.md` ≤ ~250. When a budget
   is blown, extract reference material to `devdocs/reference/` instead of growing the guide.
 - **New top-level code directory** → gets a `README.md`; add an `AGENTS.md` only once it

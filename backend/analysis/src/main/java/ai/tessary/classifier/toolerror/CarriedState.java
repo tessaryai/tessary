@@ -15,8 +15,10 @@ import org.jspecify.annotations.Nullable;
  * has no database and is meant to keep it that way — both consumes and produces it.
  *
  * @param baseline the in-control reference these accumulators were measured against, or null on a row
- *     that has not learned one yet. <b>Frozen once learned.</b> Re-learning it each pass from the leading
- *     buckets of a sliding window is what let a slow degradation drag its own reference along behind it
+ *     that has not learned one yet. <b>Frozen once learned</b>, that is once it holds
+ *     {@link ToolErrorConfig#freezeBaselineCalls()}; below that it is still learning, and its counts are all
+ *     that says so. Re-learning it each pass from the leading buckets of a sliding window is what let a slow
+ *     degradation drag its own reference along behind it
  * @param watermarkBucket the last hourly bucket folded in, or null on a row that has never advanced.
  *     The next sweep folds only buckets strictly after it, which is the whole defence against a retried
  *     pass counting the same evidence twice
@@ -31,6 +33,12 @@ import org.jspecify.annotations.Nullable;
  *     while learning a reference and while folding, so the spell a human just closed cannot be
  *     re-accumulated from the hours they ruled on. A resumed replay needs no fence: its watermark already
  *     sits past those hours
+ * @param learnedThrough the hour a still-learning {@link #baseline} has learned up to: it never learns from
+ *     this hour or an earlier one again. Null when nothing says. Not stored: while the reference learns,
+ *     every hour a replay folds is learned from too, so it is the watermark the row was saved with.
+ *     {@link #rebuilding} clears the watermark and keeps this, so a rebuild grows the reference from the
+ *     hours after it only, instead of counting its hours twice or re-learning it from a window that has
+ *     slid forward since
  */
 public record CarriedState(
         String toolKey,
@@ -40,7 +48,30 @@ public record CarriedState(
         String stateEpoch,
         @Nullable String pendingPinBy,
         @Nullable String pendingPinAt,
-        @Nullable String resetAt) {
+        @Nullable String resetAt,
+        @Nullable String learnedThrough) {
+
+    /** A row as stored, whose reference has learned up to its watermark. */
+    public CarriedState(
+            String toolKey,
+            State state,
+            @Nullable ToolErrorRate baseline,
+            @Nullable String watermarkBucket,
+            String stateEpoch,
+            @Nullable String pendingPinBy,
+            @Nullable String pendingPinAt,
+            @Nullable String resetAt) {
+        this(
+                toolKey,
+                state,
+                baseline,
+                watermarkBucket,
+                stateEpoch,
+                pendingPinBy,
+                pendingPinAt,
+                resetAt,
+                watermarkBucket);
+    }
 
     /**
      * Whether {@code bucket} falls before the reset fence. Compared as instants, not strings: a bucket is a
@@ -54,14 +85,16 @@ public record CarriedState(
     /**
      * This state with its accumulator and watermark cleared, so a replay rebuilds the whole window against the
      * frozen reference instead of resuming after the last hour it folded. The reference, the pending pin and the
-     * reset fence are kept: the first is learned once and frozen, the other two record human decisions.
+     * reset fence are kept: the first is learned once and frozen, the other two record human decisions. So is
+     * {@link #learnedThrough}, which is how a reference still learning knows which hours it already holds.
      *
      * <p>For a classifier whose hourly tallies are not final when first read (a backfill lands one hour across
      * several uploads; a late flag turns an old conversation into a failure), which a resume would keep at its
      * first, partial count for good.
      */
     public CarriedState rebuilding() {
-        return new CarriedState(toolKey, State.EMPTY, baseline, null, stateEpoch, pendingPinBy, pendingPinAt, resetAt);
+        return new CarriedState(
+                toolKey, State.EMPTY, baseline, null, stateEpoch, pendingPinBy, pendingPinAt, resetAt, learnedThrough);
     }
 
     /** Whether an absorb is waiting for the run to grow thick enough to pin from. */
@@ -78,18 +111,25 @@ public record CarriedState(
      * and the stored number is a sum of terms that no longer mean what they meant — arithmetically fine,
      * silently wrong, and with no error anywhere to notice it.
      *
+     * <p>So is when the reference stops learning, but only for a config where it learns while judging. There
+     * every hour judged before the freeze was judged against a smaller reference than the one after it, which
+     * a different minimum or freeze would not reproduce. A config that freezes the reference when judging
+     * starts leaves the epoch exactly as it was, so no existing row rebuilds for a dial it does not use.
+     *
      * <p>The reference is deliberately NOT in here. It is carried explicitly on {@link #baseline} and
      * compared explicitly, because "the reference moved" and "the tuning moved" want different handling
      * and folding them together makes both invisible.
      */
     public static String epochOf(ToolErrorConfig config, String schemaVersion) {
-        return String.join(
+        String epoch = String.join(
                 "|",
                 schemaVersion,
                 Long.toString(config.arlTarget()),
                 Double.toString(config.shiftMultiple()),
                 Double.toString(config.shiftFloor()),
                 Double.toString(config.downArmMinRate()));
+        if (!config.learnsWhileJudging()) return epoch;
+        return epoch + "|learn=" + config.minBaselineCalls() + "-" + config.freezeBaselineCalls();
     }
 
     /** Whether this state can be resumed under {@code epoch} against {@code against}, or must be rebuilt. */

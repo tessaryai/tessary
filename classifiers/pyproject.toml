@@ -69,9 +69,10 @@ package = false
 # shadow the open packages. It cannot collapse to a bare `["."]` either — `metric_drift/
 # export_corpus.py` spells its own import absolutely (`from metric_drift.corpus import ...`).
 # With `tessary-paid/` deleted (the public export) the overlay entry is a non-existent
-# directory, which pytest ignores, and only the six open tests under `tests/` remain — the truth.
+# directory, which pytest ignores, and only the open tests under `tests/` remain — the truth.
 pythonpath = [".", "../tessary-paid/classifiers"]
 testpaths = ["tests"]
+markers = ["network: needs to download from Hugging Face; skipped when that isn't possible"]
 
 [tool.ruff]
 line-length = 118

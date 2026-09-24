@@ -214,6 +214,35 @@ public final class ClassifierDtos {
     }
 
     /**
+     * Whether the groundedness model is scoring, and what the classifier row and its setup prompts need to
+     * say so. Everything the row shows is read here, so the rules live on the server once.
+     *
+     * @param state {@code off} when the row is disabled; else {@code on}, {@code not_scoring} (it was set up
+     *     and has stopped scoring) or {@code not_set_up} (the model has never answered a sweep)
+     * @param mode {@code dev} or {@code production}, from {@code TESSARY_GROUNDEDNESS_CLASSIFIER_MODE}
+     * @param configured whether the instance has a model URL at all
+     * @param available whether the model answered its last health check with the groundedness head
+     * @param reason the health check's answer, for example {@code unreachable: ConnectException}
+     * @param checkedAt when the health check last ran; null before the first
+     * @param everSwept whether a sweep has ever moved this classifier's cursor, which only a model that
+     *     answered can do
+     * @param lastScoredAt the newest scored answer in this project; null until one is
+     * @param lastCaughtUpAt when a sweep last reached the newest observation; null until one has
+     * @param setupRef the git ref the setup prompts link to: the running release's tag, or {@code main}
+     */
+    public record GroundednessStatusView(
+            String state,
+            String mode,
+            boolean configured,
+            boolean available,
+            String reason,
+            @JsonProperty("checked_at") @Nullable String checkedAt,
+            @JsonProperty("ever_swept") boolean everSwept,
+            @JsonProperty("last_scored_at") @Nullable String lastScoredAt,
+            @JsonProperty("last_caught_up_at") @Nullable String lastCaughtUpAt,
+            @JsonProperty("setup_ref") String setupRef) {}
+
+    /**
      * The Frustration classifier's operating point and, per call site, what its rate test has learned and where
      * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
      * is derived by the replay.

@@ -37,6 +37,10 @@ import org.jspecify.annotations.Nullable;
  * @param maxPatterns failure signatures a finding's breakdown carries before the tail folds
  * @param minDecisionInterval the lower clamp on the derived threshold. {@link #MIN_DECISION_INTERVAL} for
  *     tool_error, which never reads it from a blob; see the constant for who may lower it
+ * @param freezeBaselineCalls calls the reference keeps learning up to. Judging starts at
+ *     {@code minBaselineCalls}; from there each later hour is judged against the reference and then added
+ *     to it, until the reference holds this many and stops moving. Defaults to, and is never below,
+ *     {@code minBaselineCalls}, which is the reference frozen the moment judging starts
  */
 public record ToolErrorConfig(
         long arlTarget,
@@ -47,7 +51,8 @@ public record ToolErrorConfig(
         double downArmMinRate,
         int settleSeconds,
         int maxPatterns,
-        double minDecisionInterval) {
+        double minDecisionInterval,
+        int freezeBaselineCalls) {
 
     /**
      * EXPERIMENT(tool-error-tuning): calls a healthy tool should run between false alarms, the ARL₀.
@@ -190,6 +195,33 @@ public record ToolErrorConfig(
         maxPatterns = clampInt(maxPatterns, 1, ToolErrorRate.MAX_PATTERNS, DEFAULT_MAX_PATTERNS);
         minDecisionInterval =
                 clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
+        // Never below the minimum: a reference that stopped learning before judging could start would be one
+        // that never judges anything.
+        freezeBaselineCalls = clampInt(freezeBaselineCalls, minBaselineCalls, 1_000_000, minBaselineCalls);
+    }
+
+    /** A classifier's shape with its own threshold floor, and a reference frozen as soon as judging starts. */
+    public ToolErrorConfig(
+            long arlTarget,
+            double shiftMultiple,
+            double shiftFloor,
+            double minEffectSize,
+            int minBaselineCalls,
+            double downArmMinRate,
+            int settleSeconds,
+            int maxPatterns,
+            double minDecisionInterval) {
+        this(
+                arlTarget,
+                shiftMultiple,
+                shiftFloor,
+                minEffectSize,
+                minBaselineCalls,
+                downArmMinRate,
+                settleSeconds,
+                maxPatterns,
+                minDecisionInterval,
+                minBaselineCalls);
     }
 
     /** tool_error's shape: the threshold floor is always {@link #MIN_DECISION_INTERVAL}. */
@@ -212,6 +244,14 @@ public record ToolErrorConfig(
                 settleSeconds,
                 maxPatterns,
                 MIN_DECISION_INTERVAL);
+    }
+
+    /**
+     * Whether the reference keeps learning after judging has started, which is what a stored accumulator's
+     * epoch has to say (see {@link CarriedState#epochOf}).
+     */
+    public boolean learnsWhileJudging() {
+        return freezeBaselineCalls > minBaselineCalls;
     }
 
     /**
@@ -267,7 +307,10 @@ public record ToolErrorConfig(
                     root.path("min_baseline_calls").asInt(DEFAULT_MIN_BASELINE_CALLS),
                     root.path("down_arm_min_rate").asDouble(DEFAULT_DOWN_ARM_MIN_RATE),
                     root.path("settle_seconds").asInt(DEFAULT_SETTLE_SECONDS),
-                    root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS));
+                    root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS),
+                    MIN_DECISION_INTERVAL,
+                    // Absent means the minimum: the reference freezes the moment judging starts.
+                    root.path("freeze_baseline_calls").asInt(0));
         } catch (JsonProcessingException e) {
             return defaults();
         }

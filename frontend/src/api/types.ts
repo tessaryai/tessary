@@ -147,6 +147,16 @@ export type OnboardingStage = OnboardingProgress["stage"];
 export type Classifier = S["ClassifierView"];
 export type ClassifierEvent = S["ClassifierEventView"];
 export type ClassifierHealth = S["ClassifierHealthView"];
+/**
+ * The Groundedness row's status: whether the model is scoring, and if not, whether it ever was. `state`
+ * is computed on the server; a disabled row is `off` whatever the model does.
+ */
+export type GroundednessStatus = Omit<S["GroundednessStatusView"], "state" | "mode"> & {
+  state: "off" | "on" | "not_scoring" | "not_set_up";
+  mode: GroundednessMode;
+};
+/** `TESSARY_GROUNDEDNESS_CLASSIFIER_MODE`: where the model runs, which picks the setup and restart prompts. */
+export type GroundednessMode = "dev" | "production";
 export type ClassifierDailyVolume = S["ClassifierDailyVolumeView"];
 export type ClassifierDebug = S["ClassifierDebugView"];
 export type ClassifierTuning = S["TuningView"];
@@ -322,9 +332,9 @@ export type SearchResults = S["GlobalSearchView"];
 /**
  * The cause kinds the findings surface carries. Behaviour drift's three (`novelty`/`omission` are
  * high confidence, `surprisal` is low), metric drift's `distribution_shift`, tool error's
- * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, and
- * `sop_conformance`: a conformance finding rendered in the same shape (its causeKey is the SOP
- * rule slug, its traceCount the tested window's activations).
+ * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, groundedness's
+ * `groundedness_rate`, and `sop_conformance`: a conformance finding rendered in the same shape (its
+ * causeKey is the SOP rule slug, its traceCount the tested window's activations).
  */
 export type BehaviorCauseKind =
   | "novelty"
@@ -334,6 +344,7 @@ export type BehaviorCauseKind =
   | "rate_shift"
   | "armed_window"
   | "malformed_rate"
+  | "groundedness_rate"
   | "sop_conformance";
 
 /** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */
@@ -441,6 +452,14 @@ export type MalformedOutputPage = S["FailingOutputPage"];
 export type FrustrationDetail = S["FrustrationDetail"];
 export type FrustratedConversation = S["FrustratedConversationView"];
 export type FrustratedSessionPage = S["FrustratedSessionPage"];
+
+/**
+ * A `groundedness_rate` finding's block: the flagged-answer rate against the call site's learned rate, and
+ * the flagged answers the finding cites, each with the sentences the model marked in it.
+ */
+export type GroundednessDetail = S["GroundednessDetail"];
+export type FlaggedAnswer = S["FlaggedAnswerView"];
+export type FlaggedAnswerPage = S["FlaggedAnswerPage"];
 
 /**
  * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the

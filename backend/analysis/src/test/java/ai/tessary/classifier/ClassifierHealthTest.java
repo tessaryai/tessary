@@ -52,7 +52,9 @@ class ClassifierHealthTest {
                 mock(CapabilityService.class),
                 mock(ProjectRepository.class),
                 mock(ai.tessary.classifier.metric.MetricBaselineRepository.class),
-                mock(ai.tessary.llm.decisions.DecisionProviderResolver.class));
+                mock(ai.tessary.llm.decisions.DecisionProviderResolver.class),
+                mock(ai.tessary.plan.EncoderAvailability.class),
+                new ai.tessary.config.GroundednessProperties());
     }
 
     private static ClassifierRow signal(String id) {

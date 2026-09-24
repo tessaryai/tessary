@@ -12,6 +12,7 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.detector.SecretLeakDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetector;
 import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
@@ -34,14 +35,14 @@ import org.springframework.stereotype.Component;
  * <p>Nine built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
  * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
  * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
- * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, the one PAIR head, a
- * claim against a premise rather than one string in isolation, scored by the standalone
- * classify-service {@code /classify} with a deterministic filter in front of it. The <b>decision</b>
- * tier is Frustration: each eligible user turn is one question to a hosted decision model on the org's
- * own key, and a call site's rate of frustrated conversations is watched with Tool Error's sequential
- * test. Neither detector is named here by class: both are supplied through the {@link
- * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see those modules'
- * {@code detectorFactory} comments below. The <b>fitting</b> tier holds five modules that ship as
+ * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, a TOKEN head that reads
+ * the retrieved passages and the whole answer in one pass ({@link GroundednessDetector}), scored by
+ * the standalone classify-service {@code /classify} with a deterministic filter in front of it. The
+ * <b>decision</b> tier is Frustration: each eligible user turn is one question to a hosted decision
+ * model on the org's own key, and a call site's rate of frustrated conversations is watched with Tool
+ * Error's sequential test. Its detector is not named here by class: it is supplied through the {@link
+ * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see that module's
+ * {@code detectorFactory} comment below. The <b>fitting</b> tier holds five modules that ship as
  * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all:
  * trace-grain Behaviour Drift ({@code BehaviorDriftDetector}), the two window-grain metric classifiers
  * (Duration Drift and Cost Drift), Tool Errors, and SOP Conformance, scored against an authored
@@ -88,8 +89,9 @@ public class BuiltInClassifierCatalog {
      * on. {@code capability} rides along because seeding reads it, to decide whether the classifier
      * reaches the org at all.
      *
-     * <p>Every built-in seeds enabled except Frustration, which seeds disabled because enabling it
-     * spends the org's own provider credit. Trust in an unmeasured classifier is expressed only by who
+     * <p>Every built-in seeds enabled except two. Frustration seeds disabled because enabling it
+     * spends the org's own provider credit, and Groundedness because it needs a model server a person
+     * sets up first. Trust in an unmeasured classifier is expressed only by who
      * its capability flag is on for, resolved per org without a deploy, rather than by this switch.
      */
     public record BuiltIn(
@@ -201,53 +203,51 @@ public class BuiltInClassifierCatalog {
             new ClassifierModelModule(
                     "groundedness",
                     "Groundedness",
-                    "The output CONTRADICTS its source content — a three-way NLI head "
-                            + "(bart-large-mnli) scores each asserted sentence against the source the "
-                            + "trace actually produced: the retrieved documents where there are any, the "
-                            + "prompt where the document sits in the prompt. It fires on contradiction "
-                            + "only. A sentence the source simply does not mention is NOT a finding — "
-                            + "most such sentences are facts the agent got from a tool, and calling them "
-                            + "hallucinations was this classifier's largest error. The cost of that is "
-                            + "stated plainly: an INVENTED addition the source is silent on reads the "
-                            + "same as a true one and is not caught. Gated to call sites whose shape "
-                            + "declares verifiable source content (extract/summarize/rag_answer), quiet "
-                            + "on a turn that asserts nothing checkable, and tool-backed answers remain "
-                            + "out of scope.",
+                    // User-facing, the classifier row's text. How the model reads an answer and how the rate
+                    // test judges a call site is the method card's job (ClassifierMethodCard), and the
+                    // catalog quotes no benchmark numbers.
+                    "Answers that state things the retrieved documents don't support.",
                     Kind.GROUNDEDNESS,
-                    // The premise is the trace's own evidence (retrieved documents, or the prompt where
-                    // the document sits in it), scored per sentence rather than per answer, and an answer
-                    // with no verifiable sentence abstains. Tool results are withdrawn as an evidence
-                    // carrier entirely: a claim sourced from a tool call abstains rather than firing,
-                    // because the head has no reliable way to judge it against a policy document that
-                    // could neither confirm nor deny it. bart-large-mnli is three-way, so it can express
-                    // that abstain (NEUTRAL) where a binary support/not-support head cannot. A version
-                    // bump here rewrites configJson wholesale, so an operator's edited thresholds are
-                    // replaced by the catalog's, which is why the values below are unchanged from v1:
-                    // the decoded `unsupported` score (1 - P(contradiction)) is sharply bimodal, so the
-                    // same 0.9/0.6 band still sits in empty space.
-                    4,
-                    // bart-large-mnli (MIT), three-way MNLI, off-the-shelf but measured against this
-                    // classifier's own labelled data before shipping.
+                    // v5 (2026-09-18): the pair head (bart-large-mnli, contradiction-only, per-sentence
+                    // windows) is replaced by the long-context token head. The contract changed with it,
+                    // from "contradicts" to "unsupported: contradicted OR baseless", because on
+                    // human-labelled data the contradiction-only question was unreachable by any model of
+                    // this size while the unsupported question is where the field's own benchmarks sit.
+                    // Evidence reaches the head as a LIST of documents (GroundingEvidenceReads.Evidence#
+                    // documents), never one joined string: the layout with numbered passages is the one
+                    // the checkpoint was trained on.
+                    // v6 (2026-09-21): the classifier armed by default, three detections in a day.
+                    // v7: arming is replaced by a rate test per call site, and the two bands by one
+                    // threshold. A fixed count arms on the model's false alarms, whose rate depends on the
+                    // domain; a reference learned per call site absorbs it, so only a rise is a finding.
+                    // A version bump rewrites configJson wholesale, which is what drops the arming block
+                    // and the second band from projects seeded before it.
+                    7,
+                    // tessaryai/groundedness-classifier-v1 (MIT; ModernBERT-large, Apache-2.0 base;
+                    // RAGTruth, MIT), measured on RAGTruth's human-labelled test split before shipping;
+                    // numbers in the classifiers README and the model card.
                     Capability.GROUNDEDNESS,
-                    // Per-call: the pair head scores one output against ITS OWN input, so an inner
+                    // Per-call: the head scores one output against ITS OWN input, so an inner
                     // retrieval-answer call is exactly as checkable as the outermost one.
                     Grain.OBSERVATION,
-                    // Unsupportedness (1 - support) bands, see GroundednessDetector's threshold_high/
-                    // threshold_low commentary. Wide separation observed in spot checks (supported
-                    // ~0.95+, unsupported/contradicted ~0.01-0.10); revisit once the eval harness has
-                    // measured this head's actual recall@fixed-fp.
-                    "{\"threshold_high\":0.9,\"threshold_low\":0.6}",
-                    // null, not a factory lambda: one of the two detectorFactory entries here that are null
-                    // for a reason other than "not observation/turn grain" (see ClassifierModelModule's
-                    // DetectorFactory javadoc; frustration is the other). Groundedness is observation-grain, but its
-                    // detector is
-                    // supplied externally through the DetectorSupplier seam folded into this class's
-                    // constructor below, rather than closed over here by class reference, so this file
-                    // never has to name that implementation directly. The manifest entry still owns every
-                    // other fact about the classifier, catalog metadata, the operating point, the
-                    // capability and grain, because check-classifier-quality-doc.sh greps this config
-                    // literal by literal path.
-                    null),
+                    // Every key here is one GroundednessConfig parses. threshold is the flag cutoff on
+                    // P(unsupported), the 2% false-alarm point on RAGTruth test; it is hashed into the
+                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
+                    // rate test's dials, in traces: judged from 200, the reference learning until 1,000,
+                    // and one false finding per 50,000 traces on a healthy call site.
+                    "{\"threshold\":0.975,\"arl_target\":50000,\"min_decision_interval\":4,"
+                            + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
+                            + "\"min_baseline_traces\":200,\"freeze_baseline_traces\":1000}",
+                    // null: the detector writes its own groundedness_assessment rows, one per scored
+                    // answer, so it arrives through the DetectorSupplier seam with its repository
+                    // (GroundednessDetectorSupplier), as Frustration's does.
+                    null,
+                    // TRACKING: the one band the detector writes is HIGH, so both modes read the same
+                    // rows, as Frustration's.
+                    ClassifierRow.Mode.TRACKING,
+                    // Seeds disabled: it needs a model server a person sets up first, so a person turns
+                    // it on, through the setup flow that checks the model answers.
+                    false),
             new ClassifierModelModule(
                     "behavior_drift",
                     "Behaviour Drift",
@@ -531,7 +531,7 @@ public class BuiltInClassifierCatalog {
         // fail-loud invariant kept via the collector framework rather than an explicit constructor
         // throw, which SpotBugs forbids (CT_CONSTRUCTOR_THROW). A module with no factory is one of
         // the five fitting-tier classifiers, dispatched by the ClassifierSweep registered for their
-        // kind, or groundedness or frustration, whose detectors are instead supplied through
+        // kind, or frustration or groundedness, whose detectors are instead supplied through
         // `discovered` below.
         //
         // `discovered` is the generic source: any DetectorSupplier bean on the classpath is folded in
