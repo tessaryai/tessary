@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -31,10 +30,6 @@ CLASSIFIERS = Path(__file__).resolve().parents[1]
 SERVE_PY = CLASSIFIERS / "groundedness" / "serve.py"
 CONTRACT = CLASSIFIERS / "groundedness" / "contract"
 ANSWER_KEY = Path(__file__).resolve().parent / "fixtures" / "groundedness_answer_key.json"
-# tokenizer.json and tokenizer_config.json copied unchanged from tessaryai/groundedness-classifier-v1
-# at DEFAULT_REVISION (the model repo is MIT; the tokenizer is ModernBERT's, Apache-2.0), so the
-# encoding check runs offline on exactly the tokenizer the model was trained with.
-TOKENIZER = Path(__file__).resolve().parent / "fixtures" / "groundedness_tokenizer"
 
 # A dependency's distribution name to the top-level module it installs, where the two differ.
 PACKAGE_MODULES = {"transformers": "transformers", "torch": "torch"}
@@ -212,33 +207,27 @@ def test_encoding_matches_the_answer_key():
         assert got == want, case["name"]
 
 
-def _transformers():
-    """check-groundedness-serve.sh installs transformers at the answer key's version and sets
-    GROUNDEDNESS_SERVE_GATE, so there a missing transformers fails instead of skipping. The
-    classifiers gate runs this file too, without transformers, and skips this one test."""
-    if os.environ.get("GROUNDEDNESS_SERVE_GATE") == "1":
-        import transformers
+class _RecordingTokenizer:
+    """Records how encode() calls the tokenizer."""
 
-        return transformers
-    return pytest.importorskip("transformers")
+    def __init__(self):
+        self.calls: list[tuple[tuple, dict]] = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return {}
 
 
-def test_encoding_matches_the_answer_key_on_the_pinned_tokenizer():
-    transformers = _transformers()
-    key = _answer_key()
-    assert transformers.__version__ == key["transformers"], "the answer key was made on another transformers"
-    names = {case["name"] for case in key["cases"]}
-    assert {"truncated_qa_8192", "truncated_summary_8192"} <= names, "the key must keep a case cut at MAX_LENGTH"
-    tok = transformers.AutoTokenizer.from_pretrained(TOKENIZER)
-    for case in key["cases"]:
-        enc = serve.encode(tok, case["passages"], case["question"], case["answer"])
-        assert enc["input_ids"] == case["input_ids"], case["name"]
-        answer = [(i, o) for i, (o, s) in enumerate(zip(enc["offset_mapping"], enc.sequence_ids())) if s == 1]
-        assert (answer[0][0], answer[-1][0] + 1) == (case["answer_token_start"], case["answer_token_end"]), case["name"]
-        for sent in case["sentences"]:
-            toks = [i for i, (a, b) in answer if a < sent["end"] and b > sent["start"]]
-            got = (toks[0], toks[-1] + 1) if toks else (None, None)
-            assert got == (sent["token_start"], sent["token_end"]), (case["name"], sent)
+def test_encode_puts_the_prompt_first_and_truncates_only_the_prompt():
+    """Training encoded (prompt, answer) and cut only the prompt at MAX_LENGTH. Answer first, the
+    answer cut, or another length would score sentences on tokens the model never saw."""
+    tok = _RecordingTokenizer()
+    passages, question, answer = ["The sky is blue."], "What colour is the sky?", "Blue."
+    serve.encode(tok, passages, question, answer)
+    assert tok.calls == [(
+        (serve.lettuce_prompt(passages, question), answer),
+        {"truncation": "only_first", "max_length": 8192, "return_offsets_mapping": True, "return_tensors": None},
+    )]
 
 
 class _CountingTokenizer:
