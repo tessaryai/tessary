@@ -357,7 +357,7 @@ def _resolve(turns: list[Turn]) -> None:
 
     Two questions, one round trip, and neither is re-implemented on this side. A Python restatement of
     either would be a detector nobody ships: `ActionSymbol`'s normalization decides which spans share a
-    bucket, and `TokenUsage.nonOverlapping()` + `TokenPriceBook` decide what a turn cost and whether it
+    bucket, and `TokenUsage` + `TokenPriceBook` decide what a turn cost and whether it
     has a cost at all. Both are exactly the kind of arithmetic behaviour drift's port diverged on for a
     release, and the reason `bridge.py` exists.
 

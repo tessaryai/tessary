@@ -70,7 +70,7 @@ This matters more than anything else in the harness, so it is stated first and p
 | the cross-grain suppression rule (`MetricSuppression`) | **the shipping Java class** | "a tool explained this turn" means what it means in production |
 | `cause_key`, the finding title, p50/p95 in raw units (`MetricFindingEvidence`) | **the shipping Java class** | the strings in an eval report are the strings on the Classifiers page |
 | **window assembly** — when a window closes, what pins, which reference a close is compared against | **reimplemented in Python** (`windows.py`) | this can drift from `MetricDriftSweep` and nothing would fail; `classifiers/tests/test_metric_drift_windows.py` pins the rules it copies |
-| **reading the numbers off traces** (`MetricSource`'s column-preferred accessor, abstention reasons, `TokenUsage.nonOverlapping()`, the price book) | **not run at all** — the corpus is exported already-measured | an export that computes duration the wrong way (a min/max envelope over the trace, say) would feed this harness numbers the sweep would never produce. Use the queries in `corpus.py` |
+| **reading the numbers off traces** (`MetricSource`'s column-preferred accessor, abstention reasons, `TokenUsage`, the price book) | **not run at all** — the corpus is exported already-measured | an export that computes duration the wrong way (a min/max envelope over the trace, say) would feed this harness numbers the sweep would never produce. Use the queries in `corpus.py` |
 
 The bridge is `bridge.py` + `bridge.jsh`: one `jshell` process per batch, running against the build
 output of the backend modules `bridge.MODULES` names — `analysis` for the detector, the sketch, the
@@ -126,8 +126,9 @@ is the easier shape to hand-write a fixture in.
   production has — more of them below `min_sample`, and the ones that arm noisier — which moves the
   false-positive count the null run reports and therefore the floor it sets.
 - **Cost.** `trace.total_cost` is null on every production row (`StructuralEnricher` passes literal
-  null), so the export ships each turn's llm leaves as `(model, usage)` pairs and the loader sums them
-  through `TokenUsage.nonOverlapping()` and prices them through the vendored `TokenPriceBook`. A turn
+  null), so the export ships each turn's llm leaves as the model plus the span's four typed token
+  columns, which ingest already made disjoint, and the loader sums them as `TokenUsage` and prices them
+  through the vendored `TokenPriceBook`. A turn
   with one unpriced leaf loads with `cost_usd: null` and abstains, exactly as the sweep would — an
   unpriced model is unpriced, not free, and a zero would read as a cost improvement.
 

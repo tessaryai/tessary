@@ -12,7 +12,11 @@ the ~250,000 that `arl.py` predicts analytically. **The gap between the two is t
 and it is the single number this run exists to produce — every figure in arl.py assumes independent
 Bernoulli trials, and real tool failures are not.
 
-Read the lowest threshold whose measured ARL0 clears the target. Nothing here writes back into
+The shipped detector derives each tool's threshold from `arl_target` and its baseline rate, so the
+swept value is the threshold's FLOOR (`min_decision_interval`), capped at 12 like the config's. Each row
+prints the thresholds the armed tools actually ran at: two rows with the same range are one run.
+
+Read the lowest floor whose measured ARL0 clears the target. Nothing here writes back into
 PROGRAM.md or the catalog blob; that edit is a decision, made by a human looking at this table.
 """
 
@@ -26,7 +30,8 @@ from . import bridge, corpus
 
 #: Spanning the analytic answer (6.0) by a wide margin in both directions, because the whole point is to
 #: discover that burstiness has moved it rather than to confirm a prior.
-DEFAULT_THRESHOLDS = (4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 15.0, 20.0)
+#: Floors above 12 are clamped to 12 by the config (MAX_DECISION_INTERVAL), so they would repeat that row.
+DEFAULT_THRESHOLDS = (4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0)
 
 
 def series_payload(rows: list[corpus.Bucket]) -> list[dict]:
@@ -55,8 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"corpus: {len(rows):,} buckets · {len(series)} tools · {calls:,} calls · {failures:,} failures")
     print(f"        overall failure rate {failures / calls:.4%}\n")
 
-    print(f"{'h':>6} {'armed':>6} {'alarms':>7} {'calls armed':>13} {'measured ARL0':>15}")
-    print("-" * 52)
+    print(f"{'floor':>6} {'thresholds run':>15} {'armed':>6} {'alarms':>7} {'calls armed':>13} {'measured ARL0':>15}")
+    print("-" * 68)
     for h in DEFAULT_THRESHOLDS:
         results = bridge.replay(series, h, args.min_effect_size, args.min_baseline_calls)
         armed = [r for r in results if r.get("armed")]
@@ -66,7 +71,9 @@ def main(argv: list[str] | None = None) -> int:
         # the false-alarm rate by however long it then sat there.
         watched = sum(r.get("alarm_after_calls") or r.get("calls_seen") or 0 for r in armed)
         arl = f"{watched / len(alarms):,.0f}" if alarms else f">{watched:,}"
-        print(f"{h:>6.1f} {len(armed):>6} {len(alarms):>7} {watched:>13,} {arl:>15}")
+        ran = [r["threshold"] for r in armed if r.get("threshold") is not None]
+        span = f"{min(ran):.1f}-{max(ran):.1f}" if ran else "-"
+        print(f"{h:>6.1f} {span:>15} {len(armed):>6} {len(alarms):>7} {watched:>13,} {arl:>15}")
 
     print(
         "\nEvery alarm above is a FALSE alarm: this is unmodified traffic. Compare the measured ARL0"
