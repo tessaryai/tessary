@@ -96,13 +96,13 @@ Do not use “conversation” as a synonym for session, and do not use “sessio
 
 ## Disposition
 
-What a person says a resolved frustration case turned out to be: **Fixed** or **False alarm**.
+What a person says a resolved frustration or groundedness case turned out to be: **Fixed** or **False alarm**.
 
 Use:
 
 - Resolve the case with the disposition that matches what happened.
 
-Only a frustration case has a disposition. Other cases close on a one-line reason alone.
+Only a frustration or groundedness case has a disposition. Other cases close on a one-line reason alone.
 
 ## How the terms relate
 

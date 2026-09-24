@@ -50,7 +50,8 @@ public final class CaseDtos {
             @Nullable String resolution,
             @JsonProperty("resolution_reason") @Nullable String resolutionReason,
             @JsonProperty("resolved_by") @Nullable String resolvedBy,
-            /** {@code fixed} | {@code false_alarm} on a resolved frustration case; null on every other case. */
+            /** {@code fixed} | {@code false_alarm} on a resolved frustration or groundedness case; null on every
+             *  other case. */
             @Nullable String disposition,
             @JsonProperty("muted_at") @Nullable String mutedAt,
             @JsonProperty("muted_by") @Nullable String mutedBy,
