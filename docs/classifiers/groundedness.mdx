@@ -12,7 +12,7 @@ The groundedness classifier checks each answer your agent gives against the docu
 - One place for the model to run:
   - **This Mac (dev):** a Mac with Apple silicon, 16 GB of memory, and 6 GB of free disk, running Tessary's stack, with `uv` installed.
   - **AWS (production):** Tessary running on AWS, the AWS CLI signed in to the same account, a subnet in Tessary's VPC that reaches the internet, and a quota of at least 4 vCPUs for G instances in Tessary's region.
-- Spans tagged with a call site whose shape is `rag_answer`, `summarize`, or `extract`. See [Call sites](/concepts/call-sites).
+- Spans tagged with a call site whose shape is `rag_answer`, `summarize`, or `extract`. A shape comes from the `.tessary/` bundle you import, not from your traces. See [Call-site shapes](/concepts/call-sites#call-site-shapes).
 - Retrieved documents on your spans as `retrieval.documents.<N>.document.content`. See [Retrieval](/instrument/span-requirements#retrieval).
 - Traces that carry a thread ID or a session ID, if your agent answers follow-up questions from documents it retrieved on an earlier turn.
 

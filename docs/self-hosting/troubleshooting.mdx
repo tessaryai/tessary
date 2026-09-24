@@ -70,7 +70,7 @@ Run both operations through the `postgres` service in your compose deployment, u
 
 If the row shows no alert and still no findings appear, the classifier may be running as designed. Each call site first learns its own normal rate of flagged answers, and a finding opens only when the rate rises above it. These answers are never scored:
 
-- An answer on a call site whose shape is not `rag_answer`, `summarize`, or `extract`.
+- An answer on a call site whose shape is not `rag_answer`, `summarize`, or `extract`, or that has no shape because no imported bundle set one. [Call-site shapes](/concepts/call-sites#call-site-shapes) says how to set it.
 - An answer that asserts nothing checkable, such as a greeting or a question back to the user.
 - An answer on a `rag_answer` call site with no retrieved documents to compare against, when its session called a tool or a retriever. Tool results are not read as documents.
 
