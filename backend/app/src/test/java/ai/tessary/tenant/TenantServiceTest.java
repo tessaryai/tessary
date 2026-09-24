@@ -291,12 +291,13 @@ class TenantServiceTest {
                 .single();
         // The standalone fabricated finding/case/report were folded into the showcase rows so that
         // every seeded row hangs off a real classifier. These are what SampleProjectSeedListener now writes:
-        //   findings — four metric-drift (drift 0-3) plus two tool-error (drift 4-5);
-        //   cases     — three, numbered 1..3, which is what the seeder's own comment says it takes so
-        //               that the first case a real detector opens on the project continues from 4;
+        //   findings — four metric-drift (drift 0-3), two tool-error (drift 4-5), one groundedness and
+        //              one frustration;
+        //   cases     — three seeded directly and numbered 1..3, then the groundedness and frustration
+        //               cases the live CaseOpener opens as 4 and 5;
         //   reports   — one, seeded only by seedCaseA, the single case carrying a full agentic RCA.
-        assertEquals(6, findings, "the sample project's demo + showcase findings were seeded");
-        assertEquals(3, cases, "the sample project's demo + showcase cases were seeded");
+        assertEquals(8, findings, "the sample project's demo + showcase findings were seeded");
+        assertEquals(5, cases, "the sample project's demo + showcase cases were seeded");
         assertEquals(1, rcaReports, "the sample project's demo + showcase RCA report was seeded");
     }
 
