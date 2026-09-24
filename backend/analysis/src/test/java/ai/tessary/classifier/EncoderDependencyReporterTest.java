@@ -13,60 +13,88 @@ import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * {@link EncoderDependencyReporter} counts a project as depending on the encoder when its groundedness row
  * is enabled and its org holds the capability, and nothing else: whether the model answers right now is
  * not an input, because a model that is down is still depended on.
  */
+@ExtendWith(MockitoExtension.class)
 class EncoderDependencyReporterTest {
 
-    private final ProjectRepository projects = mock(ProjectRepository.class);
-    private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
-    private final CapabilityService capabilities = mock(CapabilityService.class);
-    private EncoderDependencyReporter reporter;
+    @Mock
+    CapabilityService capabilities;
 
-    @BeforeEach
-    void setup() {
-        reporter = new EncoderDependencyReporter(projects, classifiers, capabilities);
+    /** The active projects, in order. */
+    private static ProjectRepository activeProjects(Project... active) {
+        return new ProjectRepository(mock(JdbcClient.class)) {
+            @Override
+            public List<Project> findActive() {
+                return List.of(active);
+            }
+        };
+    }
+
+    /** Each project's enabled classifier rows; a project not in the map has none. */
+    private static ClassifierRepository enabledRows(Map<String, List<ClassifierRow>> byProject) {
+        return new ClassifierRepository(mock(JdbcClient.class)) {
+            @Override
+            public List<ClassifierRow> listEnabled(String projectId) {
+                return byProject.getOrDefault(projectId, List.of());
+            }
+        };
     }
 
     @Test
-    void anEnabledRowUnderAHeldCapabilityIsADependency() {
-        when(projects.findActive()).thenReturn(List.of(project("p1", "o1"), project("p2", "o1")));
-        when(classifiers.listEnabled("p1")).thenReturn(List.of(row("p1", Kind.GROUNDEDNESS, "groundedness")));
-        when(classifiers.listEnabled("p2")).thenReturn(List.of(row("p2", Kind.SECRET_LEAK, "secret_leak")));
+    void dependentProjectsAndTheirOrgsAreCountedApart() {
+        // Three dependent projects in two orgs, plus a project whose only row is not encoder-backed.
+        ProjectRepository projects =
+                activeProjects(project("p1", "o1"), project("p2", "o1"), project("p3", "o2"), project("p4", "o2"));
+        ClassifierRepository classifiers = enabledRows(Map.of(
+                "p1", List.of(row("p1", Kind.GROUNDEDNESS, "groundedness")),
+                "p2", List.of(row("p2", Kind.GROUNDEDNESS, "groundedness")),
+                "p3", List.of(row("p3", Kind.GROUNDEDNESS, "groundedness")),
+                "p4", List.of(row("p4", Kind.SECRET_LEAK, "secret_leak"))));
         when(capabilities.isEnabled("o1", Capability.GROUNDEDNESS)).thenReturn(true);
+        when(capabilities.isEnabled("o2", Capability.GROUNDEDNESS)).thenReturn(true);
 
-        EncoderDependencyReporter.Dependency d = reporter.report();
+        EncoderDependencyReporter.Dependency d =
+                new EncoderDependencyReporter(projects, classifiers, capabilities).report();
 
-        assertEquals(1, d.projects());
-        assertEquals(1, d.orgs());
-        assertEquals(Set.of("groundedness"), d.classifiers());
+        assertEquals(new EncoderDependencyReporter.Dependency(3, 2, Set.of("groundedness")), d);
         assertFalse(d.decommissionable());
     }
 
     @Test
     void anOrgThatTurnedTheCapabilityOffDoesNotDepend() {
-        when(projects.findActive()).thenReturn(List.of(project("p1", "o1")));
-        when(classifiers.listEnabled("p1")).thenReturn(List.of(row("p1", Kind.GROUNDEDNESS, "groundedness")));
+        ProjectRepository projects = activeProjects(project("p1", "o1"));
+        ClassifierRepository classifiers =
+                enabledRows(Map.of("p1", List.of(row("p1", Kind.GROUNDEDNESS, "groundedness"))));
         when(capabilities.isEnabled("o1", Capability.GROUNDEDNESS)).thenReturn(false);
 
-        EncoderDependencyReporter.Dependency d = reporter.report();
+        EncoderDependencyReporter.Dependency d =
+                new EncoderDependencyReporter(projects, classifiers, capabilities).report();
 
-        assertEquals(0, d.projects());
+        assertEquals(new EncoderDependencyReporter.Dependency(0, 0, Set.of()), d);
         assertTrue(d.decommissionable());
     }
 
     @Test
     void noEnabledGroundednessRowIsDecommissionable() {
-        when(projects.findActive()).thenReturn(List.of(project("p1", "o1")));
-        when(classifiers.listEnabled("p1")).thenReturn(List.of());
+        ProjectRepository projects = activeProjects(project("p1", "o1"));
 
-        assertTrue(reporter.report().decommissionable());
+        EncoderDependencyReporter.Dependency d =
+                new EncoderDependencyReporter(projects, enabledRows(Map.of()), capabilities).report();
+
+        assertEquals(new EncoderDependencyReporter.Dependency(0, 0, Set.of()), d);
+        assertTrue(d.decommissionable());
     }
 
     private static Project project(String id, String orgId) {

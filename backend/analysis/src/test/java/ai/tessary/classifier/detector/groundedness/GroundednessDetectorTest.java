@@ -3,8 +3,8 @@ package ai.tessary.classifier.detector.groundedness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRow;
@@ -20,7 +20,6 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,13 +67,9 @@ class GroundednessDetectorTest {
             "2026-01-01T00:00:00Z",
             "2026-01-01T00:00:00Z");
 
-    /**
-     * The assessments a sweep wrote, keeping only the first per (trace, span, scorer), which is what the
-     * table's unique index does to a second insert.
-     */
+    /** The assessments a sweep wrote, in order. */
     private static final class RecordingAssessments extends GroundednessAssessmentRepository {
         final List<Assessment> rows = new ArrayList<>();
-        final Set<List<String>> keys = new HashSet<>();
 
         RecordingAssessments() {
             super(Mockito.mock(JdbcClient.class));
@@ -82,9 +77,6 @@ class GroundednessDetectorTest {
 
         @Override
         public boolean insert(Assessment a) {
-            if (!keys.add(List.of(a.projectId(), a.classifierId(), a.traceId(), a.spanId(), a.scorerVersion()))) {
-                return false;
-            }
             rows.add(a);
             return true;
         }
@@ -209,17 +201,21 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    void highUnsupportedFiresOnAGroundedShape() {
+    void highUnsupportedFiresOnAGroundedShape() throws Exception {
+        String answer = "The candidate knows Java and GCP.";
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.99));
-        Detection detection = d.detect(
-                obs("cs-1", "5 years of Python and AWS experience.", "The candidate knows Java and GCP."), null);
+        Detection detection = d.detect(obs("cs-1", "5 years of Python and AWS experience.", answer), null);
         assertTrue(detection.fired());
         assertEquals(Detection.Severity.WARN, detection.severity());
         assertEquals(Detection.Confidence.HIGH, detection.confidence(), "0.99 is past the 0.975 high bar");
-        String evidence = assertNotNull2(detection.evidenceJson());
-        assertTrue(evidence.contains("groundedness"));
-        assertTrue(evidence.contains("\"unsupported\":0.99"), evidence);
-        assertTrue(evidence.contains("\"conflict\":0.495"), "the narrower score rides along: " + evidence);
+        // The fake head's conflict is half its unsupported, and its one span is the whole answer. An extract
+        // call site with no retrieved documents is checked against its prompt.
+        assertEquals(
+                mapper.readTree("{\"head\":\"groundedness\",\"unsupported\":0.99,\"conflict\":0.495,"
+                        + "\"premise_had_evidence\":false,"
+                        + "\"flagged_sentences\":[{\"start\":0,\"end\":" + answer.length() + ",\"unsupported\":0.99}],"
+                        + "\"claim\":\"" + answer + "\"}"),
+                mapper.readTree(assertNotNull2(detection.evidenceJson())));
     }
 
     @Test
@@ -270,29 +266,31 @@ class GroundednessDetectorTest {
         assertFalse(d.detect(obs("cs-1", "some input", null), null).fired());
     }
 
+    /**
+     * The skipped row comes first, so the flagged row's place among the scored ones (0) differs from its place in
+     * the batch (1): a firing written at the scored index would land on the skipped observation.
+     */
     @Test
     void batchStaysIndexAlignedAndOnlyGatedRowsAreScored() {
-        GroundednessDetector d =
-                detector(Map.of("cs-1", "extract", "cs-2", "draft", "cs-3", "rag_answer"), List.of(0.99, 0.05));
+        GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "draft"), List.of(0.99, 0.05));
         List<Detection> ds = d.detectBatch(
                 List.of(
-                        obs("cs-1", "the doc says X", "the doc says Y"), // gated, unsupported -> fires
                         obs("cs-2", "write a poem", "roses are red"), // ungated -> skipped
-                        obs("cs-3", "the doc says X", "the doc says X")), // gated, supported -> quiet
+                        obs("cs-1", "the doc says X", "the doc says Y"), // gated, unsupported -> fires
+                        obs("cs-1", "the doc says X", "the doc says X")), // gated, supported -> quiet
                 null);
-        assertTrue(ds.get(0).fired());
-        assertFalse(ds.get(1).fired());
-        assertFalse(ds.get(2).fired());
+        assertEquals(
+                List.of(false, true, false), ds.stream().map(Detection::fired).toList());
     }
 
     @Test
     @DisplayName("document-in-prompt: the prompt (system AND user text) is the one passage, with no question")
-    void promptPremiseIncludesSystemMessageContentAndIsSentAsOnePassage() {
+    void promptPremiseIncludesSystemMessageContentAndIsSentAsOnePassage() throws Exception {
         List<Response> seen = new ArrayList<>();
         GroundingEvidenceReads evidence = (projectId, ids) -> Map.of();
         CallSiteShapeReads shapes = (projectId, ids) -> Map.of("cs-1", "extract");
         GroundednessDetector d =
-                new GroundednessDetector(head(List.of(0.05), seen), shapes, evidence, assessments, mapper);
+                new GroundednessDetector(head(List.of(0.99), seen), shapes, evidence, assessments, mapper);
         String storedInput = "[{\"role\":\"system\",\"content\":\"here is the document: refunds take 5-7 days\"},"
                 + "{\"role\":\"user\",\"content\":\"how long do refunds take?\"}]";
         SubstrateObservation o = new SubstrateObservation(
@@ -308,14 +306,22 @@ class GroundednessDetectorTest {
                 assistantOutput("Refunds take 5-7 business days."),
                 null,
                 "2026-01-01T00:00:00Z");
-        d.detect(o, null);
-        assertEquals(1, seen.size());
-        Response sent = seen.get(0);
-        assertEquals(1, sent.passages().size(), "the prompt is ONE passage: " + sent.passages());
-        assertTrue(sent.passages().get(0).contains("refunds take 5-7 days"), "system document content: " + sent);
-        assertTrue(sent.passages().get(0).contains("how long do refunds take"), "and the user message: " + sent);
-        assertNull(sent.question(), "no separate question: the prompt already carries it");
-        assertEquals("Refunds take 5-7 business days.", sent.answer());
+        Detection got = d.detect(o, null);
+        // One passage, the system and user text in message order a line apart; no separate question, since
+        // the prompt already carries it.
+        assertEquals(
+                List.of(new Response(
+                        List.of("here is the document: refunds take 5-7 days\nhow long do refunds take?"),
+                        null,
+                        "Refunds take 5-7 business days.")),
+                seen);
+        assertTrue(got.fired());
+        assertEquals(
+                false,
+                mapper.readTree(assertNotNull2(got.evidenceJson()))
+                        .get("premise_had_evidence")
+                        .asBoolean(true),
+                "checked against its prompt, not retrieved documents: the page and the RCA dossier say which");
     }
 
     @Test
@@ -415,19 +421,13 @@ class GroundednessDetectorTest {
         assertTrue(assessments.rows.isEmpty(), "an answer too long for the model has no verdict");
     }
 
+    /**
+     * Rows written under two thresholds must not mix in one rate. That a rescore under one threshold inserts once
+     * is the unique index's job, covered against Postgres in {@code GroundednessAssessmentIntegrationTest}.
+     */
     @Test
-    void aRescoreDoesNotDoubleCount() {
-        SubstrateObservation o = obs("cs-1", "the doc says X", "the doc says Y");
-        detector(Map.of("cs-1", "extract"), List.of(0.99)).sweepBatch(SIGNAL, List.of(o), null);
-        detector(Map.of("cs-1", "extract"), List.of(0.99)).sweepBatch(SIGNAL, List.of(o), null);
-        assertEquals(1, assessments.rows.size(), "a rewound sweep writes the same key, which inserts once");
-        assertEquals(
-                GroundednessDetector.scorerVersion(0.975),
-                GroundednessDetector.scorerVersion(0.975),
-                "the scorer version is stable across sweeps");
-        assertFalse(
-                GroundednessDetector.scorerVersion(0.975).equals(GroundednessDetector.scorerVersion(0.95)),
-                "a new threshold starts a new set of rows");
+    void aNewThresholdGivesANewScorerVersion() {
+        assertNotEquals(GroundednessDetector.scorerVersion(0.975), GroundednessDetector.scorerVersion(0.95));
     }
 
     @Test
@@ -558,7 +558,7 @@ class GroundednessDetectorTest {
 
     @Test
     @DisplayName("the whole answer is sent once; the worst sentence by the head's offsets is named")
-    void wholeAnswerIsScoredOnceAndTheWorstSentenceIsNamed() {
+    void wholeAnswerIsScoredOnceAndTheWorstSentenceIsNamed() throws Exception {
         CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
         String answer = "Refunds are issued within 5-7 business days. "
                 + "You are also covered by Extended Warranty KB-77 for 24 months.";
@@ -588,11 +588,15 @@ class GroundednessDetectorTest {
         assertEquals(answer, seen.get(0).answer(), "the head sees the whole answer, sentences included");
         assertTrue(got.fired(), "the answer is only as grounded as its worst sentence");
         assertEquals(Detection.Confidence.HIGH, got.confidence());
-        String json = String.valueOf(got.evidenceJson());
-        assertTrue(json.contains("\"flagged_sentences\":[{\"start\":" + answer.indexOf("You are")), json);
-        assertTrue(json.contains("KB-77"), "the firing names the sentence that failed: " + json);
-        assertFalse(json.contains("5-7 business days"), "and not the one that passed: " + json);
-        assertTrue(json.contains("\"unsupported\":0.98"), json);
+        int cut = answer.indexOf("You are");
+        // The firing names the sentence that failed and not the one that passed.
+        assertEquals(
+                mapper.readTree("{\"head\":\"groundedness\",\"unsupported\":0.98,\"conflict\":0.12,"
+                        + "\"premise_had_evidence\":true,"
+                        + "\"flagged_sentences\":[{\"start\":" + cut + ",\"end\":" + answer.length()
+                        + ",\"unsupported\":0.98}],"
+                        + "\"claim\":\"You are also covered by Extended Warranty KB-77 for 24 months.\"}"),
+                mapper.readTree(assertNotNull2(got.evidenceJson())));
     }
 
     @Test
@@ -612,6 +616,61 @@ class GroundednessDetectorTest {
                                 "Refunds are issued within 5-7 business days. Store credit is instant."),
                         null)
                 .fired());
+    }
+
+    /** A head that answers every request with {@code score}. */
+    private static EncoderScorer answering(ResponseScore score) {
+        return new EncoderScorer() {
+            @Override
+            public List<Double> score(String head, List<String> texts) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
+                return List.of(score);
+            }
+        };
+    }
+
+    @Test
+    @DisplayName("the claim echoed into a detection is the worst sentence's first 300 characters")
+    void aLongWorstSentenceIsEchoedAsItsFirst300Characters() throws Exception {
+        String first = "Refunds are issued within 5-7 business days. ";
+        String worst = "Extended Warranty KB-77 covers " + "every part and every repair ".repeat(15) + "for 24 months.";
+        String answer = first + worst;
+        EncoderScorer head = answering(new ResponseScore(
+                0.99,
+                0.2,
+                List.of(
+                        new Span(0, first.length() - 1, 0.02, 0.01),
+                        new Span(first.length(), answer.length(), 0.99, 0.2))));
+        CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-1", "extract");
+        GroundingEvidenceReads none = (projectId, ids) -> Map.of();
+
+        Detection got = new GroundednessDetector(head, extract, none, assessments, mapper)
+                .detect(obs("cs-1", "how long do refunds take?", answer), null);
+
+        assertTrue(worst.length() > 300, "the sentence must be longer than the cap");
+        assertEquals(
+                worst.substring(0, 300),
+                mapper.readTree(assertNotNull2(got.evidenceJson())).get("claim").asText());
+    }
+
+    @Test
+    @DisplayName("a flagged answer the head returned no sentences for echoes the whole answer as its claim")
+    void aFlaggedAnswerWithNoSentencesEchoesTheWholeAnswer() throws Exception {
+        String answer = "Extended Warranty KB-77 covers you for 24 months.";
+        CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-1", "extract");
+        GroundingEvidenceReads none = (projectId, ids) -> Map.of();
+
+        Detection got = new GroundednessDetector(
+                        answering(new ResponseScore(0.99, 0.2, List.of())), extract, none, assessments, mapper)
+                .detect(obs("cs-1", "what does the warranty cover?", answer), null);
+
+        JsonNode evidence = mapper.readTree(assertNotNull2(got.evidenceJson()));
+        assertEquals(answer, evidence.get("claim").asText());
+        assertEquals(mapper.readTree("[]"), evidence.get("flagged_sentences"));
     }
 
     private static String assertNotNull2(@Nullable String s) {

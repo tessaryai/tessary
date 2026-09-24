@@ -4,16 +4,12 @@ package ai.tessary.classifier.detector.groundedness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.FlaggedAnswer;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.toolerror.CarriedState;
@@ -35,6 +31,9 @@ import java.util.Optional;
 import java.util.Random;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The rate test over groundedness-shaped tallies: a trace is a trial, one with a flagged answer a failure, and
@@ -201,24 +200,39 @@ class GroundednessRateReplayTest {
     /**
      * The engine recovers a run's failures from its accumulator, which assumes one reference for the whole run.
      * A run that began while the reference was learning was judged against several, so the finding counts its
-     * flagged traces instead and derives the rate from the count.
+     * flagged traces instead and derives the rate from the count: failures are the flagged traces, never more
+     * than the traces scored, and a run with no traces reads at the baseline rate. The statistic, threshold and
+     * onset stay the engine's. Expected values are by hand, for a 2% baseline.
      */
-    @Test
-    void aRunThatBeganWhileLearningCountsItsFlaggedTraces() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 10, 0.05);
-        series(s, 10, 6, 0.40);
-        Spell spell = rising(sweep(s)).get(0);
-        ToolErrorDetector.Decision derived = spell.decision();
-        assertTrue(derived.failuresSinceOnset() != 48, "the derivation is off while the reference learned");
+    @ParameterizedTest(name = "{0} calls, {1} flagged -> {2} failures at {3}")
+    @CsvSource({
+        "100,  48,  48, 0.48, 46.0, 1.24699",
+        "100, 150, 100,  1.0, 98.0, 2.85780",
+        "  0,  48,   0, 0.02,  0.0, 0.0",
+    })
+    void aCountedRunTakesItsRateFromItsFlaggedTraces(
+            long calls, long flagged, long failures, double rate, double deltaPp, double effectSize) {
+        ToolErrorDetector.Decision derived = new ToolErrorDetector.Decision(
+                true, Direction.UP, 14.1, 11.2, 1.26, 0.02, 0.30, 28.0, 0.62, calls, 30, 640, hour(10), null);
 
-        ToolErrorDetector.Decision counted = GroundednessRateService.counted(derived, 48);
+        ToolErrorDetector.Decision counted = GroundednessRateService.counted(derived, flagged);
 
-        assertEquals(48, counted.failuresSinceOnset());
-        assertEquals(derived.callsSinceOnset(), counted.callsSinceOnset());
-        assertEquals(48.0 / derived.callsSinceOnset(), counted.currentRate(), 1e-12);
-        assertEquals((counted.currentRate() - derived.baselineRate()) * 100.0, counted.deltaPp(), 1e-9);
-        assertEquals(derived.statistic(), counted.statistic());
-        assertEquals(derived.onsetAt(), counted.onsetAt());
+        assertEquals(failures, counted.failuresSinceOnset());
+        assertEquals(calls, counted.callsSinceOnset());
+        assertEquals(rate, counted.currentRate(), 1e-12);
+        assertEquals(deltaPp, counted.deltaPp(), 1e-9);
+        assertEquals(effectSize, counted.effectSize(), 1e-5);
+        assertEquals(
+                List.of(true, Direction.UP, 14.1, 11.2, 1.26, 0.02, 640L, hour(10)),
+                List.of(
+                        counted.fired(),
+                        counted.direction(),
+                        counted.statistic(),
+                        counted.threshold(),
+                        counted.criticality(),
+                        counted.baselineRate(),
+                        counted.baselineCalls(),
+                        String.valueOf(counted.onsetAt())));
     }
 
     // ---- the service over the replay: only a rise is reported, tuning changes reset, unassigned never judged
@@ -247,9 +261,10 @@ class GroundednessRateReplayTest {
         }
         Harness h = new Harness(unassigned, List.of());
         assertTrue(h.refresh().isEmpty());
-        verify(h.states, never()).save(anyString(), any(), anyString());
+        assertEquals(List.of(), h.states.saves);
     }
 
+    /** A retune clears the accumulator and the reference, and keeps a person's pending pin. */
     @Test
     void aStateBuiltUnderOtherTuningIsResetAndReLearned() {
         ToolErrorRate stale = new ToolErrorRate();
@@ -260,26 +275,30 @@ class GroundednessRateReplayTest {
                 stale,
                 hour(9),
                 "v2-onset|groundedness|4.00|gnd-v1-000000000000|50000|2.0|0.02|0.01",
-                null,
-                null,
+                "usr_pinner",
+                hour(8),
                 null);
         Harness h = new Harness(series(new ArrayList<>(), 0, 10, 0.05), List.of(old));
         h.refresh();
 
-        verify(h.states).resetAndRelearn("p1", CALL_SITE, null, GroundednessRateService.TUNING_CHANGED, h.now);
-        verify(h.states)
-                .save(
-                        eq("p1"),
-                        eq(new CarriedState(
+        assertEquals(
+                List.of(new Reset("p1", CALL_SITE, null, GroundednessRateService.TUNING_CHANGED, h.now)),
+                h.states.resets);
+        assertEquals(
+                new Save(
+                        "p1",
+                        new CarriedState(
                                 CALL_SITE,
                                 ToolErrorDetector.State.EMPTY,
                                 null,
                                 null,
                                 CONFIG.stateEpoch(),
-                                null,
-                                null,
-                                h.now)),
-                        eq(h.now));
+                                "usr_pinner",
+                                hour(8),
+                                h.now),
+                        h.now),
+                h.states.saves.getFirst(),
+                "the retuned row, saved before the replay advances it");
     }
 
     @Test
@@ -287,28 +306,111 @@ class GroundednessRateReplayTest {
         Sweep learned = sweep(series(new ArrayList<>(), 0, 12, 0.05));
         Harness h = new Harness(series(new ArrayList<>(), 0, 12, 0.05), learned.advanced());
         h.refresh();
-        verify(h.states, never()).resetAndRelearn(anyString(), anyString(), any(), anyString(), anyString());
+        assertEquals(List.of(), h.states.resets);
     }
 
-    /** The service over mocked repositories, answering {@code tallies} for any window. */
+    private record Reset(
+            String projectId, String key, @Nullable String resetBy, String note, String resetAt) {}
+
+    private record Save(String projectId, CarriedState carried, String updatedAt) {}
+
+    /** The call sites' carried state: listed as given, every save and reset recorded. */
+    private static final class RecordedStates extends ToolErrorStateRepository {
+        private final List<CarriedState> carried;
+        final List<Save> saves = new ArrayList<>();
+        final List<Reset> resets = new ArrayList<>();
+
+        RecordedStates(List<CarriedState> carried) {
+            super(mock(JdbcClient.class));
+            this.carried = carried;
+        }
+
+        @Override
+        public List<CarriedState> list(String projectId) {
+            assertEquals("p1", projectId);
+            return carried;
+        }
+
+        @Override
+        public void save(String projectId, CarriedState state, String updatedAt) {
+            saves.add(new Save(projectId, state, updatedAt));
+        }
+
+        @Override
+        public void resetAndRelearn(
+                String projectId, String key, @Nullable String resetBy, String note, String resetAt) {
+            resets.add(new Reset(projectId, key, resetBy, note, resetAt));
+        }
+    }
+
+    /** The scored hours: {@code tallies} for any window, and no trace behind a spell to list. */
+    private static final class ScoredHours extends GroundednessRateRepository {
+        private final List<HourlyToolTally> tallies;
+        private final RecordedStates states;
+
+        ScoredHours(List<HourlyToolTally> tallies, RecordedStates states) {
+            super(mock(JdbcClient.class), mock(ClassifierDetectionWriteRepository.class));
+            this.tallies = tallies;
+            this.states = states;
+        }
+
+        @Override
+        public Optional<Instant> newestObservationAt(String projectId, String classifierId, String scorerVersion) {
+            return tallies.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(Instant.parse(tallies.getLast().bucket()));
+        }
+
+        @Override
+        public List<HourlyToolTally> hourlyTallies(
+                String projectId, String classifierId, String scorerVersion, Instant from) {
+            return tallies;
+        }
+
+        @Override
+        public ToolErrorStateRepository states() {
+            return states;
+        }
+
+        @Override
+        public List<String> scoredSince(
+                String projectId,
+                String classifierId,
+                String scorerVersion,
+                String callSiteId,
+                Instant windowFrom,
+                Instant since,
+                Instant until) {
+            return List.of();
+        }
+
+        @Override
+        public List<FlaggedAnswer> flaggedSince(
+                String projectId,
+                String classifierId,
+                String scorerVersion,
+                String callSiteId,
+                Instant windowFrom,
+                Instant since,
+                Instant until) {
+            return List.of();
+        }
+    }
+
+    /** The service over fake rate and state repositories; a spell's finding write is a mock that records none. */
     private static final class Harness {
-        final GroundednessRateRepository rates = mock(GroundednessRateRepository.class);
-        final ToolErrorStateRepository states = mock(ToolErrorStateRepository.class);
+        final RecordedStates states;
         final Instant at = START.plus(Duration.ofDays(8));
         final String now = at.toString();
-        private final GroundednessRateService service = new GroundednessRateService(
-                rates, mock(FindingRepository.class), mock(FindingEvidenceRepository.class), new ObjectMapper());
+        private final GroundednessRateService service;
 
         Harness(List<HourlyToolTally> tallies, List<CarriedState> carried) {
-            @Nullable
-            String newest =
-                    tallies.isEmpty() ? null : tallies.get(tallies.size() - 1).bucket();
-            when(rates.newestObservationAt(anyString(), anyString(), anyString()))
-                    .thenReturn(Optional.ofNullable(newest).map(Instant::parse));
-            when(rates.hourlyTallies(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(tallies);
-            when(rates.states()).thenReturn(states);
-            when(states.list("p1")).thenReturn(carried);
+            states = new RecordedStates(carried);
+            service = new GroundednessRateService(
+                    new ScoredHours(tallies, states),
+                    mock(FindingRepository.class),
+                    mock(FindingEvidenceRepository.class),
+                    new ObjectMapper());
         }
 
         List<Spell> refresh() {
