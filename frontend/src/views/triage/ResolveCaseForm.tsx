@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The body of the case page's Resolve dialog: a one-line reason, and on a frustration case the
- * disposition that decides what the classifier counts next.
+ * The body of the case page's Resolve dialog: a one-line reason, and on a frustration or
+ * groundedness case the disposition that decides what the classifier counts next.
  *
- * Only a frustration case offers the choice, because only there does the answer change anything:
- * both restart the call site's learned rate, and a false alarm also clears the conversations the
- * case cites. Every other case closes on the reason alone, and the server refuses a disposition on
- * one.
+ * Only those two offer the choice, because only there does the answer change anything: both
+ * restart the call site's learned rate, and a false alarm also clears what the case cites, the
+ * sessions of a frustration case or the flagged answers of a groundedness one. Every other case
+ * closes on the reason alone, and the server refuses a disposition on one.
  */
 import { useState } from "react";
 import type { CaseDisposition } from "../../api/types";
 import { Button, ErrorNote, Input } from "../../ui";
+import { GROUNDEDNESS_DETECTOR } from "../classifiers/groundedness";
 
-const DISPOSITIONS: [CaseDisposition, string, string][] = [
-  ["fixed", "Fixed", "The accumulator restarts and the call site re-learns its normal rate from here."],
-  [
-    "false_alarm",
-    "False alarm",
-    "The same, and the sessions this case cites stop counting as frustrated and become scorable again.",
-  ],
-];
+const FIXED_HINT = "The accumulator restarts and the call site re-learns its normal rate from here.";
+
+/** What a false alarm clears, per detector that offers one. */
+const FALSE_ALARM_HINTS: Record<string, string> = {
+  frustration: "The same, and the sessions this case cites stop counting as frustrated and become scorable again.",
+  [GROUNDEDNESS_DETECTOR]: "The same, and the answers this case cites are no longer flagged.",
+};
 
 export function ResolveCaseForm({
   detector,
@@ -35,7 +35,8 @@ export function ResolveCaseForm({
   onResolve: (reason: string, disposition?: CaseDisposition) => void;
 }) {
   const [reason, setReason] = useState("");
-  const offersDisposition = detector === "frustration";
+  const falseAlarmHint = FALSE_ALARM_HINTS[detector];
+  const offersDisposition = falseAlarmHint != null;
   const [disposition, setDisposition] = useState<CaseDisposition>("fixed");
 
   return (
@@ -52,7 +53,12 @@ export function ResolveCaseForm({
       />
       {offersDisposition && (
         <div className="mt-3.5 rounded-card border border-border divide-y divide-border" role="radiogroup">
-          {DISPOSITIONS.map(([value, label, hint]) => (
+          {(
+            [
+              ["fixed", "Fixed", FIXED_HINT],
+              ["false_alarm", "False alarm", falseAlarmHint],
+            ] as [CaseDisposition, string, string][]
+          ).map(([value, label, hint]) => (
             <label key={value} className="flex items-start gap-3 px-4 py-3 cursor-pointer">
               <input
                 type="radio"
