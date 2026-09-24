@@ -85,7 +85,7 @@ Between the OTLP endpoint and the database sits a buffer. The default needs noth
 | --- | --- | --- |
 | `TESSARY_INGEST_SPOOL_MODE` | `memory`: a 200 means the batch is queued in the backend process, the buffer sheds with `503 + Retry-After` when its byte budget is full, and a restart loses what was queued (stock exporters retry a 503, so a shed costs latency, not data). `kafka`: a 200 means the batch is persisted by a Kafka-API broker before the response, and nothing acknowledged is lost on restart. | `memory` |
 | `TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | The broker, in `kafka` mode. The bundled single-node Redpanda answers at the default. | `redpanda:9092` |
-| `TESSARY_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to — set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
+| `TESSARY_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to. Set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
 | `TESSARY_INGEST_SPOOL_KAFKA_CONSUMERS` | Drainer threads in `kafka` mode, each with its own consumer; the broker spreads the eight partitions across them, and one project's batches stay on one partition so they never run concurrently. Raise it with cores, up to the eight partitions (a ninth consumer would sit idle); `memory` mode always runs one. | `4` |
 
 To use the bundled broker, set the mode and start the stack with its profile:
@@ -164,7 +164,7 @@ Connecting a GitHub repository needs no environment variables. Connect one in-ap
 </Tip>
 
 A default deployment has exactly one outbound destination: `home.tessary.ai`. There is no Google
-Fonts call, no analytics SDK, and no other third-party host a default install reaches — the
+Fonts call, no analytics SDK, and no other third-party host a default install reaches. The
 product's one non-Geist typeface (the wordmark) ships as a local font file, not a call to Google's
 CDN. Nothing else in this section is an exception to that; it exists to say precisely what the
 backend sends there and fetches from there.
@@ -215,7 +215,7 @@ gives Tessary no install-count or activation visibility into your deployment, an
 checking for newer model prices, so it prices from the book bundled in the release you run until you
 upgrade. There is no license check, feature gate, or other in-app behavior that depends on reaching us.
 
-**Tessary will never use your conversations to train or improve any model — no exceptions, no
+**Tessary will never use your conversations to train or improve any model. No exceptions, no
 toggle.** This is an absolute guarantee, not a default you could accidentally switch off. See
 `devdocs/reference/principles.md` § "Product & positioning" for the full argument, backed by two
 guard tests in the codebase

@@ -29,11 +29,11 @@ Three volumes are project-prefixed and therefore change name:
 | Caddy's certificate state | `evals-platform_caddy-data` | `tessary_caddy-data` |
 | Caddy's config state | `evals-platform_caddy-config` | `tessary_caddy-config` |
 
-`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_tessary` — the project prefix changed in that release, the `evals` half in this one). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it — but Caddy's two volumes still move.
+`tessary-sandbox-work` is unaffected: it carries an explicit name in the configuration and was never project-prefixed. Containers are renamed too (`evals-platform-postgres-1` becomes `tessary-postgres-1`), and so is the network (`evals-platform_evals` becomes `tessary_tessary`; the project prefix changed in that release, the `evals` half in this one). If you set `POSTGRES_DATA_DIR` to a host path, your database is on that path and none of this touches it. Caddy's two volumes still move.
 
 Pick one of these two. Do it **before** the first `docker compose up` on the new configuration.
 
-### Option A — keep the old project name
+### Option A: Keep the old project name
 
 Nothing moves. Name the old project explicitly on every command from now on:
 
@@ -42,9 +42,9 @@ docker compose -f oci://docker.io/tessaryai/tessary:compose -p evals-platform up
 docker compose -p evals-platform ps
 ```
 
-`-p` outranks the project name pinned in the configuration. This is the smaller change and it is a valid end state, not just a delay — but every command needs the flag, and the documentation elsewhere assumes `-p tessary`.
+`-p` outranks the project name pinned in the configuration. This is the smaller change and it is a valid end state, not just a delay. Every command still needs the flag, and the documentation elsewhere assumes `-p tessary`.
 
-### Option B — copy the volumes to the new names
+### Option B: Copy the volumes to the new names
 
 Do this with the stack **stopped**, so nothing is writing while the copy runs.
 
@@ -60,7 +60,7 @@ for v in tessary-postgres-data caddy-data caddy-config; do
 done
 ```
 
-Then start the stack normally — `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y` — and confirm with `docker compose -p tessary ps` that every service is healthy and your existing projects and traces are still there.
+Then start the stack normally with `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`, and confirm with `docker compose -p tessary ps` that every service is healthy and your existing projects and traces are still there.
 
 This copies rather than moves, so the old volumes are still on disk if something is wrong. Remove them only once you are satisfied:
 
@@ -72,9 +72,9 @@ docker volume rm evals-platform_tessary-postgres-data evals-platform_caddy-data 
 
 The three dashboards and the alert rules under `observability/` changed identity in the same release: their `uid`s are now `tessary-overview`, `tessary-ingest` and `tessary-cpu`, the Grafana folder they expect is `tessary`, and every panel query selects `service_name="tessary-backend"` instead of `service_name="evals-platform-backend"`.
 
-Nothing in a running Grafana renames itself when the files change. Create the `tessary` folder first — the alert-rule import fails outright if it does not already exist — then re-import all three dashboards and the alert rules. The old dashboards keep their old `uid`s and their annotation history; delete them when you are ready.
+Nothing in a running Grafana renames itself when the files change. Create the `tessary` folder first, because the alert-rule import fails outright if it does not already exist. Then re-import all three dashboards and the alert rules. The old dashboards keep their old `uid`s and their annotation history; delete them when you are ready.
 
-Metric and log series recorded before the upgrade carry the old `service_name`, and renaming a query does not go back and rename the data. Panels will show history stopping at the upgrade and starting again under the new name. If you need continuity across your retention window, widen the selector to a regex over both names — `service_name=~"(evals-platform|tessary)-backend"` — and narrow it back once the old data has aged out. Otherwise the split is simply the cost, and is the trade this rename accepted.
+Metric and log series recorded before the upgrade carry the old `service_name`, and renaming a query does not go back and rename the data. Panels will show history stopping at the upgrade and starting again under the new name. If you need continuity across your retention window, widen the selector to a regex over both names, such as `service_name=~"(evals-platform|tessary)-backend"`, and narrow it back once the old data has aged out. Otherwise the split is simply the cost, and is the trade this rename accepted.
 
 ## One-time: `EVALS_` settings are now `TESSARY_`
 
@@ -202,7 +202,7 @@ Postgres schema migrations run automatically through Liquibase when the backend 
 </Steps>
 
 <Note>
-  A configuration published from a registry can never be older than the images it names: every release publishes both, and the configuration carries that release's version as its own default. Pin a release by naming it — `oci://docker.io/tessaryai/tessary:compose-<version>`, for a published release version — and upgrade by dropping back to the `compose` tag.
+  A configuration published from a registry can never be older than the images it names: every release publishes both, and the configuration carries that release's version as its own default. Pin a release by naming it (`oci://docker.io/tessaryai/tessary:compose-<version>`, for a published release version), and upgrade by dropping back to the `compose` tag.
 </Note>
 
 Your data is in named volumes (`tessary-postgres-data`, `tessary-sandbox-work`), so it survives a recreate. Only `docker compose -p tessary down -v` removes it.
