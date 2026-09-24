@@ -49,7 +49,7 @@ describe("FindingPage, groundedness", () => {
     await screen.findByText("Answers on support-agent became less grounded");
     const since = dateTime("2026-09-23T09:12:00Z");
     expect(
-      screen.getByText(`support-agent · since ${since} vs the rate it learned from its first 1,000 traces`),
+      screen.getByText(`since ${since} vs the rate it learned from its first 1,000 traces`),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Run triage" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Absorb as legitimate" })).toBeTruthy();

@@ -185,7 +185,7 @@ export function FlaggedAnswers({
                     <span className="tabular-nums">{a.score != null ? a.score.toFixed(2) : "–"}</span>
                   </span>
                   <span
-                    className={cn("text-small", on ? "text-fg font-medium" : "text-fg-secondary")}
+                    className={cn("text-small wrap-anywhere", on ? "text-fg font-medium" : "text-fg-secondary")}
                     style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
                   >
                     {sentence ?? <span className="font-mono text-muted">{a.traceId}</span>}
@@ -283,7 +283,7 @@ export function MarkedAnswer({ answer, sentences }: { answer: string; sentences:
   }
   if (at < answer.length) parts.push(answer.slice(at));
   return (
-    <p className="m-0 text-body text-fg-secondary whitespace-pre-wrap" style={{ lineHeight: 1.7 }}>
+    <p className="m-0 text-body text-fg-secondary whitespace-pre-wrap wrap-anywhere" style={{ lineHeight: 1.7 }}>
       {parts}
     </p>
   );
@@ -334,7 +334,7 @@ function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
                 <div className="flex flex-col gap-1.5">
                   <div className={SECTION_LABEL}>Question</div>
                   <p
-                    className="m-0 self-start rounded-card bg-raised py-2.5 px-3.5 text-body text-fg whitespace-pre-wrap"
+                    className="m-0 self-start rounded-card bg-raised py-2.5 px-3.5 text-body text-fg whitespace-pre-wrap wrap-anywhere"
                     style={{ maxWidth: 520 }}
                   >
                     {row.question}
@@ -354,9 +354,11 @@ function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
                         <div key={i} className="rounded-control border border-border overflow-hidden">
                           <div className="flex items-center gap-2 bg-raised py-1.75 px-3 font-mono text-small text-fg-secondary">
                             <FileText size={13} aria-hidden="true" className="text-muted shrink-0" />
-                            <span className="truncate">{d.title ?? `Document ${i + 1}`}</span>
+                            <span className="truncate" title={d.title ?? undefined}>
+                              {d.title ?? `Document ${i + 1}`}
+                            </span>
                           </div>
-                          <p className="m-0 py-2.5 px-3 text-small text-fg-secondary whitespace-pre-wrap">{d.text}</p>
+                          <p className="m-0 py-2.5 px-3 text-small text-fg-secondary whitespace-pre-wrap wrap-anywhere">{d.text}</p>
                         </div>
                       ))}
                     </div>
@@ -365,7 +367,7 @@ function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
                   // Nothing was retrieved, so the model checked the answer against the prompt itself.
                   <div className="flex flex-col gap-1.5">
                     <div className={SECTION_LABEL}>Prompt</div>
-                    <p className="m-0 rounded-control border border-border py-2.5 px-3 text-small text-fg-secondary whitespace-pre-wrap">
+                    <p className="m-0 rounded-control border border-border py-2.5 px-3 text-small text-fg-secondary whitespace-pre-wrap wrap-anywhere">
                       {documents.map((d) => d.text).join("\n\n")}
                     </p>
                   </div>
