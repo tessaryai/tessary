@@ -293,9 +293,10 @@ fi
 #                            too: coverage silently lost, the exact failure this manifest exists
 #                            to prevent.
 #   RUN_ENV_IF_PRESENT:<file> <VAR=value ...>
-#                            RUN_ENV when <file> exists, else plain RUN. For a RUN_ENV gate whose
-#                            overlay input is absent from a checkout without the overlay, so the
-#                            gate checks this tree's own input instead of failing on a missing path.
+#                            RUN_ENV when <file> exists, else plain RUN. <file> is the OVERLAY's
+#                            marker (tessary-paid/pom.xml), never the input itself: with the overlay
+#                            present a missing input must reach the gate and fail it, not fall back
+#                            to this tree's input and pass.
 #   RUN_IF_PRESENT:<reason>  run it when the script FILE exists, else skip with that reason. Used
 #                            only for overlay-owned gates, where the script living inside
 #                            tessary-paid/ makes its own presence the honest edition signal.
@@ -310,7 +311,7 @@ _manifest() {
     cat <<'MANIFEST'
 docs-links|scripts/check-docs-links.sh|EXCLUDED:dropped 2026-09-09 under the standing rule in this file's header that no gate reads a .md or .mdx file. It WAS markdown: it resolved relative links across 81 markdown files. Nothing survives the no-markdown rule|EXCLUDED:same|declared here only so the completeness assertion can see it
 version-consistency|scripts/check-version-consistency.sh|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|RUN_ENV:VERSION_LITERAL_EXEMPT=tessary-paid/OPEN-CORE.md|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. VERSION_LITERAL_EXEMPT covers dated literals this script can't name directly (boundary rule 5). Pure text; unlike check-selfhost-images.sh, no Docker or registry call.
-classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV_IF_PRESENT:tessary-paid/devdocs/reference/classifier-quality.md CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree. The paid column passes the overlay's page, which also pins frustration; the page is an overlay path the script may not name itself (boundary rule 5)
+classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN_ENV_IF_PRESENT:tessary-paid/pom.xml CQ_DOC=tessary-paid/devdocs/reference/classifier-quality.md|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree. The paid column passes the overlay's page, which also pins frustration; the page is an overlay path the script may not name itself (boundary rule 5)
 module-hygiene|scripts/check-module-hygiene.sh|RUN|RUN|self-scoping on the overlay pom; see the note below the manifest
 open-boundary|scripts/check-open-boundary.sh|RUN|RUN|the open/paid direction check itself
 license-headers|scripts/check-license-headers.sh|RUN|RUN|SPDX header presence over the publishable tree (derived from export-denylist.txt's own `delete` rows, so private trees are out of scope for both editions the same way); the script's own header names the interim manual-audit + weekly-CI posture it runs under until branch protection is available
