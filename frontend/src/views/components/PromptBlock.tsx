@@ -30,7 +30,7 @@ export function PromptBlock({
         {label}
       </div>
       <div className="rounded-card border border-border-strong bg-surface p-4">
-        <code className="font-mono text-small text-fg-secondary leading-[1.75] whitespace-pre-wrap">
+        <code className="block font-mono text-small text-fg-secondary leading-[1.75] whitespace-pre-wrap wrap-anywhere">
           {parts.map((part, i) => (
             <span key={i}>
               {part}

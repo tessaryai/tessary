@@ -1088,11 +1088,15 @@ function FrustrationCauses({
                 <div className="rounded-control border border-border overflow-hidden">
                   <div className="flex items-center gap-2.5 bg-raised py-1.75 px-3 font-mono text-small">
                     <span className="text-muted capitalize">{where.kind}</span>
-                    {where.path && <span className="text-fg truncate">{where.path}</span>}
+                    {where.path && (
+                      <span className="text-fg truncate" title={where.path}>
+                        {where.path}
+                      </span>
+                    )}
                     {where.commit && <span className="ml-auto text-muted">{truncateId(where.commit)}</span>}
                   </div>
                   {where.excerpt && (
-                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap">
+                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap wrap-anywhere">
                       {where.excerpt}
                     </pre>
                   )}
@@ -1240,11 +1244,15 @@ function GroundednessCauses({
                 <div className="rounded-control border border-border overflow-hidden">
                   <div className="flex items-center gap-2.5 bg-raised py-1.75 px-3 font-mono text-small">
                     <span className="text-muted capitalize">{where.kind}</span>
-                    {where.path && <span className="text-fg truncate">{where.path}</span>}
+                    {where.path && (
+                      <span className="text-fg truncate" title={where.path}>
+                        {where.path}
+                      </span>
+                    )}
                     {where.commit && <span className="ml-auto text-muted">{truncateId(where.commit)}</span>}
                   </div>
                   {where.excerpt && (
-                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap">
+                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap wrap-anywhere">
                       {where.excerpt}
                     </pre>
                   )}

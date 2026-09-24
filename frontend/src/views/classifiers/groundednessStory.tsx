@@ -41,22 +41,16 @@ export function GroundednessHeader({
   onResolve: (action: "expected" | "not_expected") => void;
 }) {
   const rate = detail.rate;
-  const callSite = finding.callSiteId ?? rate.bucketKey;
   const since = rate.onsetAt ? dateTime(rate.onsetAt) : null;
   const learned = `vs the rate it learned from its first ${detail.baselineTraces.toLocaleString()} traces`;
   return (
     <PageHeader
       breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
-      kicker={
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Groundedness"}</span>
-          {callSite && <span className="text-muted">{callSite}</span>}
-        </span>
-      }
+      kicker={<span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Groundedness"}</span>}
       title={finding.title}
       subtitle={
         <span title={finding.causeKey}>
-          {[callSite, since ? `since ${since} ${learned}` : learned].filter(Boolean).join(" · ")}
+          {since ? `since ${since} ${learned}` : learned}
         </span>
       }
       actions={
