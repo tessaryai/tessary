@@ -96,7 +96,7 @@ class MetricDriftCaseShapeTest {
         return row(verdict, human, EVIDENCE);
     }
 
-    /** PROGRAM.md §7's blob, as {@code MetricFindingEvidence} writes it. */
+    /** metric-drift.md §7's blob, as {@code MetricFindingEvidence} writes it. */
     private static final String EVIDENCE = """
             {"measure":"turn_duration","bucket":{"kind":"call_site","key":"discover-sales-prospects"},
              "reference":"pinned","w1_log":0.34,"ratio":1.4049,"direction":"up","n_ref":4210,"n_cur":1180,

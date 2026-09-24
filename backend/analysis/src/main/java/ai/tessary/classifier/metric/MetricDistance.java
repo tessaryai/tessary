@@ -3,7 +3,7 @@ package ai.tessary.classifier.metric;
 
 /**
  * Signed Wasserstein-1 distance between two {@link MetricSketch}es — the entire statistic behind
- * metric drift ({@code classifiers/metric_drift/PROGRAM.md} §4). Given a bucket's reference window and
+ * metric drift ({@code devdocs/concepts/metric-drift.md} §4). Given a bucket's reference window and
  * its current one, this is the single number the detector thresholds and the finding reports.
  *
  * <h2>Why W₁ on logs, and not a test</h2>
@@ -15,7 +15,7 @@ package ai.tessary.classifier.metric;
  *
  * <p>It is deliberately <b>not</b> a p-value. A KS test over a 100k-trace window calls a
  * three-millisecond shift significant, because significance inflates with sample size while effect size
- * does not. PROGRAM.md §4.2 names that as the single most common way distribution monitoring fails in
+ * does not. metric-drift.md §4.2 names that as the single most common way distribution monitoring fails in
  * production; W₁ is an effect size, and the detector's floor is set on the same scale a human reads.
  *
  * <h2>The arithmetic</h2>
@@ -44,7 +44,7 @@ package ai.tessary.classifier.metric;
  * more expensive. Negative means below. Both alarm at the same bar: faster and cheaper is reported as
  * loudly as slower and more expensive, because an agent that quietly stopped doing its verification step
  * reads as a win on
- * every other dashboard in the product (PROGRAM.md §4.4).
+ * every other dashboard in the product (metric-drift.md §4.4).
  */
 public final class MetricDistance {
 
@@ -99,7 +99,7 @@ public final class MetricDistance {
      * The multiplicative shift a finding reports: {@code 1.40} for "1.4× slower", {@code 0.71} for
      * "29% faster". Simply {@code e^signedW1}, so the sign carries through as above-one or below-one.
      *
-     * <p>The evidence blob carries this <b>and</b> the raw {@code w1_log} it came from (PROGRAM.md §7).
+     * <p>The evidence blob carries this <b>and</b> the raw {@code w1_log} it came from (metric-drift.md §7).
      * Keeping both is deliberate: the ratio is what a human reads, the raw value is what the threshold
      * was set on, and an eval that has to re-derive one from the other is an eval that can disagree with
      * the detector it is measuring.

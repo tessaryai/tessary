@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * The replay. {@code classifiers/tool_error/PROGRAM.md} §5.
+ * The replay. {@code devdocs/concepts/tool-error.md} §5.
  *
  * <p>These are the behaviours that only exist over a time series, and so cannot be seen in
  * {@code ToolErrorDetectorTest}: which traffic becomes the reference, whether a recovered tool still

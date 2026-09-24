@@ -5,11 +5,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * A Bernoulli CUSUM over one tool's calls: in-control rate and running state in, an alarm or a reason
- * for silence out. Design contract: {@code classifiers/tool_error/PROGRAM.md} §4.
+ * for silence out. Design contract: {@code devdocs/concepts/tool-error.md} §4.
  *
- * <p>Pure by design: no database, no Spring, no clock, the caller supplies event times. PROGRAM.md §12's
- * null run replays a real corpus through this class directly, and that run, not a review, decides
- * {@link ToolErrorConfig#ARL_FIT_INTERCEPT}.
+ * <p>Pure by design: no database, no Spring, no clock, the caller supplies event times.
  *
  * <p>Sequential rather than windowed, because a fixed window both delays and dilutes a rate change: a
  * regression that begins mid-window is averaged against its own healthy first half. A CUSUM accumulates
@@ -156,8 +154,6 @@ public final class ToolErrorDetector {
     /**
      * Cohen's h between two proportions: the reported effect size, never the trigger.
      *
-     * <p>Exposed because the eval harness prints it beside the run length, and a harness computing its
-     * own copy is a harness that can disagree with the detector it is measuring.
      */
     public static double cohensH(double refRate, double curRate) {
         return 2.0 * (Math.asin(Math.sqrt(clamp01(curRate))) - Math.asin(Math.sqrt(clamp01(refRate))));

@@ -27,10 +27,9 @@
 # LiteLLM's own `sample_spec` documentation stub). Carried into the price book
 # unguarded, those entries make a lookup SUCCEED into an all-zero cost, which
 # reads as "this was free" rather than "we have no rate for this". That guard now
-# lives where it belongs, in the two parsers themselves — see the shared
-# `hasTokenRate` contract documented on PriceSnapshot and TokenPriceBook — so the
-# invariant holds no matter how the file was produced, instead of depending on a
-# shell script having filtered it first.
+# lives where it belongs, in the parser itself (`PriceSnapshot.pricesTokens`), so
+# the invariant holds no matter how the file was produced, instead of depending
+# on a shell script having filtered it first.
 #
 # The output is loaded into the database by PriceBookImporter, which versions a
 # snapshot by the hash of its bytes: a refreshed file is a NEW price_book version,

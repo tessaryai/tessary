@@ -148,9 +148,8 @@
 #                                          engine it runs, so with the overlay gone there's no SOP
 #                                          compile service and a skip is the true answer rather than a hole.)
 #   scripts/check-mcp-bridge.sh            (node:test over packages/mcp, the @tessaryai/mcp stdio bridge)
-#   scripts/check-classifiers.sh           (pytest over classifiers/tests, including the two jshell bridges
-#                                          into the shipping detectors; runs after backend, whose build
-#                                          produces the classes they load)
+#   scripts/check-classifiers.sh           (pytest over classifiers/tests: the open eval framework and
+#                                          groundedness serve.py)
 #   scripts/check-classifier-parity.sh     (Python<->Java/JS classifier port pins. Three of its six
 #                                          pins are on overlay-owned modules and three are not, so
 #                                          it takes --edition and runs 3 or 6; see its own header.)
@@ -342,7 +341,7 @@ frontend|scripts/check-frontend.sh|RUN|RUN|already the open gate by construction
 paid-image|tessary-paid/scripts/check-paid-image.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:the open edition has no paid image to layer|a gate that lives in the overlay; the static half only here, `task paid:image:check` runs the Docker half
 paid-frontend|tessary-paid/scripts/check-paid-frontend.sh|RUN_IF_PRESENT:no tessary-paid/ overlay in this checkout|SKIP:this edition has no paid frontend surfaces; they live in the overlay|a gate that lives in the overlay
 backend|scripts/check-backend.sh|RUN|RUN:-P !paid|one script, both editions; the JDK-25 guard is in front of both
-classifiers|scripts/check-classifiers.sh|RUN|RUN|classifiers/tests over uv; open on both sides (pyproject's testpaths is the open tests/ only). ORDERED AFTER backend: the tool_error and metric_drift jshell bridges load backend/*/target/classes, and the script fails rather than letting their tests skip when those are missing
+classifiers|scripts/check-classifiers.sh|RUN|RUN|classifiers/tests over uv; open on both sides (pyproject's testpaths is the open tests/ only)
 conformance-parity|scripts/check-conformance-parity.sh|EXCLUDED:run by `task conformance:parity` and the CI conformance-parity job, never by this pipeline|EXCLUDED:same, and its generator is paid so the open edition would skip it anyway|declared here only so the completeness assertion can see it
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|EXCLUDED:same|declared here only so the completeness assertion can see it
 open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or the dispatch-only boot-checks.yml CI workflow (workflow_dispatch only, see its header), never part of `task check`|EXCLUDED:same|declared here only so the completeness assertion can see it
@@ -589,6 +588,7 @@ if [ -z "$SLICES" ]; then
     _gate compose-artifact
     _gate classify-service
     _gate groundedness-serve
+    _gate classifiers
     _gate groundedness-setup
     _gate slack-service
     _gate sandbox-runner
@@ -601,7 +601,6 @@ if [ -z "$SLICES" ]; then
     _gate paid-image
     _gate paid-frontend
     _gate backend
-    _gate classifiers
     _summary
     exit 0
 fi

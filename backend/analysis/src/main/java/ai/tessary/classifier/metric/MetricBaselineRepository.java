@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * JdbcClient repository for {@code metric_baseline} — the per-(bucket × measure) window state of the
- * metric-drift classifiers. Design contract: {@code classifiers/metric_drift/PROGRAM.md}.
+ * metric-drift classifiers. Design contract: {@code devdocs/concepts/metric-drift.md}.
  *
  * <p>Mirrors {@code BehaviorProfileRepository}'s shape on purpose: one row carries everything a sweep
  * needs, the counters and the watermark that guards them move in a single statement, and the writers

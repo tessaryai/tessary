@@ -47,10 +47,7 @@ An unknown slice fails before anything runs, so a typo can never silently select
 **Two gates need host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
 vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
 stops if either is missing. `classifiers` runs `uv sync --frozen --group dev --extra quality` and
-pytest over `classifiers/tests`, so it needs `uv`. Its `tool_error` and `metric_drift` bridge tests
-drive the shipping detectors through `jshell` against `backend/*/target/classes`, which is why the row
-runs after `backend`; it fails rather than letting those tests skip when the classes or `jshell` are
-missing. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
+pytest over `classifiers/tests`, so it needs `uv`. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
 it runs via `task contract:plugin` and `drift-checks.yml`. See
 [`contract/tests/README.md`](../../contract/tests/README.md).
 

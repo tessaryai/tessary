@@ -16,7 +16,7 @@ import ai.tessary.classifier.toolerror.ToolFailure.Source;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
-/** The statistic. {@code classifiers/tool_error/PROGRAM.md} §4. */
+/** The statistic. {@code devdocs/concepts/tool-error.md} §4. */
 class ToolErrorDetectorTest {
 
     private static final ToolErrorConfig CONFIG = ToolErrorConfig.defaults();
@@ -221,7 +221,7 @@ class ToolErrorDetectorTest {
         assertEquals(Silence.NO_BASELINE, d.silence());
     }
 
-    /** A wait, not a skip — the distinction PROGRAM.md §3.3 turns on. */
+    /** A wait, not a skip — the distinction tool-error.md §3.3 turns on. */
     @Test
     void aThinReferenceWaitsRatherThanJudging() {
         Decision d = ToolErrorDetector.decide(State.EMPTY, pinned(100, 1), CONFIG);

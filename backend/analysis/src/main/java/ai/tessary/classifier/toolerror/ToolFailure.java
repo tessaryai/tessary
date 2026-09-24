@@ -7,7 +7,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What counts as a failed tool call, and how two failures are recognized as the same kind. Design
- * contract: {@code classifiers/tool_error/PROGRAM.md} §1 and §2.
+ * contract: {@code devdocs/concepts/tool-error.md} §1 and §2.
  *
  * <p><b>This class is the definition.</b> Not a helper beside it — the only expression of it that
  * exists. {@link #SQL_PREDICATE} is interpolated by every reader that counts failures, and

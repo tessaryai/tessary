@@ -7,8 +7,7 @@ name: Check
 # boot-checks.yml.
 #
 # Everything before the final step assembles the toolchains that script needs in one job:
-# Java (backend, and check-backend.sh hard-fails on the wrong JDK first; its jshell also runs the
-# classifier bridges), pnpm + node (frontend, classify-service, sandbox-runner and mcp-bridge),
+# Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm + node (frontend, classify-service, sandbox-runner and mcp-bridge),
 # python (the gates that shell out to python3), uv (the classifiers gate), and caddy on PATH (the
 # caddy gate). Order matters once: pnpm/action-setup must run before
 # actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
@@ -204,8 +203,7 @@ jobs:
       # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
       - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
 
-      # check-classifiers.sh: `uv sync --frozen` + pytest over classifiers/tests. It runs after the
-      # backend gate inside check.sh, because its jshell bridges load backend/*/target/classes.
+      # check-classifiers.sh: `uv sync --frozen` + pytest over classifiers/tests.
       # check-groundedness-serve.sh runs serve.py's tests through `uv run`, and
       # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template.
       - uses: astral-sh/setup-uv@v7

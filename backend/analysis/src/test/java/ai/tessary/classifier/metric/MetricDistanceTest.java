@@ -55,7 +55,7 @@ class MetricDistanceTest {
      * distance that only worked in the middle of its range would be a coincidence.
      *
      * <p>Both directions, at the same tolerance: a 1.4× speed-up is measured exactly as well as a 1.4×
-     * slowdown, which is what PROGRAM.md §4.4 requires of a detector meant to notice an agent that
+     * slowdown, which is what metric-drift.md §4.4 requires of a detector meant to notice an agent that
      * quietly stopped doing work.
      */
     @Test
@@ -92,9 +92,9 @@ class MetricDistanceTest {
     }
 
     /**
-     * Two independent draws from the same distribution — the shape of PLAN.md §9's null run, in
-     * miniature. Sampling noise alone must stay far below {@code w1_floor} (0.139 as it stands), or the
-     * classifier would fire on ordinary traffic before it ever saw a regression.
+     * Two independent draws from the same distribution — a null run in miniature. Sampling noise alone
+     * must stay far below {@code w1_floor} (0.139 as it stands), or the classifier would fire on ordinary
+     * traffic before it ever saw a regression.
      */
     @Test
     void independentDrawsFromOneDistributionStayNearZero() {
@@ -148,7 +148,7 @@ class MetricDistanceTest {
      * Mass that moves out of the top of the range still reads as a shift up. It reads as a smaller one
      * than the truth — the overflow counter knows the samples left, not how far they went — and
      * understating is the only safe direction to be wrong in. The overflow counter itself is what tells
-     * an operator the range needs moving (PLAN.md §11).
+     * an operator the range needs moving.
      */
     @Test
     void massLeavingTheRangeStillRegistersAsAShift() {

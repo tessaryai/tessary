@@ -31,7 +31,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * Recomputes a project's tool-error findings and writes them down. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5 and §6.
+ * {@code devdocs/concepts/tool-error.md} §5 and §6.
  *
  * <p>One pass is: read the hourly aggregate, replay it, and upsert one finding per tool currently in a
  * spell. There is no cursor, no watermark and no transaction spanning passes, because nothing carries
@@ -53,7 +53,7 @@ public class ToolErrorService {
      * How far back a replay reads. Long enough to hold a reference plus a spell, short enough that the
      * aggregate stays a cheap read; the same 28 days {@code TrendService} replays for grader pass rate.
      *
-     * <p>PROGRAM.md §5.3 records the limit this imposes. Anchored to the project's newest tool-call
+     * <p>tool-error.md §5.3 records the limit this imposes. Anchored to the project's newest tool-call
      * event ({@link ToolErrorRepository#newestEventAt}), not to wall-clock now: a backfill whose traffic
      * is all months old still gets a window that contains it, where {@code now - 28d} would read nothing
      * but the empty months since.
@@ -360,7 +360,7 @@ public class ToolErrorService {
      * Both are enumerated in full: a cap here would be a sample with an undeclared selection rule.
      *
      * <p><b>No baseline.</b> A CUSUM has one reference and it is a fitted rate, not a window of rows
-     * (PROGRAM.md §4.6). Enumerating the traffic before onset would assert a two-window comparison this
+     * (tool-error.md §4.6). Enumerating the traffic before onset would assert a two-window comparison this
      * detector never made.
      *
      * <p><b>No exemplar.</b> Naming one trace as the entry point biases the run that reads it; the

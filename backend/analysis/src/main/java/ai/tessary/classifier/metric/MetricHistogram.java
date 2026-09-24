@@ -37,8 +37,7 @@ import org.jspecify.annotations.Nullable;
  * {@link #count()}. Both matter. Dropping it would make a bucket that moved <i>out</i> of range look
  * unchanged, which is the one move a drift detector must not miss. Folding it into the first or last
  * bin would hide the fact that the range is wrong: traffic pinned in overflow is a configuration bug,
- * and PLAN.md §11 lists "overflow bin non-empty in the null run" as the signal that the cost range
- * needs moving. Distance treats the edge counters as two extra slots one bin wide, which understates
+ * and a non-empty overflow bin is the signal that the range needs moving. Distance treats the edge counters as two extra slots one bin wide, which understates
  * a shift that lands out of range and never overstates one.
  *
  * <p>Not thread-safe. Each sweep pass owns its sketches under the signal job's existing lease.

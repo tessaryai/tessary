@@ -170,8 +170,8 @@ class MetricSuppressionTest {
     @Test
     @DisplayName("a tightened bar is what a swallowed regression is corrected with")
     void raisingTheFractionUnsuppresses() {
-        // PLAN.md §11's response to "suppression hid a real turn regression" is to raise this number, so
-        // it has to actually be the dial. Same pair of shifts, two bars, two answers.
+        // The response to "suppression hid a real turn regression" is to raise this number, so it has to
+        // actually be the dial. Same pair of shifts, two bars, two answers.
         Shift turn = turnShift(2_000, 4_000);
         Shift tool = toolShift("tool:search_docs", 600, 1_800, CALL_SITE);
 

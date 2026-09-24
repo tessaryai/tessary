@@ -60,7 +60,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * <p>The signal is the seeded {@code duration_drift} row wearing a config blob shrunk to fixture sizes.
  * The sweep is invoked directly rather than through {@link ClassifierWorker}'s {@code Grain.WINDOW}
  * branch, so nothing here depends on the classifier being enabled, which it is not until
- * PLAN.md §9's null case sets a measured {@code w1_floor}.
+ * a null run against real traffic sets a measured {@code w1_floor}.
  */
 @SpringBootTest
 class MetricDriftSweepIntegrationTest {
@@ -84,7 +84,7 @@ class MetricDriftSweepIntegrationTest {
     /**
      * The {@code cost_drift} shape at fixture sizes. One measure, because {@code cost} is the only measure
      * under that switch that can open a finding at all — the four token buckets ride on the finding as
-     * evidence and are not nameable here (PROGRAM.md §6.1).
+     * evidence and are not nameable here (metric-drift.md §6.1).
      */
     private static final String CONFIG_COST = """
             {"measures": ["cost"], "window_target_count": 50, "min_sample": 30}""";

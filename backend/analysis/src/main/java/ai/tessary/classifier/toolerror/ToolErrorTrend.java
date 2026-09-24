@@ -15,14 +15,14 @@ import org.jspecify.annotations.Nullable;
 /**
  * Replays a project's hourly tool tallies through {@link ToolErrorDetector} and reports which tools are
  * in an unrecovered degraded spell right now. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5.
+ * {@code devdocs/concepts/tool-error.md} §5.
  *
  * <p><b>Pure given its input, and that is still the whole design.</b> No database, no Spring, no clock.
  * What changed is that the accumulator it starts from is now an input rather than always zero: a sweep
  * hands in what the last sweep left, and gets back what this one leaves.
  *
  * <p>That reintroduces the cursor/double-count bug class this classifier used to be immune to, and
- * {@code classifiers/tool_error/PROGRAM.md} §5 explains what bought it back. The defence is entirely in
+ * {@code devdocs/concepts/tool-error.md} §5 explains what bought it back. The defence is entirely in
  * {@link CarriedState}: fold only buckets strictly after the watermark, and rebuild from scratch rather
  * than resume whenever the tuning or the reference has moved. Both live on the type rather than in a
  * caller's head, because a caller that forgets either produces wrong numbers with nothing to notice.
@@ -38,7 +38,7 @@ import org.jspecify.annotations.Nullable;
  * so a grouped replay is very slightly slower to forget a burst than a per-call one. It never makes the
  * detector more sensitive. What it buys is that the whole history is one aggregate query instead of every
  * row, which is what makes recompute affordable at all. §4.3's run lengths were computed per call, so
- * PROGRAM.md §12's null run must be read as the authority over them.
+ * a grouped replay's measured run lengths are the authority over them.
  */
 public final class ToolErrorTrend {
 

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The references humans have accepted for a project's tools — the store behind <em>Legitimate — absorb</em>
- * on a tool-error finding. Design contract: {@code classifiers/tool_error/PROGRAM.md} §5 and migration
+ * on a tool-error finding. Design contract: {@code devdocs/concepts/tool-error.md} §5 and migration
  * {@code 0050}.
  *
  * <p>Read once per replay and written once per press, which is why it is a whole-project read rather than a
