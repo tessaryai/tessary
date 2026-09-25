@@ -279,8 +279,7 @@ class LauncherEncoderScorerBackpressureTest {
             LauncherEncoderScorer refused = scorer(new ObserverProperties(), held.getLocalPort());
 
             EncoderUnreachableException e = assertThrows(
-                    EncoderUnreachableException.class,
-                    () -> refused.scoreResponses("groundedness", List.of(r("a"))));
+                    EncoderUnreachableException.class, () -> refused.scoreResponses("groundedness", List.of(r("a"))));
 
             assertTrue(LauncherEncoderScorer.isUnreachable(e), String.valueOf(e.getCause()));
         }
