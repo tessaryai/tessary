@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -53,14 +52,6 @@ public class FindingEvidenceRepository {
      * (finding_id, role, rank)} stores, so the scan and the sort agree.
      */
     private static final String ORDER = "role, rank NULLS LAST, id";
-
-    /**
-     * The other ordering: most significant role first, for the readers that truncate. Ordering by
-     * {@link #ORDER} instead would sort the vocabulary alphabetically, spending the budget on
-     * {@code baseline} (the healthy side, compared against) before it reached the flagged one.
-     */
-    private static final String ROLE_SIGNIFICANCE = "CASE role WHEN 'exemplar' THEN 0 WHEN 'changepoint' THEN 1"
-            + " WHEN 'witness' THEN 2 WHEN 'member' THEN 3 ELSE 4 END";
 
     /**
      * Where a null {@code rank} sorts in the cursor comparison, past every real rank, matching the
@@ -243,12 +234,6 @@ public class FindingEvidenceRepository {
         return record(projectId, findingId, role, refs, now);
     }
 
-    /** Convenience for the common single-exemplar write. */
-    public int recordExemplarTrace(String projectId, String findingId, @Nullable String traceId, String now) {
-        if (traceId == null || traceId.isBlank()) return 0;
-        return record(projectId, findingId, FindingEvidenceRow.Role.EXEMPLAR, List.of(Ref.trace(traceId)), now);
-    }
-
     /**
      * The finding's whole evidence set, role then rank, the order the detector wrote it in.
      *
@@ -271,39 +256,20 @@ public class FindingEvidenceRepository {
             List<FindingEvidenceRow> rows, @Nullable String nextCursor) {}
 
     /**
-     * One page of a finding's evidence in the detector's own order, optionally narrowed to a role.
-     *
-     * <p>The keyset is {@code (role, rank, id)}, not {@code rank}: rank is neither dense nor unique
-     * across the set (two roles number from zero independently, and gaps appear where a re-record
-     * conflicted), so paging on rank alone would skip rows and interleave roles. The id tiebreak makes
-     * the order total.
-     *
-     * <p>A null rank sorts to the tail, matching {@code ix_finding_evidence_finding}'s NULLS LAST, and the
-     * cursor comparison coalesces it to {@link #RANK_TAIL} so those rows stay reachable on later pages
-     * rather than silently dropping out.
+     * The first page of a finding's evidence in the detector's own order, with a cursor that is non-null
+     * when more rows follow.
      *
      * <p>Over-fetches by one, as every keyset reader here does, so a next page needs no count.
      */
-    public Page page(String projectId, String findingId, @Nullable String role, int limit, @Nullable String cursor) {
-        Key key = decodeCursor(cursor);
-        StringBuilder sql = new StringBuilder(
-                "SELECT " + COLS + " FROM finding_evidence WHERE project_id = :pid AND finding_id = :fid");
-        if (role != null) sql.append(" AND role = :role");
-        if (key != null) {
-            sql.append(" AND (role, COALESCE(rank, ")
-                    .append(RANK_TAIL)
-                    .append("), id) > (CAST(:cRole AS text), CAST(:cRank AS integer), CAST(:cId AS text))");
-        }
-        sql.append(" ORDER BY ").append(ORDER).append(" LIMIT :n");
-        var spec = jdbc.sql(sql.toString())
+    public Page page(String projectId, String findingId, int limit) {
+        List<FindingEvidenceRow> rows = jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
+                        + " WHERE project_id = :pid AND finding_id = :fid"
+                        + " ORDER BY " + ORDER + " LIMIT :n")
                 .param("pid", projectId)
                 .param("fid", findingId)
-                .param("n", limit + 1);
-        if (role != null) spec = spec.param("role", role);
-        if (key != null) {
-            spec = spec.param("cRole", key.role()).param("cRank", key.rank()).param("cId", key.id());
-        }
-        List<FindingEvidenceRow> rows = spec.query((rs, n) -> map(rs)).list();
+                .param("n", limit + 1)
+                .query((rs, n) -> map(rs))
+                .list();
         if (rows.size() <= limit) return new Page(rows, null);
         // Seeded from the last row of THIS page, never from the over-fetched row: that one is the first
         // row of the next page and seeding from it would skip it.
@@ -383,11 +349,18 @@ public class FindingEvidenceRepository {
     public record SpanPage(List<SpanRef> rows, @Nullable String nextCursor) {}
 
     /**
-     * {@link #page}, with the span each ref names joined on. Same keyset, order and over-fetch, so a
-     * reader paging this and a reader paging the refs see the population in the same sequence; kept
-     * separate from {@link #page} because the dossier's enumeration wants ids and nothing else, while a
-     * reader judging one row — a person at the table, an agent on the MCP door — needs the row to say
-     * something.
+     * One page of a finding's evidence refs in the detector's own order, optionally narrowed to a role,
+     * with the span each ref names joined on. Same order and over-fetch as {@link #page}, so the dossier's
+     * enumeration and a reader paging this see the population in the same sequence; kept separate from
+     * {@link #page} because the enumeration wants ids and nothing else, while a reader judging one row — a
+     * person at the table, an agent on the MCP door — needs the row to say something.
+     *
+     * <p>The keyset is {@code (role, rank, id)}, not {@code rank}: rank is neither dense nor unique
+     * across the set (two roles number from zero independently, and gaps appear where a re-record
+     * conflicted), so paging on rank alone would skip rows and interleave roles. The id tiebreak makes
+     * the order total. A null rank sorts to the tail, matching {@code ix_finding_evidence_finding}'s
+     * NULLS LAST, and the cursor comparison coalesces it to {@link #RANK_TAIL} so those rows stay
+     * reachable on later pages rather than silently dropping out.
      *
      * <p>The join is LEFT and falls back to the trace's logical root for a trace-grain ref, so a
      * behaviour-drift finding still renders a name and a time rather than an id and four dashes. A ref
@@ -519,70 +492,6 @@ public class FindingEvidenceRepository {
                 .query((rs, n) -> new Tally(rs.getString("role"), rs.getLong("n")))
                 .list()) {
             out.put(tally.role(), tally.count());
-        }
-        return out;
-    }
-
-    /**
-     * The trace a Layer-2 run is pointed at: the lowest-ranked {@code exemplar}. Empty when the
-     * detector recorded none, or when the trace it recorded has since aged out and its row went with
-     * it, Layer 2 refuses to rule on a finding it cannot read, and this is where that shows up.
-     */
-    public Optional<String> exemplarTraceId(String projectId, String findingId) {
-        return jdbc.sql("SELECT trace_id FROM finding_evidence"
-                        + " WHERE project_id = :pid AND finding_id = :fid AND role = :role AND trace_id IS NOT NULL"
-                        + " ORDER BY rank NULLS LAST, id LIMIT 1")
-                .param("pid", projectId)
-                .param("fid", findingId)
-                .param("role", FindingEvidenceRow.Role.EXEMPLAR)
-                .query(String.class)
-                .optional();
-    }
-
-    /**
-     * The trace a Layer-2 run is anchored to: the most significant trace-grain ref the finding carries,
-     * whatever role wrote it. Empty only when the finding cites no trace at all.
-     *
-     * <p>Role-agnostic on purpose: not every classifier cites {@code exemplar} (tool error cites
-     * {@code witness} and {@code member}; metric drift cites {@code member} and {@code baseline}), so
-     * demanding an exemplar would refuse analysis on findings that never write one.
-     *
-     * <p>This resolves a session and a deploy for the job rather than pointing the agent at what to
-     * read, it pages evidence through MCP and decides that itself. The significance order still
-     * matters: a {@code baseline} trace would name the healthy side's deploy.
-     */
-    public Optional<String> anchorTraceId(String projectId, String findingId) {
-        return jdbc.sql("SELECT trace_id FROM finding_evidence"
-                        + " WHERE project_id = :pid AND finding_id = :fid AND trace_id IS NOT NULL"
-                        + " ORDER BY " + ROLE_SIGNIFICANCE + ", rank NULLS LAST, id LIMIT 1")
-                .param("pid", projectId)
-                .param("fid", findingId)
-                .query(String.class)
-                .optional();
-    }
-
-    /**
-     * The traces a set of findings recorded, most significant first, the case page's exemplar list and
-     * the grader lane's input, read in one query so a page of cases is not N of them.
-     *
-     * <p>"Most significant" is an explicit order, not the role column's: alphabetical order would put
-     * {@code baseline} (the healthy side, compared against) ahead of the exemplars. Every caller here
-     * truncates, and spending that budget on the wrong side of the comparison would report that graders
-     * found nothing wrong, true of a baseline, and meaningless for the finding.
-     */
-    public Map<String, List<String>> traceIdsByFinding(String projectId, List<String> findingIds) {
-        Map<String, List<String>> out = new LinkedHashMap<>();
-        if (findingIds.isEmpty()) return out;
-        record Pair(String findingId, String traceId) {}
-        for (Pair pair : jdbc.sql("SELECT finding_id, trace_id FROM finding_evidence"
-                        + " WHERE project_id = :pid AND finding_id IN (:ids) AND trace_id IS NOT NULL"
-                        + " ORDER BY finding_id, " + ROLE_SIGNIFICANCE + ", rank NULLS LAST, id")
-                .param("pid", projectId)
-                .param("ids", findingIds)
-                .query((rs, n) -> new Pair(rs.getString("finding_id"), rs.getString("trace_id")))
-                .list()) {
-            List<String> traces = out.computeIfAbsent(pair.findingId(), k -> new ArrayList<>());
-            if (!traces.contains(pair.traceId())) traces.add(pair.traceId());
         }
         return out;
     }

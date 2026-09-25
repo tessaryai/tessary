@@ -28,12 +28,6 @@ import org.junit.jupiter.api.Test;
 class PasswordAuthProviderTest {
 
     @Test
-    @DisplayName("isEnabled() is unconditionally true -- no external config to be missing")
-    void alwaysEnabled() {
-        assertTrue(new PasswordAuthProvider(mock(PrincipalRepository.class), new AuthProperties()).isEnabled());
-    }
-
-    @Test
     @DisplayName("supportsRedirectFlow() is false -- no OAuth dance")
     void noRedirectFlow() {
         assertEquals(

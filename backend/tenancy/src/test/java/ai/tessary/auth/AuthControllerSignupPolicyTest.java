@@ -20,6 +20,7 @@ import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.PrincipalRepository;
 import ai.tessary.tenant.TenantService;
+import jakarta.servlet.http.Cookie;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,7 @@ class AuthControllerSignupPolicyTest {
 
     private static AuthProvider.AuthResult result(String email) {
         return new AuthProvider.AuthResult(
-                "token", null, Instant.now().plusSeconds(3600), "user_new", email, null, null, null, null, null);
+                "token", null, Instant.now().plusSeconds(3600), "user_new", email, null, null, null, null);
     }
 
     @Test
@@ -89,9 +90,12 @@ class AuthControllerSignupPolicyTest {
 
     @Test
     void callbackRefusalLandsOnTheSignInScreenWithTheReason() throws Exception {
-        when(provider.isEnabled()).thenReturn(false);
+        when(provider.supportsRedirectFlow()).thenReturn(true);
         when(provider.authenticateWithCode("code-1")).thenReturn(result("stranger@example.com"));
-        mvc.perform(get("/auth/callback").param("code", "code-1"))
+        mvc.perform(get("/auth/callback")
+                        .param("code", "code-1")
+                        .param("state", "state-1")
+                        .cookie(new Cookie("tessary-oauth-state", "state-1")))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", "http://localhost:3000/login?error=signup_refused"));
         verify(tenants, never()).upsertUserFromWorkos(any(), any(), any(), any());

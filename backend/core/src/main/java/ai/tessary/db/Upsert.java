@@ -38,30 +38,14 @@ public final class Upsert {
     /**
      * @param table the target table
      * @param values ordered map of column name to bound value; iteration order fixes the INSERT
-     *     column order. Must be non-empty.
+     *     column order.
      * @param conflictKeys the columns forming the conflict target (the {@code ON CONFLICT (...)}
-     *     tuple). Must be a subset of {@code values}' keys and non-empty.
+     *     tuple), a subset of {@code values}' keys that leaves at least one column to update.
      * @return the assembled statement; every non-conflict-key column is updated on conflict from
      *     {@code excluded}.
      */
     public static Upsert into(String table, Map<String, Object> values, List<String> conflictKeys) {
-        if (values.isEmpty()) {
-            throw new IllegalArgumentException("upsert into " + table + " has no columns");
-        }
-        if (conflictKeys.isEmpty()) {
-            throw new IllegalArgumentException("upsert into " + table + " has no conflict keys");
-        }
         Set<String> keySet = Set.copyOf(conflictKeys);
-        if (!values.keySet().containsAll(keySet)) {
-            throw new IllegalArgumentException("upsert into " + table + " conflict keys not in column set");
-        }
-        if (keySet.containsAll(values.keySet())) {
-            // Every column is a conflict key, so DO UPDATE SET would be empty -> malformed SQL.
-            // This helper deliberately does not model DO NOTHING; fail loudly rather than emit it.
-            throw new IllegalArgumentException(
-                    "upsert into " + table + " has no non-conflict-key columns to update on conflict");
-        }
-
         List<String> columns = List.copyOf(values.keySet());
         String columnList = String.join(", ", columns);
         StringBuilder placeholders = new StringBuilder();

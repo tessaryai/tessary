@@ -15,7 +15,7 @@ quality is [classifier-quality.md](../reference/classifier-quality.md).
 
 The scorer is `tessaryai/groundedness-classifier-v1` (MIT, ModernBERT-large with a token head), served
 by [`classifiers/groundedness/serve.py`](../../classifiers/groundedness/serve.py) on a GPU: a Mac with
-Apple silicon, or a GPU instance on AWS. It is not a classify-service head, and it is not an LLM call:
+Apple silicon, or a GPU instance on AWS. It is not an LLM call:
 there is no provider key and no per-request bill. The backend reaches it at
 `tessary.observer.encoder.url` with `POST /classify` (see the server's README for the contract).
 
@@ -90,7 +90,7 @@ with the note `tuning changed`, because a reference learned under another thresh
 
 `EncoderAvailability` probes the model's `GET /healthz` on boot and every
 `tessary.observer.encoder.probe-interval-ms`. Up means a `200` whose `heads` lists `groundedness`; a
-bare `200` is not enough, because classify-service answers one with an empty manifest. While the model
+bare `200` with an empty manifest is not enough. While the model
 is down, `ClassifierService` enqueues no groundedness sweep and `ClassifierWorker` hands a claimed one
 back without spending an attempt. Scoring pauses and resumes from the cursor when the model answers.
 The classifier, its findings and the org's switch are untouched.

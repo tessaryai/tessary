@@ -52,10 +52,6 @@ public final class SessionCipher {
         this.key = raw;
     }
 
-    public boolean isConfigured() {
-        return key != null;
-    }
-
     /** Seal a sealed-session record into a cookie-safe string. */
     public String seal(SealedSession session) {
         byte[] k = requireKey();

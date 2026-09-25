@@ -291,7 +291,14 @@ class JevDecisionClientTest {
     void anUnpricedCall_isStillAnsweredWithNoCost() throws Exception {
         stub(response(200, answer("")));
         JevDecisionClient unpriced = new JevDecisionClient(
-                http, mapper, OpenTelemetry.noop(), null, null, sleeps::add, Duration.ofSeconds(20), 3);
+                http,
+                mapper,
+                OpenTelemetry.noop(),
+                mock(PlatformCallPricer.class),
+                mock(LlmUsageAccountant.class),
+                sleeps::add,
+                Duration.ofSeconds(20),
+                3);
 
         DecisionAnswer answer = unpriced.decide("p1", "frustration", typesafe(), request());
 

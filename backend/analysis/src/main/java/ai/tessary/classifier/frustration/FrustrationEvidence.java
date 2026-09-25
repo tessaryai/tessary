@@ -5,7 +5,6 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
@@ -126,11 +125,7 @@ public final class FrustrationEvidence {
         body.put("min_decision_interval", config.minDecisionInterval());
         body.put("scorer_version", config.scorerVersion());
         body.put("jev_threshold", config.threshold());
-        try {
-            return mapper.writeValueAsString(body);
-        } catch (JsonProcessingException e) {
-            return "{\"call_site_id\":\"" + callSite + "\"}";
-        }
+        return mapper.valueToTree(body).toString();
     }
 
     /** The rate, read off the finding's own flat payload, in the shape tool_error's figure renders. */

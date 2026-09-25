@@ -15,6 +15,7 @@ import ai.tessary.featureflags.OrgFeatureFlagRepository;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Set;
@@ -59,11 +60,7 @@ class PartnerCatalogTest {
      * on purpose.
      */
     private static final List<Capability> NON_LAUNCH = List.of(
-            Capability.FRUSTRATION,
-            Capability.GROUNDEDNESS,
-            Capability.SECRET_LEAK,
-            Capability.MALFORMED_OUTPUT,
-            Capability.BEHAVIOR_DRIFT);
+            Capability.FRUSTRATION, Capability.GROUNDEDNESS, Capability.SECRET_LEAK, Capability.MALFORMED_OUTPUT);
 
     @Autowired
     TenantService tenants;
@@ -119,7 +116,7 @@ class PartnerCatalogTest {
 
     /** Whether the row still physically exists for the project, ignoring the flag layer entirely. */
     private ClassifierRow storedRow(String projectId, String key) {
-        return rows.findByKey(projectId, key).orElseThrow();
+        return ClassifierRows.byKey(rows, projectId, key).orElseThrow();
     }
 
     @Test
@@ -147,8 +144,7 @@ class PartnerCatalogTest {
         Set<String> partnerKeys = visibleKeys(partner.project().id());
 
         assertTrue(
-                ourKeys.containsAll(
-                        Set.of("frustration", "groundedness", "secret_leak", "malformed_output", "behavior_drift")),
+                ourKeys.containsAll(Set.of("frustration", "groundedness", "secret_leak", "malformed_output")),
                 "the org that kept them sees the whole catalog: " + ourKeys);
         assertTrue(
                 ourKeys.containsAll(Set.of("duration_drift", "cost_drift", "tool_error")),
@@ -163,10 +159,9 @@ class PartnerCatalogTest {
         // Hidden, not withdrawn: every module the partner cannot see is still defined and still
         // seeded as a row in their project, one row away from appearing, with no migration and no
         // re-seed.
-        for (String hidden :
-                List.of("frustration", "groundedness", "secret_leak", "malformed_output", "behavior_drift")) {
+        for (String hidden : List.of("frustration", "groundedness", "secret_leak", "malformed_output")) {
             assertTrue(
-                    rows.findByKey(partner.project().id(), hidden).isPresent(),
+                    ClassifierRows.byKey(rows, partner.project().id(), hidden).isPresent(),
                     hidden + " is hidden by the override layer, not removed from the partner's project");
         }
     }
@@ -203,42 +198,31 @@ class PartnerCatalogTest {
      * What a flag going off reaches BEYOND the classifier list, and what it deliberately does not.
      *
      * <p>Hiding the row alone would be a half-measure: its findings sit in the Findings list on the same
-     * page, and an alert rule on it can still page someone about a detector their org no longer has. Both
-     * are gated. What stays is history: past detections and any case already open, because a case is a
-     * record of something that happened, and withdrawing the detector does not un-happen it.
+     * page, so they are gated too. What stays is history: past detections and any case already open, because
+     * a case is a record of something that happened, and withdrawing the detector does not un-happen it.
      */
     @Test
-    void flagOffAlsoGatesFindingsAndAlertsButNotHistory() {
+    void flagOffAlsoGatesFindingsButNotHistory() {
         var fix = TenantFixture.bootstrap(tenants, "catalog-downstream");
         String projectId = fix.project().id();
-        // behavior_drift is off by default, so this grant is what gives the case something to
-        // withdraw. An explicit override still wins for an unavailable capability; see
-        // CapabilityService.resolveOne.
-        grant(fix.org().id(), Capability.BEHAVIOR_DRIFT);
+        grant(fix.org().id(), Capability.TOOL_ERROR);
         classifiers.seedBuiltIns(projectId);
 
         // Findings from the classifier are visible while it is on, and gone the moment it is off.
         // The detector kinds a project may NOT see is the seam both the list and the by-id guard read.
         assertFalse(
-                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.BEHAVIOR_DRIFT),
-                "on, behaviour drift's findings are the org's to read");
+                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.TOOL_ERROR),
+                "on, tool error's findings are the org's to read");
 
-        withhold(fix.org().id(), Capability.BEHAVIOR_DRIFT);
+        withhold(fix.org().id(), Capability.TOOL_ERROR);
 
         assertTrue(
-                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.BEHAVIOR_DRIFT),
+                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.TOOL_ERROR),
                 "off, its findings are withheld with it — a lead list for a detector you cannot "
                         + "open is worse than no lead list");
 
-        // The alert seam: a rule pointing at this classifier stops evaluating. AlertWorker asks exactly
-        // this question per rule, so a rule that survives here is a rule that can still page someone.
-        String id = storedRow(projectId, "behavior_drift").id();
-        assertFalse(
-                classifiers.reachesProject(projectId, id),
-                "an alert rule on it must stop evaluating rather than wait for its window to empty");
-
         // And the row itself is still there, untouched, exactly as the other cases assert.
-        assertTrue(storedRow(projectId, "behavior_drift").enabled(), "history and state survive the switch");
+        assertTrue(storedRow(projectId, "tool_error").enabled(), "history and state survive the switch");
     }
 
     /**
@@ -253,14 +237,15 @@ class PartnerCatalogTest {
      */
     @Test
     void flagOnReachesAProjectWithNoTracesAtAll() {
-        // behavior_drift is off by default, which is what keeps this premise reachable: the
-        // creation-time ClassifierSeedListener cannot seed it, so the only thing that can make the
-        // row appear later is the periodic reconcile.
-        var fix = TenantFixture.bootstrap(tenants, "catalog-no-traces");
+        // secret_leak is withheld before the project exists, which is what keeps this premise
+        // reachable: the creation-time ClassifierSeedListener cannot seed it, so the only thing that
+        // can make the row appear later is the periodic reconcile.
+        var fix = TenantFixture.bootstrap(
+                tenants, "catalog-no-traces", org -> withhold(org.id(), Capability.SECRET_LEAK));
         String projectId = fix.project().id();
-        assertFalse(visibleKeys(projectId).contains("behavior_drift"), "off at creation, never seeded");
+        assertFalse(ClassifierRows.byKey(rows, projectId, "secret_leak").isPresent(), "off at creation, never seeded");
 
-        grant(fix.org().id(), Capability.BEHAVIOR_DRIFT); // the org gains the capability, nothing else changes
+        grant(fix.org().id(), Capability.SECRET_LEAK); // the org gains the capability, nothing else changes
         assertFalse(
                 substrate.projectsWithObservations().contains(projectId),
                 "the project has never ingested a span, which used to make it invisible to provisioning");
@@ -268,11 +253,11 @@ class PartnerCatalogTest {
         catalogWorker.tick();
 
         assertTrue(
-                visibleKeys(projectId).contains("behavior_drift"),
+                visibleKeys(projectId).contains("secret_leak"),
                 "the reconcile scans the PROJECT table, so a quiet project gets the classifier its org now "
                         + "has — no trace required, and on the reconcile's own cadence rather than whenever "
                         + "the project's first span happens to arrive");
-        assertTrue(storedRow(projectId, "behavior_drift").enabled(), "seeded ON, like every built-in");
+        assertTrue(storedRow(projectId, "secret_leak").enabled(), "seeded ON, like every built-in");
     }
 
     /**
@@ -292,7 +277,7 @@ class PartnerCatalogTest {
         assertTrue(storedRow(projectId, "secret_leak").enabled(), "it seeds enabled");
 
         withhold(fix.org().id(), Capability.SECRET_LEAK);
-        classifiers.resyncBuiltIns(projectId); // seeds, then runs retireDroppedBuiltIns over every row
+        classifiers.resyncBuiltIns(fix.project()); // seeds, then runs retireDroppedBuiltIns over every row
 
         ClassifierRow stored = storedRow(projectId, "secret_leak");
         assertEquals(id, stored.id(), "the row is neither deleted nor re-inserted under a new id");

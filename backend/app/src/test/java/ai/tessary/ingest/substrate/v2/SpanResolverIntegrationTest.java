@@ -129,7 +129,7 @@ class SpanResolverIntegrationTest {
         assertEquals(1, resolver.runOnce().orphans());
 
         SpanRow child = spans.findById(pid, traceId, "child").orElseThrow();
-        assertEquals(SpanRow.ResolverState.ORPHAN, child.pathState());
+        assertEquals("orphan", child.pathState());
         assertNull(child.path(), "orphan means the ancestry is unknowable, not that the span is a root");
         assertEquals(0, pendingPaths(), "and it is out of the partial index for good");
     }

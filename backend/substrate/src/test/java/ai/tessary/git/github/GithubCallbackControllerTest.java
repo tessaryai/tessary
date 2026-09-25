@@ -71,7 +71,7 @@ class GithubCallbackControllerTest {
     @Test
     void alreadyBound_bouncesConnected_withoutTouchingGithub() {
         GitIntegrationRow existing =
-                new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", "enc", null, "t", "t");
+                new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", "enc", "t", "t");
         when(integrations.find("p1")).thenReturn(Optional.of(existing));
         ResponseEntity<Void> resp = controller.callback(999L, stateFor("p1"), "code", "install");
         assertTrue(location(resp).endsWith("/orgs/acme/projects/web/settings/git?connected=1"));

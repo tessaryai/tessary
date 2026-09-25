@@ -10,15 +10,16 @@ import org.springframework.stereotype.Component;
  * <p><b>The prefix is a historical name and is kept deliberately.</b> This class configured the git
  * observer, which has since been removed. What survives are its two sub-blocks, and they never belonged to the
  * observer alone: {@link Agentic} is the sandbox launcher every agentic run goes through — Layer-2
- * triage and agentic RCA both bind it — and {@link Encoder} is the classify-service endpoint the
- * conformance encoder and the metric detectors call. Renaming {@code tessary.observer.*} would mean
+ * triage and agentic RCA both bind it — and {@link Encoder} is the groundedness model server the
+ * metric detectors call. Renaming {@code tessary.observer.*} would mean
  * moving every deployment's env vars in lockstep with a release, for a rename that buys a reader one
  * word; the honest fix is a broader config pass, not this one. Note {@code docker-compose.yml} already
  * falls {@code TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY} back to the observer-named key for the same reason.
  *
  * <p>The observer-only knobs are gone: the batch cron and its zone, the claim-batch and attempt bounds,
  * the compare-window cap, the {@code .tessary/} directory, the change-request switch, the analyzer
- * selector and the ignore globs. A deployment that still sets one of those env vars is not failed —
+ * selector, the ignore globs, and the agentic block's drift-analysis sandbox selector and remediate
+ * switch. A deployment that still sets one of those env vars is not failed —
  * Spring ignores an unbound key — it simply has no effect. {@link #getLeaseSeconds()} stays: the
  * Layer-2 triage worker leases its own agentic jobs on it.
  */
@@ -54,42 +55,26 @@ public class ObserverProperties {
 
     /**
      * Where encoder classification ({@code POST /classify}) is served, bound from
-     * {@code tessary.observer.encoder.*}: the standalone classify-service, running on ECS
-     * Fargate in production (so CPU inference cannot starve the web host) and as the
-     * {@code classify} container in docker-compose.dev.yml locally. Required for signal
-     * sweeps — there is no fallback endpoint.
+     * {@code tessary.observer.encoder.*}: the groundedness model server,
+     * {@code classifiers/groundedness/serve.py}, run as its own process so inference cannot starve
+     * the web host. Required for signal sweeps — there is no fallback endpoint.
      */
     public static class Encoder {
 
-        /** Base URL of the classify service (e.g. http://classify.tessary.internal:8080). */
+        /** Base URL of the groundedness model server (e.g. http://classify.tessary.internal:8080). */
         private String url = "";
 
-        /** Bearer secret the classify service requires. */
+        /** Bearer secret the groundedness model server requires. */
         private String apiKey = "";
 
         /**
          * How many {@code /classify} requests this backend has in flight at once, across every sweep
-         * and every head. Must not exceed the encoder's own ceiling (classify-service's
-         * {@code MAX_INFLIGHT}, default 2; the native service's {@code --max-inflight}): over it the
+         * and every head. Must not exceed the encoder's own ceiling (serve.py's
+         * {@code --max-inflight}, env {@code MAX_INFLIGHT}, default 1): over it the
          * encoder queues and then answers 429, under it sweeps wait here, in-process, and the
          * encoder never sees a burst it has to shed.
          */
         private int maxInflight = 2;
-
-        /**
-         * How often the backend asks the encoder's {@code /healthz} whether it is there. The answer
-         * gates sweeping the encoder-backed classifiers ({@code EncoderAvailability}); sweeps are
-         * enqueued on their own minute, so a faster probe buys little.
-         */
-        private long probeIntervalMs = 60_000;
-
-        public long getProbeIntervalMs() {
-            return probeIntervalMs;
-        }
-
-        public void setProbeIntervalMs(long v) {
-            this.probeIntervalMs = v;
-        }
 
         public int getMaxInflight() {
             return maxInflight;
@@ -117,13 +102,10 @@ public class ObserverProperties {
     }
 
     /**
-     * Tuning for the agentic analyzer ({@code analyzer-type=agentic}), bound from
-     * {@code tessary.observer.agentic.*}. Only consulted when that analyzer is active.
+     * The sandbox launcher the Layer-2 triage and agentic RCA lanes run through, bound from
+     * {@code tessary.observer.agentic.*}.
      */
     public static class Agentic {
-
-        /** Which {@code AnalysisSandbox} runs the agent. Only "e2b" ships today. */
-        private String sandbox = "e2b";
 
         /** Base URL of the Node launcher sidecar that drives the E2B SDK (e.g. http://launcher:8080). */
         private String launcherUrl = "";
@@ -138,9 +120,6 @@ public class ObserverProperties {
         // "global." is region-agnostic; "us.anthropic.claude-sonnet-5" pins a geo. Confirm what is ACTIVE
         // in the account with `aws bedrock list-inference-profiles`.
         private String model = "global.anthropic.claude-sonnet-5";
-        // When true, the agent edits/adds graders via the evals plugin and the backend opens a
-        // draft PR with the changes. Default false = detect-only (alert + proposals, no PR).
-        private boolean remediate = false;
         // The TRIAGE lane's wall clock: a hard kill for a run that has hung, NOT a budget the agent
         // plans against. It is deliberately not stated in the prompt — a model cannot observe elapsed
         // time, so a number it cannot measure only invites it to guess and cut its reading short. The
@@ -151,11 +130,9 @@ public class ObserverProperties {
         // lease follows it up on its own.
         private long timeoutMs = 1_800_000;
 
-        // The turn budget for the TRIAGE lane only — E2bAnalysisSandbox (drift analysis /
-        // remediation, driven by analyze.js) reads this same Agentic block for launcherUrl/timeoutMs
-        // but deliberately does NOT read this field, so the "no turn cap" comment above still holds
-        // for it. E2bTriageSandbox threads it into the launcher POST body as `max_turns`, which
-        // triage.js forwards into agent-stream.js's `config.agent.build.maxSteps` — the SDK's own
+        // The turn budget for the TRIAGE lane only. E2bTriageSandbox threads it into the launcher POST
+        // body as `max_turns`, which triage.js forwards into agent-stream.js's
+        // `config.agent.build.maxSteps` — the SDK's own
         // documented mechanism for forcing a text-only reply once the cap is hit (see
         // @opencode-ai/sdk's AgentConfig.maxSteps: "Maximum number of agentic iterations before
         // forcing text-only response"), rather than a hard kill that discards a partial verdict.
@@ -165,14 +142,6 @@ public class ObserverProperties {
         // This is the RAW cap; two of it go to opencode's text-only landing, so the number the prompt
         // states, and the number the agent actually works with, is 50.
         private int maxTurns = 52;
-
-        public String getSandbox() {
-            return sandbox;
-        }
-
-        public void setSandbox(String v) {
-            this.sandbox = v;
-        }
 
         public String getLauncherUrl() {
             return launcherUrl;
@@ -196,14 +165,6 @@ public class ObserverProperties {
 
         public void setModel(String v) {
             this.model = v;
-        }
-
-        public boolean isRemediate() {
-            return remediate;
-        }
-
-        public void setRemediate(boolean v) {
-            this.remediate = v;
         }
 
         public long getTimeoutMs() {

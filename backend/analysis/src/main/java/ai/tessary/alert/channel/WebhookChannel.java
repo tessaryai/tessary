@@ -47,12 +47,7 @@ public class WebhookChannel implements AlertChannel {
     @Override
     public DeliveryResult deliver(AlertEventRow event, JsonNode config) {
         String url = requireUrl(config);
-        String body;
-        try {
-            body = mapper.writeValueAsString(AlertPayload.envelope(event, mapper));
-        } catch (Exception e) {
-            throw new TessaryException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not serialize webhook payload");
-        }
+        String body = AlertPayload.envelope(event, mapper).toString();
         Map<String, String> headers = new HashMap<>();
         headers.put("X-Evals-Event", event.ruleType());
         headers.put("X-Evals-Delivery", event.id());

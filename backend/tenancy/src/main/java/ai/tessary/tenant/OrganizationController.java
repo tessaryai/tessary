@@ -174,7 +174,7 @@ public class OrganizationController {
 
     private TenantPathResolver.OrgResolved requireOwner(TenantContext ctx, String orgSlug, String action) {
         var r = resolver.requireOrg(ctx, orgSlug);
-        // Irreversible organization lifecycle (rename/archive/delete/transfer) is owner-only,
+        // Irreversible organization lifecycle (rename/archive/delete) is owner-only,
         // expressed as the ORG_ADMIN permission which only the owner role holds.
         r.require(Permission.ORG_ADMIN, action);
         return r;
@@ -204,7 +204,7 @@ public class OrganizationController {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.MEMBERS_MANAGE, "add members");
         String email = req.email().toLowerCase(Locale.ROOT).trim();
-        String role = (req.role() == null || req.role().isBlank()) ? OrgMembership.MEMBER : req.role();
+        String role = req.role() == null ? OrgMembership.MEMBER : req.role();
         String now = Instant.now().toString();
 
         Optional<Principal> existing = users.findByEmail(email);
@@ -219,10 +219,7 @@ public class OrganizationController {
         }
 
         // Unknown email → pending invite, consumed on the invitee's first login.
-        String workosInvitationId = null;
-        if (provider.isEnabled()) {
-            workosInvitationId = provider.createInvitation(email).id();
-        }
+        String workosInvitationId = provider.createInvitation(email).id();
         OrgInvitation inv = new OrgInvitation(
                 Ids.ulid(),
                 r.org().id(),
@@ -295,7 +292,7 @@ public class OrganizationController {
                 .filter(i -> i.orgId().equals(r.org().id()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "no such invitation"));
         invitations.markRevoked(inv.id(), Instant.now().toString());
-        if (inv.workosInvitationId() != null && provider.isEnabled()) {
+        if (inv.workosInvitationId() != null) {
             try {
                 provider.revokeInvitation(inv.workosInvitationId());
             } catch (RuntimeException e) {

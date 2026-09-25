@@ -13,19 +13,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
- * The four-way posture table of {@link AuthFilter#shouldNotFilter}.
+ * The posture table of {@link AuthFilter#shouldNotFilter}.
  *
- * <p>Plain JUnit with hand-built collaborators, on the {@code AbsentSopIntakeTest} /
- * {@code AbsentSlackMentionSourceTest} precedent: no database, no Spring context, no Docker, so it
+ * <p>Plain JUnit with hand-built collaborators: no database, no Spring context, no Docker, so it
  * runs everywhere and fast. It also cannot be weakened by the suite-wide {@code
  * TestAuthDisabledInitializer}, since a test asserting the closed default must not sit in the
  * module where the default is globally flipped open.
@@ -38,42 +35,30 @@ class AuthFilterPostureTest {
         "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus"
     };
 
-    private static AuthFilter filter(boolean providerConfigured, boolean authDisabled) {
-        return filter(providerConfigured, authDisabled, noPaidBypasses());
-    }
-
-    private static AuthFilter filter(
-            boolean providerConfigured, boolean authDisabled, ObjectProvider<SelfAuthenticatingPath> paidBypasses) {
-        return filter(providerConfigured, authDisabled, paidBypasses, mock(BearerTokenAuthenticator.class), notStaff());
+    private static AuthFilter filter(boolean authDisabled) {
+        return filter(authDisabled, mock(BearerTokenAuthenticator.class), notStaff());
     }
 
     /**
      * Full-control overload for the authorization-boundary tests below, which drive a genuinely
      * non-null {@link TenantContext} through {@code doFilterInternal} (via a stubbed {@code
-     * bearerAuth}) and a specific {@link PlatformStaff#isStaff} answer. The other overloads default
+     * bearerAuth}) and a specific {@link PlatformStaff#isStaff} answer. The other overload defaults
      * to "not staff", harmless above since none of those tests populate a ctx.
      */
     private static AuthFilter filter(
-            boolean providerConfigured,
-            boolean authDisabled,
-            ObjectProvider<SelfAuthenticatingPath> paidBypasses,
-            BearerTokenAuthenticator bearerAuth,
-            PlatformStaff platformStaff) {
-        AuthProvider provider = mock(AuthProvider.class);
-        when(provider.isEnabled()).thenReturn(providerConfigured);
+            boolean authDisabled, BearerTokenAuthenticator bearerAuth, PlatformStaff platformStaff) {
         AuthProperties auth = new AuthProperties();
         auth.setDisabled(authDisabled);
-        // Everything after the two property/provider objects is unreachable from shouldNotFilter,
-        // which only reads the path, those two, and paidBypasses. Bare mocks rather than nulls: the
-        // constructor's parameters are not @Nullable, and NullAway checks test compilation too.
+        // Everything after the property object is unreachable from shouldNotFilter, which only
+        // reads the path and that. Bare mocks rather than nulls: the constructor's parameters are
+        // not @Nullable, and NullAway checks test compilation too.
         return new AuthFilter(
                 auth,
-                provider,
+                mock(AuthProvider.class),
                 mock(SessionCipher.class),
                 mock(PrincipalRepository.class),
                 bearerAuth,
                 new ObjectMapper(),
-                paidBypasses,
                 platformStaff);
     }
 
@@ -101,51 +86,24 @@ class AuthFilterPostureTest {
         return bearerAuth;
     }
 
-    /**
-     * An empty {@code ObjectProvider}, with zero {@link SelfAuthenticatingPath} implementations on
-     * the classpath. Same convention {@code AbsentSlackMentionSourceTest.noSource()} established
-     * one module over.
-     */
-    @SuppressWarnings("unchecked")
-    private static ObjectProvider<SelfAuthenticatingPath> noPaidBypasses() {
-        ObjectProvider<SelfAuthenticatingPath> provider = mock(ObjectProvider.class);
-        when(provider.orderedStream()).thenReturn(Stream.empty());
-        return provider;
-    }
-
     private static HttpServletRequest guarded() {
         return new MockHttpServletRequest("GET", "/api/orgs/acme/projects/web/traces");
     }
 
     @Test
-    @DisplayName("no provider and no explicit opt-in: the request is FILTERED, i.e. 401")
-    void absentProviderFailsClosed() {
-        assertFalse(
-                filter(false, false).shouldNotFilter(guarded()),
-                "an unconfigured instance must refuse guarded paths, not serve them; this is the cell that "
-                        + "used to put every /api/** path on the internet unauthenticated");
-    }
-
-    @Test
-    @DisplayName("no provider but the operator opted in: bypassed — the dev stack and the suite")
-    void absentProviderWithExplicitOptInBypasses() {
-        assertTrue(filter(false, true).shouldNotFilter(guarded()));
-    }
-
-    @Test
     @DisplayName("the flag bypasses regardless of provider state")
     void flagWinsRegardlessOfProviderState() {
-        // PasswordAuthProvider is unconditionally enabled, so "no provider configured" is no
-        // longer a reachable state. The flag is authoritative on its own; a test that wants
+        // A provider is always configured (PasswordAuthProvider is the fallback), so "no provider
+        // configured" is not a reachable state. The flag is authoritative on its own; a test that wants
         // enforcement despite the suite's global disabled=true default must say so explicitly
         // (see TestAuthDisabledInitializer's javadoc).
-        assertTrue(filter(true, true).shouldNotFilter(guarded()));
+        assertTrue(filter(true).shouldNotFilter(guarded()));
     }
 
     @Test
     @DisplayName("a configured provider enforces by default")
     void configuredProviderEnforces() {
-        assertFalse(filter(true, false).shouldNotFilter(guarded()));
+        assertFalse(filter(false).shouldNotFilter(guarded()));
     }
 
     @Test
@@ -153,7 +111,7 @@ class AuthFilterPostureTest {
     void byDesignPathsAreUnaffected() {
         for (String path : new String[] {"/auth/login", "/auth/callback", "/v3/api-docs"}) {
             assertTrue(
-                    filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
+                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
                     path + " is unauthenticated by design and must not be caught by the closed default");
         }
     }
@@ -166,45 +124,16 @@ class AuthFilterPostureTest {
         // treatment. The controller answers unconditionally, so a signed-out visitor can still
         // learn which auth flow to render.
         assertFalse(
-                filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", "/auth/mode")),
+                filter(false).shouldNotFilter(new MockHttpServletRequest("GET", "/auth/mode")),
                 "/auth/mode must not be in the bypass list, exactly like /auth/me");
 
         MockHttpServletResponse res = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/auth/mode");
-        filter(true, false).doFilterInternal(req, res, chain);
+        filter(false).doFilterInternal(req, res, chain);
 
         assertEquals(req, chain.getRequest(), "/auth/mode with no session must still reach the controller");
         assertEquals(200, res.getStatus(), "MockFilterChain never actually writes a status; asserted for clarity");
-    }
-
-    @Test
-    @DisplayName("with no paid-contributed bypass, the old Slack path is filtered like any other path")
-    void withNoPaidBypassTheSlackPathIsFiltered() {
-        assertFalse(
-                filter(true, false).shouldNotFilter(new MockHttpServletRequest("POST", "/internal/slack/mention")),
-                "AuthFilter no longer hard-codes this path; an edition with no SelfAuthenticatingPath "
-                        + "implementation must not bypass it either");
-    }
-
-    @Test
-    @DisplayName("a paid-contributed SelfAuthenticatingPath bypasses the path it names, and no other")
-    void aPaidContributedBypassIsHonoured() {
-        SelfAuthenticatingPath stub = path -> "/internal/slack/mention".equals(path);
-        @SuppressWarnings("unchecked")
-        ObjectProvider<SelfAuthenticatingPath> provider = mock(ObjectProvider.class);
-        // thenAnswer, not thenReturn: shouldNotFilter is called twice below, and a Stream can only
-        // be consumed once. A fixed instance would throw IllegalStateException on the second call.
-        when(provider.orderedStream()).thenAnswer(invocation -> Stream.of(stub));
-
-        AuthFilter withBypass = filter(true, false, provider);
-        assertTrue(
-                withBypass.shouldNotFilter(new MockHttpServletRequest("POST", "/internal/slack/mention")),
-                "the seam mechanism itself, independent of any concrete paid bean: a provider that "
-                        + "claims this path must bypass it");
-        assertFalse(
-                withBypass.shouldNotFilter(guarded()),
-                "a bypass scoped to one path must not widen to an unrelated guarded path");
     }
 
     @Test
@@ -213,7 +142,7 @@ class AuthFilterPostureTest {
         for (String path :
                 new String[] {"/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"}) {
             assertTrue(
-                    filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
+                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
                     path + " is polled by orchestrators before anything holds a credential");
         }
     }
@@ -226,7 +155,7 @@ class AuthFilterPostureTest {
         // shipped today, because widening exposure must not widen the unauthenticated surface.
         for (String path : ACTUATOR_GUARDED) {
             assertFalse(
-                    filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
+                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
                     path + " must require authentication");
         }
     }
@@ -244,7 +173,7 @@ class AuthFilterPostureTest {
         for (String path : ACTUATOR_GUARDED) {
             MockHttpServletResponse res = new MockHttpServletResponse();
             MockFilterChain chain = new MockFilterChain();
-            filter(true, false).doFilterInternal(new MockHttpServletRequest("GET", path), res, chain);
+            filter(false).doFilterInternal(new MockHttpServletRequest("GET", path), res, chain);
 
             assertEquals(401, res.getStatus(), path + " must be rejected");
             assertNull(chain.getRequest(), path + " must never reach the filter chain unauthenticated");
@@ -258,7 +187,7 @@ class AuthFilterPostureTest {
         // unauthenticated index is a map of the management surface even when each entry is guarded.
         MockHttpServletResponse res = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
-        filter(true, false).doFilterInternal(new MockHttpServletRequest("GET", "/actuator"), res, chain);
+        filter(false).doFilterInternal(new MockHttpServletRequest("GET", "/actuator"), res, chain);
 
         assertEquals(401, res.getStatus());
         assertNull(chain.getRequest());
@@ -268,7 +197,7 @@ class AuthFilterPostureTest {
     @DisplayName("a health GROUP is not public — show-details:always must not publish /actuator/health/db")
     void healthGroupsAreNotPublic() {
         assertFalse(
-                filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/health/db")),
+                filter(false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/health/db")),
                 "the probes are enumerated, not prefixed, so a health component stays guarded");
     }
 
@@ -276,7 +205,7 @@ class AuthFilterPostureTest {
     @DisplayName("a health-prefixed sibling does not inherit the exemption by name")
     void healthPrefixedSiblingsAreNotPublic() {
         assertFalse(
-                filter(true, false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/healthz")),
+                filter(false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/healthz")),
                 "/actuator/health is matched exactly, so a same-prefix sibling must not be public");
     }
 
@@ -294,8 +223,7 @@ class AuthFilterPostureTest {
     @DisplayName("an authenticated, non-staff caller is rejected 403, not served")
     void actuatorGuardedPathsRejectNonStaffWithForbidden() throws ServletException, IOException {
         for (String path : ACTUATOR_GUARDED) {
-            AuthFilter filter =
-                    filter(true, false, noPaidBypasses(), authenticatingAs(SOME_AUTHENTICATED_USER), notStaff());
+            AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), notStaff());
             MockHttpServletRequest req = new MockHttpServletRequest("GET", path);
             req.addHeader("Authorization", "Bearer irrelevant-to-the-stub");
             MockHttpServletResponse res = new MockHttpServletResponse();
@@ -312,8 +240,7 @@ class AuthFilterPostureTest {
     @DisplayName("an authenticated, platform-staff caller reaches the chain")
     void actuatorGuardedPathsPassStaff() throws ServletException, IOException {
         for (String path : ACTUATOR_GUARDED) {
-            AuthFilter filter =
-                    filter(true, false, noPaidBypasses(), authenticatingAs(SOME_AUTHENTICATED_USER), isStaff());
+            AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), isStaff());
             MockHttpServletRequest req = new MockHttpServletRequest("GET", path);
             req.addHeader("Authorization", "Bearer irrelevant-to-the-stub");
             MockHttpServletResponse res = new MockHttpServletResponse();
@@ -334,14 +261,7 @@ class AuthFilterPostureTest {
         // to exactly what it was before that refactor.
         var cipher = mock(SessionCipher.class);
         var session = new SealedSession(
-                "access-token",
-                "refresh-token",
-                java.time.Instant.now().plusSeconds(3600).toString(),
-                "workos-user-1",
-                "someone@example.com",
-                null,
-                null,
-                null);
+                "refresh-token", java.time.Instant.now().plusSeconds(3600).toString(), "workos-user-1", null);
         when(cipher.unseal(org.mockito.ArgumentMatchers.any())).thenReturn(session);
 
         var users = mock(PrincipalRepository.class);
@@ -349,16 +269,13 @@ class AuthFilterPostureTest {
                 "user-1", "workos-user-1", "someone@example.com", null, null, "2026-01-01T00:00:00Z", null);
         when(users.findByWorkosId("workos-user-1")).thenReturn(java.util.Optional.of(principal));
 
-        AuthProvider provider = mock(AuthProvider.class);
-        when(provider.isEnabled()).thenReturn(true);
         AuthFilter filter = new AuthFilter(
                 new AuthProperties(),
-                provider,
+                mock(AuthProvider.class),
                 cipher,
                 users,
                 mock(BearerTokenAuthenticator.class),
                 new ObjectMapper(),
-                noPaidBypasses(),
                 notStaff());
 
         MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/orgs/acme/projects/web/traces");

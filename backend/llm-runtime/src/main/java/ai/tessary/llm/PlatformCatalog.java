@@ -11,8 +11,7 @@ import java.util.Optional;
  * so the "Add a model" form can render generically. The {@code auth} kind drives
  * which credential fields the UI shows, which keeps the form consistent across
  * platforms (every {@code api_key} platform looks identical) and means adding a
- * platform is one descriptor here plus a build branch in {@code ChatModelFactory},
- * no per-provider conditionals to edit in the frontend.
+ * platform is one descriptor here, with no per-provider conditionals to edit in the frontend.
  */
 public final class PlatformCatalog {
 
@@ -41,21 +40,19 @@ public final class PlatformCatalog {
     }
 
     // Every platform requires an org-provided credential; there is no credential-free platform.
-    // ChatModelFactory never falls back to an ambient key for a run selection.
     private static final List<PlatformDescriptor> PLATFORMS = List.of(
             new PlatformDescriptor(ModelProvider.OPENAI, "OpenAI", AUTH_API_KEY, true, "https://api.openai.com/v1"),
-            // WITH the /v1: langchain4j-anthropic's DefaultAnthropicClient appends the bare path
-            // "messages" to whatever baseUrl it's given rather than adding the version segment itself,
-            // and OpenCode's @ai-sdk/anthropic in the agentic sandbox does the same. A bare host here
-            // would post to /messages and 404 on both paths if a user typed it into the form.
+            // WITH the /v1: OpenCode's @ai-sdk/anthropic in the agentic sandbox appends the bare path
+            // "messages" to whatever baseUrl it's given rather than adding the version segment itself.
+            // A bare host here would post to /messages and 404 if a user typed it into the form.
             new PlatformDescriptor(
                     ModelProvider.ANTHROPIC, "Anthropic", AUTH_API_KEY, true, "https://api.anthropic.com/v1"),
             new PlatformDescriptor(
                     ModelProvider.OPENROUTER, "OpenRouter", AUTH_API_KEY, true, "https://openrouter.ai/api/v1"),
             new PlatformDescriptor(
                     ModelProvider.MOONSHOT, "Moonshot", AUTH_API_KEY, true, "https://api.moonshot.ai/v1"),
-            // Gemini over its own OpenAI-compatible endpoint, the same Chat Completions build path
-            // as OpenRouter/Moonshot, so no new auth kind or build method.
+            // Gemini over its own OpenAI-compatible endpoint, like OpenRouter/Moonshot, so no new auth
+            // kind.
             new PlatformDescriptor(
                     ModelProvider.GEMINI,
                     "Google Gemini",
@@ -93,8 +90,8 @@ public final class PlatformCatalog {
         return PLATFORMS.stream().filter(p -> p.id() == id).findFirst();
     }
 
-    /** Auth kind for a platform, defaulting to {@code api_key} for any unmapped value. */
+    /** Auth kind for a platform. */
     public static String authOf(ModelProvider id) {
-        return find(id).map(PlatformDescriptor::auth).orElse(AUTH_API_KEY);
+        return find(id).orElseThrow().auth();
     }
 }

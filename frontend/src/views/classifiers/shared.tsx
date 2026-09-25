@@ -12,15 +12,6 @@ import { cn } from "../../ui";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
-/** The behaviour-drift detector is the one classifier with a fitted baseline. */
-export const BEHAVIOR_DETECTOR = "behavior_drift";
-
-/**
- * SOP conformance opens findings too: one row per authored rule, served through the same findings
- * endpoint with `causeKind: "sop_conformance"` and the rule slug as its causeKey.
- */
-export const SOP_CONFORMANCE_DETECTOR = "sop_conformance";
-
 /**
  * One section of a detail rail. Sections are separated by a hairline rather than by bare
  * whitespace: five stacked blocks with only margins between them read as one long column of
@@ -142,38 +133,21 @@ export function RunTriageButton({
  * caller renders this only while the finding is still unruled (`!triaged`) — there is no override
  * of a standing ruling any more, machine or human; a cause that disagrees with the traffic again
  * simply opens a fresh finding, which is triaged like any other.
- *
- * <p>Conformance gets one verb. The two-verb split exists to correct a fitted reference (absorbing
- * a gram or re-pinning a baseline teaches the detector that what it saw is normal), and an SOP
- * rule has no such reference to correct: the authored SOP is the reference, and changing it is a
- * repo edit rather than a button here. So resolving simply closes the row, and a deviation that
- * persists opens a fresh one, which is why closing is never suppression.
  */
 export function ResolveVerbs({
-  causeKind,
   busy,
-  deviationLabel = "Confirm and open a case",
   onResolve,
 }: {
-  causeKind: string;
   busy: boolean;
-  deviationLabel?: string;
   onResolve: (action: "expected" | "not_expected") => void;
 }) {
-  if (causeKind === "sop_conformance") {
-    return (
-      <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("expected")}>
-        Resolve
-      </VerbButton>
-    );
-  }
   return (
     <>
       <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("expected")}>
         Absorb as legitimate
       </VerbButton>
       <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("not_expected")}>
-        {deviationLabel}
+        Confirm and open a case
       </VerbButton>
     </>
   );
@@ -220,27 +194,14 @@ export function isClosedByTriage(finding: BehaviorFinding): boolean {
 }
 
 /**
- * Whether this row is the "this has always been broken" claim rather than the "this got worse" one.
- * Only an SOP-conformance finding is ever either.
- */
-export function isBaselineFinding(finding: BehaviorFinding): boolean {
-  return finding.conformanceKind === "baseline";
-}
-
-/**
  * The chain on one line: how much traffic, and what triage made of it.
- *
- * <p>A baseline finding's traffic is not firings. Its count is the population its violations were
- * counted over, once, at fit time, so "seen 257×" would report a fitted fact as a recurring event.
  *
  * <p>No recurrence count any more: a ruling freezes the finding, so a cause that fires again after
  * one opens a fresh finding rather than reopening this one — there is nothing left to count here.
  */
 export function chainWords(finding: BehaviorFinding): string {
   return [
-    isBaselineFinding(finding)
-      ? `${finding.traceCount} applicable turns when the rule was fitted`
-      : `seen ${finding.traceCount}×`,
+    `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
       ? `${finding.humanVerdictAt != null ? "a person" : "triage"} ruled ${finding.triageVerdict ?? "unknown"}`
       : finding.triageStatus === "in_flight"
@@ -253,29 +214,18 @@ export function chainWords(finding: BehaviorFinding): string {
     .join(" · ");
 }
 
-/** Key fragments that are acronyms, so the generic casing below does not render `sop` as `Sop`. */
-const ACRONYMS = new Set(["sop"]);
-
 /**
- * A detector key as a person would say it: `cost_drift` → `Cost drift`, `sop_conformance` →
- * `SOP conformance`.
+ * A detector key as a person would say it: `cost_drift` → `Cost drift`.
  *
  * <p>The key itself comes from the server on `finding.detector` and is never re-derived here. Three
  * classifiers share one findings table with no column saying which wrote a row, so the mapping is
  * reconstructed from the cause kind and the cause key, and its own javadoc says the two copies that
  * already exist must not drift. A third copy in TypeScript is exactly the drift it warns about.
- *
- * <p>{@link ACRONYMS} is not that third copy: it spells words, not detectors. A key it says nothing
- * about still gets a label, which is the property that keeps this generic: adding a detector never
- * requires touching this file, and only a detector whose name contains an initialism ever does.
  */
 export function detectorLabel(key: string): string {
   return key
     .split("_")
-    .map((word, i) => {
-      if (ACRONYMS.has(word)) return word.toUpperCase();
-      return i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
-    })
+    .map((word, i) => (i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(" ");
 }
 

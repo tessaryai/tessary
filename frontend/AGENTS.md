@@ -25,13 +25,11 @@ system and a slow drift back out of it.
 Two consequences worth knowing before you reach for a workaround:
 
 - **Dark only.** There is no light mode and no `data-theme="light"` block.
-  `ThemeProvider` (`src/ui/ThemeContext.tsx`) hard-sets dark and its setters are
-  no-ops; the API is kept so existing imports compile. Don't add a competing
-  theme-init path.
+  `ThemeProvider` (`src/ui/ThemeContext.tsx`) hard-sets dark. Don't add a
+  competing theme-init path.
 - **Compose `src/ui/`, don't hand-roll.** `import { Button, Card, Table } from
   "../ui"`. A primitive built by hand is a primitive that will miss the next
-  token change. Charts go through `src/ui/charts/chartTheme.ts` — no ad-hoc
-  chart hues.
+  token change.
 
 ## Where things live
 
@@ -40,30 +38,22 @@ Two consequences worth knowing before you reach for a workaround:
   utilities; `src/index.css` itself owns only base rules, keyframes and scoped
   component CSS (`.payload-md`, `.payload-json`).
 - **Component primitives** → `src/ui/` (barrel: `src/ui/index.ts`).
-- **Charts** → `src/ui/charts/chartTheme.ts`.
 
 ## Structure (src/)
 
 - `api/` — `client.ts` (fetch layer), `types.ts` (+ `ApiError`), `types-auth.ts`,
   `generated/schema.d.ts` (OpenAPI-generated — see *Types* below).
 - `auth/` — `AuthContext.tsx` (/auth/me poller), `ProtectedRoute.tsx`.
-- `paid/` — the OPEN edition's answer to the `@paid` seam: real code with empty exports. Open
-  source imports the `@paid` specifier and the BUILD decides what it resolves to — this stub in
-  the open build, the overlay's own entry in the paid one. **A paid-only surface is therefore a
-  two-tree edit**: the view lives in the overlay, and only its registration passes through here.
-  Adding one to `views/` instead ships paid code in the open bundle, which
-  `scripts/check-frontend.sh` fails over the emitted chunks rather than over source.
 - `tenant/` — `TenantContext.tsx`: `TenantProvider`, `useTenant`, `useProjectApi`.
 - `shell/` — navigation shell: `nav.tsx` (**the IA source of truth**), `Sidebar.tsx`,
   `ShellChrome.tsx` (layers the project-scoped providers), `CommandPalette.tsx` +
   `PaletteContext.tsx` + `commands.tsx` (⌘K), `ShellActions.tsx`,
-  `useCases.ts` (the Triage badge count), `recents.ts`, `useSidebarCollapsed.ts`, `useDropdown.ts`. Import the IA from the
-  `shell/index.ts` barrel.
+  `useCases.ts` (the Triage badge count), `recents.ts`, `useSidebarCollapsed.ts`, `useDropdown.ts`. Import the IA from `shell/nav.tsx`
+  and its capability-filtered view from `shell/useNavigation.ts`.
 - `ui/` — design-system primitives barrel (`import { Button, Card, Table } from "../ui"`),
-  `ui/charts/` (`TrendChart`, `StackedBarChart`, `VolumeBars`, `chartTheme.ts`),
   `ThemeContext.tsx`, `density.tsx`, `escStack.ts` (the shared overlay ESC stack — a rail
   under a modal must not also close on the same keypress).
-- `capabilities/` — `useCapabilities()` / `CapabilityGate` / `NAV_CAPABILITY`. ONE gating axis:
+- `capabilities/` — `useCapabilities()` / `CapabilityGate`. ONE gating axis:
   the backend resolves every capability per session and the SPA reads the answer. **Fail-closed**
   on the client while the read is in flight (the browser has no defaults of its own). There is no
   frontend LaunchDarkly client and no plan logic.
@@ -71,17 +61,15 @@ Two consequences worth knowing before you reach for a workaround:
   `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
   `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are
   `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. Surface-specific shared widgets go in `views/components/`
-  (`PayloadViewer`, `SpanOutline`, `SourceConnect`, …). Generic primitives belong in
+  (`PayloadViewer`, `ConnectRepositoryDialog`, `SourceConnect`, …). Generic primitives belong in
   `src/ui/`, not here.
-- `components/` — app-level, non-visual mounts (`MixpanelPageViewTracker`). Not a
-  general component bucket; a new visual primitive goes in `src/ui/`.
-- `lib/` — `mixpanel.ts`, `labels.ts`, `ttfv.ts`, `effort.ts` (reasoning-effort labels).
+- `lib/` — `relativeTime.ts`, `routePreload.ts`.
 
 ## API + data conventions
 
 - All responses unwrap from `ApiResponse<T>` in `api/client.ts` (`http<T>()`). Failures throw
-  `ApiError(status, code, message, details)` — render `err.code` + `err.message`, never
-  "something went wrong".
+  `ApiError` (`status`, `code`, `detail`) — render `err.code` + `err.detail` (`ErrorNote` does),
+  never "something went wrong".
 - **`projectApi(orgSlug, projectSlug)`** is the per-project client factory; views read it via
   `useProjectApi()` inside `TenantProvider`. There is no global `api` — don't import one.
 - **Types are generated, not hand-written.** `pnpm run generate:api` runs `openapi-typescript`
@@ -103,10 +91,9 @@ Two consequences worth knowing before you reach for a workaround:
   mechanism also did — the difference is scope (one first-run wait state, keyed on the substrate
   read, not a per-surface capability check) and that a project can dodge it entirely via the
   gate's own "Start with a sample project" escape hatch. `<CapabilityGate capability=…>` is
-  unchanged and still the only *per-surface* wrapper. First-run guidance for the connected case
-  lives in the `…/setup` wizard (`views/Setup.tsx` + `views/onboarding/useOnboarding.ts`), which a
-  project reaches by navigation — that part is unaffected; `ConnectGate` only stands in front of
-  it for a project that hasn't connected a source yet.
+  unchanged and still the only *per-surface* wrapper. Once connected, Triage reads the onboarding
+  ladder (`views/onboarding/useOnboarding.ts`, a passive read of the backend's derived stage, not
+  the old gate) to pick which empty state to show.
 
 ## Rendering trace payloads
 
@@ -126,12 +113,12 @@ image-detection shapes mirror the backend `ContentExtractor` — keep them in sy
 2. Add the lazy import at the top of `App.tsx` via the `named(() => import("./views/X"), "X")`
    helper, and a plain `<Route path="segment" element={<X/>} />` inside `ProjectShell`'s
    nested `<Routes>`. Wrap gated surfaces in `<CapabilityGate capability=…>` — that is the only
-   route wrapper — and add the surface to `NAV_CAPABILITY` so the sidebar and palette agree.
+   route wrapper — and set the same `capability` on the nav item so the sidebar and palette agree.
 3. Moved/renamed an old path? Leave a `<Navigate … replace />` redirect with the others at
    the bottom of `ProjectShell` — that block is the live migration map, and bookmarks and
    Slack deep links depend on it.
-4. Settings sub-pages: add to `SETTINGS_SECTIONS` in `nav.tsx` **and** a child `<Route>` under
-   `settings` in App.tsx.
+4. Settings sub-pages: add an item to the right group in `SETTINGS_GROUPS` in `nav.tsx` **and**
+   a child `<Route>` under `settings` in App.tsx.
 
 ## Copy
 

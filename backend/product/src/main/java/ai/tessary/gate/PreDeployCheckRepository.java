@@ -70,19 +70,6 @@ public class PreDeployCheckRepository {
                 .list();
     }
 
-    /**
-     * The DISTINCT active-check surfaces for the project — the read-side join the risk forecast unions
-     * into a future PR's resolved surfaces. {@code dismissed} checks are excluded.
-     */
-    public List<String> activeSurfaces(String projectId) {
-        return jdbc.sql("SELECT DISTINCT surface FROM pre_deploy_check "
-                        + "WHERE project_id = :pid AND status = :active ORDER BY surface")
-                .param("pid", projectId)
-                .param("active", PreDeployCheckRow.Status.ACTIVE)
-                .query(String.class)
-                .list();
-    }
-
     /** Flip a check's lifecycle status (active ↔ dismissed). Returns rows affected (0 = no such check). */
     public int setStatus(String projectId, String id, String status, String updatedAt) {
         return jdbc.sql("UPDATE pre_deploy_check SET status = :status, updated_at = :updatedAt "

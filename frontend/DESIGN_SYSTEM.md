@@ -13,8 +13,7 @@ without fatigue: a near-black floor, an achromatic grey ramp for everything
 structural *and* everything interactive, and exactly three hues, each with one
 job. Red is error, green is success, blue is info and warning. **All three are
 status only, used sparingly.** None of them is an accent. Nothing else in the
-UI carries hue: chart series have their own palette that never leaks into
-chrome, and brand pink never leaves the logo.
+UI carries hue, and brand pink never leaves the logo.
 
 **The accent is grey.** The primary button, active nav and selection all come
 from the top of the grey ramp, so no hue ever means "clickable". That is what
@@ -44,7 +43,7 @@ component). Components consume semantic tokens only, as Tailwind utilities or
 All values come from the `@theme` block in `tokens.css`. Most are exposed as
 Tailwind utilities (`bg-surface`, `text-muted`, `border-border-strong`, …); the
 rest are read via `var(--…)`. The primitive ramp (`--primitive-level-*`,
-`--primitive-grey-*`, `--primitive-red/green/blue`, `--primitive-viz-*`) is
+`--primitive-grey-*`, `--primitive-red/green/blue`) is
 referenced by the semantic layer and never by a component.
 
 ### Surfaces
@@ -113,7 +112,6 @@ by a hue and not by a different fill.
 |---|---|---|
 | `--color-hover` | `#242424` | hover bg on any surface (`bg-hover`) |
 | `--color-selected` | `#242424` | selected row / active nav bg (`bg-selected`) |
-| `--color-pressed` | `#2E2E2E` | pressed bg (`bg-pressed`) |
 
 ### Status
 
@@ -134,7 +132,6 @@ surface level.
 | `--color-info-subtle` | `rgba(112,182,253,0.12)` | info bg (`bg-info-subtle`) |
 | `--color-error` | `#FF6D87` | fail / error (`text-error`) |
 | `--color-error-subtle` | `rgba(255,109,135,0.12)` | error bg (`bg-error-subtle`) |
-| `--color-status-text-on` | `#121212` | label on any solid status fill (`text-status-text-on`) |
 
 Because warning and info share a hue, a warning must carry a distinguishing icon
 or wording; the color alone won't do it. Since no hue is a control, a filled
@@ -142,19 +139,12 @@ blue chip reads as status, the same as a red or green one.
 
 ### Data-viz / charts
 
-Chart chrome reuses border/muted so charts sit in the same language. The series
-ramp ("Siblings") is the **only** place new chart hues enter; read it via
-`chartTheme` in `src/ui/charts/`, never ad hoc, and never reuse a series hue
-for text, status, or UI chrome.
+Chart chrome reuses the border color so the hand-drawn finding charts sit in
+the same language.
 
 | Token | Value | Usage |
 |---|---|---|
 | `--color-chart-grid` | `#3C3C3C` | gridlines (= border) |
-| `--color-chart-axis` | `#A0A0A0` | tick labels (= muted) |
-| `--color-chart-series-1..8` | lavender, orange, cyan, amber, teal, violet, rose, olive | categorical series, fixed order; `-1` is the single-series default |
-
-Ramp values (`--primitive-viz-1..8`): `#CFAFFF`, `#C9690C`, `#0097AC`,
-`#F1B047`, `#35D8CA`, `#AF64BB`, `#FFA2D5`, `#918A00`.
 
 ### Brand values that are not tokens
 
@@ -180,7 +170,6 @@ Used sparingly; elevation is carried by surface level.
 
 | Token | Value |
 |---|---|
-| `--shadow-sm` | `0 1px 3px rgba(0,0,0,0.5)` |
 | `--shadow-md` | `0 4px 16px rgba(0,0,0,0.6)` |
 
 Focus ring: `0 0 0 3px rgba(112,182,253,0.6)` (`var(--focus-ring)`), the link
@@ -207,7 +196,6 @@ keyframes that use them. Everything collapses to `0ms` under
 | `--duration-transition` | `300ms` (panels, drawers) |
 | `--duration-reveal` | `500ms` (larger reveals) |
 | `--ease-enter` | `cubic-bezier(0.16, 1, 0.3, 1)` |
-| `--ease-exit` | `cubic-bezier(0.4, 0, 1, 1)` |
 
 ## Typography
 
@@ -233,7 +221,6 @@ wrong, and that is a change to `tokens.css`, not a local override.
 
 | Role | Utility | Size / leading | Weight | Tracking | Color |
 |---|---|---|---|---|---|
-| display | `text-display` | `2.25rem` / 1.1 | 600 | `-0.02em` | `text-fg` |
 | h1 | `text-h1` | `1.75rem` / 1.3 | 600 | `-0.01em` | `text-fg` |
 | h2 | `text-h2` | `1.25rem` / 1.3 | 600 | 0 | `text-fg` |
 | h3 | `text-h3` | `1rem` / 1.5 | 500 | 0 | `text-fg` |
@@ -271,8 +258,8 @@ roles are recipes over the core scale so the scale stays small.
 - **Disabled.** grey-600 (`text-subtle`) at the role's normal weight. No
   opacity reduction.
 - **Placeholder.** grey-600, weight 400 (set globally by `index.css`).
-- **Text on any status or accent fill.** `#121212` (`text-accent-text-on` /
-  `text-status-text-on`), weight 500. No white-label exception.
+- **Text on any status or accent fill.** `#121212` (`text-accent-text-on`),
+  weight 500. No white-label exception.
 - **Status as text.** Error red passes contrast only in the large-or-bold
   class: `metric`, `h1`–`h3`, `body-strong`. Small error copy is grey-300 text
   with an error-colored icon, never red text. Success and info pass at body
@@ -325,8 +312,7 @@ from the type spec.
 and no light token block. `ThemeProvider` (`src/ui/ThemeContext.tsx`) hard-sets
 `color-scheme: dark` and a dark background on `<html>`, removes any stale
 `data-theme` attribute, and clears the old `tsy-theme` `localStorage` key on
-mount. `useTheme()` still returns `{ theme, setTheme, toggle }` so existing
-imports compile, but `theme` is always `"dark"` and the setters are no-ops.
+mount.
 
 Don't add a `:root[data-theme="light"]` block or invent light values: the
 palette was designed without them. If light ever earns a full pass, it starts
@@ -350,7 +336,6 @@ with a new palette, not a re-skin of this one.
    `accent-edge` for low-emphasis accent treatments. Body text is never a status
    hue.
 4. **Status hues are not text colors by default.** Red only as large-or-bold
-   text; otherwise grey text plus a colored icon. Chart series hues never
-   appear outside a chart.
+   text; otherwise grey text plus a colored icon.
 5. **Step elevation one level at a time.** `bg` → `surface` → `raised` →
    `overlay`; never skip a level, never use shadow to fake one.

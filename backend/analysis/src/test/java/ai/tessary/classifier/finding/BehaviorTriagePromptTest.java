@@ -42,20 +42,7 @@ class BehaviorTriagePromptTest {
 
     /** The job argument neither {@code dossier} nor {@code buildPrompt} reads; a fixed stand-in. */
     private static final BehaviorTriageJobRow JOB = new BehaviorTriageJobRow(
-            "job-1",
-            "proj-1",
-            "fnd-1",
-            null,
-            BuiltInDetector.Kind.TOOL_ERROR,
-            "claimed",
-            null,
-            null,
-            0,
-            null,
-            "2026-08-01T00:00:00Z",
-            "2026-08-01T00:00:00Z",
-            null,
-            null);
+            "job-1", "proj-1", "fnd-1", "claimed", null, null, 0, null, "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
 
     private static BehaviorTriageEngine engine() {
         return engine(new ObserverProperties());
@@ -325,7 +312,7 @@ class BehaviorTriagePromptTest {
                 finding(BuiltInDetector.Kind.TOOL_ERROR, "k", BehaviorSubstrateRepository.UNATTRIBUTED, null, null);
         assertTrue(findingMd(engine(), unattributed).contains("call site: none"));
 
-        FindingRow plain = finding(BuiltInDetector.Kind.BEHAVIOR_DRIFT, "k", "cs-checkout", null, null);
+        FindingRow plain = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", "cs-checkout", null, null);
         String plainMd = findingMd(engine(), plain);
         assertTrue(plainMd.contains("- call site: `cs-checkout`\n"), plainMd);
 
@@ -337,7 +324,7 @@ class BehaviorTriagePromptTest {
 
     @Test
     void theClaimLineIsDroppedWhenTheCauseCarriesNoMagnitude() {
-        FindingRow omission = finding(BuiltInDetector.Kind.BEHAVIOR_DRIFT, "omitted-step", null, null, null);
+        FindingRow omission = finding(BuiltInDetector.Kind.TOOL_ERROR, "omitted-step", null, null, null);
 
         assertFalse(findingMd(engine(), omission).contains("- claim:"));
     }

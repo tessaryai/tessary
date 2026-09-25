@@ -12,12 +12,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * Turns one v2 {@code (span, span_payload)} pair — the shape {@link TracesController}'s existing detail
  * read already fetches — into the {@link RawEntry} {@link TraceSpanMapper} consumes, for the trace export
- * endpoint. Mirrors {@code ingest/substrate/SubstrateSource#toRawEntry}'s field mapping exactly
- * (same producer-id-preserving identity: {@code sourceExternalId} is the composite
- * {@code "<trace_id>:<span_id>"} handle, {@code parentId} is the parent's handle in the same trace) —
- * that mapper reads {@code SpanRepository.SpanEntry} (a joined row), this one reads the two rows
- * {@link ai.tessary.traces.TracesController#detail} already holds separately, so no new query is
- * added for the export.
+ * endpoint. Identity is producer-id-preserving: {@code sourceExternalId} is the composite
+ * {@code "<trace_id>:<span_id>"} handle, and {@code parentId} is the parent's handle in the same trace.
+ * It reads the two rows {@link ai.tessary.traces.TracesController#detail} already holds separately, so
+ * no new query is added for the export.
  *
  * <p>Public, not package-private, because its caller ({@code TracesController}) lives in the
  * {@code ai.tessary.traces} package, not this one.
@@ -29,8 +27,7 @@ public final class SpanRowMapper {
     public static RawEntry toRawEntry(SpanRow s, @Nullable SpanPayloadRow payload, ObjectMapper mapper) {
         String parentSpanId = s.parentSpanId();
         return new RawEntry(
-                s.traceId() + ':' + s.id(), // sourceExternalId — composite handle, mirrors SubstrateSource
-                null, // sourceUrl — not stored in the substrate
+                s.traceId() + ':' + s.id(), // sourceExternalId — composite handle
                 s.name(),
                 payload == null ? null : payload.input(),
                 payload == null ? null : payload.output(),
@@ -43,8 +40,7 @@ public final class SpanRowMapper {
                 s.kind(), // operationKind — already normalized at ingest
                 s.endedAt(),
                 null, // inputMessagesJson — not re-derived from the payload string here
-                null, // outputMessagesJson
-                s.callSiteId());
+                null); // outputMessagesJson
     }
 
     private static Map<String, Object> parseMetadata(@Nullable String json, ObjectMapper mapper) {

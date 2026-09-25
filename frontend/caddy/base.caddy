@@ -5,7 +5,7 @@
 # the operator's own terminator fronts the :8000 listener below. No SITE_DOMAIN, no site block.
 #
 # Routes (identical on every listener):
-#   /api/*  /auth/*  /mcp  /mcp/*  /webhooks/*  /git/github/callback  /git/github/manifest/callback  /v1/traces  /v1/query/*  /v1/usage/*   → backend
+#   /api/*  /auth/*  /mcp  /mcp/*  /git/github/callback  /git/github/manifest/callback  /v1/traces  /v1/query/*  /v1/usage/*   → backend
 #   else                                                                           → static (Vite production build at /srv)
 
 # Cache policy for the static build. Imported by every listener so they can never drift.
@@ -26,7 +26,7 @@
 
 (app) {
 	@backend {
-		path /api/* /auth/* /mcp /mcp/* /webhooks/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
+		path /api/* /auth/* /mcp /mcp/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
 	}
 	handle @backend {
 		# Another build may drop directives for the backend route here (a per-key rate ceiling,

@@ -23,7 +23,6 @@ export type Concept = {
   label: string;
   gloss: string;
   long?: string;
-  learnMore?: string;
 };
 
 export const CONCEPTS: Record<ConceptId, Concept> = {

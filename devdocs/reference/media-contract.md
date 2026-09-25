@@ -2,8 +2,7 @@
 
 > **Status: images and PDF documents are both live** — extending to at least one non-image modality
 > rather than staying images-only. This
-> doc is the public, documented decision; `MediaResolver`'s old "images-only v1"
-> framing predates it and has been corrected in code alongside this doc.
+> doc is the public, documented decision; the old "images-only v1" framing predates it.
 
 Flagged in the 2026-09-01 review of the Langfuse migration gap analysis: "declare the supported media
 contract … fail explicitly on unsupported modalities rather than silently labeling them." This is that
@@ -18,8 +17,8 @@ contract.
 
 **Audio and video are explicitly out of scope for this launch.** The type system is shaped so a third
 modality is additive, not a rework: a fourth `TYPE_*` triad on `ContentBlock`, a fourth switch case
-everywhere this batch touched (`ContentExtractor`'s three flatten switches, `MediaExternalizer`,
-`MediaResolver`'s inline-resolution gate, `TraceSpanMapper`'s export, and `PayloadViewer.tsx`'s frontend
+everywhere this batch touched (`ContentExtractor`'s two flatten switches, `MediaExternalizer`,
+`TraceSpanMapper`'s export, and `PayloadViewer.tsx`'s frontend
 switch — `ContentBlocks`' judge-boundary switch no longer exists, see §6) — never a structural change to
 `MediaStore` or the `media_object`
 schema. When audio/video is picked up, size and streaming will force real decisions this contract
@@ -35,26 +34,24 @@ seam an object store could fill later without touching callers or the schema; PD
 now the way audio/video would, and building a filesystem/S3 backend for a modality that fits comfortably
 in a `bytea` column is scope the gate doesn't require.
 
-## 3. Size limit: one shared 8 MiB cap, not an inherited one
+## 3. Size limit: the ingest caps, not a media one
 
-`tessary.ingest.max-media-bytes` (default 8 MiB, tuned for images) now bounds documents too. No new config
-key was added — the goal was to state the resulting limit, not build a new one, and unnecessary
-config surface is disfavored.
+There is no media-specific size key. Nothing fetches media at ingest any more, so an inline image or
+document is bounded only by the ingest request and batch caps in [`config-keys.md`](./config-keys.md).
 
-**This is a deliberate, real per-item cap, not an inherited or object-store-scale one.** Postgres `bytea`
+**Those caps are deliberately small, not object-store scale.** Postgres `bytea`
 has no practical size ceiling anywhere near a gigabyte in principle, but a hot OLTP table serving live
 ingest traffic is not the place for multi-hundred-MB blobs, and this repo already gates request/OTLP-batch
 size well below that via the existing ingest cap. For comparison: Langfuse's own S3 media backend defaults
 `LANGFUSE_S3_MEDIA_MAX_CONTENT_LENGTH` to **1 GB**, with presigned download URLs expiring after an hour —
-that number belongs to an object store, is over 100x the cap here, and is **not** being adopted or implied
+that number belongs to an object store, is far above the ingest caps here, and is **not** being adopted or implied
 by this contract. When audio/video needs headroom beyond a `bytea`-friendly size, that is the signal an
-object-store `MediaStore` implementation is due, not a reason to raise this cap past what Postgres should
+object-store `MediaStore` implementation is due, not a reason to raise the ingest caps past what Postgres should
 carry.
 
 `CachingMediaStore`'s in-memory read cache (`tessary.media.cache.max-bytes`, 64 MiB default) sits in front
 of storage and was previously undocumented — see [`config-keys.md`](./config-keys.md). It was sized for
-image-scale objects (a handful of images per grader call); a document up to the 8 MiB ingest cap fits the
-same budget without resizing it.
+image-scale objects (a handful of images per grader call).
 
 ## 4. Export shape: inline, not referenced or bundled
 
@@ -84,7 +81,7 @@ production callers before this issue; this endpoint is the caller.
 ## 5. `document_url` is display-only — a deliberate decision, not an omission
 
 `document_url` mirrors `image_url`'s field layout exactly (the `url` field holds the real URL) and is
-**never fetched server-side** — not at ingest (`MediaResolver`, `MediaExternalizer`), and not at export
+**never fetched server-side** — not at ingest (`MediaExternalizer`), and not at export
 (`TraceSpanMapper` labels it, never downloads it). There is no judge boundary left to fetch it either:
 grading and `ContentBlocks` were removed along with it (§6). This adds no new outbound-fetch surface anywhere in the
 pipeline. A caller that needs a document graded must send its bytes (`document_b64`) or let it externalize
@@ -101,8 +98,8 @@ gradable boundary belongs:
   `JudgeError.UNSUPPORTED_CONTENT_TYPE` for any block type it didn't route, because a
   silently-incomplete grade is a **wrong verdict** and a grader that graded half an input without
   saying so is worse than one that refused to run. **This boundary no longer exists**: grading and
-  `ContentBlocks` were removed, so `JudgeError.UNSUPPORTED_CONTENT_TYPE` is declared and thrown
-  nowhere. The policy is recorded because the reasoning is what any future gradable boundary should
+  `ContentBlocks` were removed, and the `JudgeError` catalogue with them. The policy is
+  recorded because the reasoning is what any future gradable boundary should
   re-adopt — not because something enforces it today.
 - **Silently labeled** at the classifier-context/trajectory-rendering boundary —
   `ContentExtractor.partPlaceholder` renders an unrecognized part as `[unsupported]` text, and the

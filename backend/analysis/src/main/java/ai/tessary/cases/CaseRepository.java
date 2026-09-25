@@ -35,14 +35,14 @@ public class CaseRepository {
      * CaseRow}'s header, ruling and RCA lane all read (1b: cases read over all their findings; the
      * newest stands in for the case until the multi-finding case page ships).
      */
-    private static final String COLS = "id, project_id, seq, detector, subject_kind, subject_id, "
+    private static final String COLS = "id, seq, detector, subject_kind, subject_id, "
             + "subject_label, call_site_id, metric, "
             + "(SELECT COUNT(*) FROM finding f WHERE f.case_id = eval_case.id) AS finding_count, "
             + "(SELECT f.id FROM finding f WHERE f.case_id = eval_case.id ORDER BY f.created_at DESC LIMIT 1)"
             + " AS latest_finding_id, "
             + "state, locked_at, title, basis, severity, onset_at, "
             + "current_value, baseline_value, delta, opened_at, last_seen_at, resolved_at, resolution, "
-            + "resolution_reason, resolved_by, disposition, muted_at, muted_by, updated_at";
+            + "resolution_reason, resolved_by, disposition, muted_at, muted_by";
 
     private static final String LIVE_ORDER = "ORDER BY severity DESC, opened_at DESC";
 
@@ -402,7 +402,6 @@ public class CaseRepository {
     private static CaseRow map(ResultSet rs) throws SQLException {
         return new CaseRow(
                 rs.getString("id"),
-                rs.getString("project_id"),
                 rs.getLong("seq"),
                 rs.getString("detector"),
                 rs.getString("subject_kind"),
@@ -429,8 +428,7 @@ public class CaseRepository {
                 rs.getString("resolved_by"),
                 rs.getString("disposition"),
                 rs.getString("muted_at"),
-                rs.getString("muted_by"),
-                rs.getString("updated_at"));
+                rs.getString("muted_by"));
     }
 
     private static @Nullable Double doubleOrNull(ResultSet rs, String column) throws SQLException {

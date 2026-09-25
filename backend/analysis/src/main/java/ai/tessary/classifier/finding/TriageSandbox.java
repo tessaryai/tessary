@@ -8,8 +8,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Runs one Layer-2 triage ruling in an environment that can materialize a finding's dossier, run the
  * agent against it and against this platform's MCP surface, and tear down. {@link E2bTriageSandbox}
- * drives an E2B microVM via the launcher sidecar. Selected by {@code tessary.classifier.triage-sandbox},
- * mirroring the observer's {@code AnalysisSandbox}/{@code tessary.observer.agentic.sandbox}.
+ * drives an E2B microVM via the launcher sidecar. Selected by {@code tessary.classifier.triage-sandbox}.
  */
 public interface TriageSandbox {
 

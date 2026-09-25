@@ -33,7 +33,7 @@ import org.springframework.stereotype.Repository;
 public class RcaFacetRepository {
 
     /** One (dimension value, count) bucket — the model-mix read. */
-    public record FacetCount(@Nullable String value, long count) {}
+    public record FacetCount(String value, long count) {}
 
     /** One span of a cited trace, projected to the facets the deterministic diff groups by. */
     public record ObservationFacet(

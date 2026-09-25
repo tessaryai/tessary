@@ -29,6 +29,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -81,6 +82,9 @@ class SignupPolicyIntegrationTest {
 
     @Autowired
     AuditLogRepository audits;
+
+    @Autowired
+    JdbcClient jdbc;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
@@ -149,12 +153,16 @@ class SignupPolicyIntegrationTest {
     }
 
     private void assertRefusedWithNothingCreated(String email) throws Exception {
-        long orgsBefore = orgs.countAll();
+        long orgsBefore = countOrgs();
         MockHttpServletResponse res = signup(email);
         assertEquals(403, res.getStatus(), res.getContentAsString());
         assertTrue(res.getContentAsString().contains("AUTH.SIGNUP_REFUSED"), res.getContentAsString());
         assertTrue(users.findByEmail(email).isEmpty(), "a refused sign-up leaves no principal");
-        assertEquals(orgsBefore, orgs.countAll(), "a refused sign-up mints no organization");
+        assertEquals(orgsBefore, countOrgs(), "a refused sign-up mints no organization");
+    }
+
+    private long countOrgs() {
+        return jdbc.sql("SELECT COUNT(*) FROM organization").query(Long.class).single();
     }
 
     @Test
@@ -296,12 +304,17 @@ class SignupPolicyIntegrationTest {
 
         Organization org = installOrg();
         String projectId = projects.findDefaultForOrg(org.id()).orElseThrow().id();
-        int before =
-                audits.findBySubject(projectId, "organization", org.id(), 50).size();
+        long before = orgAuditCount(projectId, org.id());
         setPolicy(owner, "open", List.of());
-        List<?> after = audits.findBySubject(projectId, "organization", org.id(), 50);
-        assertEquals(before + 1, after.size(), "each policy change writes one audit row");
+        long after = orgAuditCount(projectId, org.id());
+        assertEquals(before + 1, after, "each policy change writes one audit row");
         assertFalse(before == 0, "the earlier changes in this class were audited too");
         assertEquals(200, signup("reopened-1226@example.com").getStatus(), "open again admits a stranger");
+    }
+
+    private long orgAuditCount(String projectId, String orgId) {
+        return audits.findByProject(projectId, 500).stream()
+                .filter(a -> a.subjectKind().equals("organization") && orgId.equals(a.subjectId()))
+                .count();
     }
 }

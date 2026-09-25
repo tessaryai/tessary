@@ -10,7 +10,8 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "generate:api": "openapi-typescript ../backend/contract/src/main/resources/openapi/tessary-api.json -o src/api/generated/schema.d.ts",
-    "generate:routes": "node scripts/generate-route-manifest.mjs"
+    "generate:routes": "node scripts/generate-route-manifest.mjs",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -23,7 +24,6 @@
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.3",
-    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
@@ -33,6 +33,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "5.0.1",
     "jsdom": "^30.1.0",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4.3.3",
@@ -42,6 +43,6 @@
   },
   "packageManager": "pnpm@11.15.1",
   "comments": {
-    "overrides": "Dependency overrides live in pnpm-workspace.yaml, not here: pnpm 11 removed the `pnpm` field in package.json and ignores it silently. See that file for the es-toolkit pin and the openapi-typescript peer override, both of which are load-bearing."
+    "overrides": "Dependency overrides live in pnpm-workspace.yaml, not here: pnpm 11 removed the `pnpm` field in package.json and ignores it silently. See that file for the openapi-typescript peer override, which is load-bearing."
   }
 }

@@ -33,15 +33,6 @@ tessary:
   # devdocs/reference/telemetry-contract.md.
   telemetry:
     enabled: ${TESSARY_TELEMETRY_ENABLED:true}
-  # Rate-limiter pacing for the OpenRouter/Moonshot tiers is a static constant in code (LlmPacer):
-  # there are no model/provider Spring profiles. Every provider requires an org-provided credential.
-  # Prompt-cache TTL, read by LlmCaller for every platform LLM call. `grader` is a historical name;
-  # the RCA and triage lanes are what read it now.
-  grader:
-    cache:
-      # Prompt-cache TTL on the Bedrock cache point. Bedrock supports 5m or 1h; values
-      # other than 5m/1h fall back to the 5-minute default. Default unchanged (5m).
-      ttl: ${TESSARY_GRADER_CACHE_TTL:5m}
   # Feature flags: nothing to configure. This build resolves a capability from the org's own
   # `org_feature_flag` rows (Settings -> Features) and, absent a row, from the built-in default in
   # CapabilityService. There is no SDK, no key and no `tessary.launchdarkly` block, and no
@@ -95,16 +86,16 @@ spring:
 logging:
   level:
     # Local compose sets APP_LOG_LEVEL=DEBUG. This key must follow that env: a hard-coded INFO
-    # here is more specific than logback's ai.tessary logger and silently ate DEBUG (including
-    # encoder.classify.request.body) even when APP_LOG_LEVEL=DEBUG was set.
+    # here is more specific than logback's ai.tessary logger and silently ate DEBUG even when
+    # APP_LOG_LEVEL=DEBUG was set.
     ai.tessary: ${APP_LOG_LEVEL:INFO}
     org.springframework: WARN
-  # Surface the LogContext business ids (bound per run) in the plain-text dev console: they live
-  # only in MDC, which the default console pattern doesn't render. Spring injects this into
+  # Surface the trace id in the plain-text dev console: it lives only in MDC, which the default
+  # console pattern doesn't render. Spring injects this into
   # CONSOLE_LOG_PATTERN's correlation slot. The production profile ignores it, since its JSON
   # encoder emits MDC as fields instead.
   pattern:
-    correlation: "[run=%X{runId:-} grader=%X{graderId:-} trace=%X{traceId:-}] "
+    correlation: "[trace=%X{traceId:-}] "
 
 management:
   # Exposure is left at Spring Boot's default, which is `health` alone. If you widen it, know two

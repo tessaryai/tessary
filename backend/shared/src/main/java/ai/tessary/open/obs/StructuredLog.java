@@ -41,10 +41,6 @@ public final class StructuredLog {
 
     private StructuredLog() {}
 
-    public static Builder info(Logger log, String event) {
-        return new Builder(emitInfo(log), null, event);
-    }
-
     public static Builder info(Logger log, Marker marker, String event) {
         return new Builder(emitInfo(log), marker, event);
     }
@@ -57,16 +53,8 @@ public final class StructuredLog {
         return new Builder(emitDebug(log), null, event);
     }
 
-    public static Builder warn(Logger log, String event) {
-        return new Builder(emitWarn(log), null, event);
-    }
-
     public static Builder warn(Logger log, Marker marker, String event) {
         return new Builder(emitWarn(log), marker, event);
-    }
-
-    public static Builder error(Logger log, String event) {
-        return new Builder(emitError(log), null, event);
     }
 
     public static Builder error(Logger log, Marker marker, String event) {

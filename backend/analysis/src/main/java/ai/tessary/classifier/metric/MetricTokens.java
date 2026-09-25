@@ -6,6 +6,7 @@ import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.util.RawValue;
 import java.util.List;
 import java.util.OptionalDouble;
 import org.jspecify.annotations.Nullable;
@@ -173,12 +174,7 @@ public final class MetricTokens {
     public String toJson() {
         ObjectNode root = MetricHistogram.JSON.createObjectNode();
         for (int i = 0; i < sketches.length; i++) {
-            try {
-                root.set(QUANTITIES.get(i), MetricHistogram.JSON.readTree(sketches[i].toJson()));
-            } catch (JsonProcessingException ex) {
-                // A sketch that cannot re-read its own output is a bug in the sketch, not a data problem.
-                throw new IllegalStateException("metric sketch produced unreadable json", ex);
-            }
+            root.putRawValue(QUANTITIES.get(i), new RawValue(sketches[i].toJson()));
         }
         return root.toString();
     }

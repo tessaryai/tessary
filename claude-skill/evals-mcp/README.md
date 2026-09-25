@@ -17,7 +17,7 @@ Platform reference (auth model, key store, code map):
 │                          │                │              McpToolRegistry     │
 └──────────────────────────┘                │                                  │
                                             │  Case / Query / Substrate /      │
-                                            │  Curation / Pipeline services    │
+                                            │  Pipeline services               │
                                             └──────────────────────────────────┘
 ```
 
@@ -89,33 +89,31 @@ Conventions the tools share, stated here once rather than per row:
   `get_finding_evidence`, whose response fields are camelCase; its arguments are snake_case like
   every other tool's.
 
-| Tool | Args (`limit`/`cursor` omitted — see above) | Returns | Gate |
-|---|---|---|---|
-| `get_project` | — | project identity, counts, packs, judge runtime, **`watching`** (classifiers enabled, call sites swept, `traces_last_day`) | open |
-| `list_call_sites` | — | call sites + observed stats | open |
-| `list_failure_modes` | `call_site_id`, `chain_id`, `scope`, `severity`, `layer`, `pack_id`, `compliance_tag` | taxonomy rows | open |
-| `list_cases` | `state` (open\|muted\|resolved), `detector`, `call_site_id` | paged case rows; open is worst-first, resolved is newest-closure-first | open |
-| `get_case` | `id` (stored id or `C-118`) | case + activity trail + `latest_finding_id` + `finding_count` + exemplars + the **RCA report inline in `rca`** when one has finished | open |
-| `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) | open |
-| `get_finding` | `id` | finding + parsed evidence | open |
-| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}`, camelCase, no payload text — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` | open |
-| `list_traces` | `model`, `kind`, `call_site_id`, `status`, `range`, `q` | paged trace rollup rows + previews | open |
-| `get_trace` | `trace_id`, `fields` | rollup + spans, oldest-first, capped 200 + `spans_truncated`; skeleton rows (typed columns + previews + `payload_available`) unless `fields: ["payload"]` | open |
-| `list_spans` | `trace_id`, `call_site_id`, `kind`, `name`, `status`, `model_id`, `session_id`, `range`, `q`, `mode` (keyword\|semantic), `fields` | paged compact span rows; full payloads only when scoped | open |
-| `get_span` | `trace_id` **and** `span_id` | one span, full payload | open |
-| `list_sessions` | — | paged sessions, most recently active first (identity only — no rollup) | open |
-| `get_session` | `id` | session + totals summed from its traces + those traces, capped 1000 + `traces_truncated` | open |
-| `describe_dataset` | `dataset` (omit for all) | per dataset: facetable fields, filterable fields, `searchable`, time column, measure | open |
-| `query_count` | `dataset`, `range`, `filters` | count, or the summed measure on `metric_rollups` | open |
-| `query_timeseries` | `dataset`, `interval`, `range`, `filters` | buckets | open |
-| `query_facets` | `dataset`, `field`, `range`, `filters`, `top_n` | top-N breakdown | open |
-| `query_search` | `dataset` (**`tool_calls` \| `classifier_events`**), `q`, `mode`, `range`, `filters` | paged rows | open |
+| Tool | Args (`limit`/`cursor` omitted — see above) | Returns |
+|---|---|---|
+| `get_project` | — | project identity, counts, packs, judge runtime, **`watching`** (classifiers enabled, call sites swept, `traces_last_day`) |
+| `list_call_sites` | — | call sites + observed stats |
+| `list_failure_modes` | `call_site_id`, `chain_id`, `scope`, `severity`, `layer`, `pack_id`, `compliance_tag` | taxonomy rows |
+| `list_cases` | `state` (open\|muted\|resolved), `detector`, `call_site_id` | paged case rows; open is worst-first, resolved is newest-closure-first |
+| `get_case` | `id` (stored id or `C-118`) | case + activity trail + `latest_finding_id` + `finding_count` + exemplars + the **RCA report inline in `rca`** when one has finished |
+| `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) |
+| `get_finding` | `id` | finding + parsed evidence |
+| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}`, camelCase, no payload text — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` |
+| `list_traces` | `model`, `kind`, `call_site_id`, `status`, `range`, `q` | paged trace rollup rows + previews |
+| `get_trace` | `trace_id`, `fields` | rollup + spans, oldest-first, capped 200 + `spans_truncated`; skeleton rows (typed columns + previews + `payload_available`) unless `fields: ["payload"]` |
+| `list_spans` | `trace_id`, `call_site_id`, `kind`, `name`, `status`, `model_id`, `session_id`, `range`, `q`, `mode` (keyword), `fields` | paged compact span rows; full payloads only when scoped |
+| `get_span` | `trace_id` **and** `span_id` | one span, full payload |
+| `list_sessions` | — | paged sessions, most recently active first (identity only — no rollup) |
+| `get_session` | `id` | session + totals summed from its traces + those traces, capped 1000 + `traces_truncated` |
+| `describe_dataset` | `dataset` (omit for all) | per dataset: facetable fields, filterable fields, `searchable`, time column, measure |
+| `query_count` | `dataset`, `range`, `filters` | count, or the summed measure on `metric_rollups` |
+| `query_timeseries` | `dataset`, `interval`, `range`, `filters` | buckets |
+| `query_facets` | `dataset`, `field`, `range`, `filters`, `top_n` | top-N breakdown |
+| `query_search` | `dataset` (**`tool_calls` \| `classifier_events`**), `q`, `mode`, `range`, `filters` | paged rows |
 
-**Gate** is the capability an org must hold to be *offered* the tool. **Nothing on this surface is gated
-today**: all 19 rows are open, so a launch partner's `tools/list` is the whole catalogue. It was 22 with two
-gated on `GRADERS` until grading was deleted — the two grader reads and `list_quality_dimensions` went
-with it, and `Capability.GRADERS` itself no longer exists. The per-tool mechanism stays (`McpTool.capability`,
-null on every tool today), because a paid classifier's own reads are the obvious next thing to want it.
+**Nothing on this surface is gated**: all 19 rows are open, so a launch partner's `tools/list` is the
+whole catalogue. It was 22 with two gated on `GRADERS` until grading was deleted — the two grader reads
+and `list_quality_dimensions` went with it, and `Capability.GRADERS` itself no longer exists.
 **`Capability.RCA` gates nothing here any more** — a case
 carries its own report, so an org without RCA simply has no report rows to inline. Where the line falls, and
 why, is argued in `McpTool`'s javadoc. Never maintain a second copy of this table anywhere: `tools/list` is

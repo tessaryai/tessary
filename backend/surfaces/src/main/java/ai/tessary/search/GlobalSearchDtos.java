@@ -8,8 +8,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Wire DTOs for the UI-facing global search palette — the ⌘K command palette's
  * server-backed content search. Distinct from the token-scoped {@code /v1/query} search API: this is a
- * plain, org-membership-scoped full-text read over the project's content entities (graders, datasets,
- * traces), feeding the palette as an async command source.
+ * plain, org-membership-scoped full-text read over the project's traces, feeding the palette as an
+ * async command source.
  *
  * <p>Snake_case on the wire, camelCase in Java — the platform DTO convention.
  */

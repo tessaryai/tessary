@@ -87,57 +87,6 @@ public class FindingRepository {
             @Nullable String escalatedAt) {}
 
     /**
-     * Record {@code traceDelta} firings against a behaviour-drift cause, creating the OPEN finding if
-     * this is the first.
-     *
-     * <p>The payload is first-write-wins, exactly as the exemplar used to be: it carries the native
-     * cause vocabulary and the verdict the exemplar was judged under, and re-pointing that on every
-     * later firing would make the evidence under an escalation unstable.
-     */
-    public Recorded recordFiring(
-            String id,
-            String projectId,
-            String profileId,
-            String causeKind,
-            String causeKey,
-            String workflowKey,
-            long traceDelta,
-            @Nullable String exemplarVerdictId,
-            @Nullable String sinceVersionId,
-            String callSiteId,
-            String now) {
-        String payload = payloadJson(nativeVocabulary(causeKind, workflowKey, causeKey, exemplarVerdictId));
-        Recorded outcome = jdbc.sql("""
-            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                 subject_label, call_site_id, status, onset_at, last_seen_at,
-                                 sample_count, payload, since_version_id, created_at, updated_at)
-            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :now, :now, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
-            ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
-                sample_count = finding.sample_count + EXCLUDED.sample_count,
-                last_seen_at = EXCLUDED.last_seen_at,
-                updated_at = EXCLUDED.updated_at
-            RETURNING id, sample_count, escalated_at
-            """)
-                .param("id", id)
-                .param("pid", projectId)
-                .param("classifier", "behavior_drift")
-                .param("causeKey", CauseKey.behaviorDrift(profileId, causeKind, causeKey, workflowKey))
-                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
-                .param("subjectId", profileId)
-                .param("subjectLabel", causeKey)
-                .param("callSiteId", callSiteId)
-                .param("delta", traceDelta)
-                .param("payload", payload)
-                .param("versionId", sinceVersionId)
-                .param("now", now)
-                .query((rs, n) -> recorded(rs))
-                .single();
-        return created(id, outcome);
-    }
-
-    /**
      * Record a closed window's shift against a metric-drift cause.
      *
      * <p><b>{@code sampleDelta} is a sample count, not a trace label.</b> Nothing here labelled a trace
@@ -170,8 +119,7 @@ public class FindingRepository {
             String eventAt,
             String quietBefore,
             String now) {
-        String payload =
-                mergeVocabulary(evidenceJson, nativeVocabulary("distribution_shift", "__global__", causeKey, null));
+        String payload = mergeVocabulary(evidenceJson, nativeVocabulary("distribution_shift", "__global__", causeKey));
         Recorded outcome = jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
@@ -300,7 +248,7 @@ public class FindingRepository {
             String eventAt,
             String quietBefore,
             String now) {
-        String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey, null));
+        String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey));
         return jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
@@ -725,16 +673,6 @@ public class FindingRepository {
                 == 1;
     }
 
-    /** Close one finding directly — no ruling, no human decision. Returns 0 when it was already closed. */
-    public int close(String projectId, String findingId, String now) {
-        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
-                        + " WHERE project_id = :pid AND id = :id AND " + LIVE)
-                .param("now", now)
-                .param("pid", projectId)
-                .param("id", findingId)
-                .update();
-    }
-
     /**
      * Close every open finding linked to a case, in the same transaction as the case's own close — a
      * case resolved or absorbed closes what it holds, whoever or whatever closed it.
@@ -745,24 +683,6 @@ public class FindingRepository {
                 .param("now", now)
                 .param("pid", projectId)
                 .param("caseId", caseId)
-                .update();
-    }
-
-    /**
-     * Close every open behaviour-drift finding whose cause is the graduated gram — its alerts must stop
-     * by themselves. Matched on the profile subject plus the classifier's own key inside the payload,
-     * because the scoped {@code cause_key} folds the cause kind in and a graduation is about the gram
-     * whichever kind fired on it. Not a ruling: no verdict, no case, just a settled cause.
-     */
-    public int closeForNativeCause(String projectId, String profileId, String nativeCauseKey) {
-        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
-                        + " WHERE project_id = :pid AND subject_kind = :subjectKind AND subject_id = :profileId"
-                        + "   AND payload ->> 'native_cause_key' = :cause AND " + LIVE)
-                .param("now", java.time.Instant.now().toString())
-                .param("pid", projectId)
-                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
-                .param("profileId", profileId)
-                .param("cause", nativeCauseKey)
                 .update();
     }
 
@@ -886,13 +806,11 @@ public class FindingRepository {
      * recorded stops being readable. Built as a literal rather than through Jackson because the values
      * are ids and enum words, and a JSON writer here would be a dependency for four string members.
      */
-    private static Map<String, String> nativeVocabulary(
-            String causeKind, String workflowKey, String nativeCauseKey, @Nullable String exemplarVerdictId) {
+    private static Map<String, String> nativeVocabulary(String causeKind, String workflowKey, String nativeCauseKey) {
         Map<String, String> out = new LinkedHashMap<>();
         out.put("cause_kind", causeKind);
         out.put("workflow_key", workflowKey);
         out.put("native_cause_key", nativeCauseKey);
-        if (exemplarVerdictId != null) out.put("exemplar_verdict_id", exemplarVerdictId);
         return out;
     }
 

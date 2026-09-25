@@ -20,8 +20,6 @@ import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
 import ai.tessary.query.QueryDataset;
 import ai.tessary.query.QueryDtos.CountRequest;
 import ai.tessary.query.QueryDtos.CountView;
@@ -135,7 +133,6 @@ public class McpToolRegistry {
     private final SpanPayloadRepository payloads;
     private final TraceV2Repository traces;
     private final SessionReadService sessions;
-    private final CapabilityService capabilities;
     private final FindingService behaviorDrift;
     private final CaseService cases;
 
@@ -150,7 +147,6 @@ public class McpToolRegistry {
             SpanPayloadRepository payloads,
             TraceV2Repository traces,
             SessionReadService sessions,
-            CapabilityService capabilities,
             FindingService behaviorDrift,
             CaseService cases) {
         this.pipelineService = pipelineService;
@@ -160,7 +156,6 @@ public class McpToolRegistry {
         this.payloads = payloads;
         this.traces = traces;
         this.sessions = sessions;
-        this.capabilities = capabilities;
         this.behaviorDrift = behaviorDrift;
         this.cases = cases;
         register();
@@ -181,53 +176,19 @@ public class McpToolRegistry {
         this.payloads = null;
         this.traces = null;
         this.sessions = null;
-        this.capabilities = null;
         this.behaviorDrift = null;
         this.cases = null;
         for (McpTool t : toolset) tools.put(t.name(), t);
     }
 
-    public List<McpTool> all() {
+    /** Every registered tool, in registration order. This is what {@code tools/list} answers. */
+    public List<McpTool> tools() {
         return List.copyOf(tools.values());
     }
 
-    /**
-     * The tools this token's org is offered: every tool whose capability it holds, plus every ungated
-     * one. This is what {@code tools/list} answers. Offering a tool to an org that does not hold its
-     * capability is worse than a 403: the model will plan around a tool that cannot work and burn a
-     * turn discovering it.
-     */
-    public List<McpTool> availableFor(TenantContext ctx) {
-        String orgId = ctx.orgId();
-        // Skip resolution when there's nothing to resolve for: keeps the hand-rolled-toolset test
-        // constructor's null dependencies undereferenced, and a registry with no gated tool has
-        // nothing to ask the capability layer anyway.
-        if (orgId == null || tools.values().stream().noneMatch(t -> t.capability() != null)) {
-            return List.copyOf(tools.values());
-        }
-        CapabilitySet resolved = capabilities.resolve(orgId);
-        List<McpTool> out = new ArrayList<>(tools.size());
-        for (McpTool t : tools.values()) {
-            if (t.capability() == null || resolved.isEnabled(t.capability())) out.add(t);
-        }
-        return List.copyOf(out);
-    }
-
-    public @Nullable McpTool get(String name) {
+    /** The tool by name, or null when there is none. */
+    public @Nullable McpTool tool(String name) {
         return tools.get(name);
-    }
-
-    /**
-     * The tool by name, or null when this org is not offered it. Null rather than a distinct
-     * "forbidden" answer, so a withheld tool is indistinguishable from one that does not exist:
-     * there is nothing a partner can do about a capability it does not hold.
-     */
-    public @Nullable McpTool availableTool(String name, TenantContext ctx) {
-        McpTool tool = tools.get(name);
-        if (tool == null || tool.capability() == null) return tool;
-        String orgId = ctx.orgId();
-        if (orgId == null) return tool;
-        return capabilities.isEnabled(orgId, tool.capability()) ? tool : null;
     }
 
     // ------------------------------------------------------------------ registration
@@ -346,8 +307,7 @@ public class McpToolRegistry {
                                                 CASE_STATES)),
                                 Map.entry(
                                         "detector",
-                                        strField("Restrict to one detector (e.g. 'behavior_drift',"
-                                                + " 'metric_drift', 'tool_error', 'sop_conformance').")),
+                                        strField("Restrict to one detector (e.g. 'metric_drift', 'tool_error').")),
                                 Map.entry(
                                         "call_site_id",
                                         strField("Restrict to cases about one call site. A case whose subject"
@@ -700,7 +660,7 @@ public class McpToolRegistry {
         add(new McpTool(
                 "list_findings",
                 "List classifier findings for this token's project — the aggregated causes behind"
-                        + " behaviour-drift, metric-drift and tool-error-rate-drift detections. Returns headline"
+                        + " metric-drift and tool-error-rate-drift detections. Returns headline"
                         + " rows without the evidence blob; pass an id to get_finding for the full evidence."
                         + " Confirmed findings only by default; pass include='all' for the raw Layer-1 stream,"
                         + " which is a lead list rather than an alert list. Findings whose detector this org does"
@@ -711,8 +671,7 @@ public class McpToolRegistry {
                                 Map.entry("call_site_id", strField("Restrict to one call site.")),
                                 Map.entry(
                                         "detector",
-                                        strField("Restrict to one detector (e.g. 'behavior_drift',"
-                                                + " 'tool_error').")),
+                                        strField("Restrict to one detector (e.g. 'cost_drift', 'tool_error').")),
                                 Map.entry(
                                         "include",
                                         enumField(
@@ -751,9 +710,9 @@ public class McpToolRegistry {
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
                         + " context on it. counts is what SURVIVES and can still be opened; recorded_counts is"
                         + " what the detector wrote at finding-open — counts below recorded means substrate aged"
-                        + " out, never a lost write. ZERO under a role is a real answer: behaviour drift,"
-                        + " conformance's windowed drift test and metric drift's rolling-control arm all compare"
-                        + " against a fitted model, so they have no baseline rows to point at; read that as 'no"
+                        + " out, never a lost write. ZERO under a role is a real answer: metric drift's"
+                        + " rolling-control arm compares against a fitted model, so it has no baseline rows to"
+                        + " point at; read that as 'no"
                         + " enumerable reference side', not as missing evidence. Pages in the detector's own"
                         + " order, stably; rank has gaps and is an order, not an index. There is NO sampling"
                         + " mode — if you want a stride or a random draw, take it yourself and say in your"
@@ -808,8 +767,7 @@ public class McpToolRegistry {
                             .toList(),
                     view.lane());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "listing findings failed" : message, e);
+            throw toolError(e);
         }
     }
 
@@ -839,7 +797,6 @@ public class McpToolRegistry {
                 detail.finding().withoutTriage(),
                 detail.metric(),
                 toolError == null ? null : withoutIds(toolError),
-                detail.baseline(),
                 malformedOutput == null ? null : withoutIds(malformedOutput),
                 secretLeak == null ? null : withoutIds(secretLeak),
                 detail.armedWindow(),
@@ -899,8 +856,7 @@ public class McpToolRegistry {
         try {
             return agentView(behaviorDrift.finding(projectId, id));
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "finding not found: " + id : message, e);
+            throw toolError(e);
         }
     }
 
@@ -935,7 +891,7 @@ public class McpToolRegistry {
         String cursor = strArg(args, "cursor");
         try {
             if (boolArg(args, "count_only")) {
-                return behaviorDrift.findingEvidence(projectId, findingId, role, pageSize, cursor, true);
+                return behaviorDrift.findingEvidence(projectId, findingId);
             }
             BehaviorDtos.FindingEvidenceSpanPage page =
                     behaviorDrift.findingEvidenceSpans(projectId, findingId, role, pageSize, cursor);
@@ -945,8 +901,7 @@ public class McpToolRegistry {
                     page.counts(),
                     page.recordedCounts());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "finding not found: " + findingId : message, e);
+            throw toolError(e);
         }
     }
 
@@ -1181,8 +1136,7 @@ public class McpToolRegistry {
                     pageSize,
                     strArg(args, "cursor"));
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "listing cases failed" : message, e);
+            throw toolError(e);
         }
     }
 
@@ -1219,8 +1173,7 @@ public class McpToolRegistry {
                     detail.absorbAvailable(),
                     detail.detectorAvailable());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "case not found: " + id : message, e);
+            throw toolError(e);
         }
     }
 
@@ -1239,7 +1192,7 @@ public class McpToolRegistry {
         try {
             selected = wire == null ? List.of(QueryDataset.values()) : List.of(QueryDataset.fromWire(wire));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
         List<Map<String, Object>> described = new ArrayList<>(selected.size());
         for (QueryDataset d : selected) {
@@ -1265,7 +1218,7 @@ public class McpToolRegistry {
         try {
             return CountView.of(queryService.count(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1276,7 +1229,7 @@ public class McpToolRegistry {
         try {
             return TimeseriesView.of(queryService.timeseries(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1288,7 +1241,7 @@ public class McpToolRegistry {
         try {
             return FacetsView.of(field, queryService.facets(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1305,17 +1258,17 @@ public class McpToolRegistry {
         try {
             return SearchView.of(queryService.search(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
     /**
-     * Map a {@link QueryService} validation failure to a {@link McpTool.ToolException} the LLM can
-     * correct, not a {@code -32603} internal error.
+     * Map a service's {@link TessaryException} (a {@link QueryService} validation failure, a finding or case
+     * that is not there) to a {@link McpTool.ToolException} the LLM can correct, not a {@code -32603}
+     * internal error.
      */
-    private static McpTool.ToolException queryError(TessaryException e) {
-        String message = e.getMessage();
-        return new McpTool.ToolException(message == null ? "query failed" : message, e);
+    private static McpTool.ToolException toolError(TessaryException e) {
+        return new McpTool.ToolException(Objects.requireNonNull(e.getMessage()), e);
     }
 
     // ------------------------------------------------------------------ substrate list handlers
@@ -1395,7 +1348,7 @@ public class McpToolRegistry {
         try {
             page = queryService.search(projectId, req);
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
 
         List<SpanKey> keys = new ArrayList<>(page.rows().size());

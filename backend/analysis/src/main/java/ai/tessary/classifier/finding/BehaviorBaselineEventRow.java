@@ -21,20 +21,6 @@ public record BehaviorBaselineEventRow(
         String occurredAt,
         @Nullable String detailJson) {
 
-    /** An entry against a behaviour-drift epoch. */
-    public static BehaviorBaselineEventRow forProfile(
-            String id,
-            String profileId,
-            String projectId,
-            String event,
-            @Nullable String workflowKey,
-            @Nullable String gramKey,
-            String occurredAt,
-            @Nullable String detailJson) {
-        return new BehaviorBaselineEventRow(
-                id, profileId, null, projectId, event, workflowKey, gramKey, occurredAt, detailJson);
-    }
-
     /**
      * An entry against a metric-drift baseline. {@code gramKey} carries the finding's {@code cause_key}
      * — the changelog's "what was this about" column, which for a distribution shift is the same string
@@ -65,15 +51,6 @@ public record BehaviorBaselineEventRow(
     /** {@code behavior_baseline_event.event} values. */
     public static final class Event {
         private Event() {}
-
-        public static final String GRAM_GRADUATED = "gram_graduated";
-        public static final String GRAM_ALLOWLISTED = "gram_allowlisted";
-        public static final String GRAM_BLOCKED = "gram_blocked";
-        public static final String PROFILE_ARMED = "profile_armed";
-        public static final String PROFILE_STALE = "profile_stale";
-
-        /** A stale epoch re-baselined; counts are inherited, scoring resumes after re-arming. */
-        public static final String EPOCH_REOPENED = "epoch_reopened";
 
         /**
          * A metric-drift baseline's pinned reference was moved onto the current level — the write behind

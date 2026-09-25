@@ -81,15 +81,9 @@ public final class RedactionEngine {
     /**
      * Apply every rule, in order, to {@code text}. Returns {@code text} unchanged (same reference) when it
      * is null/blank or no rule matches; the hot-path common case allocates nothing. Each rule's
-     * replacement is substituted literally.
-     */
-    public static @Nullable String apply(@Nullable String text, List<CompiledRule> rules) {
-        return apply(text, rules, null);
-    }
-
-    /**
-     * {@link #apply(String, List)}, reporting every credential a {@link CorpusRule} replaced to {@code
-     * matched}. Regex rules report nothing: what they remove is named only by their replacement token.
+     * replacement is substituted literally. Every credential a {@link CorpusRule} replaced is reported
+     * to {@code matched} when it is non-null. Regex rules report nothing: what they remove is named only
+     * by their replacement token.
      */
     public static @Nullable String apply(
             @Nullable String text,
@@ -269,12 +263,9 @@ public final class RedactionEngine {
      * SpanBatchWriter} strips an attribute only when its value is byte-for-byte identical to the
      * promoted column, and a reformat on one side of that comparison would silently stop the strip
      * working.
+     *
+     * <p>Corpus findings are reported to {@code matched} when it is non-null.
      */
-    public static @Nullable String applyToJson(@Nullable String json, List<CompiledRule> rules) {
-        return applyToJson(json, rules, null);
-    }
-
-    /** {@link #applyToJson(String, List)}, reporting corpus findings to {@code matched}. */
     public static @Nullable String applyToJson(
             @Nullable String json,
             List<CompiledRule> rules,
@@ -285,13 +276,7 @@ public final class RedactionEngine {
         if (root == null) return applyToTextParts(json, rules, matched);
         JsonNode redacted = redactNode(root, rules, 0, matched);
         if (redacted == null) return json; // nothing matched: original bytes, original reference
-        try {
-            return JSON.writeValueAsString(redacted);
-        } catch (JsonProcessingException e) {
-            // It parsed, so it serializes; this is unreachable in practice. Falling back to the text path
-            // keeps the guarantee that matters: nothing unredacted is ever returned from here.
-            return applyToTextParts(json, rules, matched);
-        }
+        return redacted.toString();
     }
 
     /** The document as a container node, or null when it is not one (prose, a bare scalar, malformed). */
@@ -365,11 +350,7 @@ public final class RedactionEngine {
             if (nested != null) {
                 JsonNode rewritten = redactNode(nested, rules, depth + 1, matched);
                 if (rewritten == null) return text;
-                try {
-                    return JSON.writeValueAsString(rewritten);
-                } catch (JsonProcessingException e) {
-                    return Objects.requireNonNull(applyToTextParts(text, rules, matched));
-                }
+                return rewritten.toString();
             }
         }
         return Objects.requireNonNull(applyToTextParts(text, rules, matched));

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the analyzer scripts (analyze.js, rca.js, synthesize.js,
- * codegen.js). ONE source of truth for:
+ * Shared OpenCode runner for the agent lanes (rca.js, triage.js). ONE source of truth for:
  *   - starting `opencode serve` and driving it over the SDK,
  *   - turning its session messages into the `turns[]` shape the backend's
  *     AgentSpanTelemetry.recordTurns expects,
@@ -28,7 +27,7 @@
  * Runs identically in-VM (E2B template, /home/user) and in local/host mode
  * (agent-sandbox/), because `require('./agent-stream')` resolves beside the caller in
  * both. THEREFORE this file MUST be copied into the E2B template next to the scripts (see
- * template.ts `.copy('agent-stream.js', ...)`) — a missing copy turns every analyzer run
+ * template.ts `.copy('agent-stream.js', ...)`) — a missing copy turns every lane run
  * into a require-not-found crash.
  */
 const { execFileSync, spawn } = require('node:child_process');
@@ -56,10 +55,6 @@ const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   '*',
 );
 
-// How long the sandbox may run when the caller does not say. The launcher always passes the
-// run's real deadline; this only covers a direct/local invocation.
-const DEFAULT_RUN_MS = 900_000;
-
 /**
  * Raise Node's 300s cap on a SINGLE fetch to the run's own deadline.
  *
@@ -85,27 +80,19 @@ function makeFetch(runMs) {
   const dispatcher = new Agent({ headersTimeout: runMs, bodyTimeout: runMs });
   // undici's fetch cannot consume a cross-realm global `Request` (it stringifies to
   // "[object Request]" and throws Invalid URL), and a Request is exactly what the SDK hands its
-  // override — so unwrap it into (url, init). The body is buffered rather than streamed to stay
-  // off the half-duplex path; these payloads are prompts, not uploads.
-  return async function boundedFetch(input, init) {
-    // Unwrapped whether or not an init tags along. The generated client calls this as
-    // `fetch(request)` with one argument today, but a Request reaching the (url, init) fallback
-    // below is exactly the Invalid URL failure above — so the Request-like branch must be the
-    // one that can never be bypassed, not the one that happens to match today's call shape.
-    if (input && typeof input === 'object' && typeof input.url === 'string' && input.headers) {
-      const req = init ? new Request(input, init) : input;
-      const method = req.method || 'GET';
-      return undiciFetch(req.url, {
-        method,
-        headers: Object.fromEntries(req.headers.entries()),
-        // Carried across the unwrap: dropping it would strand the socket of a request whose
-        // caller has already given up.
-        signal: req.signal,
-        body: method === 'GET' || method === 'HEAD' ? undefined : Buffer.from(await req.arrayBuffer()),
-        dispatcher,
-      });
-    }
-    return undiciFetch(input, { ...init, dispatcher });
+  // override — so unwrap it. The body is buffered rather than streamed to stay off the
+  // half-duplex path; these payloads are prompts, not uploads.
+  return async function boundedFetch(req) {
+    const method = req.method || 'GET';
+    return undiciFetch(req.url, {
+      method,
+      headers: Object.fromEntries(req.headers.entries()),
+      // Carried across the unwrap: dropping it would strand the socket of a request whose
+      // caller has already given up.
+      signal: req.signal,
+      body: method === 'GET' || method === 'HEAD' ? undefined : Buffer.from(await req.arrayBuffer()),
+      dispatcher,
+    });
   };
 }
 
@@ -177,7 +164,7 @@ const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS || 180_000);
 /**
  * Run git, and FAIL rather than wait for a human who is not there.
  *
- * <p>This helper existed in five copies (analyze, adjudicate, codegen, rca, synthesize), each
+ * <p>This helper used to exist as one copy per lane, each
  * `execFileSync('git', args, { stdio: 'ignore' })` with no timeout and no prompt suppression. That
  * is a hang, not an error: when a clone's credentials are rejected — an expired installation token,
  * a revoked app — git asks for a username, the question goes to an ignored stdin, and it waits
@@ -262,7 +249,7 @@ function quarantineRepo() {
 // invoked (Bedrock logged zero invocations for those runs).
 //
 // So spawnOpencodeServer waits for the process to print `opencode server listening on <url>` on
-// stdout and hands back that url — the same contract, arguments, env and failure messages as the
+// stdout and hands back that url — the same contract, env and failure messages as the
 // SDK's createOpencodeServer (@opencode-ai/sdk 1.18.30, dist/server.js), which this replaced. It
 // still takes a TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — a hand-built
 // JSON string is how an invalid `permission.webfetch` shape once shipped unnoticed.
@@ -320,9 +307,8 @@ function stopProcess(proc) {
  */
 function spawnOpencodeServer({ hostname, port, timeout, config }) {
   const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
-  if (config && config.logLevel) args.push(`--log-level=${config.logLevel}`);
   const proc = spawn('opencode', args, {
-    env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config || {}) },
+    env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
   });
   const close = () => stopProcess(proc);
 
@@ -367,18 +353,12 @@ function spawnOpencodeServer({ hostname, port, timeout, config }) {
  * The launcher's provider config (agentEnvs), passed down in the env var OpenCode reads. Must be
  * MERGED, not replaced: the var holds one value, so overwriting it drops the provider block and
  * bedrock-mantle-gpt never registers — the GPT-5.6 lanes then fail to resolve a model while every
- * bedrock-runtime lane still works off the ambient AWS_REGION. Unparseable throws rather than
- * degrading to that same silent state.
+ * bedrock-runtime lane still works off the ambient AWS_REGION.
  */
 function inheritedConfig() {
   const raw = process.env.OPENCODE_CONFIG_CONTENT;
   if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (e) {
-    throw new Error(`OPENCODE_CONFIG_CONTENT is not valid JSON: ${e.message}`);
-  }
+  return JSON.parse(raw);
 }
 
 /**
@@ -487,7 +467,7 @@ function schemaInstruction(jsonSchema) {
  * correction prompt names back to the model.
  */
 function missingKeys(parsed, jsonSchema) {
-  const required = jsonSchema && Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
+  const required = Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
   if (!parsed || typeof parsed !== 'object') return required;
   return required.filter((k) => parsed[k] === undefined);
 }
@@ -577,7 +557,7 @@ function describeSchemaMiss(text, turns, jsonSchema) {
     'schema miss: ' +
       `chars=${t.length} braces=${(t.match(/{/g) || []).length} balanced=${spans.length} ` +
       `turns=${turns ? turns.length : 0} last_turn_output_tokens=${last ? last.usage.output_tokens : 0}`,
-    'required=' + ((jsonSchema && jsonSchema.required) || []).join(','),
+    'required=' + (jsonSchema.required || []).join(','),
     usageLine(turns),
     '--- reply head ---\n' + scrubToken(t.slice(0, 600)),
   ];
@@ -604,7 +584,7 @@ function describeSchemaMiss(text, turns, jsonSchema) {
  * (toEnvelope) and a failing run's stdout envelope (triage.js/rca.js's catch block, via this same
  * exported name) compute spend, so the two can never drift apart.
  *
- * Every field here is a plain number, on purpose: this crosses into grader-runner/launcher/server.js's
+ * Every field here is a plain number, on purpose: this crosses into sandbox-runner/launcher/server.js's
  * HARD RULE territory (buildErrorBody forwards exactly this shape into the 502 body it sends the
  * backend), so nothing added to this object may ever become a string.
  */
@@ -653,12 +633,7 @@ function toolCallsOf(parts) {
     .filter((c) => c && (c.type === 'tool' || c.type === 'tool_use' || c.type === 'tool-call'))
     .map((c) => {
       const state = c.state || {};
-      let args = '';
-      try {
-        args = JSON.stringify(c.input || state.input || {});
-      } catch {
-        args = '';
-      }
+      const args = JSON.stringify(c.input || state.input || {});
       return { id: c.callID || c.id || '', name: c.tool || c.name || '', input: args };
     })
     .filter((c) => c.name);
@@ -671,13 +646,7 @@ function toolResultsOf(parts) {
     const state = c.state || {};
     let r = state.output ?? state.result ?? c.output;
     if (r === undefined || r === null) continue;
-    if (typeof r !== 'string') {
-      try {
-        r = JSON.stringify(r);
-      } catch {
-        continue;
-      }
-    }
+    if (typeof r !== 'string') r = JSON.stringify(r);
     out.push({ id: c.callID || c.id || '', content: r });
   }
   return out;
@@ -724,7 +693,6 @@ function toTurns(messages, prompt) {
     const parts = partsOf(m.parts ? m : msg);
     const results = toolResultsOf(parts);
     turns.push({
-      index: turns.length,
       model: msg.modelID || msg.model || '',
       usage: usageOf(msg),
       tools: toolCallsOf(parts).map((c) => c.name),
@@ -740,10 +708,9 @@ function toTurns(messages, prompt) {
 }
 
 /**
- * The result envelope. This shape is OURS — the backend's AgentSpanTelemetry and
- * E2bAnalysisSandbox read `usage`, `num_turns` and `structured_output` by name, and the analyzer
- * scripts read `structured_output`/`result` — so it is a contract between this file and Java, not
- * an artifact of the harness that used to produce it.
+ * The result envelope. This shape is OURS — the backend's AgentSpanTelemetry and the lanes' Java
+ * sandboxes read `usage`, `num_turns` and `structured_output` by name — so it is a contract between
+ * this file and Java, not an artifact of the harness that used to produce it.
  *
  * It carries NO cost field, on purpose. The harness's own figure does not price cache reads
  * (anomalyco/opencode#28494), and cache reads are most of a repo-grounded run's bill, so the
@@ -751,7 +718,7 @@ function toTurns(messages, prompt) {
  */
 function toEnvelope(turns, structured, text) {
   const usage = sumUsage(turns);
-  const env = { type: 'result', is_error: false, num_turns: turns.length, usage, result: text };
+  const env = { num_turns: turns.length, usage, result: text };
   if (structured && typeof structured === 'object') env.structured_output = structured;
   return JSON.stringify(env);
 }
@@ -761,27 +728,23 @@ function toEnvelope(turns, structured, text) {
 /**
  * Run one agent invocation against `spec.prompt`; collect per-turn telemetry + a result envelope.
  *
- * @param {{model: string, prompt: string, jsonSchema?: object, mcp?: {url: string, token: string},
- *          permission?: object, rejectOn?: 'error'|'no-result'|'never', timeoutMs?: number,
- *          maxTurns?: number, systemPrompt?: string}} spec
+ * @param {{model: string, prompt: string, jsonSchema: object, mcp: {url: string, token: string},
+ *          permission: object, timeoutMs: number, maxTurns?: number, systemPrompt?: string}} spec
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
- *   - jsonSchema: when set, the reply is schema-constrained and lands in `structured_output`.
+ *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
+ *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
+ *     is that reply.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
  *     may edit anything is a choice, not a default.
- *   - rejectOn: 'error' (default) rejects when the run produced no usable reply, for runs whose
- *     VALUE is that reply (synthesize, rca). 'no-result' rejects only on a wholly empty run
- *     (analyze, which fails open downstream). 'never' always resolves, for runs whose artifact
- *     is a file the agent wrote (codegen).
  *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
- *   - maxTurns: the operator-configured turn BUDGET (triage/RCA only; every other
- *     caller omits this). Without systemPrompt, passed to the SDK as `config.agent.build.maxSteps`
+ *   - maxTurns: the operator-configured turn BUDGET. Without systemPrompt, passed to the SDK as `config.agent.build.maxSteps`
  *     (see the `steps` doc below for the with-systemPrompt case), whose own doc comment ("Maximum
  *     number of agentic iterations before forcing text-only response") is the mechanism this
  *     relies on for a soft landing rather than a hard kill — set 2 LOWER than the budget so the
  *     forced text-only turn lands with margin, per the issue's "two turns before the cap" ask. NOT
  *     independently confirmed against a live run in the change that added this field — see that
  *     change's PR description.
- *   - systemPrompt: triage only (RCA and every other caller omit it). When set, this run starts an
+ *   - systemPrompt: triage only (RCA omits it). When set, this run starts an
  *     `mcp-relay` in front of `spec.mcp` (so opencode's own config carries no platform token — see
  *     mcp-relay.js) and defines a custom opencode agent (`TRIAGE_AGENT`) whose `prompt` REPLACES
  *     the provider's default system prompt, `steps` carries the same maxTurns-2 budget as
@@ -802,9 +765,8 @@ async function runAgent(spec) {
   const { createOpencodeClient } = await import('@opencode-ai/sdk');
 
   // Headless: every tool the lane needs must be 'allow' outright, because an 'ask' has nobody to
-  // answer it and would burn the run's wall-clock waiting. bash is on for all five lanes (git, the
-  // baked validator, the codegen harness, triage's own check scripts); webfetch is off for all five —
-  // nothing here has a reason to reach the network, and it would be the cheapest exfiltration channel
+  // answer it and would burn the run's wall-clock waiting. bash is on for both lanes (git,
+  // triage's own check scripts); webfetch is off for both — nothing here has a reason to reach the network, and it would be the cheapest exfiltration channel
   // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD,
   // with two named exceptions for triage (see OPENCODE_TMP_GLOB above) — opencode matches multiple
   // rules on the SAME map by taking the last one that matches a given path, so listing the allows
@@ -820,7 +782,7 @@ async function runAgent(spec) {
       webfetch: 'deny',
       websearch: 'deny',
       edit: { '*': 'deny' },
-      ...(spec.permission || {}),
+      ...spec.permission,
       external_directory: spec.systemPrompt
         ? { '*': 'deny', [OPENCODE_TMP_GLOB]: 'allow', [OPENCODE_TOOL_OUTPUT_GLOB]: 'allow' }
         : { '*': 'deny' },
@@ -835,12 +797,10 @@ async function runAgent(spec) {
   if (spec.systemPrompt) {
     // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
     // it (see mcp-relay.js's header for why that split matters).
-    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
-      relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
-      config.mcp = {
-        'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
-      };
-    }
+    relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
+    config.mcp = {
+      'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
+    };
     // The custom agent's `prompt` REPLACES the provider's default system prompt (verified against
     // opencode source, see the research notes this change was built from). `task`/`skill` are
     // denied because this lane runs no sub-agents and ships no skills of its own; `todowrite`
@@ -854,17 +814,15 @@ async function runAgent(spec) {
       },
     };
   } else {
-    if (spec.mcp && spec.mcp.url && spec.mcp.token) {
-      // Config, never argv: the platform key must not be visible in the process table.
-      config.mcp = {
-        'tessary-evals': {
-          type: 'remote',
-          url: spec.mcp.url,
-          enabled: true,
-          headers: { Authorization: `Bearer ${spec.mcp.token}` },
-        },
-      };
-    }
+    // Config, never argv: the platform key must not be visible in the process table.
+    config.mcp = {
+      'tessary-evals': {
+        type: 'remote',
+        url: spec.mcp.url,
+        enabled: true,
+        headers: { Authorization: `Bearer ${spec.mcp.token}` },
+      },
+    };
     if (steps !== undefined) {
       // See the JSDoc above for the mechanism and its margin. No prompt selects a
       // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
@@ -880,7 +838,7 @@ async function runAgent(spec) {
     server = await startServer(config);
     const client = createOpencodeClient({
       baseUrl: server.url,
-      fetch: makeFetch(spec.timeoutMs || DEFAULT_RUN_MS),
+      fetch: makeFetch(spec.timeoutMs),
       throwOnError: true, // a 4xx must not read as "the agent produced nothing"
     });
     let turns = [];
@@ -931,8 +889,8 @@ async function runAgent(spec) {
       // investigation prompt would order a second investigation. Send the correction and the
       // schema, nothing else.
       const prompt = resume
-        ? correction.trim() + (spec.jsonSchema ? schemaInstruction(spec.jsonSchema) : '')
-        : (spec.jsonSchema ? spec.prompt + schemaInstruction(spec.jsonSchema) : spec.prompt) + correction;
+        ? correction.trim() + schemaInstruction(spec.jsonSchema)
+        : spec.prompt + schemaInstruction(spec.jsonSchema) + correction;
       const body = {
         model: splitModel(spec.model),
         parts: [{ type: 'text', text: prompt }],
@@ -947,7 +905,7 @@ async function runAgent(spec) {
       const info = (reply && (reply.info || reply.data || reply)) || {};
       text =
         textOf(partsOf(reply && reply.parts ? reply : info)) || (turns.length ? turns[turns.length - 1].text : '');
-      structured = spec.jsonSchema ? extractJson(text) : null;
+      structured = extractJson(text);
 
       if (isEmptyCompletion(turns)) {
         // (E) Gate the fresh-session retry on how little this session actually did. A LONE empty
@@ -980,7 +938,6 @@ async function runAgent(spec) {
         resume = false;
         continue;
       }
-      if (!spec.jsonSchema) break;
       // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
       // so "we parsed an object at all" is the check that carries the prose case.
       const missing = missingKeys(structured, spec.jsonSchema);
@@ -1008,40 +965,33 @@ async function runAgent(spec) {
     // F1: every throw below carries `.turns = finalTurns` — a plain data property on the Error,
     // never a string field derived from model output — so triage.js/rca.js's catch block can book
     // what this run actually spent instead of the backend recording a $0 failure.
-    const rejectOn = spec.rejectOn || 'error';
     const empty = finalTurns.length === 0;
     const unusable = empty || (!structured && !text);
-    if (rejectOn !== 'never' && empty) {
+    if (empty) {
       console.error(usageLine(finalTurns));
       throw Object.assign(new Error('opencode produced no result'), { turns: finalTurns });
     }
-    if (rejectOn === 'error' && unusable) {
+    if (unusable) {
       console.error(usageLine(finalTurns));
       throw Object.assign(new Error('opencode produced no usable reply'), { turns: finalTurns });
     }
 
     // A schema miss that survived the retry is a FAILED run, not a thin one. Prose is truthy
-    // `text`, so it clears `unusable` above and would otherwise resolve as success — and the
-    // callers of a schema lane do not degrade gracefully on that: synthesize's extractBody falls
-    // back to `{judge_prompt: <the prose>, rubric: ''}` and would ship that as a grader. Reject
-    // here so the backend records a failure instead of persisting a plausible-looking artifact.
-    // Only for rejectOn:'error'; 'no-result' (analyze) and 'never' (codegen) both have a
-    // downstream that reads a partial run correctly.
-    if (rejectOn === 'error' && spec.jsonSchema) {
-      const missing = missingKeys(structured, spec.jsonSchema);
-      if (!structured || missing.length) console.error(describeSchemaMiss(text, finalTurns, spec.jsonSchema));
-      if (!structured) {
-        throw Object.assign(
-          new Error('opencode did not return a JSON object for the requested schema (2 attempts)'),
-          { turns: finalTurns },
-        );
-      }
-      if (missing.length) {
-        throw Object.assign(
-          new Error(`opencode returned JSON missing required ${missing.join(', ')} (2 attempts)`),
-          { turns: finalTurns },
-        );
-      }
+    // `text`, so it clears `unusable` above and would otherwise resolve as success. Reject here so
+    // the backend records a failure instead of persisting a plausible-looking artifact.
+    const missing = missingKeys(structured, spec.jsonSchema);
+    if (!structured || missing.length) console.error(describeSchemaMiss(text, finalTurns, spec.jsonSchema));
+    if (!structured) {
+      throw Object.assign(
+        new Error('opencode did not return a JSON object for the requested schema (2 attempts)'),
+        { turns: finalTurns },
+      );
+    }
+    if (missing.length) {
+      throw Object.assign(
+        new Error(`opencode returned JSON missing required ${missing.join(', ')} (2 attempts)`),
+        { turns: finalTurns },
+      );
     }
 
     return { startMs, turns: finalTurns, resultRaw: toEnvelope(finalTurns, structured, text) };
@@ -1065,15 +1015,10 @@ async function runAgent(spec) {
 
 module.exports = {
   git,
-  missingKeys,
   runAgent,
-  scrubToken,
   describeError,
-  splitModel,
-  extractJson,
   quarantineRepo,
   sumUsage,
   WORK,
   REPO,
-  AGENT_CWD,
 };

@@ -3,12 +3,10 @@
  * Settings → Git integration.
  *
  * The repository connection is administration — a credential binding the whole
- * project depends on — so it lives in Settings with the other credentials rather
- * than on the Observer surface that happens to consume it.
+ * project depends on — so it lives in Settings with the other credentials.
  *
- * It is load-bearing for two things that fail without it — Observer has nothing to
- * compare graders against, and every Run RCA is refused because the sandboxed
- * agent has no repo to clone — and it UPGRADES a third. Layer-2 triage runs
+ * Every Run RCA is refused without it, because the sandboxed agent has no repo
+ * to clone, and it UPGRADES Layer-2 triage. Layer-2 triage runs
  * either way: with a repo it rules a finding against the committed spec and the
  * code, and without one it rules from the finding's own trace evidence. The
  * difference is the strength of the ruling, not whether there is one, and the
@@ -49,7 +47,6 @@ export function GitIntegration() {
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["git-integration", api.base] });
-    void qc.invalidateQueries({ queryKey: ["observer-status", api.base] });
   };
 
   // The install callback lands back here. Refresh, say so once, and strip the flag
@@ -197,7 +194,6 @@ export function GitIntegration() {
               <div className="text-subtle mt-1.25 text-small">
                 {integ.provider}
                 {integ.host ? ` · ${integ.host}` : ""}
-                {integ.observerCursorSha ? ` · synced at ${integ.observerCursorSha.slice(0, 7)}` : " · not synced yet"}
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>

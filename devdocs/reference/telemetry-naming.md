@@ -20,7 +20,7 @@ conventions*.
    name.** Do not invent a parallel colon-prefixed vocabulary
    (`rca:…`, `triage:…`).
 3. **Entity identity goes in attributes / observation metadata**, not the name.
-   Prefer `langfuse.observation.metadata.<key>` (via `LlmCaller`'s `meta` map) and
+   Prefer `langfuse.observation.metadata.<key>` and
    `tessary.project.id` / `langfuse.observation.metadata.project_id`.
 4. **Carve-out — agentic child turns:** the sandbox lanes emit a dotted child
    `agent.llm_request`, one per agent turn (`agent.author`/`agent.codegen` were
@@ -32,21 +32,14 @@ conventions*.
 
 ## Alloy / Langfuse admission
 
-`observability/alloy/config.alloy` (and `config.dev.alloy`) keeps a span for Langfuse when it
+`observability/alloy/config.dev.alloy` keeps a span for Langfuse when it
 has **either**:
 
-- `gen_ai.operation.name` (set by `LlmCaller` and agentic roots), **or**
+- `gen_ai.operation.name` (set by `JevDecisionClient` and agentic roots), **or**
 - `langfuse.trace.name` (set on non-LLM product roots such as `agentic-rca`).
 
 A new non-LLM product span that should reach Langfuse **must** stamp
 `langfuse.trace.name` (prefer that over a fake `gen_ai.operation.name`).
-
-No platform LLM path currently calls `LlmCaller` at all: RCA and TRIAGE resolve their
-model via `ProjectModelSettings#resolveAgenticModel` and the sandbox launcher, bypassing
-it entirely, and the grading/judge callers that used to were removed. So `parentTrace`
-is unexercised today rather than uniformly null-in-practice. Restoring run-level parent
-traces (wiring the classifier/RCA workers through `LlmCaller` with a non-null
-`parentTrace`) is a follow-up — see below.
 
 ## Inventory — platform emitters
 
@@ -80,7 +73,7 @@ as an MDC key rename below, and gets the same treatment: recorded here, no dual-
 | Key | Where | Purpose |
 |---|---|---|
 | `tessary.triage.finding_id` | observation metadata | The finding a Layer-2 ruling is about, and the ledger subject its spend books against |
-| `tessary.project.id` / `project_id` | span attribute; `langfuse.observation.metadata.project_id` (LlmCaller) or `langfuse.trace.metadata.project_id` (agentic sandbox roots) | Tenant join key |
+| `tessary.project.id` / `project_id` | span attribute; `langfuse.observation.metadata.project_id` (`JevDecisionClient`) or `langfuse.trace.metadata.project_id` (agentic sandbox roots) | Tenant join key |
 
 The `grader_id` / `grader_name` / `grader_kind` / `phase` keys were removed with grading.
 
@@ -92,7 +85,7 @@ build cannot see it either. Record every rename here:
 | `evals.project.id` | `tessary.project.id` | 2026-09 namespace rename. The whole `evals.*` internal attribute namespace moved to `tessary.*` so one name spans code, config and telemetry. The customer-emitted vocabulary (`tessary.call_site.id` and the `gen_ai.*` set) was already `tessary.*` and did not move. No dual-emit window: these are platform-internal spans, not customer-ingested ones. |
 | `evals.rca.subject_id` / `evals.head_sha` | `tessary.rca.subject_id` / `tessary.head_sha` | 2026-09 namespace rename, as above (`E2bRcaSandbox`). |
 | `evals.triage.finding_id` / `evals.triage.cost_usd` / `evals.triage.spend_cap_usd` / `evals.triage.over_spend_cap` | `tessary.triage.*` | 2026-09 namespace rename, as above (`E2bTriageSandbox`). |
-| `evals.latency_ms` / `evals.agent.tools` / `evals.llm.structured_output.tool_miss` / `evals.cache.likely_expiry` | `tessary.*` | 2026-09 namespace rename, as above (`LlmCaller`, `AgentSpanTelemetry`). |
+| `evals.latency_ms` / `evals.agent.tools` | `tessary.*` | 2026-09 namespace rename, as above (`JevDecisionClient`, `AgentSpanTelemetry`). |
 
 Two telemetry names were deliberately **not** renamed, because they are opaque keys that carry state
 across the upgrade rather than anything an operator reads: the Hikari pool name `evals-hikari` (a
@@ -119,7 +112,7 @@ matching, silently, at deploy. So record every rename here:
 
 **Do**
 
-- Route every LLM chat through `LlmCaller` with a static kebab `spanName`.
+- Give every LLM span a static kebab span name.
 - Put job / entity ids in the `meta` map (or explicit attributes).
 - Stamp `langfuse.trace.name` on non-LLM product roots that should reach Langfuse.
 - Update this inventory when adding an emitter.

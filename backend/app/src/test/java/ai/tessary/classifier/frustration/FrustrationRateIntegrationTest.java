@@ -29,6 +29,7 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -126,15 +127,15 @@ class FrustrationRateIntegrationTest {
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()))
                 .toList();
         assertEquals(180, members.size(), "every session the rate counted, calm ones included");
-        assertTrue(members.stream().allMatch(r -> "session".equals(r.grain())));
-        long sessions = rows.stream().filter(r -> "session".equals(r.grain())).count();
-        long traces = rows.stream().filter(r -> "trace".equals(r.grain())).count();
+        assertTrue(members.stream().allMatch(r -> "session".equals(grain(r))));
+        long sessions = rows.stream().filter(r -> "session".equals(grain(r))).count();
+        long traces = rows.stream().filter(r -> "trace".equals(grain(r))).count();
         assertEquals(72, sessions, "every frustrated session, not a sample of them");
         assertEquals(sessions, traces, "each session beside the turn that fired in it");
         FindingEvidenceRow first = rows.get(0);
         FindingEvidenceRow second = rows.get(1);
-        assertEquals("session", first.grain());
-        assertEquals("trace", second.grain());
+        assertEquals("session", grain(first));
+        assertEquals("trace", grain(second));
         assertEquals("conv-" + second.traceId(), first.sessionId(), "the pair names one session");
 
         assertNotNull(finding.caseId(), "the case opened in the same pass");
@@ -299,7 +300,7 @@ class FrustrationRateIntegrationTest {
 
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
-        return classifiers.findByKey(pid, "frustration").orElseThrow();
+        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
     /** {@code perHour} one-turn conversations an hour, the first {@code rate} of each hour flagged. */
@@ -356,5 +357,11 @@ class FrustrationRateIntegrationTest {
                 .param("evidence", "{\"score\":0.71,\"call_site_id\":\"" + callSite + "\"}")
                 .param("at", Timestamp.from(at))
                 .update();
+    }
+
+    /** The grain a ref is at: a span ref carries a span id, a trace ref a trace id, a session ref neither. */
+    private static String grain(FindingEvidenceRow row) {
+        if (row.spanId() != null) return "span";
+        return row.traceId() != null ? "trace" : "session";
     }
 }

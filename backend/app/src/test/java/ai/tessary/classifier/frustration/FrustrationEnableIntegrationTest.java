@@ -18,13 +18,13 @@ import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
 import ai.tessary.llm.ProviderCredentialSavedEvent;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -74,8 +74,7 @@ class FrustrationEnableIntegrationTest {
                 () -> classifierService.setEnabled(t.project().id(), signal.id(), true));
 
         assertEquals(ClassifierError.PROVIDER_REQUIRED, e.error());
-        assertFalse(classifiers
-                .findByKey(t.project().id(), "frustration")
+        assertFalse(ClassifierRows.byKey(classifiers, t.project().id(), "frustration")
                 .orElseThrow()
                 .enabled());
     }
@@ -86,7 +85,7 @@ class FrustrationEnableIntegrationTest {
         String pid = t.project().id();
         ClassifierRow signal = frustration(t);
         storeKey(t, ModelProvider.TYPESAFE);
-        modelSettings.set(pid, t.org().id(), ModelLane.FRUSTRATION, "TYPESAFE:jev-latest", ServiceTier.STANDARD, null);
+        modelSettings.set(pid, t.org().id(), ModelLane.FRUSTRATION, "TYPESAFE:jev-latest");
         classifiers.pause(pid, signal.id(), ClassifierPause.PROVIDER_REJECTED, Instant.now());
 
         ClassifierRow enabled = classifierService.setEnabled(pid, signal.id(), true);
@@ -104,7 +103,8 @@ class FrustrationEnableIntegrationTest {
         classifiers.setEnabled(pid, signal.id(), true);
         classifiers.pause(pid, signal.id(), ClassifierPause.NO_PROVIDER, Instant.now());
 
-        ClassifierRow row = classifiers.findByKey(pid, "frustration").orElseThrow();
+        ClassifierRow row =
+                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
         assertEquals(ClassifierPause.NO_PROVIDER, classifierService.readiness(pid, row));
     }
 
@@ -115,7 +115,7 @@ class FrustrationEnableIntegrationTest {
         ClassifierRow signal = frustration(t);
         storeKey(t, ModelProvider.TYPESAFE);
         storeKey(t, ModelProvider.OPENROUTER);
-        modelSettings.set(pid, t.org().id(), ModelLane.FRUSTRATION, "TYPESAFE:jev-latest", ServiceTier.STANDARD, null);
+        modelSettings.set(pid, t.org().id(), ModelLane.FRUSTRATION, "TYPESAFE:jev-latest");
         classifiers.pause(pid, signal.id(), ClassifierPause.PROVIDER_REJECTED, Instant.now());
 
         events.publishEvent(new ProviderCredentialSavedEvent(t.org().id(), ModelProvider.OPENROUTER));
@@ -131,7 +131,8 @@ class FrustrationEnableIntegrationTest {
 
     private ClassifierRow frustration(TenantFixture.Setup t) {
         classifierService.seedBuiltIns(t.project().id());
-        return classifiers.findByKey(t.project().id(), "frustration").orElseThrow();
+        return ClassifierRows.byKey(classifiers, t.project().id(), "frustration")
+                .orElseThrow();
     }
 
     private void storeKey(TenantFixture.Setup t, ModelProvider provider) {

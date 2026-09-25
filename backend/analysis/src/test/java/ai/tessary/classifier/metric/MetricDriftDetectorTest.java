@@ -65,7 +65,8 @@ class MetricDriftDetectorTest {
         // distribution monitoring fails in production.
         assertFalse(d.fired());
         assertEquals(Silence.WITHIN_FLOOR, d.silence());
-        assertTrue(d.magnitude() < CONFIG.w1Floor(), "measured " + d.magnitude() + " against " + CONFIG.w1Floor());
+        double magnitude = Math.abs(d.w1Log());
+        assertTrue(magnitude < CONFIG.w1Floor(), "measured " + magnitude + " against " + CONFIG.w1Floor());
     }
 
     @Test

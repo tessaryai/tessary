@@ -34,9 +34,8 @@
  * `detail` is launcher-authored or scrubbed SDK metadata ONLY — never the clone URL, sandbox
  * output, model output, or repo content (see "Failure diagnostics" below).
  *
- * Encoder classification (POST /classify) is NOT served here — it lives in the
- * standalone classify-service (../../classify-service), which runs on ECS Fargate
- * in production and as the `classify` service in docker-compose.dev.yml locally.
+ * Encoder classification (POST /classify) is NOT served here — the groundedness head is served
+ * by classifiers/groundedness/serve.py.
  *
  * Env:
  *   PORT                  (default 8080)
@@ -338,10 +337,8 @@ function defaultBaseUrlFor(mode) {
       // appends only `/messages`, so a bare host POSTs to https://api.anthropic.com/messages and
       // 404s — and in SERVER mode OpenCode folds that into an empty assistant turn rather than an
       // error, so the run surfaces as "opencode produced no usable reply" with a valid key and
-      // zero tokens. The backend's langchain4j client behaves the SAME way: its own default is
-      // "https://api.anthropic.com/v1/" and DefaultAnthropicClient appends the bare path
-      // "messages". PlatformCatalog now carries the /v1 form for that reason, so this line really
-      // does mirror the backend — one correct form for both consumers.
+      // zero tokens. The backend's PlatformCatalog carries the same /v1 form, and
+      // scripts/check-sandbox-runner-launcher.sh holds the two equal.
       return 'https://api.anthropic.com/v1';
     default:
       return null;
@@ -364,8 +361,7 @@ function openAiCompatCredentials(mode, credential) {
 // scopes inference by project the way bedrock-runtime scopes it by inference profile, so the
 // production IAM policy grants `bedrock-mantle:CreateInference` on a project ARN. A request
 // without this header lands in the account's `default` project, which that policy does not
-// cover — a 403, not a mis-filed line item. Mirrors llm/MantleHttpClient, which adds the same
-// header before signing.
+// cover — a 403, not a mis-filed line item.
 const MANTLE_PROJECT_HEADER = 'OpenAI-Project';
 
 // The provider config OpenCode runs with, injected per run rather than baked into the image so
@@ -1273,19 +1269,15 @@ async function runAgenticScript(scriptName, rawPayload) {
   // Both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
   // file). Reject a missing or localhost-pointed callback URL BEFORE spending an E2B sandbox create
   // call: on this backend the microVM cannot reach the host's localhost at all, so letting the run
-  // proceed only guarantees a slower, more expensive version of the same failure. The guard is kept
-  // conditional rather than unconditional so a future clone-only agentic route does not inherit an
-  // MCP requirement it has no use for.
-  if (scriptName === 'rca.js' || scriptName === 'triage.js') {
-    const mcpUrl = payload.mcp && payload.mcp.url;
-    if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
-      const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
-        + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
-        + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
-        + 'SANDBOX_BACKEND to docker for development');
-      e.launcherKind = 'bad_request';
-      throw e;
-    }
+  // proceed only guarantees a slower, more expensive version of the same failure.
+  const mcpUrl = payload.mcp && payload.mcp.url;
+  if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
+    const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
+      + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
+      + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
+      + 'SANDBOX_BACKEND to docker for development');
+    e.launcherKind = 'bad_request';
+    throw e;
   }
   const startedAt = Date.now();
   // Diagnostics ride on the thrown error (see buildErrorBody) so the backend stops seeing a
@@ -1333,21 +1325,10 @@ async function runAgenticScript(scriptName, rawPayload) {
       if (stdout) console.error('--- sandbox stdout ---\n' + scrubToken(stdout).slice(0, 2000));
       await logSandboxDiagnostics(sandboxId);
       // F1: same failure-envelope extraction as the other two backends — CommandExitError is the
-      // NORMAL shape a triage/rca non-zero exit takes here (see the defensive res.exitCode branch
-      // below for the abnormal one), so this is the primary site for the E2B backend, not a fallback.
+      // only shape a triage/rca non-zero exit takes here, so this is the primary site for the E2B
+      // backend, not a fallback.
       const usage = usageFromFailureStdout(stdout);
       if (usage && e && typeof e === 'object') e.usage = usage;
-      throw e;
-    }
-    if (res.exitCode !== 0) {
-      // Defensive: E2B normally throws CommandExitError on a non-zero exit. stderr stays on this
-      // console — the error's message is now published as `detail`.
-      console.error(`${scriptName} exit ${res.exitCode} after ${Date.now() - startedAt}ms (sandbox ${sandboxId})`);
-      if (res.stderr) console.error('--- sandbox stderr ---\n' + scrubToken(res.stderr).slice(-4000));
-      const e = new Error(`${scriptName} exit ${res.exitCode}`);
-      e.exitCode = res.exitCode;
-      const usage = usageFromFailureStdout(res.stdout);
-      if (usage) e.usage = usage;
       throw e;
     }
     return parseScriptOutput(scriptName, res.stdout);

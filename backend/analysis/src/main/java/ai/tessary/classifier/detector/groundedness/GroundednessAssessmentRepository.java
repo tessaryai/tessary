@@ -93,8 +93,6 @@ public class GroundednessAssessmentRepository {
                 .param("cid", classifierId)
                 .query((rs, n) -> rs.getTimestamp("last"))
                 .list();
-        return last.isEmpty() || last.get(0) == null
-                ? Optional.empty()
-                : Optional.of(last.get(0).toInstant());
+        return last.get(0) == null ? Optional.empty() : Optional.of(last.get(0).toInstant());
     }
 }

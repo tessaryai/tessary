@@ -9,6 +9,7 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.billing.BillingController;
 import ai.tessary.classifier.ClassifierController;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
+import ai.tessary.tenant.rbac.Role;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -67,7 +68,7 @@ class RbacEnforcementIntegrationTest {
     @Test
     void viewer_cannotCreateProject_butCanView() {
         var fix = TenantFixture.bootstrap(tenants, "rbac-viewer");
-        Principal viewer = memberWithRole(fix.org().id(), OrgMembership.VIEWER, "viewer");
+        Principal viewer = memberWithRole(fix.org().id(), Role.VIEWER.wire(), "viewer");
 
         // View is allowed.
         assertTrue(orgController
@@ -109,7 +110,7 @@ class RbacEnforcementIntegrationTest {
     @Test
     void admin_canManageMembers_butNotBillingOrLifecycle() {
         var fix = TenantFixture.bootstrap(tenants, "rbac-admin");
-        Principal admin = memberWithRole(fix.org().id(), OrgMembership.ADMIN, "admin");
+        Principal admin = memberWithRole(fix.org().id(), Role.ADMIN.wire(), "admin");
 
         // Admin can invite a (non-owner) member.
         var result = orgController.addMember(
@@ -140,7 +141,7 @@ class RbacEnforcementIntegrationTest {
     @Test
     void admin_cannotGrantOwnerRole() {
         var fix = TenantFixture.bootstrap(tenants, "rbac-escalate");
-        Principal admin = memberWithRole(fix.org().id(), OrgMembership.ADMIN, "admin2");
+        Principal admin = memberWithRole(fix.org().id(), Role.ADMIN.wire(), "admin2");
         Principal target = memberWithRole(fix.org().id(), OrgMembership.MEMBER, "target");
 
         ResponseStatusException ex = assertThrows(
@@ -156,7 +157,7 @@ class RbacEnforcementIntegrationTest {
     @Test
     void billingRole_reachesBilling_butNotOrgContent() {
         var fix = TenantFixture.bootstrap(tenants, "rbac-billing");
-        Principal billing = memberWithRole(fix.org().id(), OrgMembership.BILLING, "billing");
+        Principal billing = memberWithRole(fix.org().id(), Role.BILLING.wire(), "billing");
 
         // Billing role can reach billing.
         var summary = billingController.getBilling(session(billing), fix.org().slug(), null, null);
@@ -187,7 +188,7 @@ class RbacEnforcementIntegrationTest {
     @Test
     void viewer_cannotToggleSignal_butCanList() {
         var fix = TenantFixture.bootstrap(tenants, "rbac-sig-viewer");
-        Principal viewer = memberWithRole(fix.org().id(), OrgMembership.VIEWER, "sig-viewer");
+        Principal viewer = memberWithRole(fix.org().id(), Role.VIEWER.wire(), "sig-viewer");
 
         // Seeding happens on the first successful generation run; simulate it, then list as a viewer.
         signalService.seedBuiltIns(fix.project().id());

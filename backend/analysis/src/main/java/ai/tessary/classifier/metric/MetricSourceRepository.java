@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -15,9 +16,9 @@ import org.springframework.stereotype.Repository;
  *
  * <p>Duration, cost, and token usage are typed columns on {@code span}/{@code trace}, NULL when a
  * producer reported nothing and a real value (including 0) when it did, so presence never needs
- * reading out of raw key spellings. The rollup columns ({@code trace.latency_ms}, {@code
- * total_cost}) are returned beside the leaf facts rather than instead of them, since a NULL rollup
- * means "not yet rolled up," distinct from zero.
+ * reading out of raw key spellings. The rollup columns ({@code trace.total_cost}, and a tool span's
+ * {@code latency_ms}) are returned beside the leaf facts rather than instead of them, since a NULL
+ * rollup means "not yet rolled up," distinct from zero.
  *
  * <p>The entry-point call site is never re-derived here: the rollup worker copies it onto {@code
  * trace.call_site_id} from the root span, and this and {@link
@@ -57,8 +58,7 @@ public class MetricSourceRepository {
      * <p>Duration comes from the root span's own interval, never a min/max envelope over the trace:
      * async children can outlive their parent and inflate an envelope's p95, while the root span
      * encloses its children the way Jaeger, Tempo, and Datadog report trace duration. {@code
-     * trace.latency_ms} is such an envelope, which is why both are returned and {@link MetricSource}
-     * picks the right one per measure.
+     * trace.latency_ms} is such an envelope, which is why it is not read here.
      *
      * <p>The root LATERAL takes the earliest-starting parentless span, matching {@code
      * VitalsRepository}'s {@code DISTINCT ON} so the two surfaces never report different durations
@@ -68,19 +68,17 @@ public class MetricSourceRepository {
      * <p>{@code parent_span_id} is the producer's own statement, stored verbatim and never repaired,
      * so a null parent means exactly one thing: this span is the root.
      *
-     * <p>{@code prior_turns} is the trace's rank within its conversation by event order, on the
-     * pinned {@code COALESCE(thread_id, session_id, id)} grain, the same expression conformance
-     * groups on. A single-shot producer's trace is its own conversation and reports 0.
+     * <p>{@code prior_turns} is the trace's rank within its conversation by event order, on the pinned {@code
+     * COALESCE(thread_id, session_id, id)} grain. A single-shot producer's trace is its own conversation and
+     * reports 0.
      *
      * <p>Exactly one row per trace in the page: the join to {@code span} is a LEFT LATERAL, so a
      * trace whose spans haven't landed yet is still accounted for rather than vanishing from the
      * page.
      */
     public List<TurnFacts> turnFacts(String projectId, List<String> traceIds) {
-        if (traceIds.isEmpty()) return List.of();
         return jdbc.sql("""
                         SELECT tr.id                                             AS trace_id,
-                               tr.latency_ms                                     AS rollup_latency_ms,
                                tr.total_cost                                     AS rollup_total_cost,
                                -- Carried beside the total because SUM skips nulls: a trace with one
                                -- unpriced generation reports the price of the others and reads cheap.
@@ -125,7 +123,6 @@ public class MetricSourceRepository {
                 .param("ids", traceIds)
                 .query((rs, n) -> new TurnFacts(
                         rs.getString("trace_id"),
-                        nullableLong(rs, "rollup_latency_ms"),
                         rs.getBigDecimal("rollup_total_cost"),
                         nullableInt(rs, "unpriced_spans"),
                         rs.getBoolean("has_root"),
@@ -152,16 +149,13 @@ public class MetricSourceRepository {
      * (including 0) when it did, so "reported zero" and "reports nothing" stay distinguishable.
      */
     public List<LeafUsage> leafUsage(String projectId, List<String> traceIds) {
-        if (traceIds.isEmpty()) return List.of();
         return jdbc.sql("""
                         SELECT s.trace_id            AS trace_id,
                                s.provided_model_name AS model,
-                               s.model_id            AS model_id,
                                s.input_tokens        AS input_tokens,
                                s.output_tokens       AS output_tokens,
                                s.cache_read_tokens   AS cache_read_tokens,
                                s.cache_write_tokens  AS cache_write_tokens,
-                               s.reasoning_tokens    AS reasoning_tokens,
                                s.total_cost          AS total_cost,
                                s.cost_source         AS cost_source
                         FROM span s
@@ -176,12 +170,10 @@ public class MetricSourceRepository {
                 .query((rs, n) -> new LeafUsage(
                         rs.getString("trace_id"),
                         rs.getString("model"),
-                        rs.getString("model_id"),
                         nullableLong(rs, "input_tokens"),
                         nullableLong(rs, "output_tokens"),
                         nullableLong(rs, "cache_read_tokens"),
                         nullableLong(rs, "cache_write_tokens"),
-                        nullableLong(rs, "reasoning_tokens"),
                         rs.getBigDecimal("total_cost"),
                         rs.getString("cost_source")))
                 .list();
@@ -191,10 +183,9 @@ public class MetricSourceRepository {
      * Every dispatchable span of the given traces, with its own interval: the {@code tool_duration}
      * subjects. See {@link #MEASURED_KINDS} for which kinds qualify.
      *
-     * <p>Name resolution mirrors {@code BehaviorSubstrateRepository.actionsForTraces} exactly, since
-     * the tool bucket key is an {@link ai.tessary.classifier.substrate.ActionSymbol} and a different
-     * name here would key latency on a symbol the drift alphabet never mints: normalized {@code
-     * tool_call.name}, then the raw {@code gen_ai.tool.name} attribute, then the span name. The
+     * <p>The tool bucket key is an {@link ai.tessary.classifier.substrate.ActionSymbol} of the tool's
+     * name, never the span's: normalized {@code tool_call.name}, then the raw {@code gen_ai.tool.name}
+     * attribute, then the span name. The
      * LATERAL keeps it one row per span, since {@code tool_call} can hold duplicate rows for a
      * re-ingested span.
      *
@@ -202,7 +193,6 @@ public class MetricSourceRepository {
      * that increasingly hangs must not read as a shrinking sample of fast calls.
      */
     public List<ToolSpanFacts> toolSpanFacts(String projectId, List<String> traceIds) {
-        if (traceIds.isEmpty()) return List.of();
         return jdbc.sql("""
                         SELECT s.trace_id       AS trace_id,
                                s.id             AS span_id,
@@ -249,9 +239,7 @@ public class MetricSourceRepository {
     /**
      * One trace's duration and cost facts, column and derivation side by side.
      *
-     * @param rollupLatencyMs {@code trace.latency_ms}: the rollup worker's envelope over the whole
-     *     trace, or null when it has not rolled up yet
-     * @param rollupTotalCost {@code trace.total_cost}: likewise
+     * @param rollupTotalCost {@code trace.total_cost}, or null when the trace has not rolled up yet
      * @param unpricedSpans how many of the trace's spans carried usage the price book could not price.
      *     Null when the trace has not rolled up; a positive value means {@code rollupTotalCost} is a sum
      *     with a hole in it and must not be read as the turn's cost
@@ -268,7 +256,6 @@ public class MetricSourceRepository {
      */
     public record TurnFacts(
             String traceId,
-            @Nullable Long rollupLatencyMs,
             @Nullable BigDecimal rollupTotalCost,
             @Nullable Integer unpricedSpans,
             boolean hasRoot,
@@ -286,7 +273,6 @@ public class MetricSourceRepository {
      * exists to catch, as "this provider does not report cache reads".
      *
      * @param model the producer's raw model string, kept for logging and for the cache-write gate
-     * @param modelId the resolved {@code model.id}, or null when the price book knew no such model
      * @param totalCost the generated per-span total, priced at write time against the book in force
      *     then. Null exactly when {@code costSource} is {@code unpriced}: never zero, which would
      *     launder "we hold no rate" into "it was free".
@@ -296,12 +282,10 @@ public class MetricSourceRepository {
     public record LeafUsage(
             String traceId,
             @Nullable String model,
-            @Nullable String modelId,
             @Nullable Long inputTokens,
             @Nullable Long outputTokens,
             @Nullable Long cacheReadTokens,
             @Nullable Long cacheWriteTokens,
-            @Nullable Long reasoningTokens,
             @Nullable BigDecimal totalCost,
             String costSource) {
 
@@ -334,14 +318,8 @@ public class MetricSourceRepository {
      * {@code Instant.parse} rejects outright, and getting it wrong is silent.
      */
     private static String eventAt(ResultSet rs) throws SQLException {
-        String iso = ai.tessary.storage.Timestamps.iso(rs, "event_at");
-        if (iso == null) {
-            // Unreachable: span.started_at is NOT NULL. Failing loudly rather than returning null keeps
-            // the non-null contract on ToolSpanFacts.eventAt honest; a null there would silently make
-            // every window comparison fall through to a wall-clock default.
-            throw new SQLException("event_at resolved to null for span " + rs.getString("span_id"));
-        }
-        return iso;
+        // span.started_at is NOT NULL.
+        return Objects.requireNonNull(ai.tessary.storage.Timestamps.iso(rs, "event_at"));
     }
 
     private static @Nullable Integer nullableInt(ResultSet rs, String column) throws SQLException {

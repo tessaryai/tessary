@@ -22,7 +22,7 @@ CLOSED and answers 401: an unconfigured WorkOS is the normal state of a self-hos
 instance and must not be read as consent to serve it open, and the open edition always
 has a working provider (`PasswordAuthProvider`) anyway, so "no provider configured" is no longer a
 real state. The dev stack and the test suite both set the flag explicitly. In the `production`
-profile, `AuthRequiredInProdGuard` refuses to boot with no provider at all.
+profile, `AuthRequiredInProdGuard` refuses to boot without `TESSARY_AUTH_COOKIE_PASSWORD`.
 
 ## One key store
 
@@ -85,16 +85,13 @@ lanes take. It is scoped and gated exactly like `get_finding` (same service, sam
 cross-tenant id reads as not-found), and there is deliberately **no server-side sampling mode**: an
 agent that wants a stride or a draw takes it and says so in its citation.
 
-Each tool declares the capability an org must hold to be offered it (`McpTool.capability`), and
-`tools/list` answers per-token from that — so a partner is never shown a tool that cannot work for
-them, and a call to a withheld tool reads as unknown rather than forbidden. The line: the launch
-product's own output is open (project, imported taxonomy, cases and the RCA reports they carry,
-findings, query, the substrate list/read tools). The full catalogue is **19 tools, and every one of
-them is open** — `McpTool.capability` is null on all of them. It was 22 with two gated on `GRADERS`
-until grading was deleted and took three with it: `list_graders` and `get_grader` (the gated pair)
-plus the open `list_quality_dimensions`, whose axes each named a grader; the mechanism stays, because
-a paid classifier's own reads are the obvious next thing to want it. `McpCapabilityGateTest` pins the
-count alongside the read-only invariant.
+The launch product's own output is open (project, imported taxonomy, cases and the RCA reports they
+carry, findings, query, the substrate list/read tools). The full catalogue is **19 tools, and every
+one of them is open**: `tools/list` returns all of them for any valid token. It was 22 with two gated
+on `GRADERS` until grading was deleted and took three with it: `list_graders` and `get_grader` (the
+gated pair) plus the open `list_quality_dimensions`, whose axes each named a grader. The per-tool
+capability field went later, once no tool declared one. `McpCapabilityGateTest` pins the count
+alongside the read-only invariant.
 
 **No MCP tool is RCA-gated.** `Capability.RCA` used to gate five of them, for spend — `run_triage`
 started a platform-paid agent session. Now that a finished report reaches MCP inlined on the case
@@ -140,11 +137,10 @@ an agent gets ids on purpose, one row per unit the detector measured, never a sa
 
 ## Known limitations
 
-- **`list_findings` truncates silently.** Each `TriageSource` (`BehaviorTriageSource`, and
-  `ConformanceTriageSource` where the paid conformance classifier is enabled) caps its own page at
-  its own `DEFAULT_FINDING_LIMIT = 200` — no `limit`/`cursor` args — and `FindingService` just
-  concatenates every source's page, so the total returned scales with the number of registered
-  sources (200 per source; up to 400 with conformance enabled). Nothing in the response marks the
+- **`list_findings` truncates silently.** Each `TriageSource` (`BehaviorTriageSource` in this tree)
+  caps its own page at its own `DEFAULT_FINDING_LIMIT = 200` — no `limit`/`cursor` args — and
+  `FindingService` just concatenates every source's page, so the total returned scales with the
+  number of registered sources (200 per source). Nothing in the response marks the
   list as partial. A project with more confirmed findings than the effective cap gets that many
   back with no signal that they aren't all of them.
 - **The resolved-case page sorts, not seeks.** `list_cases` orders open/muted cases off

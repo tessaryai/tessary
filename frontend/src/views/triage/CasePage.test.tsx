@@ -29,7 +29,7 @@ const { me, getCapabilities } = vi.hoisted(() => ({
 }));
 
 function capabilities(rcaEnabled: boolean): CapabilitiesView {
-  return { capabilities: { rca_enabled: rcaEnabled } as CapabilitiesView["capabilities"], unavailable: [] };
+  return { capabilities: { rca_enabled: rcaEnabled } as CapabilitiesView["capabilities"] };
 }
 
 vi.mock("../../api/client", async (importOriginal) => {

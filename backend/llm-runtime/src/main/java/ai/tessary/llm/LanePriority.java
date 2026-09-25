@@ -50,9 +50,8 @@ import java.util.Optional;
  * <p>{@link ModelProvider#ANTHROPIC}, {@link ModelProvider#OPENROUTER} and
  * {@link ModelProvider#MOONSHOT} were absent from both lanes until this change, for a reason that
  * was never a decision about the models: {@code sandbox-runner/launcher/server.js} had no provider
- * mode for them, so a lane pointed at one would have failed at launch. Since
- * {@link LaneGroup#LLM_CALLS} has had no members, that left an org holding only one of
- * those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
+ * mode for them, so a lane pointed at one would have failed at launch. With the agent lanes the only
+ * chat lanes, that left an org holding only one of those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
  * on its own wire, the other two as OpenAI-compat — so the coverage rule reaches every provider the
  * Providers page will sell you. Adding an eleventh still means adding it to the launcher first.
  *
@@ -62,17 +61,15 @@ import java.util.Optional;
  *
  * <p>Model keys are the two spellings {@link ProjectModelSettings} decodes: a dotted
  * {@link BedrockModelProfile} key, or {@code "<PROVIDER>:<model_name>"} for a {@link ModelCatalog}
- * entry. {@link ModelCatalog}'s class-load check refuses to start if what a lane here names and what
- * its group offers are not the same set, so a model can neither go missing from a lane nor be ordered
- * into existence.
+ * entry. What a lane here names and what its group offers must be the same set, so a model can
+ * neither go missing from a lane nor be ordered into existence.
  */
 public final class LanePriority {
 
     /**
      * One provider's standing on one lane: every model we support there, and which of them automatic
-     * selection takes. {@code defaultModelKey} is always a member of {@code modelKeys} — checked at
-     * class load below, because a default outside its own list would be selectable automatically and
-     * unpickable by hand.
+     * selection takes. {@code defaultModelKey} is always a member of {@code modelKeys}, because a
+     * default outside its own list would be selectable automatically and unpickable by hand.
      */
     public record ProviderOption(ModelProvider provider, List<String> modelKeys, String defaultModelKey) {}
 
@@ -149,24 +146,12 @@ public final class LanePriority {
                 List.of(
                         new ProviderOption(ModelProvider.TYPESAFE, List.of(JEV), JEV),
                         new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV)));
-        for (ModelLane lane : ModelLane.values()) {
-            List<ProviderOption> options = m.get(lane);
-            if (options == null || options.isEmpty()) {
-                throw new IllegalStateException("no provider order declared for lane " + lane);
-            }
-            for (ProviderOption o : options) {
-                if (!o.modelKeys().contains(o.defaultModelKey())) {
-                    throw new IllegalStateException("lane " + lane + " defaults " + o.provider() + " to "
-                            + o.defaultModelKey() + ", which is not one of its own models");
-                }
-            }
-        }
         return Collections.unmodifiableMap(m);
     }
 
     private LanePriority() {}
 
-    /** One lane's providers, best first. Never empty — {@link #byLane} refuses to build a partial map. */
+    /** One lane's providers, best first. */
     public static List<ProviderOption> of(ModelLane lane) {
         return BY_LANE.get(lane);
     }
@@ -179,10 +164,5 @@ public final class LanePriority {
     /** Every model {@code lane} offers, in provider order then each provider's own order. */
     public static List<String> modelKeys(ModelLane lane) {
         return of(lane).stream().flatMap(o -> o.modelKeys().stream()).toList();
-    }
-
-    /** Every lane's provider ordering, in {@link ModelLane} declaration order. */
-    public static Map<ModelLane, List<ProviderOption>> all() {
-        return BY_LANE;
     }
 }

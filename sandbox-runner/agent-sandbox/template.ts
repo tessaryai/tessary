@@ -12,10 +12,8 @@ import { Template } from 'e2b';
  * Build/publish with the sibling build.ts (see README): `pnpm exec tsx build.ts`.
  *
  * BASE IMAGE PARITY: this template and the sibling Dockerfile (the Docker-backend agent
- * image) both compile re2@1.26.1, whose engines range is "^22.22.2 || ^24.15.0 || >=26.0.0". Both
- * are node:24-alpine3.24. Do not bump one without the other — and note that on 24 re2 has no
- * prebuild for its ABI and builds from source, which is why `linux-headers` is in the apk line
- * below and in the sibling's. See the sibling Dockerfile's header for the full account.
+ * image) are both node:24-alpine3.24. Do not bump one without the other. See the sibling
+ * Dockerfile's header for the full account.
  *
  * ALPINE, AND THE TWO THINGS IT FORCES. E2B supports Alpine as a base (their docs list
  * Debian/Ubuntu, Fedora/RHEL, Arch and Alpine; only images with no /etc/os-release — scratch,
@@ -38,12 +36,7 @@ import { Template } from 'e2b';
  */
 export const template = Template()
   // node 24, not 22: 22 is maintenance-only since 2025-10-21 and EOL 2027-04-30, 24 runs to
-  // 2028-04-30. re2@1.26.1 (pinned below, byte-identical to the sibling Dockerfile) declares
-  // engines.node "^22.22.2 || ^24.15.0 || >=26.0.0", so 24 is in range; 20 never was — npm's
-  // resolved node-gyp fails to even configure there (`TypeError:
-  // webidl.util.markAsUncloneable is not a function`, verified on linux/amd64 and linux/arm64),
-  // and the E2B build was unbuildable on 20. What 24 costs: re2 ships no prebuild for ABI 137, so
-  // it compiles from source and the apk line below must carry `linux-headers`.
+  // 2028-04-30.
   //
   // Alpine, not Debian: every CRITICAL left on the Debian recipe was an unfixable Debian package.
   // bookworm carried 16; trixie cleared libsqlite3-0 and zlib1g and left 13 — all perl
@@ -62,8 +55,7 @@ export const template = Template()
   // npm 11.19.0, whose vendored tar is already 7.5.19 — verified on the base — so the step became
   // a no-op the moment `fromImage` above moved. If it ever recurs, patch the vendored copy again
   // rather than bumping npm: npm>=12 flips `allowScripts` off by default, which silently skips
-  // opencode-ai's and re2's install scripts below and ships an re2 that throws MODULE_NOT_FOUND
-  // at require time.
+  // opencode-ai's install script below.
   //
   // `apk upgrade` first, for the reason the sibling Dockerfile gives on this line: node:24-alpine3.24
   // is rebuilt on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only
@@ -71,21 +63,11 @@ export const template = Template()
   // npm and pnpm — this is a sandbox for agent code, so npm, python3, pip, git and the compilers
   // are its runtime working surface rather than build-time bootstraps.
   //
-  // Then the packages: git + the agent's clone; python3/py3-pip run the baked bundle validator;
-  // make/g++/linux-headers build re2 FROM SOURCE (no prebuild for Node 24's ABI — see the header);
-  // bash because THIS SDK execs /bin/bash and Alpine has none (see the header); jq so triage's own
-  // checks/ scripts can shape MCP JSON on the command line.
+  // Then the packages: git + the agent's clone; python3/py3-pip/make/g++ for the agent's own
+  // scripts (the working surface above); bash because THIS SDK execs /bin/bash and Alpine has none
+  // (see the header); jq so triage's own checks/ scripts can shape MCP JSON on the command line.
   // A raw runCmd, not `.aptInstall`, because the builder has no apkInstall — see the header.
-  // NOTE: the base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
-  // (validate.py + pipeline_io.py, both of which `import yaml`) was previously a hard crash
-  // in-VM, silently killing the observer's remediate+validate path. Install pip here and
-  // PyYAML below.
-  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers jq', { user: 'root' })
-  // PyYAML is the validator's only required third-party Python dep. Bake it at build time (no
-  // per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
-  // system environment PEP 668 externally-managed; PIP_BREAK_SYSTEM_PACKAGES below lets the agent
-  // `pip install` further deps at runtime without the flag.
-  .runCmd('python3 -m pip install --no-cache-dir --break-system-packages pyyaml', { user: 'root' })
+  .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ jq', { user: 'root' })
   // OpenCode — provides the `opencode` binary agent-stream.js starts as a server. Pinned to the
   // SAME version as @opencode-ai/sdk below: they ship in lockstep, and agent-stream.js reads
   // message parts whose field names have moved between releases (see partsOf/toolCallsOf). Bump
@@ -107,11 +89,6 @@ export const template = Template()
   )
   // Modules the in-VM scripts require from /home/user — @opencode-ai/sdk drives that server.
   //
-  // acorn/acorn-walk/re2 backed the codegen self-correction harness, which has since been deleted. They
-  // are LEFT IN the install line on purpose: changing it changes the built image, and the published
-  // cloud template can only be rebuilt by a human with the team's E2B key (see build.ts). Trimming
-  // them is a follow-up for whoever next runs that build, not a change to make blind here.
-  //
   // DELIBERATELY npm, though the repo is otherwise on pnpm — do not "fix" this. There is no
   // lockfile to honour here, the sandbox is disposable so pnpm's shared store buys
   // nothing, and npm is already in the base image while pnpm would be another install step.
@@ -121,25 +98,13 @@ export const template = Template()
   // together: here, the sibling Dockerfile, AND agent-sandbox/package.json (the host-local
   // backend, also ^6.28.0). agent-stream.js needs it to lift fetch's 300s headers timeout.
   .runCmd(
-    'mkdir -p /home/user && cd /home/user && npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.30 undici@^6.28.0 && npm cache clean --force',
+    'mkdir -p /home/user && cd /home/user && npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 && npm cache clean --force',
   )
   // HOME must match the runtime user (e2b runs sandboxes as `user`) so the runtime `opencode`
   // finds its config; PIP_BREAK_SYSTEM_PACKAGES lets the agent `pip install` further deps at
   // runtime (PEP 668 externally-managed).
   .setEnvs({ HOME: '/home/user', PIP_BREAK_SYSTEM_PACKAGES: '1' })
-  .runCmd('mkdir -p /home/user /home/user/tessary-contract')
-  // The bundle contract, baked from the PLATFORM's own copies (build.ts stages them into
-  // ./vendor/ from ../../contract/). Baking our own files rather than installing the public evals
-  // plugin from the marketplace keeps an unpinned network install out of the build.
-  .copy('vendor/validate.py', '/home/user/tessary-contract/validate.py')
-  .copy('vendor/pipeline_io.py', '/home/user/tessary-contract/pipeline_io.py')
-  .copy('vendor/AUTHORING_CONTRACT.md', '/home/user/tessary-contract/AUTHORING_CONTRACT.md')
-  .copy('vendor/output_format.md', '/home/user/tessary-contract/output_format.md')
-  .copy('vendor/grader.schema.json', '/home/user/tessary-contract/grader.schema.json')
-  // Wrapper on PATH so a prompt can run validation as `tessary-evals-validate` without knowing the
-  // baked layout (see the script's header).
-  .copy('tessary-evals-validate', '/usr/local/bin/tessary-evals-validate')
-  .runCmd('chmod +x /usr/local/bin/tessary-evals-validate', { user: 'root' })
+  .runCmd('mkdir -p /home/user')
   .setWorkdir('/home/user')
   // Shared OpenCode runner required by rca.js/triage.js — must be baked beside them or their
   // `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by

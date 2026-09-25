@@ -62,8 +62,8 @@ done
 cd "$ROOT"
 COMPOSE=docker-compose.yml
 # EMPTY, and that is the point. This used to name `alloy`, the one service allowed a host-path
-# bind because it was profile-gated off and documented as clone-only (it mounted
-# ./observability/alloy/config.alloy, which no remote install can resolve). That service is no
+# bind because it was profile-gated off and documented as clone-only (it mounted a config file
+# from the clone, which no remote install can resolve). That service is no
 # longer defined in this compose file, so the open file has no clone-only service left and the
 # exemption is empty rather than populated. Keep the mechanism: it is one variable, and the next
 # service that genuinely cannot resolve remotely should be listed here and argued for, not

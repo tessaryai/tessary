@@ -39,10 +39,10 @@ list to one representative name silently stops covering its siblings.
 AWS SDK for Java 2.0, 2.54.7
 License: Apache License 2.0
 Bundled as (Maven artifact IDs): annotations, apache5-client, auth, aws-core,
-aws-json-protocol, bedrockruntime, checksums, checksums-spi, endpoints-spi, http-auth,
+aws-json-protocol, bedrock, checksums, checksums-spi, endpoints-spi, http-auth,
 http-auth-aws, http-auth-aws-eventstream, http-auth-spi, http-client-spi, identity-spi,
-json-utils, lambda, metrics-spi, netty-nio-client, profiles, protocol-core, regions,
-retries, retries-spi, sdk-core, third-party-jackson-core, utils, utils-lite
+json-utils, metrics-spi, netty-nio-client, profiles, protocol-core, regions, retries,
+retries-spi, sdk-core, third-party-jackson-core, utils, utils-lite
 --------------------------------------------------------------------------------
 AWS SDK for Java 2.0
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.

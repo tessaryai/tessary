@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -16,7 +17,7 @@ import org.springframework.stereotype.Repository;
 /**
  * JdbcClient repository for the v2 {@code session} table (substrate-model.md §5.2).
  *
- * <p>Two kinds of write only, and neither is an accumulation. {@link #getOrCreate} (and its batch form) is
+ * <p>Two kinds of write only, and neither is an accumulation. {@link #getOrCreateAll} is
  * {@code ON CONFLICT DO NOTHING} on the natural key, so a redelivered batch is a no-op and the row is in
  * place before any trace can reference it (§6.1 resolution order — sessions, then traces, then spans).
  * {@link #touchAll} folds a whole drained batch's window into one {@code LEAST}/{@code GREATEST} pair per
@@ -60,28 +61,20 @@ public class SessionRepository {
     }
 
     /**
-     * One JDBC batch of {@link #getOrCreate} inserts, in the order given (the caller sorts, see SpanBatchWriter).
-     */
-    public void getOrCreateAll(List<SessionRow> rows) {
-        if (rows.isEmpty()) return;
-        int[] applied = named.batchUpdate(
-                GET_OR_CREATE_SQL, rows.stream().map(SessionRepository::params).toArray(SqlParameterSource[]::new));
-        BatchCounts.requireReal(applied);
-    }
-
-    /**
-     * Get-or-create, identity fields only (§6.1 step 1).
+     * Get-or-create, identity fields only (§6.1 step 1), as one JDBC batch in the order given (the caller
+     * sorts, see SpanBatchWriter).
      *
      * <p><b>Identity fields only</b> is the whole contract: an arrival never writes {@code started_at} or
      * {@code last_activity_at} through this path, because whichever batch happened to create the row would
      * otherwise stamp its own window permanently — a late-arriving span of an old session dragging the
      * session's recency backwards, and an earlier span arriving later never correcting a start time that is
      * already too late. Timing belongs to {@link #touchAll} and its {@code LEAST}/{@code GREATEST}.
-     *
-     * @return true when this call created the row.
      */
-    public boolean getOrCreate(SessionRow row) {
-        return jdbc.sql(GET_OR_CREATE_SQL).paramSource(params(row)).update() > 0;
+    public void getOrCreateAll(List<SessionRow> rows) {
+        if (rows.isEmpty()) return;
+        int[] applied = named.batchUpdate(
+                GET_OR_CREATE_SQL, rows.stream().map(SessionRepository::params).toArray(SqlParameterSource[]::new));
+        BatchCounts.requireReal(applied);
     }
 
     /**
@@ -162,11 +155,6 @@ public class SessionRepository {
                 .optional();
     }
 
-    /** A project's sessions, most recently active first — served by {@code ix_session_project_active}. */
-    public List<SessionRow> listByProject(String projectId, int limit) {
-        return listByProject(projectId, limit, null, null);
-    }
-
     /**
      * A page of the project's sessions, most recently active first, keyset-paginated on
      * {@code (last_activity_at, id)} — served entirely by {@code ix_session_project_active}.
@@ -210,10 +198,6 @@ public class SessionRepository {
 
     /** A NOT NULL timestamptz column, read back as ISO-8601. */
     static String requireIso(ResultSet rs, String column) throws SQLException {
-        String iso = Timestamps.iso(rs, column);
-        if (iso == null) {
-            throw new SQLException("NOT NULL column " + column + " read back null");
-        }
-        return iso;
+        return Objects.requireNonNull(Timestamps.iso(rs, column), column);
     }
 }

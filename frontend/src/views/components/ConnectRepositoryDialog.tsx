@@ -72,12 +72,10 @@ export function tokenTemplateUrl(repo: { owner: string; name: string } | null): 
 export function ConnectRepositoryDialog({
   open,
   onClose,
-  onConnected,
   onUseGithubApp,
 }: {
   open: boolean;
   onClose: () => void;
-  onConnected?: () => void;
   /** Omitted where the App path has no home, e.g. the dialog opened from a case. */
   onUseGithubApp?: () => void;
 }) {
@@ -105,7 +103,6 @@ export function ConnectRepositoryDialog({
       setHelpOpen(false);
       void qc.invalidateQueries({ queryKey: ["git-integration", api.base] });
       toast.success("Repository connected");
-      onConnected?.();
       onClose();
     },
   });

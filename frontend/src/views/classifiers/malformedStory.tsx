@@ -150,18 +150,13 @@ export function SchemaFieldTree({
   detail,
   selected,
   onSelect,
-  caption,
 }: {
   detail: MalformedOutputDetail;
   selected: FieldId;
   onSelect: (field: FieldId) => void;
-  caption?: string;
 }) {
   return (
     <div>
-      {caption && (
-        <p className="text-subtle mt-0 mx-0 mb-2 text-small">{caption}</p>
-      )}
       <div className="rounded-card border border-border overflow-hidden">
         <div className="flex flex-col gap-px bg-border">
           {detail.fields.map((f) => (
@@ -376,12 +371,10 @@ export function HowOutputsBroke({
   findingId,
   detail,
   linkToTrace,
-  caption,
 }: {
   findingId: string;
   detail: MalformedOutputDetail;
   linkToTrace: TraceLinker;
-  caption?: string;
 }) {
   const initial: FieldId =
     detail.fields.find((f) => f.failing > 0)?.path ??
@@ -390,7 +383,7 @@ export function HowOutputsBroke({
 
   return (
     <div className="grid gap-5 items-start" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-      <SchemaFieldTree detail={detail} selected={selected} onSelect={setSelected} caption={caption} />
+      <SchemaFieldTree detail={detail} selected={selected} onSelect={setSelected} />
       <FailingOutput findingId={findingId} field={selected} detail={detail} linkToTrace={linkToTrace} />
     </div>
   );

@@ -36,9 +36,7 @@ public record DecisionTarget(ModelProvider provider, String modelId, URI endpoin
                 };
         String base = baseUrlOverride != null && !baseUrlOverride.isBlank()
                 ? baseUrlOverride.trim()
-                : PlatformCatalog.find(provider)
-                        .map(PlatformCatalog.PlatformDescriptor::defaultBaseUrl)
-                        .orElseThrow(() -> new TessaryException(ModelConfigError.UNKNOWN_PROVIDER, provider));
+                : PlatformCatalog.find(provider).orElseThrow().defaultBaseUrl();
         while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
         if (base.toLowerCase(Locale.ROOT).endsWith("/v1")) base = base.substring(0, base.length() - 3);
         return URI.create(base + path);

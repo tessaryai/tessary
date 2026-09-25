@@ -18,7 +18,7 @@ one as a control.
    Redaction runs on the `SubstrateWriter` **drainer**. Immediately before a `RawEntry` batch is
    written, a project's *enabled* redaction rules are applied to its free-text, PII-bearing fields
    (`input`, `output`, the `gen_ai.input/output.messages` payloads, and string values in metadata).
-   Structural fields (ids, timestamps, `name`, `model`, `source_url`, kind) are untouched. So no
+   Structural fields (ids, timestamps, `name`, `model`, kind) are untouched. So no
    unredacted PII reaches the substrate **via that writer** — and because redaction runs before the
    previews are cut, `trace.input_preview`/`output_preview` are redacted by construction rather than
    separately.
@@ -82,9 +82,9 @@ recall, and this is the recall it costs.
 | **IPv6 addresses** | `:64` matches IPv4 dotted-quad only |
 | **The body of a PEM private key** | `:121` redacts the `-----BEGIN … PRIVATE KEY-----` framing line only. That is deliberate (redacting the body means an unbounded `.` across newlines on every ingested body) and it means the base64 key material stays in the span |
 | **Stripe keys** (`sk_live_…`, `rk_live_…`) | Not in the default set. The `sk-` credential rule is anchored on the hyphen form, which Stripe does not use |
-| **`span.name`, `model`, `source_url`** | `RedactionService.java:104,105,108` copy these through untouched (lines 106-107 in between are the `redact(input)`/`redact(output)` calls) — only `input`, `output`, the two `gen_ai` message payloads and metadata strings are passed to `redact()`. A URL with an email or a token in its query string is not scanned |
-| **Any value that arrived as a JSON number or boolean** | `RedactionEngine.java:322-324`: "Numbers, booleans and nulls are returned untouched… it is not that a rule is unlikely to match them, it is that no rule is ever offered them." An SSN or a card number serialized unquoted is invisible to every rule |
-| **The interior of a long inline payload run** (base64 media, embedded blobs) | `RedactionEngine.java:170-180` skips the interior of a contiguous payload-character run once it exceeds `EDGE_MARGIN`×2 + `MIN_RUN` (512 + 512 + 512 ≈ 1.5 KB). The first and last 512 characters are still scanned; everything between them is preserved verbatim and never offered to a rule |
+| **`span.name`, `model`** | `RedactionService.java:309,312` copy these through untouched (lines 310-311 in between are the `redact(input)`/`redact(output)` calls) — only `input`, `output`, the two `gen_ai` message payloads and metadata strings are passed to `redact()` |
+| **Any value that arrived as a JSON number or boolean** | `RedactionEngine.java:337-339`: "Numbers, booleans and nulls are returned untouched… it is not that a rule is unlikely to match them, it is that no rule is ever offered them." An SSN or a card number serialized unquoted is invisible to every rule |
+| **The interior of a long inline payload run** (base64 media, embedded blobs) | `RedactionEngine.java:189-198` skips the interior of a contiguous payload-character run once it exceeds `EDGE_MARGIN`×2 + `MIN_RUN` (512 + 512 + 512 ≈ 1.5 KB). The first and last 512 characters are still scanned; everything between them is preserved verbatim and never offered to a rule |
 
 ### What redaction records for `secret_leak`
 
@@ -124,8 +124,7 @@ bands are where precision lives.
 The corpus's regexes are written for Go's RE2, which never backtracks, and run here on Java's, which does.
 `GitleaksCorpus` translates the constructs the two spell differently and, for gitleaks' keyword-context
 rules (`(?i)[\w.-]{0,50}?(?:vendor)…`), anchors the rule once per vendor name instead of at every position.
-That is the difference between roughly 530 ms and 210 ms per megabyte of keyword-dense text, and a test
-holds the fast path to exactly what a whole-text scan finds.
+That is the difference between roughly 530 ms and 210 ms per megabyte of keyword-dense text.
 
 The second tier exists because of what this product ingests rather than because of a regulation: an
 agent's traces carry tool arguments, tool results, headers and environment dumps, so the

@@ -40,7 +40,6 @@ class IdsTest {
     void slugify_fallsBackToProjectWhenEmpty() {
         assertEquals("project", Ids.slugify(""));
         assertEquals("project", Ids.slugify("!!!"));
-        assertEquals("project", Ids.slugify(null));
     }
 
     @Test

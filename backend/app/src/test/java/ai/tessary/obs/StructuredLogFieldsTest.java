@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
@@ -63,7 +64,7 @@ class StructuredLogFieldsTest {
     void fieldsBecomeJsonFieldsAndTheMessageStaysJustTheEventName() {
         String name = "test.structuredlog.fields";
         var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), "signal.sweep.complete")
+                () -> StructuredLog.info(LoggerFactory.getLogger(name), Markers.OPS, "signal.sweep.complete")
                         .field("signal", "groundedness")
                         .field("scanned", 42)
                         .log(),
@@ -86,7 +87,7 @@ class StructuredLogFieldsTest {
     void durationIsANumericFieldSoItCanBeGraphed() {
         String name = "test.structuredlog.duration";
         var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), "redaction.apply")
+                () -> StructuredLog.info(LoggerFactory.getLogger(name), Markers.OPS, "redaction.apply")
                         .field("durationMs", 5500L)
                         .field("bytes", 44735)
                         .log(),
@@ -103,7 +104,7 @@ class StructuredLogFieldsTest {
     void markersAndCausesStillSurvive() {
         String name = "test.structuredlog.cause";
         var captured = capture(
-                () -> StructuredLog.warn(LoggerFactory.getLogger(name), "ingest.batch.failed")
+                () -> StructuredLog.warn(LoggerFactory.getLogger(name), Markers.OPS, "ingest.batch.failed")
                         .field("count", 3)
                         .cause(new IllegalStateException("boom"))
                         .log(),

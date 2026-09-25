@@ -281,8 +281,6 @@ public class GithubTokenService implements GitTokenService {
             try {
                 JsonNode arr = mapper.readTree(res.body()).path(arrayField);
                 if (arr.isArray()) arr.forEach(out::add);
-            } catch (TessaryException e) {
-                throw e;
             } catch (Exception e) {
                 throw new TessaryException(GitError.TOKEN_MINT_FAILED, e, LABEL);
             }

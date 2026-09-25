@@ -10,7 +10,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
@@ -88,17 +87,13 @@ class BehaviorTriageWorkerTest {
                 id,
                 PROJECT,
                 findingId,
-                null,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
                 "running",
                 "owner",
                 "2026-09-16T00:00:00Z",
                 1,
                 null,
                 "2026-09-15T00:00:00Z",
-                "2026-09-16T00:00:00Z",
-                BehaviorTriageSource.KIND,
-                null);
+                "2026-09-16T00:00:00Z");
     }
 
     /** Claims every job, handing back a brief so the worker always calls {@code engine.rule}. */

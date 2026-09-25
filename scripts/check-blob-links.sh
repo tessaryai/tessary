@@ -13,8 +13,7 @@
 # WHAT IT READS. Link paths only, never the prose around them: this is the one named exception to
 # the no-markdown rule in scripts/check.sh's header. A link with a `#anchor` to a Markdown file
 # also needs a heading that GitHub would give that anchor, since an agent told to follow
-# `...#restart` finds nothing when the heading is renamed. A path that a `delete` row of
-# scripts/lib/export-denylist.txt removes fails too: the file is here, but it never reaches GitHub.
+# `...#restart` finds nothing when the heading is renamed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -22,42 +21,16 @@ cd "$ROOT"
 SOURCES="frontend/src skills docs classifiers/groundedness/setup setup.md instrument.md README.md"
 PREFIX='https://github.com/tessaryai/tessary/blob/main/'
 
-existing=""
-for s in $SOURCES; do
-  [ -e "$s" ] && existing="$existing $s"
-done
-if [ -z "$existing" ]; then
-  echo "blob-links skipped: none of $SOURCES is in this checkout"
-  exit 0
-fi
-
 # One `<file>:<path>[#anchor]` per link. A trailing `.` or `,` is sentence punctuation, not path.
 # shellcheck disable=SC2086
 links="$(grep -rIHoE --exclude-dir=node_modules \
-  'https://github\.com/tessaryai/tessary/blob/main/[A-Za-z0-9._/-]+(#[A-Za-z0-9_-]+)?' $existing \
+  'https://github\.com/tessaryai/tessary/blob/main/[A-Za-z0-9._/-]+(#[A-Za-z0-9_-]+)?' $SOURCES \
   | sed -E "s|:${PREFIX}|:|; s|[.,]+\$||" | sort -u || true)"
 
 # GitHub's heading anchor: lower case, punctuation other than `-` and `_` dropped, spaces to `-`.
 anchors_of() {
   sed -nE 's/^#{1,6}[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\1/p' "$1" \
     | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9 _-]//g; s/ /-/g'
-}
-
-# The export's `delete` rows, as `dir <prefix>` or `file <path>`.
-deleted="$(awk -F'|' '!/^#/ && $2 == "delete" && ($3 == "dir" || $3 == "file") { print $3, $1 }' \
-  scripts/lib/export-denylist.txt 2>/dev/null || true)"
-export_deletes() {
-  local kind pattern
-  while read -r kind pattern; do
-    [ -n "$pattern" ] || continue
-    case "$kind" in
-      dir) case "$1" in "$pattern"/*) return 0 ;; esac ;;
-      file) [ "$1" = "$pattern" ] && return 0 ;;
-    esac
-  done <<EOF
-$deleted
-EOF
-  return 1
 }
 
 checked=0
@@ -71,11 +44,6 @@ while IFS= read -r line; do
   case "$target" in *'#'*) anchor="${target#*#}" ;; esac
   checked=$((checked + 1))
 
-  if export_deletes "$path"; then
-    bad="${bad}  $src links $path, which the export deletes
-"
-    continue
-  fi
   if [ ! -f "$path" ]; then
     bad="${bad}  $src links $path, which is not a file in this tree
 "
@@ -97,7 +65,7 @@ EOF
 # Zero links means the extraction broke (the grep failed, or the pattern or PREFIX stopped matching
 # how the links are written), not that there is nothing to check: the sources above carry dozens.
 if [ "$checked" -eq 0 ]; then
-  echo "check-blob-links: found no ${PREFIX}<path> link in$existing, so nothing was checked." >&2
+  echo "check-blob-links: found no ${PREFIX}<path> link in $SOURCES, so nothing was checked." >&2
   echo "  The link pattern in this script no longer matches the links; fix the pattern." >&2
   exit 1
 fi

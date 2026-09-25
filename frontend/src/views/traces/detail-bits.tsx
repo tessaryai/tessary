@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The trace interior's two shared controls: the view segment and the Verdicts
- * pill. Kept surface-local.
+ * The trace interior's shared pieces: the view segment and TraceMedia. Kept
+ * surface-local.
  */
 import { useMemo } from "react";
 import { cn } from "../../ui";
@@ -78,11 +78,3 @@ export function ViewSegment({
     </div>
   );
 }
-
-/* ── Evidence banner (?case=&verdict=) ───────────────────────────────────── */
-
-/**
- * Pinned evidence strip — both variants: `turn N` targeted (Conversation
- * scrolls to the judged turn) and `whole trace` (banner only). Border comes
- * from the caller (border-b in the rail, rounded card on the full page).
- */

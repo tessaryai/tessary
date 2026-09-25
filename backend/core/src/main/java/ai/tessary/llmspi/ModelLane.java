@@ -8,22 +8,16 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Locale;
 
 /**
- * The distinct jobs the platform runs an LLM for, each independently pointable at a model + tier in
- * a project's settings.
+ * The distinct jobs the platform runs an LLM for, each independently pointable at a model in a
+ * project's settings.
  *
- * <p>The lanes fall into two {@link LaneGroup}s, split by how the platform reaches the model rather
- * than by what the work is for. {@link LaneGroup#LLM_CALLS} lanes are requests this codebase
- * composes and sends: we own the prompt, the tools and the response format, the call is one round
- * trip, and a Bedrock service tier rides on it. {@link LaneGroup#AGENT_VM} lanes hand an
- * inference-profile id to an agent inside an E2B microVM and never see the request: there is no
- * request of ours for a tier to attach to, and the model has to sustain a long tool-use loop over a
- * repository or a dossier, a capability bar the other group does not have.
- *
- * <p>That boundary is also a cost/latency boundary: an {@link LaneGroup#LLM_CALLS} lane runs per
- * trace or per keystroke and is the natural home for a cheap fast model, while an
- * {@link LaneGroup#AGENT_VM} lane runs once per mover or per cause and is worth a frontier one.
- * {@link LaneGroup#DECISION_CALLS} lanes ask a hosted decision model one typed question per
- * observation; the provider is the whole choice there, since each serves one decision model.
+ * <p>The lanes fall into {@link LaneGroup}s, split by how the platform reaches the model rather than
+ * by what the work is for. {@link LaneGroup#AGENT_VM} lanes hand an inference-profile id to an agent
+ * inside an E2B microVM and never see the request: the model has to sustain a long tool-use loop over
+ * a repository or a dossier, and an AGENT_VM lane runs once per mover or per cause, so it is worth a
+ * frontier model. {@link LaneGroup#DECISION_CALLS} lanes ask a hosted decision model one typed
+ * question per observation; the provider is the whole choice there, since each serves one decision
+ * model.
  *
  * <p>These lanes always run on the org's own credential; there is no platform-funded path. Every
  * RCA/TRIAGE run resolves an org {@code ProviderCredential} for its provider (Bedrock/mantle by
@@ -105,16 +99,6 @@ public enum ModelLane {
     /** How the platform reaches the model for this lane, and the settings section it renders under. */
     public LaneGroup group() {
         return group;
-    }
-
-    /**
-     * Whether a {@link ServiceTier} is meaningful for this lane. Answered by the group, because it is
-     * a fact about how the platform reaches the model rather than about the job: offering a Flex
-     * dropdown on an agent lane would be a control that silently does nothing, so the settings UI
-     * hides it and writes get clamped to Standard (see {@code ProjectModelSettings#set}).
-     */
-    public boolean tiered() {
-        return group.tiered();
     }
 
     /**

@@ -370,7 +370,7 @@ function TimelineRow({
   focusId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const s = o.started_at ? new Date(o.started_at).getTime() : NaN;
+  const s = new Date(o.started_at).getTime();
   if (Number.isNaN(s)) return null;
   const e = o.ended_at ? new Date(o.ended_at).getTime() : s + (o.duration_ms ?? 0);
   const span = bounds.end - bounds.start;
@@ -583,7 +583,7 @@ function sessionBounds(traces: TraceListItem[]): { start: number; end: number } 
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   for (const t of traces) {
-    const s = t.started_at ? new Date(t.started_at).getTime() : NaN;
+    const s = new Date(t.started_at).getTime();
     if (Number.isNaN(s)) continue;
     start = Math.min(start, s);
     const e = t.ended_at ? new Date(t.ended_at).getTime() : s + (t.latency_ms ?? 0);

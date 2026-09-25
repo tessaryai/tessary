@@ -22,7 +22,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class RcaReportRepository {
 
-    private static final String COLS = "r.id, r.project_id, r.job_id, r.subject_kind, r.subject_id, "
+    private static final String COLS = "r.id, r.job_id, r.subject_kind, r.subject_id, "
             + "r.subject_label, r.call_site_id, r.metric, r.report_kind, r.window_from, r.window_split, r.window_to, "
             + "r.current_value, r.prior_value, r.delta, j.status AS status, r.verdict, r.summary, "
             + "r.ruled_out, r.hypotheses, r.causes, r.detailed_report, r.engine, r.repo_available, "
@@ -163,36 +163,11 @@ public class RcaReportRepository {
 
     /** The project's most recent reports, newest first, bounded by {@code limit}. */
     public List<RcaReportRow> listByProject(String projectId, int limit) {
-        return listByProject(projectId, limit, null, null, null, null);
-    }
-
-    /**
-     * The project's most recent reports, newest first, bounded by {@code limit} and narrowed by any
-     * of the optional filters. Filtering happens in SQL, not after the limit — asking for one
-     * subject's history must not be silently emptied by newer reports on other subjects. {@code
-     * status} filters the live queue status on the joined job, the same column {@link #COLS}
-     * projects as the report's status.
-     */
-    public List<RcaReportRow> listByProject(
-            String projectId,
-            int limit,
-            @Nullable String subjectKind,
-            @Nullable String subjectId,
-            @Nullable String metric,
-            @Nullable String status) {
         return jdbc.sql("SELECT " + COLS + " " + FROM + """
                          WHERE r.project_id = :pid
-                           AND (CAST(:subjectKind AS text) IS NULL OR r.subject_kind = :subjectKind)
-                           AND (CAST(:subjectId AS text) IS NULL OR r.subject_id = :subjectId)
-                           AND (CAST(:metric AS text) IS NULL OR r.metric = :metric)
-                           AND (CAST(:status AS text) IS NULL OR j.status = :status)
                          ORDER BY r.created_at DESC LIMIT :limit
                         """)
                 .param("pid", projectId)
-                .param("subjectKind", subjectKind)
-                .param("subjectId", subjectId)
-                .param("metric", metric)
-                .param("status", status)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
                 .list();
@@ -239,7 +214,6 @@ public class RcaReportRepository {
     private static RcaReportRow map(ResultSet rs) throws SQLException {
         return new RcaReportRow(
                 rs.getString("id"),
-                rs.getString("project_id"),
                 rs.getString("job_id"),
                 rs.getString("subject_kind"),
                 rs.getString("subject_id"),

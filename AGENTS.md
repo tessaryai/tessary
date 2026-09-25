@@ -34,7 +34,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | Layer | Tech |
 |---|---|
 | Reverse proxy | Caddy (`Caddyfile`) — `/api/*`, `/auth/*`, `/mcp` → backend; rest → Vite/static |
-| Backend | Spring Boot 4.0.x, Java 25 + Loom virtual threads, an eleven-module Maven reactor (layering in [`devdocs/modules.md`](./devdocs/modules.md)), LangChain4j, Postgres via JdbcClient + Liquibase |
+| Backend | Spring Boot 4.0.x, Java 25 + Loom virtual threads, an eleven-module Maven reactor (layering in [`devdocs/modules.md`](./devdocs/modules.md)), Postgres via JdbcClient + Liquibase |
 | Frontend | React 19, Vite, TypeScript, TanStack Query, react-router-dom 7, Tailwind v4 (token-driven design system) |
 | Auth | WorkOS AuthKit (sealed cookie session); per-project bearer tokens / API keys for MCP + headless ([`devdocs/reference/auth-and-mcp.md`](./devdocs/reference/auth-and-mcp.md)) |
 
@@ -44,11 +44,10 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 |---|---|
 | [`backend/`](./backend/) | The Java backend — conventions in [`backend/AGENTS.md`](./backend/AGENTS.md), inventory in [`devdocs/reference/architecture.md`](./devdocs/reference/architecture.md), module layering in [`devdocs/modules.md`](./devdocs/modules.md) |
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
-| [`classify-service/`](./classify-service/) | Standalone encoder service (ECS Fargate). Serves `/embed` for SOP conformance; in the open edition it serves no `/classify` head, and groundedness runs on `classifiers/groundedness/serve.py` instead. See its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
 | [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`) and the OTLP trace emitter the boot check uses (`classifiers/data_gen/`). Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
-| [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
+| [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
 | `scripts/`, `observability/` | The shared check and deploy scripts; Grafana dashboards |
 
@@ -109,9 +108,9 @@ and the bare `task check` before merging. **CI runs the same gate on every pull 
 code** — `.github/workflows/check.yml` calls `scripts/check.sh`, the same manifest `task check` runs,
 so local green means CI green by construction. A prose-only diff is filtered out by that file's
 `paths-ignore` (prose is Mintlify's check to run, not this pipeline's), and a draft PR is skipped
-until it is marked ready. `secret-scan.yml` is armed alongside it. Those two are the only workflows
-that run on their own on PRs; `price-book-refresh.yml` is the one cron (daily), and everything
-else is `workflow_dispatch:` only.
+until it is marked ready. `secret-scan.yml` also runs on every pull request.
+Two workflows run on a cron: `price-book-refresh.yml` daily and `codeql.yml` weekly
+(Mondays 04:00 UTC). Everything else is `workflow_dispatch:` only.
 Nothing is merge-blocking (branch protection is plan-gated on this tier), so a red check still has to
 be respected by a human. Docker is required for any backend slice. Full cost model and recount commands:
 [`devdocs/reference/test-suite.md`](./devdocs/reference/test-suite.md).

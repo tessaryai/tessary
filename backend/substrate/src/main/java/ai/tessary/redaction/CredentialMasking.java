@@ -23,7 +23,6 @@ public final class CredentialMasking {
         StringBuilder out = new StringBuilder(text.length());
         int cursor = 0;
         for (GitleaksCorpus.Finding f : findings) {
-            if (f.start() < cursor) continue;
             out.append(text, cursor, f.start());
             out.append(maskedKey(text.substring(f.start(), f.end())));
             cursor = f.end();

@@ -80,11 +80,10 @@ public interface IngestSpool {
      * default; the Kafka spool keys its messages by project, which pins a project to one partition and
      * so to one consumer in the group, and answers its consumer count.
      *
-     * <p>It is the spool that answers rather than the configuration because the two can disagree: the
-     * bean is chosen from the raw {@code tessary.ingest.spool.mode} property by {@code @ConditionalOnProperty},
-     * while {@code IngestSpoolProperties} answers from a normalised copy of the same string. Asking the
-     * instance that was actually wired removes the second reading, so the count cannot describe a spool
-     * other than the one running.
+     * <p>It is the spool that answers rather than the configuration: the bean is chosen from the raw
+     * {@code tessary.ingest.spool.mode} property by {@code @ConditionalOnProperty}, and asking the
+     * instance that was actually wired means the count cannot describe a spool other than the one
+     * running.
      */
     default int drainers() {
         return 1;

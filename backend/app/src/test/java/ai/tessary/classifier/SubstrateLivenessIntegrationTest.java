@@ -56,7 +56,6 @@ class SubstrateLivenessIntegrationTest {
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
         return List.of(new RawEntry(
                 traceId + "-root",
-                null,
                 "agent",
                 "user question",
                 "agent answer",

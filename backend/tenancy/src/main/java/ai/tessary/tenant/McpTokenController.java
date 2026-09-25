@@ -53,7 +53,7 @@ public class McpTokenController {
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view MCP tokens");
-        List<ApiKey> rows = tokenRepo.findByProject(r.project().id(), true);
+        List<ApiKey> rows = tokenRepo.findByProject(r.project().id());
         // Strip hash from the wire view.
         return ApiResponse.ok(rows.stream().map(McpTokenController::toWire).toList());
     }

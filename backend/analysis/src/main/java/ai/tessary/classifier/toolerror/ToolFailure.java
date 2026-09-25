@@ -116,12 +116,6 @@ public final class ToolFailure {
     public static final String UNDESCRIBED = ErrorSignature.UNDESCRIBED;
 
     /**
-     * Longest signature kept. Bounded because signatures are map keys inside a persisted evidence blob,
-     * and a stack trace pasted into a status message would otherwise be one key.
-     */
-    static final int MAX_SIGNATURE_LENGTH = ErrorSignature.MAX_SIGNATURE_LENGTH;
-
-    /**
      * Collapse one failure message to the pattern it is an instance of.
      *
      * <p><b>The definition now lives in {@link ErrorSignature}, in {@code core}.</b> It moved down a

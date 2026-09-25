@@ -39,11 +39,9 @@ semantics).
 An org with no stored credentials shows every catalog platform as **Not configured** — not an
 error, and there is no "no key needed" platform any more (Ollama, the one exception, was removed).
 That is the state a brand-new self-host install starts in, and it is a real, tested state, not a
-placeholder: `BYO_PROVIDER_KEYS` is **on** by default in both editions — the open edition through
-`CapabilityService`'s own default, and the hosted product through `Capability.BYO_PROVIDER_KEYS`. It
-was off for hosted orgs previously; once the last platform-funded lane was removed, the flag's
-default was revisited and flipped, once the old off-by-default reasoning no
-longer held (that constant's javadoc carries the reasoning). Nobody has to flip a flag to reach this page; it's there
+placeholder: `BYO_PROVIDER_KEYS` is **on** by default, through `CapabilityService`'s own default
+(every capability is on except the ones it names as off by default). It was off for hosted orgs
+previously; once the last platform-funded lane was removed, that default no longer held. Nobody has to flip a flag to reach this page; it's there
 from the first boot. **Every org now needs at least one commercial provider key configured before
 the first RCA or Triage run can succeed** — there is no keyless default any more, in either
 edition.
@@ -61,7 +59,7 @@ option is itself a bug report, not something you should have to work around.
 
 ## What happens if you leave a lane on "no selection"
 
-The platform's old ambient-Bedrock fallback (`ChatModelFactory#resolvePlatformBedrock`, gated by
+The platform's old ambient-Bedrock fallback (gated by
 `tessary.judge.platform-bedrock.enabled`) is **gone entirely** — it had no production caller left
 (RCA and TRIAGE have always resolved through `ProjectModelSettings`, never through that path), so
 removing it changed no live behavior, only deleted dead code and a stale doc claim. If a project's
@@ -97,7 +95,6 @@ markup, if any, is not in the booked figure. OpenRouter's own reported cost is k
 raw response for audit. Only `jev-latest` is offered, with no pinned versions; the version that
 answered each call is recorded with it.
 
-A decision key is refused anywhere a chat model is built (`ModelConfigError.NOT_A_CHAT_PROVIDER`).
 A rejected key (HTTP 401 or 403) fails with `DECISION.PROVIDER_REJECTED` and is not retried.
 
 The Providers page marks TypeSafe "Used by Frustration" (the catalog's `used_by` on that platform),
@@ -135,14 +132,14 @@ else.
 2. Pin a model from that platform for the RCA or TRIAGE lane, if you want to be certain it's the
    one running.
 3. Run an RCA investigation or a triage escalation against a project in that org.
-   `ChatModelFactory#resolveApiKey` and `AgenticCredentialResolver#resolve` both fail closed with
+   `AgenticCredentialResolver#resolve` fails closed with
    `MISSING_CREDENTIALS` for any platform with no stored org key — there is no platform-funded
    exception left at all.
 
 ## See also
 
-- [reference/principles.md](../reference/principles.md#product--positioning) for the single-tenant /
+- [reference/principles.md](../reference/principles.md#product--positioning) for the
   no-shared-training guarantee that also governs how a project's own data is (and isn't) used.
 - `backend/llm-runtime/src/main/java/ai/tessary/llm/ProviderCredentialController.java`,
-  `ChatModelFactory.java`, `AgenticCredentialResolver.java`, and `decisions/JevDecisionClient.java`
+  `AgenticCredentialResolver.java` and `decisions/JevDecisionClient.java`
   for the code this doc describes.

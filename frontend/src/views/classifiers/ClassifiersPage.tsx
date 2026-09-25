@@ -49,7 +49,6 @@ import {
   ago,
   detectorLabel,
   enabledDetectors,
-  isBaselineFinding,
   isClosedByTriage,
   triageState,
 } from "./shared";
@@ -72,7 +71,7 @@ export function ClassifiersPage() {
    */
   const allQ = useQuery({
     queryKey: ["behavior-findings", api.base, "all"],
-    queryFn: () => api.listBehaviorFindings("open", "all"),
+    queryFn: () => api.listBehaviorFindings(),
   });
 
   const classifiers = classifiersQ.data ?? [];
@@ -198,16 +197,7 @@ function FindingTable({
             <TD className="text-fg truncate" style={{ maxWidth: 0 }} title={f.title}>
               {f.title}
             </TD>
-            {/*
-              * The baseline tag is not decoration: a conformance row is one of two different claims —
-              * "this rule has always been broken" and "this rule got worse" — and this list is where a
-              * reader decides which to open first. The title says it in words; this says it where the
-              * eye scans.
-              */}
-            <TD className="text-muted truncate">
-              {f.detector ? detectorLabel(f.detector) : "–"}
-              {isBaselineFinding(f) && <span className="text-subtle"> · baseline</span>}
-            </TD>
+            <TD className="text-muted truncate">{f.detector ? detectorLabel(f.detector) : "–"}</TD>
             <TD>
               <TriageCell finding={f} />
             </TD>

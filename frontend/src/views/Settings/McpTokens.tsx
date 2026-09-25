@@ -39,8 +39,7 @@ function KeyGlyph({ size = 20 }: { size?: number }) {
   return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
 }
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return "Never";
+function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   const diff = Date.now() - then;
   if (diff < 0) return new Date(iso).toLocaleString();

@@ -270,7 +270,6 @@ function ProviderKeyModal({
   const [awsRegion, setAwsRegion] = useState(existing?.aws_region ?? "us-east-1");
   const [awsAccess, setAwsAccess] = useState("");
   const [awsSecret, setAwsSecret] = useState("");
-  const [bedrockArn, setBedrockArn] = useState(existing?.bedrock_model_arn ?? "");
   const [customModelName, setCustomModelName] = useState(existing?.custom_model_name ?? "");
   // Bedrock/mantle-only. Defaults to the stored value, else "api_key" — the same default the
   // backend applies to a credential with no auth_mode column value (ProviderCredentialController).
@@ -291,7 +290,6 @@ function ProviderKeyModal({
         // (explicitly clear) whenever that mode is selected, same as any other omitted field.
         aws_access_key: isAws && !usesIamRole ? (awsAccess.trim() ? awsAccess.trim() : undefined) : undefined,
         aws_secret_key: isAws && !usesIamRole ? (awsSecret.trim() ? awsSecret.trim() : undefined) : undefined,
-        bedrock_model_arn: isAws ? bedrockArn.trim() : undefined,
         auth_mode: isAws ? authMode : undefined,
         custom_model_name: isCustom ? (customModelName.trim() ? customModelName.trim() : undefined) : undefined,
       };
@@ -397,21 +395,11 @@ function ProviderKeyModal({
             <Field label="AWS region">
               {(p) => <Input {...p} value={awsRegion} onChange={(e) => setAwsRegion(e.target.value)} className="font-mono" />}
             </Field>
-            <Field label="Inference profile ARN" hint="The ARN (Amazon Resource Name) of the inference profile. Optional, but required for marketplace models.">
-              {(p) => (
-                <Input
-                  {...p}
-                  value={bedrockArn}
-                  onChange={(e) => setBedrockArn(e.target.value)}
-                  placeholder="arn:aws:bedrock:…"
-                  className="font-mono"
-                />
-              )}
-            </Field>
 
             {/* API key (sealed access/secret keys) vs IAM role (the sandbox/host's own
                 instance or task role — no keys stored at all). An explicit opt-in, never inferred
-                from blank key fields: see ChatModelFactory#byoOrIamAwsCredentials for why. */}
+                from blank key fields, so a key left empty by mistake never falls back to the
+                host's own role. */}
             <div className="col-span-2">
               <Field label="Auth mode">
                 {(p) => (

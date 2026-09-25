@@ -4,14 +4,9 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 public enum IngestError implements ErrorCode {
-    UPSTREAM_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "Upstream %s rejected credentials"),
-    UPSTREAM_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Upstream %s rate-limited the request"),
-    UPSTREAM_FAILED(HttpStatus.BAD_GATEWAY, "Upstream %s call failed: %s"),
-    MAPPING_NOT_FOUND(HttpStatus.NOT_FOUND, "No source mapping '%s'"),
     SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "No source with id '%s'"),
     UNSUPPORTED_PROVIDER(HttpStatus.BAD_REQUEST, "Unsupported provider '%s'"),
     DUPLICATE_NAME(HttpStatus.CONFLICT, "Source name '%s' already in use"),
-    MISSING_SECRET_KEY(HttpStatus.PRECONDITION_FAILED, "tessary.secret-key (TESSARY_SECRET_KEY) is not configured"),
     INVALID_BASE_URL(HttpStatus.BAD_REQUEST, "Invalid baseUrl: %s"),
     OTLP_DISABLED(HttpStatus.NOT_FOUND, "OTLP receiver is disabled"),
     OTLP_TOKEN_REQUIRED(HttpStatus.FORBIDDEN, "OTLP ingest requires a project-scoped token"),

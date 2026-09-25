@@ -295,10 +295,8 @@ public class RedactionService {
     /**
      * Redact one entry, stamping it with the credentials the corpus rule removed.
      *
-     * <p>The copy passes every component through, {@code callSiteId} included. It used to rebuild through the
-     * pre-call-site constructor, which nulled the call site {@code SubstrateSource} sets. Nothing on the write
-     * path reads that field, so nothing broke; it is the field-by-field-copy hazard {@link RawEntry#eventTs}'s
-     * javadoc warns about, and the next reader would have found it null.
+     * <p>The copy passes every component through: a field-by-field copy that drops one is the hazard
+     * {@link RawEntry#eventTs}'s javadoc warns about.
      */
     private RawEntry redactEntry(RawEntry e, List<CompiledRule> rules) {
         Set<RedactionStamp> stamps = new LinkedHashSet<>();
@@ -308,7 +306,6 @@ public class RedactionService {
         BiConsumer<GitleaksCorpus.Finding, String> output = stampInto(stamps, RedactionStamp.OUTPUT);
         return new RawEntry(
                 e.sourceExternalId(),
-                e.sourceUrl(),
                 e.name(),
                 redact(e.input(), rules, input),
                 redact(e.output(), rules, output),
@@ -321,7 +318,6 @@ public class RedactionService {
                 e.endTimestamp(),
                 redact(e.inputMessagesJson(), rules, input),
                 redact(e.outputMessagesJson(), rules, output),
-                e.callSiteId(),
                 stamps.isEmpty() ? null : List.copyOf(stamps));
     }
 

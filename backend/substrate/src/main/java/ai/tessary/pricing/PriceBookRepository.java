@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
-import ai.tessary.storage.Timestamps;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
@@ -34,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class PriceBookRepository {
 
-    private static final String BOOK_COLS = "version, source, published_at";
+    private static final String BOOK_COLS = "version";
 
     private static final String RATE_COLS =
             "price_book_version, input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok";
@@ -247,10 +245,7 @@ public class PriceBookRepository {
     }
 
     private static PriceBook book(ResultSet rs) throws SQLException {
-        return new PriceBook(
-                rs.getString("version"),
-                rs.getString("source"),
-                Objects.requireNonNull(Timestamps.instant(rs, "published_at")));
+        return new PriceBook(rs.getString("version"));
     }
 
     private static ModelRate rate(ResultSet rs) throws SQLException {

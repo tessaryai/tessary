@@ -55,7 +55,7 @@ export function spanOrder(spans: Span[], parentOf?: Map<string, string>): Span[]
     children.set(key, [...(children.get(key) ?? []), o]);
   }
   for (const list of children.values()) {
-    list.sort((a, b) => (a.started_at ?? "").localeCompare(b.started_at ?? ""));
+    list.sort((a, b) => a.started_at.localeCompare(b.started_at));
   }
 
   const out: Span[] = [];
@@ -80,7 +80,7 @@ export function spanOrder(spans: Span[], parentOf?: Map<string, string>): Span[]
  * parents its tool spans to the agent, so the llm call that actually requested
  * them is their sibling. Passing the request→execution links nests them under it.
  */
-export function depthOf(spans: Span[], parentOf?: Map<string, string>): Map<string, number> {
+export function depthOf(spans: Span[], parentOf: Map<string, string>): Map<string, number> {
   const byId = new Map(spans.map((o) => [o.id, o]));
   const depths = new Map<string, number>();
 
@@ -89,16 +89,8 @@ export function depthOf(spans: Span[], parentOf?: Map<string, string>): Map<stri
     if (cached != null) return cached;
     // A cycle would be corrupt data rather than a deep trace; stop rather than hang.
     if (seen.has(o.id)) return 0;
-    // The server's own `depth` is preferred where it has one: it derives from the materialized
-    // `path`, which resolves ancestry the client cannot see when a parent span is missing from this
-    // response. It is null while that ancestry is still pending, which is when the walk below has to
-    // stand in — and NOT a licence to read the span as a root.
-    if (parentOf == null && o.depth != null) {
-      depths.set(o.id, o.depth);
-      return o.depth;
-    }
     seen.add(o.id);
-    const declared = parentOf?.get(o.id) ?? o.parent_span_id;
+    const declared = parentOf.get(o.id) ?? o.parent_span_id;
     const parent = declared ? byId.get(declared) : undefined;
     const depth = parent ? resolve(parent, seen) + 1 : 0;
     depths.set(o.id, depth);
@@ -126,7 +118,7 @@ export function traceBounds(trace: TraceRollup | undefined, spans: Span[]): { st
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   for (const o of spans) {
-    const s = o.started_at ? new Date(o.started_at).getTime() : NaN;
+    const s = new Date(o.started_at).getTime();
     if (Number.isNaN(s)) continue;
     start = Math.min(start, s);
     const e = o.ended_at ? new Date(o.ended_at).getTime() : s + (o.duration_ms ?? 0);
@@ -188,5 +180,3 @@ export function clockLabel(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-
-export type { TraceDetailView };

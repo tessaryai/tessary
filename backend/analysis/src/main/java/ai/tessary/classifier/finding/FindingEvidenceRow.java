@@ -66,10 +66,4 @@ public record FindingEvidenceRow(
          */
         public static final List<String> ALL = List.of(EXEMPLAR, MEMBER, BASELINE, WITNESS, CHANGEPOINT);
     }
-
-    /** The grain this row is at, as the wire word the finding and case surfaces render. */
-    public String grain() {
-        if (spanId != null) return "span";
-        return traceId != null ? "trace" : "session";
-    }
 }

@@ -59,15 +59,6 @@ class ClassifierMethodCardTest {
         assertTrue(cardOf(BuiltInDetector.Kind.SECRET_LEAK).contains("### Cause: `armed_window`"));
         assertTrue(cardOf(BuiltInDetector.Kind.GROUNDEDNESS).contains("### Cause: `groundedness_rate`"));
         assertTrue(cardOf(BuiltInDetector.Kind.FRUSTRATION).contains("### Cause: `frustration_rate`"));
-
-        String behaviorDrift = cardOf(BuiltInDetector.Kind.BEHAVIOR_DRIFT);
-        assertTrue(behaviorDrift.contains("### Cause: `omission`"));
-        assertTrue(behaviorDrift.contains("### Cause: `novelty`"));
-        assertTrue(behaviorDrift.contains("### Cause: `surprisal`"));
-
-        String sop = cardOf(BuiltInDetector.Kind.SOP_CONFORMANCE);
-        assertTrue(sop.contains("### Kind: `drift`"));
-        assertTrue(sop.contains("### Kind: `baseline`"));
     }
 
     /** No card names the retired {@code state.json} or asks the agent to recompute the detector's numbers. */
@@ -77,8 +68,6 @@ class ClassifierMethodCardTest {
                 BuiltInDetector.Kind.TOOL_ERROR,
                 BuiltInDetector.Kind.DURATION_DRIFT,
                 BuiltInDetector.Kind.COST_DRIFT,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
-                BuiltInDetector.Kind.SOP_CONFORMANCE,
                 BuiltInDetector.Kind.SECRET_LEAK,
                 BuiltInDetector.Kind.MALFORMED_OUTPUT,
                 BuiltInDetector.Kind.FRUSTRATION,

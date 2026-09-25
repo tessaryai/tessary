@@ -2,7 +2,6 @@
 package ai.tessary.classifier.metric;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -20,6 +19,7 @@ import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -37,10 +37,9 @@ import org.springframework.boot.test.context.SpringBootTest;
  * The correction loop for a {@code distribution_shift} finding — metric-drift.md §9, the half of the
  * metric-drift program a human actually touches.
  *
- * <p>Both verbs already exist on the Classifiers page and already post the same two action strings that
- * behaviour drift uses, so nothing about this is visible in the frontend diff. What changes is what the
- * strings <em>mean</em>: behaviour drift corrects a gram, metric drift corrects the <b>reference</b> a
- * whole distribution is measured against.
+ * <p>Both verbs already exist on the Classifiers page and post the same two action strings every finding
+ * uses. What they <em>mean</em> here: metric drift corrects the <b>reference</b> a whole distribution is
+ * measured against.
  *
  * <p><b>The asymmetry is the point, and it is why both branches are tested rather than just the happy
  * one.</b> A reference that moved on <em>Real deviation</em> would make the next window compare a broken
@@ -201,22 +200,6 @@ class MetricFindingResolveIntegrationTest {
                 "the day MetricDriftSweep#excludedDays must drop from the control ring");
     }
 
-    @Test
-    @DisplayName("absorbing does not write an allowlist row: there is no gram to allow forever")
-    void absorbingWritesNoAllowlistRow() {
-        Fixture f = fixture("metric-resolve-no-allowlist");
-        drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.EXPECTED, "user-1");
-
-        // An allowlist row is keyed on a PROFILE and says "this symbol is fine forever", which has no
-        // meaning for a distribution whose reference moves — and behavior_allowlist's own cause CHECK was
-        // deliberately left un-widened in 0042 so that a distribution_shift reaching it fails loudly. The
-        // re-pin IS the correction; a second one would be a second, contradictory record of it.
-        assertFalse(
-                events.listByProject(f.projectId, 100).stream()
-                        .anyMatch(e -> BehaviorBaselineEventRow.Event.GRAM_ALLOWLISTED.equals(e.event())),
-                "the metric branch corrects a reference, not a gram");
-    }
-
     // -----------------------------------------------------------------------------------------------
     // Fixture
     // -----------------------------------------------------------------------------------------------
@@ -236,7 +219,7 @@ class MetricFindingResolveIntegrationTest {
     private Fixture fixture(String slug, String eventAt) {
         String projectId = TenantFixture.bootstrap(tenants, slug).project().id();
         classifiers.seedBuiltIns(projectId);
-        String classifierId = signals.findByKey(projectId, BuiltInDetector.Kind.DURATION_DRIFT)
+        String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
                 .orElseThrow()
                 .id();
         String now = Instant.now().toString();
@@ -262,7 +245,6 @@ class MetricFindingResolveIntegrationTest {
                         null,
                         null,
                         null,
-                        null,
                         0,
                         null,
                         null,
@@ -273,8 +255,9 @@ class MetricFindingResolveIntegrationTest {
         // A day's worth of closed windows in the control ring, and the next window already part-filled —
         // the state any real bucket is in by the time a human looks at its finding. Absorbing pins the
         // ring's NEWEST day, never the filling window, which is what the assertions below pin down.
-        baselines.closeWindow(
-                baselineId, CONTROL_RING, "2026-07-24T00:00:00Z", FILLING_SKETCH, null, null, null, 9, now);
+        baselines.closeWindow(baselineId, CONTROL_RING, now);
+        baselines.advanceWindow(baselineId, 9, now, "2026-07-24T00:00:00Z", null, null, null);
+        baselines.updateCurrentSketch(baselineId, FILLING_SKETCH, null, null, null, now);
 
         String findingId = findings.recordShift(
                         Ids.ulid(),

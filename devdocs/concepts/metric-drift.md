@@ -118,7 +118,7 @@ at all, so a derivation has to exist regardless.
 |---|---|---|
 | turn duration | `trace.latency_ms` | the **root span's own** `ended_at - started_at`; `DISTINCT ON` earliest-starting root for the ~0.1% of traces with several |
 | tool-call duration | `observation.latency_ms` | that span's own `ended_at - started_at` |
-| cost | `trace.total_cost` | **SUM over leaf spans** of `TokenUsage.of(usage, model).nonOverlapping()` priced through the price book |
+| cost | `trace.total_cost` | **SUM over leaf spans** of the four disjoint `TokenUsage` buckets, priced through the price book |
 | token buckets | `trace.total_tokens` (total only) | same leaf sum, per bucket — the buckets have no column and are always derived |
 
 Two consequences worth stating outright, and they apply to the column just as much as to the
@@ -179,9 +179,9 @@ goes flat, and the detector reports nothing.
 `$`/turn is the headline. Underneath, the same machinery runs per token bucket so a firing
 explains itself: input / output / cache-read / cache-write.
 
-Three hard requirements, all from `vitals/TokenUsage`:
+Three hard requirements:
 
-1. **Read `TokenUsage.of(usage, model).nonOverlapping()`, never the raw `observation.usage` blob.**
+1. **Read the disjoint buckets `IngestPricer` carves at ingest (`vitals/TokenUsage`), never the raw `observation.usage` blob.**
    `StructuralEnricher` normalizes every provider onto one `gen_ai.usage.*` vocabulary, so an
    OpenAI generation arrives wearing Anthropic key names while still carrying OpenAI's
    cache-*inclusive* input count. Trusting the spelling already billed OpenAI cache reads twice.
@@ -437,9 +437,8 @@ statistical detector feeding cases — until it was deleted with grader Layer 1;
 `MetricDriftSource` and `ToolErrorCaseSource`.
 
 **Decision (Akhil, 2026-07-30): a case opens only after Layer-2 rules the finding a real
-deviation.** Not on detection. This follows the existing precedent exactly —
-`CaseRow.Detector.BEHAVIOR_DRIFT` is documented as "a behaviour-drift finding *that survived
-triage*" — and it is what makes the no-alert-budget decision (§9) safe: findings stream
+deviation.** Not on detection. This follows the precedent behaviour drift set, whose
+case was "a behaviour-drift finding *that survived triage*" — and it is what makes the no-alert-budget decision (§9) safe: findings stream
 freely onto the Classifiers page, but Triage is the screen people get paged from and only sees the
 triaged subset. So the finding qualifies once its verdict lands `positive`, whether that came from
 triage or from a human marking `not_expected` directly.
@@ -514,7 +513,7 @@ the price book, handled in §3.3.
 ### 8.3 The Classifiers surface
 
 DESIGN-DIRECTION §Classifiers already specifies this UI. Findings render as one row per cause with
-exactly two verbs, and the detail rail carries a baseline changelog. **No new frontend surface is
+exactly two verbs. **No new frontend surface is
 needed.**
 
 What actually shipped on main is simpler than the pre-merge draft: one file,
@@ -559,8 +558,7 @@ the sweep writes the finding and stops. A person presses **Run analysis** on the
 
 The one way that valve opens without a person is `triage_automatic_enabled`, off for every org
 until a targeting rule says otherwise. `TriageAutoEscalator` then presses the same button on a
-slow tick under three bounds — a recurrence bar, a rolling per-project budget, and a per-tick cap —
-each of which logs what it withheld. It calls `BehaviorDriftService.analyze` rather than enqueueing,
+slow tick under a recurrence bar, which logs what it withheld. It calls `BehaviorDriftService.analyze` rather than enqueueing,
 so automatic mode is the manual path pressed by a scheduler and cannot drift away from it.
 
 `max_escalations_per_sweep` is gone with the automatic path: a per-sweep ceiling on microVMs only
@@ -585,7 +583,7 @@ CREATE TABLE metric_baseline (
     bucket_kind          text NOT NULL,   -- call_site | tool
     bucket_key           text NOT NULL,
     environment_id       text,
-    state                text NOT NULL,   -- learning | armed | stale
+    state                text NOT NULL,   -- learning | armed
 
     pinned_sketch_json   text,            -- reference pinned after last deploy
     pinned_at            text,

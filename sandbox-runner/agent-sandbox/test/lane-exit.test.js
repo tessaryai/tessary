@@ -31,7 +31,7 @@ test('triage.js exits fast and clean when opencode is unreachable, instead of ha
     JSON.stringify({
       files: { 'finding.md': 'a finding to rule on' },
       prompt: 'rule on this finding',
-      json_schema: null,
+      json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
       model: 'anthropic/claude-sonnet-5',
       mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
       timeout_ms: 5000,
@@ -93,7 +93,7 @@ function runTriageAgainstStubbornOpencode(reply) {
     JSON.stringify({
       files: { 'finding.md': 'a finding to rule on' },
       prompt: 'rule on this finding',
-      json_schema: null,
+      json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
       model: 'anthropic/claude-sonnet-5',
       mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
       timeout_ms: 5000,

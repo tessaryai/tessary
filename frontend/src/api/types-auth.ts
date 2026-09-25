@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shapes returned by the new tenant-aware backend.
-import type { components } from "./generated/schema";
-
-type S = components["schemas"];
 
 /** Org-level RBAC roles. Mirrors the backend `Role` enum. */
 export type OrgRole = "owner" | "admin" | "member" | "viewer" | "billing";
@@ -45,18 +42,6 @@ export interface SignupPolicy {
    */
   governing: boolean;
   governing_org_slug: string | null;
-}
-
-/**
- * The shared body of `POST /auth/signup` and `POST /auth/login`, mirrors the backend's
- * `AuthController.SignupRequest`/`LoginRequest` records. springdoc infers these from `@RequestBody`
- * types today, but the response shape below is a raw `Map.of(...)` (see
- * `AuthController.establishSession`) that generation cannot see, so this file hand-authors both for
- * symmetry.
- */
-export interface CredentialAuthRequest {
-  email: string;
-  password: string;
 }
 
 /**
@@ -142,22 +127,6 @@ export function isSampleProject(project: Pick<Project, "settings">): boolean {
   }
 }
 
-/**
- * A per-project environment (dev/staging/prod), the scoping dimension. Every project gets
- * dev/staging/prod on creation; data surfaces filter by the selected environment.
- */
-export interface Environment {
-  id: string;
-  project_id: string;
-  slug: string;
-  name: string;
-  /** Stable display ordering for the switcher (dev=0, staging=1, prod=2). */
-  sort_order: number;
-  /** The environment a write with no explicit env tag lands in (the seeded dev). */
-  is_default: boolean;
-  created_at: string;
-}
-
 export interface OrgMember {
   user_id: string;
   email: string;
@@ -179,21 +148,6 @@ export interface AddMemberResult {
   status: "added" | "invited";
   member: OrgMember | null;
   invitation: OrgInvitation | null;
-}
-
-/** Org-level observer schedule: when (and whether) accumulated pushes are graded. */
-export interface ObserverSettingsView {
-  enabled: boolean;
-  /** The org's own cron, or null to use the server default cadence. */
-  batch_cron: string | null;
-  /** The cron actually used: the org's own, or the server default when unset. */
-  effective_cron: string;
-  last_batch_at: string | null;
-}
-
-export interface UpdateObserverSettingsRequest {
-  enabled: boolean;
-  batch_cron: string | null;
 }
 
 export interface McpTokenView {
@@ -301,91 +255,13 @@ export type CapabilityWire =
   | "groundedness_enabled"
   | "secret_leak_enabled"
   | "malformed_output_enabled"
-  | "behavior_drift_enabled"
-  | "sop_conformance_enabled"
   | "triage_automatic_enabled";
 
 /**
  * The org's capability object (`GET /api/orgs/{org}/capabilities`), the any-member read the whole
  * SPA is assembled from. Every capability is present with an explicit boolean, so an absent key is
  * a version skew rather than a meaningful "off".
- *
- * `unavailable` answers the second question separately: a capability can be off because nobody
- * turned it on, or absent because this build does not carry the code behind it. Those need
- * different UI, a switch versus an explanation, and the difference is not derivable from the map.
  */
 export interface CapabilitiesView {
   capabilities: Record<CapabilityWire, boolean>;
-  unavailable: CapabilityWire[];
-}
-
-/**
- * Whether LLM grading is running on this deployment (`GET /api/grading-status`).
- *
- * Deliberately carries no ceiling or spend figure: the breaker is deployment-wide, so those are the
- * operator's numbers and every tenant can read this endpoint. `since` is set only while `paused`.
- */
-export interface GradingStatusView {
-  paused: boolean;
-  since: string | null;
-}
-
-/**
- * One billable unit's total metered consumption for an org over the period.
- * Field names are serialized verbatim from the backend `UsageLine` record (no renames); the
- * amount is `value`, matching `record UsageLine(String unit, long value)`.
- */
-export type UsageLine = S["UsageLine"];
-
-/**
- * One group of platform LLM usage: a lane, a project, a model, or the whole org. Serialized
- * verbatim from the backend `LlmUsageSliceView`.
- *
- * The four token buckets are carried apart because they are priced apart; `total_tokens` is their
- * sum. `cost_usd` covers only the calls the pricing catalog held a rate for, so a non-zero
- * `unpriced_calls` means the true cost is higher than the figure shown. `platform_cost_usd` and
- * `byo_cost_usd` split that same total by whose credential paid; never add them to `cost_usd`.
- */
-export type LlmUsageSlice = S["LlmUsageSliceView"];
-
-/**
- * The org's LLM token + cost breakdown over `[from, to)` (an open bound = the org's whole history
- * on that side), read live off the per-call ledger. `as_of` is genuinely now, unlike the bucketed
- * `BillingSummary.usage` totals.
- */
-export type LlmUsage = S["LlmUsageView"];
-
-/**
- * One `(bucket, series)` cell of the bucketed LLM usage read: the value of a single bar segment.
- * `bucket_start` joins to an entry of `LlmUsageSeries.buckets`; `key` identifies the series within
- * the requested grouping (empty string both for the ungrouped series and for calls that reported no
- * lane/model).
- */
-export type LlmUsageCell = S["LlmUsageCellView"];
-
-/**
- * The org's LLM usage over `[from, to)` bucketed at `grain` and cut into series by `grouping`, the
- * usage chart's feed. `buckets` is the complete x-axis including quiet buckets, while `cells` only
- * carries the buckets that had calls, so a gap stays a gap instead of compressing the time axis.
- * `total` is the same window under the same filters, so headline figures and bars always agree.
- */
-export type LlmUsageSeries = S["LlmUsageSeriesView"];
-
-/** Bucket widths the usage series supports. */
-export type UsageGrain = "hour" | "day" | "week";
-
-/** Series axes the usage series supports; `none` is the org total as one series. */
-export type UsageGrouping = "none" | "lane" | "project" | "model";
-
-/**
- * Cross-project billing rollup for an org (BILLING_MANAGE-gated). `plan`/`billing_email` are
- * permanently dead placeholder fields left behind after the charging integration was removed, and
- * `usage` is the real metered totals per unit. `billing_email` is omitted from the JSON when null
- * (ApiResponse is NON_NULL).
- */
-export interface BillingSummary {
-  org_id: string;
-  plan: string;
-  billing_email?: string;
-  usage: UsageLine[];
 }

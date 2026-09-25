@@ -138,7 +138,7 @@ public class ClassifierService {
      * form the periodic reconcile calls, so one project costs a bounded number of queries rather
      * than one per catalog module.
      *
-     * <p>The row set is read once and indexed by key here, replacing a {@code findByKey} per
+     * <p>The row set is read once and indexed by key here, replacing a per-key lookup per
      * built-in. The steady-state cost of a project whose catalog is already correct is one
      * {@code classifier} read and one {@code org_plan} read, and it writes nothing.
      */
@@ -212,16 +212,11 @@ public class ClassifierService {
      * {@code classifier_key} is no longer in the catalog is disabled, never deleted, so its
      * detection history stays listable.
      *
+     * <p>Takes the {@link Project} row the periodic reconcile already holds from {@code findActive()},
+     * rather than re-reading it per project purely to recover the {@code org_id} the capability lookup
+     * needs.
+     *
      * @return how many built-ins this pass newly inserted (0 in the steady state)
-     */
-    public int resyncBuiltIns(String projectId) {
-        return resync(projectId, withheldBuiltInKeys(projectId));
-    }
-
-    /**
-     * {@link #resyncBuiltIns} for a caller that already holds the {@link Project} row: the periodic
-     * reconcile, which got it from {@code findActive()} and would otherwise re-read it per project purely
-     * to recover the {@code org_id} the capability lookup needs.
      */
     public int resyncBuiltIns(Project project) {
         return resync(project.id(), withheldForOrg(project.orgId()));
@@ -299,21 +294,6 @@ public class ClassifierService {
      */
     private static boolean reaches(ClassifierRow row, Set<String> withheldBuiltInKeys) {
         return !row.builtIn() || !withheldBuiltInKeys.contains(row.classifierKey());
-    }
-
-    /**
-     * Whether one stored classifier reaches this project's org: the boolean form of {@link #get}'s
-     * guard, for callers outside this slice that must skip rather than 404.
-     *
-     * <p>The caller that needs it is alerting: a rule pointing at a classifier the org no longer
-     * has must stop evaluating by being passed over rather than by an exception, so one bad rule
-     * cannot take the whole heartbeat's rule loop down with it. Returns {@code false} for a
-     * classifier id that does not exist, for the same reason.
-     */
-    public boolean reachesProject(String projectId, String classifierId) {
-        return signals.findById(projectId, classifierId)
-                .filter(row -> reaches(row, withheldBuiltInKeys(projectId)))
-                .isPresent();
     }
 
     /**
@@ -615,11 +595,6 @@ public class ClassifierService {
 
     public List<ClassifierDtos.ClassifierEventView> events(String projectId, int limit) {
         return detections.listByProject(projectId, limit);
-    }
-
-    public List<ClassifierDtos.ClassifierEventView> eventsForClassifier(
-            String projectId, String classifierId, int limit) {
-        return eventsForClassifier(projectId, classifierId, null, limit);
     }
 
     /**

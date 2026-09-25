@@ -68,35 +68,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         this.jdbc = jdbc;
     }
 
-    /** A failed tool call on a span: the tool {@code name} and its {@code error} message. */
-    public record ToolCallFailure(@Nullable String name, String error) {}
-
     /** A per-tool failure rate over a project's {@code tool_call}s: {@code failed/total} by name. */
     public record ToolErrorRate(@Nullable String toolName, long totalCalls, long failedCalls, double failureRate) {}
-
-    /**
-     * The failed tool calls on one span: {@code (name, error)} for every {@code tool_call} with a
-     * non-null {@code error}. Richer than a {@code MIN(error)} read since the per-tool {@code
-     * tool_error} built-in needs the failing tool's name in evidence; issued only by {@code
-     * ToolErrorRateDetector}, for spans that already carry an error.
-     *
-     * <p>Keyed on the producer triple, never a bare span id: {@code tool_call} rows are
-     * project-scoped and their span key is only unique within a trace. Hits {@code
-     * ix_tool_call_v2_trace}.
-     */
-    public List<ToolCallFailure> toolCallFailures(String projectId, String traceId, String spanId) {
-        return jdbc.sql("""
-                SELECT name, error_type AS error FROM tool_call
-                WHERE project_id = :pid AND trace_id = :tid AND span_id = :sid
-                  AND error_type IS NOT NULL AND is_deleted IS NOT TRUE
-                ORDER BY created_at ASC, id ASC
-                """)
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .query((rs, n) -> new ToolCallFailure(rs.getString("name"), rs.getString("error")))
-                .list();
-    }
 
     /**
      * Per-tool failure rates over all of a project's {@code tool_call}s: grouped by tool {@code
@@ -546,22 +519,6 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     }
 
     /**
-     * The most-recent {@code limit} spans for a project, newest first: the bounded sample the
-     * classifier cold-start labeling pass draws from. Bounded by count, never by truncating the span
-     * text (the labeling judge sees full input/output). Reuses the same projection as the sweep so
-     * an example is featurized identically to how it is scored.
-     */
-    public List<SubstrateObservation> sampleObservations(String projectId, int limit) {
-        return jdbc.sql(SELECT_SPAN
-                        + " WHERE s.project_id = :pid"
-                        + " ORDER BY s.created_at DESC, s.trace_id DESC, s.id DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
-    }
-
-    /**
      * The turns before a scored turn, for the frustration classifier.
      *
      * @param spans the {@code llm} and {@code agent} spans of the {@code turns} turns just before the
@@ -614,16 +571,6 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .query(Integer.class)
                 .single();
         return new PriorTurns(spans, count);
-    }
-
-    /** One span by its producer identity within a project (the correction loop labels a specific subject). */
-    public java.util.Optional<SubstrateObservation> observationById(String projectId, String traceId, String spanId) {
-        return jdbc.sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id = :tid AND s.id = :sid")
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .query((rs, n) -> map(rs))
-                .optional();
     }
 
     /**

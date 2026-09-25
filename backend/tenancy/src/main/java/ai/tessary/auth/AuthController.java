@@ -151,7 +151,7 @@ public class AuthController {
      */
     @GetMapping("/mode")
     public ResponseEntity<?> mode() {
-        boolean redirectFlow = provider.isEnabled() && provider.supportsRedirectFlow();
+        boolean redirectFlow = provider.supportsRedirectFlow();
         return ResponseEntity.ok(ApiResponse.ok(new AuthModeView(
                 redirectFlow,
                 isFirstRun(redirectFlow),
@@ -171,13 +171,11 @@ public class AuthController {
     @GetMapping("/login")
     public RedirectView login(
             @RequestParam(value = "returnTo", required = false) String returnTo, HttpServletResponse res) {
-        // Dev shortcut: when WorkOS isn't configured, bounce to the frontend's own /login screen
-        // rather than the app root, since the app root is itself behind ProtectedRoute, which sends
-        // an unauthenticated visitor right back to this same GET (an infinite redirect loop).
-        // supportsRedirectFlow() covers the other reason this GET route can't proceed: the active
-        // provider is enabled but has no OAuth dance to run (PasswordAuthProvider), where calling
-        // authorizationUrl() on it would throw UnsupportedOperationException, so the same bounce applies.
-        if (!provider.isEnabled() || !provider.supportsRedirectFlow()) {
+        // A provider with no OAuth dance to run (PasswordAuthProvider) cannot answer
+        // authorizationUrl(), so bounce to the frontend's own /login screen rather than the app
+        // root, since the app root is itself behind ProtectedRoute, which sends an unauthenticated
+        // visitor right back to this same GET (an infinite redirect loop).
+        if (!provider.supportsRedirectFlow()) {
             return new RedirectView(entryPageUrl(returnTo));
         }
         if (returnTo != null && !returnTo.isBlank() && isSafeReturnTo(returnTo)) {
@@ -206,24 +204,21 @@ public class AuthController {
         // reached directly (not via /login's own redirect) when something hits this URL by hand:
         // there's no returnTo query param on a bare /callback hit, so this always lands on a bare
         // screen with no query.
-        if (provider.isEnabled() && !provider.supportsRedirectFlow()) {
+        if (!provider.supportsRedirectFlow()) {
             return ResponseEntity.status(HttpStatus.FOUND)
                     .location(URI.create(entryPageUrl(null)))
                     .build();
         }
         // CSRF: the code is only honored if it carries back the state we minted at /login
-        // (popCookie consumes the state cookie so it can't be replayed). Skipped when WorkOS is
-        // disabled (dev), where /login never mints state. On a miss (expired, a replay, a stale
-        // tab, or a forged callback) restart sign-in rather than render a raw 400 JSON body to this
-        // top-level browser navigation; a fresh /login mints a new state.
-        if (provider.isEnabled()) {
-            String expectedState = popCookie(req, res, STATE_COOKIE);
-            if (expectedState == null || state == null || !constantTimeEquals(expectedState, state)) {
-                log.warn("auth/callback: missing or mismatched OAuth state; restarting sign-in");
-                return ResponseEntity.status(HttpStatus.FOUND)
-                        .location(URI.create(authProps.getFrontendUrl()))
-                        .build();
-            }
+        // (popCookie consumes the state cookie so it can't be replayed). On a miss (expired, a
+        // replay, a stale tab, or a forged callback) restart sign-in rather than render a raw 400
+        // JSON body to this top-level browser navigation; a fresh /login mints a new state.
+        String expectedState = popCookie(req, res, STATE_COOKIE);
+        if (expectedState == null || state == null || !constantTimeEquals(expectedState, state)) {
+            log.warn("auth/callback: missing or mismatched OAuth state; restarting sign-in");
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .location(URI.create(authProps.getFrontendUrl()))
+                    .build();
         }
         AuthProvider.AuthResult r;
         try {
@@ -252,8 +247,7 @@ public class AuthController {
 
         // A successful WorkOS authenticate always returns an access_token; a null here means
         // a malformed 2xx body, which we treat as an auth failure rather than seal a broken session.
-        String accessToken = r.accessToken();
-        if (accessToken == null) {
+        if (r.accessToken() == null) {
             log.warn("auth/callback: WorkOS 2xx response carried no access_token");
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(ApiResponse.failure(
@@ -261,13 +255,9 @@ public class AuthController {
                             new ErrorBody("auth.workos_failed", "no access token", null)));
         }
         SealedSession session = new SealedSession(
-                accessToken,
                 r.refreshToken(),
                 r.accessTokenExpiresAt().toString(),
                 user.workosUserId(),
-                user.email(),
-                user.displayName(),
-                user.avatarUrl(),
                 r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId());
         String setCookie = buildCookie(
                         authProps.getCookieName(),
@@ -349,9 +339,8 @@ public class AuthController {
         // Same "malformed 2xx" defensiveness as /callback's accessToken null-check, even though
         // PasswordAuthProvider always sets a placeholder token today: a future AuthProvider
         // implementing signupWithCredentials/authenticateWithCredentials might not, and this is the
-        // one seam SealedSession's non-null accessToken flows through for both credential routes.
-        String accessToken = r.accessToken();
-        if (accessToken == null) {
+        // one seam both credential routes share.
+        if (r.accessToken() == null) {
             log.warn("auth: provider returned no access token for principal {}", user.id());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(ApiResponse.failure(
@@ -360,13 +349,9 @@ public class AuthController {
         }
 
         SealedSession session = new SealedSession(
-                accessToken,
                 r.refreshToken(),
                 r.accessTokenExpiresAt().toString(),
                 user.workosUserId(),
-                user.email(),
-                user.displayName(),
-                user.avatarUrl(),
                 r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId());
         String setCookie = buildCookie(
                         authProps.getCookieName(),

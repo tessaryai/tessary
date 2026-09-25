@@ -108,12 +108,7 @@ public class RcaWorker {
         }
     }
 
-    /** Test seam: run the production handler for one job directly. */
-    void runForTest(RcaJobRow job) {
-        run(job);
-    }
-
-    private void run(RcaJobRow job) {
+    void run(RcaJobRow job) {
         Map<String, String> ctx = new LinkedHashMap<>();
         ctx.put(LogContext.PROJECT_ID, job.projectId());
         ctx.put(LogContext.JOB_ID, job.id());
@@ -158,7 +153,6 @@ public class RcaWorker {
         try {
             findings.findById(job.projectId(), job.findingId())
                     .map(FindingRow::caseId)
-                    .filter(id -> id != null)
                     .ifPresent(caseId -> caseEvents.append(
                             job.projectId(),
                             caseId,

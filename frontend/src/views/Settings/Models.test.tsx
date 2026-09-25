@@ -48,16 +48,12 @@ const SETTINGS: ModelSettingsResponse = {
       id: "agent_vm",
       label: "Agent in a VM",
       description: "A model id handed to an agent.",
-      tiered: false,
-      effort_tunable: false,
       model_selectable: true,
     },
     {
       id: "decision_calls",
       label: "Decision models",
       description: "One question per turn.",
-      tiered: false,
-      effort_tunable: false,
       model_selectable: false,
     },
   ],
@@ -131,7 +127,7 @@ afterEach(() => {
 });
 
 describe("Models", () => {
-  it("renders the decision group with a provider select and no model, tier or effort control", async () => {
+  it("renders the decision group with a provider select and no model control", async () => {
     getModelSettings.mockResolvedValue(SETTINGS);
     renderModels();
 
@@ -141,8 +137,6 @@ describe("Models", () => {
     expect(options).toEqual(["Automatic (TypeSafe)", "TypeSafe", "OpenRouter"]);
 
     expect(screen.queryByLabelText("Frustration model")).toBeNull();
-    expect(screen.queryByLabelText("Frustration service tier")).toBeNull();
-    expect(screen.queryByLabelText("Frustration reasoning effort")).toBeNull();
     expect(screen.getByLabelText("RCA model")).toBeTruthy();
   });
 });

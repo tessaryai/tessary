@@ -9,7 +9,6 @@ import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import java.util.LinkedHashSet;
-import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +34,7 @@ import org.springframework.stereotype.Component;
  * who uses what.
  *
  * <p>It reports; it never enforces. The decision to run or not run a deployment is not one a request handler
- * should be taking, and the same posture is why {@code PlatformSpendReporter} prints rather than throttles.
+ * should be taking.
  */
 @Component
 public class EncoderDependencyReporter {
@@ -109,17 +108,10 @@ public class EncoderDependencyReporter {
         Set<String> live = new LinkedHashSet<>();
         for (ClassifierRow row : classifiers.listEnabled(project.id())) {
             if (!Kind.ENCODER_BACKED.contains(row.detector())) continue;
-            Optional<Capability> capability = capabilityFor(row.detector());
-            if (capability.isPresent() && !capabilities.isEnabled(project.orgId(), capability.get())) continue;
+            // GROUNDEDNESS is the only encoder-backed kind.
+            if (!capabilities.isEnabled(project.orgId(), Capability.GROUNDEDNESS)) continue;
             live.add(row.classifierKey());
         }
         return live;
-    }
-
-    private static Optional<Capability> capabilityFor(String detector) {
-        return switch (detector) {
-            case Kind.GROUNDEDNESS -> Optional.of(Capability.GROUNDEDNESS);
-            default -> Optional.empty();
-        };
     }
 }

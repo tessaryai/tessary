@@ -13,8 +13,7 @@ import org.jspecify.annotations.Nullable;
  * renderers ({@link ai.tessary.alert.channel.AlertPayload}) need no join. {@code classifierId} is set
  * only for a threshold firing.
  *
- * @param state the firing's lifecycle state ({@code firing} today; {@code resolved} reserved for
- *     stateful anomaly rules).
+ * @param state the firing's lifecycle state ({@code firing}).
  * @param windowStart the inclusive start of the firing window (ISO) — the idempotency discriminant.
  * @param value the basis count that fired (threshold) or the total events rolled up (roll-up).
  * @param threshold the configured threshold at fire time (threshold kind only).
@@ -47,8 +46,5 @@ public record AlertEventRow(
 
         /** The alert is currently firing. */
         public static final String FIRING = "firing";
-
-        /** The alert condition has cleared (reserved for stateful anomaly rules). */
-        public static final String RESOLVED = "resolved";
     }
 }

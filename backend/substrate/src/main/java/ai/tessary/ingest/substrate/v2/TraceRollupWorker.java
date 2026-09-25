@@ -50,6 +50,12 @@ import org.springframework.stereotype.Component;
  * <p>Per-trace failures are caught per trace, which is safe HERE and forbidden in the batch writer: each
  * recompute is its own autocommit statement, so catching one does not leave a transaction rollback-only,
  * and one poison trace must not strand the other 499 the round claimed.
+ *
+ * <p>{@code tessary.ingest.substrate.rollup-enabled} is the ops kill switch for this worker and its reaper.
+ * Switching it off stops every trace's counters advancing — {@code is_settled} stays false and the list
+ * surfaces keep showing whatever the last rollup wrote. Nothing is lost by it: the deadlines stay armed on
+ * the rows, so turning it back on drains the backlog. It is for an operator who needs the connections
+ * back, not for a rollout.
  */
 @Component
 @ConditionalOnProperty(

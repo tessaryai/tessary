@@ -95,44 +95,6 @@ public class PipelineRepository {
                 readJsonList(m.capabilitiesJson, Capability.class));
     }
 
-    public boolean exists(String projectId) {
-        return jdbc.sql("SELECT 1 FROM pipeline_meta WHERE project_id = :pid")
-                .param("pid", projectId)
-                .query(Integer.class)
-                .optional()
-                .isPresent();
-    }
-
-    /** The commit the current pipeline was synced to, if known. */
-    public Optional<String> currentSyncedCommit(String projectId) {
-        List<String> vals = jdbc.sql("SELECT synced_commit_sha FROM pipeline_meta WHERE project_id = :pid")
-                .param("pid", projectId)
-                .query((rs, n) -> rs.getString("synced_commit_sha"))
-                .list();
-        return vals.isEmpty()
-                ? Optional.empty()
-                : Optional.ofNullable(vals.get(0)).filter(s -> !s.isBlank());
-    }
-
-    /** The committed knowledge index for the project, if any was imported. */
-    public Optional<String> currentKnowledgeIndex(String projectId) {
-        List<String> vals = jdbc.sql("SELECT knowledge_index_json FROM pipeline_meta WHERE project_id = :pid")
-                .param("pid", projectId)
-                .query((rs, n) -> rs.getString("knowledge_index_json"))
-                .list();
-        return vals.isEmpty()
-                ? Optional.empty()
-                : Optional.ofNullable(vals.get(0)).filter(s -> !s.isBlank());
-    }
-
-    /** Store the bundle's knowledge index. Kept out of {@link #upsertMeta} so a partial upload never clobbers it. */
-    public void stampKnowledgeIndex(String projectId, String json) {
-        jdbc.sql("UPDATE pipeline_meta SET knowledge_index_json = :json WHERE project_id = :pid")
-                .param("json", json)
-                .param("pid", projectId)
-                .update();
-    }
-
     /**
      * Record which commit (and repo) the project's pipeline now corresponds to.
      * Kept out of {@link #upsertMeta} so a partial upload never clobbers it.
@@ -161,18 +123,10 @@ public class PipelineRepository {
      *       so we deleted it. Only non-zero in {@code replace} mode.</li>
      * </ul>
      */
-    public record EntityDiff(int added, int updated, int removed) {
-        public static EntityDiff zero() {
-            return new EntityDiff(0, 0, 0);
-        }
-    }
+    public record EntityDiff(int added, int updated, int removed) {}
 
     /** What changed across the import. {@code metaReplaced=true} when pipeline.yaml was applied. */
-    public record Diff(EntityDiff callSites, EntityDiff chains, EntityDiff failureModes, boolean metaReplaced) {
-        public static Diff empty() {
-            return new Diff(EntityDiff.zero(), EntityDiff.zero(), EntityDiff.zero(), false);
-        }
-    }
+    public record Diff(EntityDiff callSites, EntityDiff chains, EntityDiff failureModes, boolean metaReplaced) {}
 
     /**
      * Atomically replace the project's pipeline. Every entity not in the upload
@@ -186,12 +140,10 @@ public class PipelineRepository {
         Set<String> preCh = existingIds(projectId, "chain");
         Set<String> preFm = existingIds(projectId, "grader_failure_mode");
 
-        // output_schema has two writers: the bundle (a call-site shard may declare one) and agentic
-        // synthesis, which reads it out of the repo and stamps the column directly. A wipe-and-write
-        // import drops the column, so the platform's capture is carried across the delete — for the
-        // same reason stampKnowledgeIndex is kept out of upsertMeta: an import must not clobber what it
-        // does not carry. Restored only where the incoming bundle is SILENT; a shard that declares a
-        // schema is the newer truth and wins, or the repo could never correct a stale capture.
+        // A call-site shard may declare output_schema or stay silent on it. A wipe-and-write import drops
+        // the column, so the stored schema is carried across the delete: an import must not clobber what
+        // it does not carry. Restored only where the incoming bundle is SILENT; a shard that declares a
+        // schema is the newer truth and wins, or the repo could never correct a stale one.
         Map<String, String> carried = callSiteOutputSchemas(projectId);
         pipeline.callSites().stream().filter(cs -> cs.outputSchema() != null).forEach(cs -> carried.remove(cs.id()));
 
@@ -214,47 +166,29 @@ public class PipelineRepository {
     }
 
     /**
-     * Diff-friendly merge. Entities present in the upload are inserted (new) or
-     * updated (existing); entities NOT in the upload are left alone. Use this
-     * for incremental updates.
-     *
-     * <p>{@code replaceMeta} controls whether the pipeline meta block (product
-     * profile, taxonomy, invariants, runtime, packs) and the entity tables get
-     * touched. False means the upload carried no meta: nothing is written. True
-     * means "pipeline.yaml is in the upload": upsert the meta + every meta entity
-     * by id (without deleting unmentioned ones).</p>
+     * Diff-friendly merge. The pipeline meta block (product profile, taxonomy, invariants, runtime,
+     * packs) is upserted, and entities present in the upload are inserted (new) or updated (existing)
+     * by id; entities NOT in the upload are left alone. Use this for incremental updates.
      */
     @Transactional
-    public Diff upsert(String projectId, Pipeline pipeline, boolean replaceMeta) {
+    public Diff upsert(String projectId, Pipeline pipeline) {
         Set<String> preCs = existingIds(projectId, "call_site");
         Set<String> preCh = existingIds(projectId, "chain");
         Set<String> preFm = existingIds(projectId, "grader_failure_mode");
 
-        if (replaceMeta) {
-            upsertMeta(projectId, pipeline);
-            upsertCallSites(projectId, pipeline.callSites());
-            upsertChains(projectId, pipeline.chains());
-            upsertFailureModes(projectId, pipeline.failureModes());
-        }
+        upsertMeta(projectId, pipeline);
+        upsertCallSites(projectId, pipeline.callSites());
+        upsertChains(projectId, pipeline.chains());
+        upsertFailureModes(projectId, pipeline.failureModes());
 
         return new Diff(
-                replaceMeta
-                        ? diffNoRemovals(
-                                preCs,
-                                pipeline.callSites().stream().map(CallSite::id).toList())
-                        : EntityDiff.zero(),
-                replaceMeta
-                        ? diffNoRemovals(
-                                preCh, pipeline.chains().stream().map(Chain::id).toList())
-                        : EntityDiff.zero(),
-                replaceMeta
-                        ? diffNoRemovals(
-                                preFm,
-                                pipeline.failureModes().stream()
-                                        .map(FailureMode::id)
-                                        .toList())
-                        : EntityDiff.zero(),
-                replaceMeta);
+                diffNoRemovals(
+                        preCs, pipeline.callSites().stream().map(CallSite::id).toList()),
+                diffNoRemovals(preCh, pipeline.chains().stream().map(Chain::id).toList()),
+                diffNoRemovals(
+                        preFm,
+                        pipeline.failureModes().stream().map(FailureMode::id).toList()),
+                true);
     }
 
     private Set<String> existingIds(String projectId, String table) {
@@ -346,38 +280,6 @@ public class PipelineRepository {
                 .update();
     }
 
-    /**
-     * Persist the call site's declared structured-output JSON Schema, captured during agentic
-     * synthesis (the agent reads the call site's real code). Last-write-wins: each generation run
-     * re-reads the code, so the newest capture is the current truth — including {@code null}, which
-     * clears a stale capture when the code no longer declares structured output. The Malformed
-     * Output built-in classifier reads this column to validate observation outputs.
-     *
-     * <p>{@code IS DISTINCT FROM} makes the write a no-op when the capture is unchanged, so the
-     * returned flag means "this call site's schema is genuinely different now" — the condition
-     * {@link PipelineService} turns into a {@link CallSiteFactChangedEvent}. Null-safe in both
-     * directions, so first capture (null → schema) and stale-clear (schema → null) both report a
-     * change while a re-run that re-reads the same code reports none.
-     *
-     * @return whether the stored schema actually changed.
-     */
-    public boolean setCallSiteOutputSchema(String projectId, String callSiteId, @Nullable String outputSchemaJson) {
-        return jdbc.sql("UPDATE call_site SET output_schema = :schema "
-                                + "WHERE project_id = :pid AND id = :id AND output_schema IS DISTINCT FROM :schema")
-                        .param("schema", outputSchemaJson)
-                        .param("pid", projectId)
-                        .param("id", callSiteId)
-                        .update()
-                > 0;
-    }
-
-    /**
-     * {@code call_site_id → shape} for every call site in the project that has one. Read by {@link
-     * PipelineService} immediately before a meta-bearing import so it can diff the incoming shapes
-     * against the stored ones — {@code shape} is written through the bulk {@link #upsertCallSites}
-     * path, which has no natural place to report a per-column change the way {@link
-     * #setCallSiteOutputSchema} does.
-     */
     /** {@code call_site_id → output_schema} for every call site in the project that has one. */
     Map<String, String> callSiteOutputSchemas(String projectId) {
         Map<String, String> out = new LinkedHashMap<>();
@@ -388,7 +290,7 @@ public class PipelineRepository {
         return out;
     }
 
-    /** Re-apply captured schemas after a wipe-and-write import, for call sites the upload still carries. */
+    /** Re-apply stored schemas after a wipe-and-write import, for call sites the upload still carries. */
     private void restoreCallSiteOutputSchemas(String projectId, Map<String, String> captured) {
         for (Map.Entry<String, String> e : captured.entrySet()) {
             // Scoped by id, so a call site the import DELETED stays gone rather than being resurrected
@@ -401,6 +303,12 @@ public class PipelineRepository {
         }
     }
 
+    /**
+     * {@code call_site_id → shape} for every call site in the project that has one. Read by {@link
+     * PipelineService} immediately before an import so it can diff the incoming shapes against the
+     * stored ones — {@code shape} is written through the bulk {@link #upsertCallSites} path, which has
+     * no natural place to report a per-column change.
+     */
     public Map<String, String> callSiteShapes(String projectId) {
         Map<String, String> out = new LinkedHashMap<>();
         jdbc.sql("SELECT id, shape FROM call_site WHERE project_id = :pid AND shape IS NOT NULL")
@@ -424,13 +332,13 @@ public class PipelineRepository {
     /**
      * The text a declared {@code output_schema} persists as: canonicalized JSON, or {@code null} when
      * the shard declared an explicit YAML null (which asserts the code declares no structured output).
-     * Canonicalized on the way in so a schema carried by the bundle and the same schema captured by
-     * synthesis are byte-identical — see {@link CanonicalJson}.
+     * Canonicalized on the way in so the same schema declared twice, keys in a different order, is
+     * byte-identical — see {@link CanonicalJson}.
      */
     private @Nullable String declaredSchemaText(CallSite cs) {
         JsonNode declared = cs.outputSchema();
         if (declared == null || declared.isNull()) return null;
-        return CanonicalJson.of(mapper, writeJson(declared));
+        return CanonicalJson.of(mapper, declared);
     }
 
     private CallSite mapCallSite(ResultSet rs, int n) throws SQLException {
@@ -465,9 +373,6 @@ public class PipelineRepository {
 
     private void upsertCallSites(String projectId, List<CallSite> sites) {
         for (CallSite cs : sites) {
-            if (cs.id() == null || cs.id().isBlank()) {
-                throw new IllegalArgumentException("call_site is missing id (project=" + projectId + ")");
-            }
             Map<String, Object> values = new LinkedHashMap<>();
             values.put(CallSiteColumns.PROJECT_ID, projectId);
             values.put(CallSiteColumns.ID, cs.id());
@@ -489,20 +394,13 @@ public class PipelineRepository {
             values.put(CallSiteColumns.DATASET_PATH, cs.datasetPath());
             values.put(CallSiteColumns.OBSERVED_JSON, writeJson(cs.observed()));
             values.put(CallSiteColumns.EXPECTED_SPANS_JSON, writeJson(cs.expectedSpans()));
-            // Written UNCONDITIONALLY, unlike output_schema two lines down. The asymmetry is
-            // deliberate and rests on writer count, not on taste: output_schema has TWO writers (the
-            // bundle and agentic synthesis), so a silent shard must not clobber the other one's
-            // capture and "absent" has to stay distinguishable from "declared empty". `tools` has
-            // exactly one writer — the bundle — so bundle silence genuinely means "no tools", and
-            // writeJson maps the empty list to SQL NULL accordingly. If a second writer ever appears
-            // here, this needs the same absent/declared split (and CallSite.tools would have to stop
-            // normalizing null to List.of(), which is what currently erases the distinction).
+            // Written UNCONDITIONALLY, unlike output_schema two lines down: bundle silence on `tools`
+            // means "no tools", and writeJson maps the empty list to SQL NULL accordingly. output_schema
+            // keeps "absent" distinguishable from "declared empty" (CallSite.tools normalizes null to
+            // List.of(), which erases that distinction for tools).
             values.put(CallSiteColumns.TOOLS_JSON, writeJson(cs.tools()));
-            // output_schema has TWO writers — the bundle (here) and agentic synthesis
-            // (setCallSiteOutputSchema). The bundle wins when it declares one; when it does not, the
-            // column is left for restoreCallSiteOutputSchemas to carry the platform's capture across.
-            // A shard that DECLARES the fact writes the column; one that is silent leaves it for
-            // restoreCallSiteOutputSchemas to carry the platform's capture across. Declaring an
+            // A shard that DECLARES output_schema writes the column; one that is silent leaves it for
+            // restoreCallSiteOutputSchemas to carry the stored schema across. Declaring an
             // explicit `output_schema: null` is a declaration — "the code has no structured output" —
             // and clears the column. Jackson binds that null to NullNode, not Java null, so the two
             // cases are only distinguishable through isNull(); a bare `!= null` check would store the

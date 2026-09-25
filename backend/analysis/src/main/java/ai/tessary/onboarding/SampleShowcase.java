@@ -11,7 +11,6 @@ import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Row;
 import ai.tessary.tenant.Ids;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
@@ -702,26 +701,23 @@ final class SampleShowcase {
         if (CLASSIFY.equals(callSite)) {
             return day < CLASSIFY_STEP_DAY ? 1.0 : 1.95;
         }
-        if (GENERATE.equals(callSite)) {
-            return 1.0 + (day - 1) / (double) (WINDOW_DAYS - 1) * 1.3;
-        }
-        return 1.0;
+        return 1.0 + (day - 1) / (double) (WINDOW_DAYS - 1) * 1.3;
     }
 
     private static double durationMultiplier(String callSite, int day) {
-        if ((KB_SEARCH.equals(callSite) || REFUND.equals(callSite)) && day >= DURATION_RAMP_START_DAY) {
+        if (day >= DURATION_RAMP_START_DAY) {
             double fraction = Math.min(1.0, (day - (DURATION_RAMP_START_DAY - 1)) / 5.0);
             return 1.0 + fraction * (KB_SEARCH.equals(callSite) ? 1.2 : 1.1);
         }
         return 1.0;
     }
 
-    private static double errorRate(String callSite, int day) {
-        if ((REFUND.equals(callSite) || ESCALATE.equals(callSite)) && day >= TOOL_ERROR_RAMP_START_DAY) {
+    private static double errorRate(int day) {
+        if (day >= TOOL_ERROR_RAMP_START_DAY) {
             double fraction = Math.min(1.0, (day - (TOOL_ERROR_RAMP_START_DAY - 1)) / 4.0);
             return TOOL_BASELINE_ERROR_RATE + fraction * 0.20;
         }
-        return (REFUND.equals(callSite) || ESCALATE.equals(callSite)) ? TOOL_BASELINE_ERROR_RATE : 0.0;
+        return TOOL_BASELINE_ERROR_RATE;
     }
 
     // ---- output shape ---------------------------------------------------------------------
@@ -732,7 +728,6 @@ final class SampleShowcase {
     record DriftStat(
             String classifierKey,
             String callSiteId,
-            String subjectKind,
             String subjectId,
             String subjectLabel,
             String measure,
@@ -1108,7 +1103,7 @@ final class SampleShowcase {
                                 double mult = durationMultiplier(REFUND, day);
                                 latencyMs = Math.round(jitterD(rnd, REFUND_BASE_LATENCY_MS * mult, 0.15));
                                 refundDuration.add(day, latencyMs, traceId);
-                                boolean failed = refundFailures.next(errorRate(REFUND, day));
+                                boolean failed = refundFailures.next(errorRate(day));
                                 refundErrors.add(day, failed, traceId);
                                 input = "order_id=" + orderId + " amount=" + amount + " customer=\"" + customer + "\"";
                                 if (failed) {
@@ -1124,7 +1119,7 @@ final class SampleShowcase {
                             case ESCALATE -> {
                                 kind = KindNormalizer.TOOL;
                                 latencyMs = jitter(rnd, ESCALATE_BASE_LATENCY_MS, 0.15);
-                                boolean failed = escalateFailures.next(errorRate(ESCALATE, day));
+                                boolean failed = escalateFailures.next(errorRate(day));
                                 escalateErrors.add(day, failed, traceId);
                                 input = "ticket_id=" + orderId + " priority=high reason=" + intentLabel;
                                 if (failed) {
@@ -1138,7 +1133,7 @@ final class SampleShowcase {
                                             + (100000 + rnd.nextInt(899999));
                                 }
                             }
-                            case EXPORT -> {
+                            default -> {
                                 kind = KindNormalizer.TOOL;
                                 latencyMs = jitter(rnd, EXPORT_BASE_LATENCY_MS, 0.15);
                                 input = "export order " + orderId + " as pdf";
@@ -1158,7 +1153,6 @@ final class SampleShowcase {
                                 outputPreview = "Export ready for order " + orderId + ". (PDF attached)";
                                 attachedMediaId = exportPdfMediaId;
                             }
-                            default -> throw new IllegalStateException("unreachable call site " + callSite);
                         }
 
                         Instant spanStart = cursor;
@@ -1330,7 +1324,6 @@ final class SampleShowcase {
                 classifyCost.stat(
                         "cost_drift",
                         CLASSIFY,
-                        "metric_baseline",
                         "cost",
                         "previous",
                         CLASSIFY_STEP_DAY,
@@ -1343,19 +1336,10 @@ final class SampleShowcase {
                 // recent window (pinned reference)" into the finding's basis, a sentence contradicting
                 // itself, over a comparison the UI could not have shown.
                 generateCost.stat(
-                        "cost_drift",
-                        GENERATE,
-                        "metric_baseline",
-                        "cost",
-                        "previous",
-                        GENERATE_SPLIT_DAY,
-                        todayMidnight,
-                        now,
-                        List.of()),
+                        "cost_drift", GENERATE, "cost", "previous", GENERATE_SPLIT_DAY, todayMidnight, now, List.of()),
                 kbDuration.stat(
                         "duration_drift",
                         KB_SEARCH,
-                        "metric_baseline",
                         "turn_duration",
                         "previous",
                         DURATION_RAMP_START_DAY,
@@ -1365,7 +1349,6 @@ final class SampleShowcase {
                 refundDuration.stat(
                         "duration_drift",
                         REFUND,
-                        "metric_baseline",
                         "turn_duration",
                         "previous",
                         DURATION_RAMP_START_DAY,
@@ -1421,11 +1404,10 @@ final class SampleShowcase {
                 roll < 0.6
                         ? new String[] {ASSEMBLE, CLASSIFY, KB_SEARCH, GENERATE, ESCALATE}
                         : new String[] {ASSEMBLE, CLASSIFY, KB_SEARCH, GENERATE};
-            case "escalation" ->
+            default ->
                 roll < 0.7
                         ? new String[] {ASSEMBLE, CLASSIFY, GENERATE, ESCALATE}
                         : new String[] {ASSEMBLE, CLASSIFY, ESCALATE};
-            default -> new String[] {ASSEMBLE, CLASSIFY, GENERATE};
         };
     }
 
@@ -1584,11 +1566,7 @@ final class SampleShowcase {
     }
 
     private static String toMessagesJson(ObjectMapper mapper, List<WireMessage> messages) {
-        try {
-            return mapper.writeValueAsString(messages);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("sample showcase message serialization failed", e);
-        }
+        return mapper.valueToTree(messages).toString();
     }
 
     /**
@@ -1712,7 +1690,6 @@ final class SampleShowcase {
         DriftStat stat(
                 String classifierKey,
                 String callSiteId,
-                String subjectKind,
                 String measure,
                 String reference,
                 int triggerDay,
@@ -1743,7 +1720,6 @@ final class SampleShowcase {
             return new DriftStat(
                     classifierKey,
                     callSiteId,
-                    subjectKind,
                     callSiteId,
                     callSiteId,
                     measure,
@@ -1828,7 +1804,6 @@ final class SampleShowcase {
             return new DriftStat(
                     "tool_error",
                     callSiteId,
-                    "tool",
                     bucketKey,
                     callSiteId,
                     "tool_error_rate",

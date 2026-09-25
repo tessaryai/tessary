@@ -134,7 +134,7 @@ export function FlaggedAnswers({
   useEffect(() => {
     const root = list.current;
     const target = end.current;
-    if (!root || !target || !hasNextPage || typeof IntersectionObserver === "undefined") return;
+    if (!root || !target || !hasNextPage) return;
     const seen = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) void fetchNextPage();

@@ -54,7 +54,6 @@
         <findsecbugs.version>1.14.0</findsecbugs.version>
         <awssdk.version>2.54.12</awssdk.version>
         <grpc.version>1.84.0</grpc.version>
-        <langchain4j.version>1.19.0</langchain4j.version>
         <!-- CVE-2026-65182 / CVE-2026-65905 / CVE-2026-68525: spring-boot-starter-parent:4.1.1's
              BOM pins tomcat-embed-core to 11.0.24. Override ahead of Boot's own BOM until a
              4.1.2+ parent is released; remove this once that BOM catches up to >=11.0.25. -->
@@ -74,12 +73,6 @@
         <testcontainers.version>2.0.5</testcontainers.version>
         <archunit.version>1.5.0</archunit.version>
         <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
-        <!-- SOP-conformance embedding serving (analysis/classifier/conformance): the in-process
-             ONNX forward pass over the bundle's frozen checkpoint plus the checkpoint's own
-             tokenizer.json via the HuggingFace tokenizers JNI binding. Verified latest stable on
-             Maven Central 2026-08-07. -->
-        <onnxruntime.version>1.29.0</onnxruntime.version>
-        <djl-tokenizers.version>0.36.0</djl-tokenizers.version>
         <!-- Verified latest stable on Maven Central 2026-09-01. Only the 11 open modules
              below bare-activate this plugin (backend/test-support and the modules outside this
              build deliberately do not) — see the per-module comment at each activation site. -->
@@ -94,15 +87,7 @@
 
     <dependencyManagement>
         <dependencies>
-            <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-bom</artifactId>
-                <version>${langchain4j.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <!-- AWS SDK v2 BOM: single source of truth for every awssdk module (Bedrock-runtime
-                 pulled by langchain4j-bedrock + the Lambda client we add directly), so they never
+            <!-- AWS SDK v2 BOM: single source of truth for every awssdk module, so they never
                  drift apart on a shared transitive like aws-core. -->
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
@@ -168,18 +153,6 @@
                 <artifactId>jspecify</artifactId>
                 <version>1.0.1</version>
             </dependency>
-            <!-- The conformance encoder's serving pair (see the property comment above). Managed
-                 here so no second module can pull a drifting version of either native binding. -->
-            <dependency>
-                <groupId>com.microsoft.onnxruntime</groupId>
-                <artifactId>onnxruntime</artifactId>
-                <version>${onnxruntime.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ai.djl.huggingface</groupId>
-                <artifactId>tokenizers</artifactId>
-                <version>${djl-tokenizers.version}</version>
-            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -228,26 +201,12 @@
                         <!-- NotJavadoc: records/DTOs document components with block comments
                              (matches the PMD DanglingJavadoc exclusion). JavaLangClash:
                              model/Runtime mirrors the synth-schema name (contract-driven).
-                             NullAway covers 25 open package prefixes plus `ai.tessary.paid`;
-                             widen
+                             NullAway covers 16 open packages; widen
                              AnnotatedPackages one package at a time and run the gate — a package
                              that is not listed is NOT checked, and a name that matches nothing is
                              silently ignored, so keep this list honest.
-                             `ai.tessary.paid` is here rather than in that module's own
-                             maven-compiler-plugin override on purpose. That module re-points
-                             SpotBugs and forbidden-apis because their filters are open-package
-                             globs that would match nothing there; NullAway's is one argument
-                             inside one long -Xplugin string, and overriding it one directory over
-                             means restating the whole ErrorProne line. Two copies of that line
-                             diverge, and the half that goes stale is the one nobody reads —
-                             which is the silently-inapplicable-analyser failure
-                             this arrangement exists to close.
-                             `scripts/check-open-boundary.sh` greps `backend/*/pom.xml` for
-                             `ai.tessary.paid`, and this file is `backend/pom.xml`, which that
-                             glob does not match: it already carries `<module>../tessary-paid</module>`
-                             and the enforcer's `<exclude>ai.tessary.paid:*</exclude>`.
-                             Still outside the set: alert, annotation, assistant, billing, ci, compile, config, experiment, gate, git, llm, llmspi, metering, model, observer, ops, plan, prediction, pricing, query, rca, redaction, regrade, review, routing, search, slack, storage, synth, tenant, traces, trend, trendstore, usage, verdict, vitals. -->
-                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.golden,ai.tessary.curation,ai.tessary.dataset,ai.tessary.auth,ai.tessary.ingest,ai.tessary.run,ai.tessary.judge,ai.tessary.db,ai.tessary.priors,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.risk,ai.tessary.classifier,ai.tessary.analytics,ai.tessary.featureflags,ai.tessary.cases,ai.tessary.sopcompile,ai.tessary.paid</arg>
+                             Still outside the set: alert, billing, ci, config, detection, edition, gate, git, llm, llmspi, metering, model, onboarding, ops, plan, pricing, prompt, query, rca, redaction, retention, search, storage, telemetry, tenant, traces, usage, vitals. -->
+                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.auth,ai.tessary.ingest,ai.tessary.db,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.classifier,ai.tessary.featureflags,ai.tessary.cases</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
@@ -306,8 +265,8 @@
                     <!-- find-sec-bugs adds the security detectors core SpotBugs does not ship:
                          injection (SQL, command, LDAP), path traversal, SSRF, XXE, weak crypto and
                          hardcoded keys, insecure cookie flags. It is the only security static
-                         analysis that runs on a contributor's machine — CodeQL needs the repo to be
-                         public before it can run at all (see .github/workflows/codeql.yml). -->
+                         analysis that runs on a contributor's machine; CodeQL runs weekly in CI
+                         (.github/workflows/codeql.yml). -->
                     <plugins>
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>
@@ -371,15 +330,10 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Coverage baseline, open modules only. NO GATE — this establishes a
-                 number before further extractions continue, it does not fail a build on a
-                 threshold. pluginManagement-only, exactly like every other plugin in this block:
-                 the aggregator has no sources and never runs it, and — unlike every other plugin
-                 here — the modules outside this build do NOT bare-activate this one, so those
-                 modules never run jacoco either. That omission (not a flag, not a profile) is the
-                 entire open/paid scoping mechanism, satisfied structurally. Coverage tooling for
-                 those modules is a separate concern, where their own integration-test
-                 harness actually gets built. -->
+            <!-- Coverage baseline. NO GATE — this establishes a number before further
+                 extractions continue, it does not fail a build on a threshold.
+                 pluginManagement-only, exactly like every other plugin in this block: the
+                 aggregator has no sources and never runs it. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -427,49 +381,6 @@
                  needs no compilation, and at `verify` it only reported after the full test suite
                  had run — paying ~3 minutes to learn about a misplaced brace. At `validate` it
                  fails in ~2s, before compile. Fix with `task backend:format`. -->
-            <!-- Dependency-direction check. Declared on the AGGREGATOR
-                 so EVERY module inherits it: an open module that declares a dependency on anything
-                 outside the open tree fails `mvn validate` before a line is compiled, which is what
-                 makes "the open tree contains no paid code" a mechanical property rather than a
-                 review convention. The module outside this build disables this execution for its own
-                 subtree, because paid->open and paid->paid are both allowed; only open->paid is not.
-
-                 Transitive on purpose: an open module must not reach paid code through a sibling
-                 either. Maven is the whole enforcement for Java — a class cannot be imported
-                 without the dependency that carries it. `scripts/check-open-boundary.sh` covers
-                 what Maven cannot see (source text, the frontend, Docker build inputs). -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-enforcer-plugin</artifactId>
-                <version>${maven-enforcer-plugin.version}</version>
-                <executions>
-                    <execution>
-                        <id>enforce-open-to-paid-direction</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>enforce</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <bannedDependencies>
-                                    <excludes>
-                                        <exclude>ai.tessary.paid:*</exclude>
-                                    </excludes>
-                                    <searchTransitive>true</searchTransitive>
-                                    <message>
-                                        This is an OPEN module and it must not depend on the paid
-                                        overlay (ai.tessary.paid:*). The open tree has to build with
-                                        tessary-paid/ deleted. Invert the dependency behind an SPI
-                                        interface in the open module and let the paid module
-                                        implement it, or move the calling code into the overlay.
-                                    </message>
-                                </bannedDependencies>
-                            </rules>
-                            <fail>true</fail>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
@@ -493,33 +404,4 @@
             </plugin>
         </plugins>
     </build>
-
-    <!--
-      An optional module joins THIS reactor when it is present on disk: one
-      repo now, two at cutover. File activation rather than a hand-thrown flag, because the
-      property being modelled is literally "does that module exist" — after the cutover the public
-      repo simply will not have it, and this pom then builds this edition with no edit.
-
-      So:
-        mvn -f backend/pom.xml verify              open + paid, one reactor  (task backend:check)
-        mvn -f backend/pom.xml -P '!paid' verify   this build only           (task backend:check:open)
-
-      The module path escapes this directory because that module is a top-level folder, which is
-      what makes the public export a folder filter rather than a per-file sieve. Maven builds
-      out-of-tree modules fine; `scripts/check-module-hygiene.sh` knows to exclude them from the
-      Docker module lists, since the open image carries no paid code.
-    -->
-    <profiles>
-        <profile>
-            <id>paid</id>
-            <activation>
-                <file>
-                    <exists>${project.basedir}/../tessary-paid/pom.xml</exists>
-                </file>
-            </activation>
-            <modules>
-                <module>../tessary-paid</module>
-            </modules>
-        </profile>
-    </profiles>
 </project>

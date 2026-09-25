@@ -3,13 +3,11 @@ package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.debug.ClassifierDebugContributor;
 import ai.tessary.classifier.debug.ClassifierDebugService;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
@@ -17,12 +15,10 @@ import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
-import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorService;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
-import ai.tessary.storage.AnnotationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,15 +34,14 @@ import org.springframework.context.annotation.Import;
  * empty list, a null block, a 404) by handing empty collections to the real constructors. It
  * cannot prove the step before that: whether Spring hands those constructors an empty collection
  * at all. The ports with a single implementation are injected as plain required {@code List<T>}
- * parameters, so removing that implementation produces no compile error, no import to sever and
- * nothing for {@code check-open-boundary.sh} to grep, while Spring treats a required collection
- * with no candidates as an unsatisfied dependency and refuses to start: a boot failure with a
- * green build, found only when a container starts. This test is what catches that quietly.
+ * parameters, so removing that implementation produces no compile error and no import to sever,
+ * while Spring treats a required collection with no candidates as an unsatisfied dependency and
+ * refuses to start: a boot failure with a green build, found only when a container starts. This
+ * test is what catches that quietly.
  *
  * <p>So this file asserts the thing no other file can: a context holding the real
  * {@link FindingService}, {@link BehaviorTriageSource} and {@link ClassifierDebugService}, with
- * every collaborator mocked and no {@link CauseResolver} or {@link ClassifierDebugContributor}
- * bean at all, comes up, and the ports resolve empty.
+ * every collaborator mocked, comes up.
  *
  * <p>No Spring Boot application, no database, no Docker: {@link ApplicationContextRunner} is a bean
  * factory, and every collaborator below is a Mockito mock that is never called.
@@ -124,16 +119,6 @@ class AbsentAdapterContextTest {
         }
 
         @Bean
-        AnnotationRepository annotations() {
-            return mock(AnnotationRepository.class);
-        }
-
-        @Bean
-        BehaviorSubstrateRepository substrate() {
-            return mock(BehaviorSubstrateRepository.class);
-        }
-
-        @Bean
         ClassifierJobRepository classifierJobs() {
             return mock(ClassifierJobRepository.class);
         }
@@ -170,7 +155,7 @@ class AbsentAdapterContextTest {
     }
 
     @Test
-    @DisplayName("with no CauseResolver or debug contributor on the classpath, the context starts")
+    @DisplayName("with no drift adapter on the classpath, the context starts")
     void the_open_edition_context_comes_up_with_no_drift_adapters() {
         new ApplicationContextRunner()
                 .withUserConfiguration(OpenEditionWiring.class)
@@ -178,11 +163,6 @@ class AbsentAdapterContextTest {
                     assertNull(
                             ctx.getStartupFailure(),
                             "an edition shipping no drift adapter must WIRE, not merely degrade once wired");
-                    // The ports really are empty: the context could otherwise be green because
-                    // something else quietly registered an adapter.
-                    assertTrue(ctx.getBeansOfType(CauseResolver.class).isEmpty());
-                    assertTrue(
-                            ctx.getBeansOfType(ClassifierDebugContributor.class).isEmpty());
                     // The shared table's own adapter is never absent, which is why that port is
                     // still a plain List<TriageSource> and is not part of this claim.
                     assertEquals(1, ctx.getBeansOfType(TriageSource.class).size());

@@ -39,14 +39,6 @@ A flagged message is not a finding on its own. Each call site learns its normal 
 
 A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md). [Catch answers your documents don't support](/classifiers/groundedness) covers turning it on, what it sends, what it costs, and reading the case.
 
-### What is not available in the open edition
-
-Two classifiers exist in the product and cannot run here:
-
-- `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
-
-The capability API refuses an override for either rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear.
-
 ## Fitting a baseline, and why a new project waits
 
 None of the drift classifiers know what "good" looks like. There is no shipped threshold for a fast call site or a cheap one, because those numbers are properties of your agent and not of the product. Each of them compares a population against that population's own recent past instead, which means each has to observe the population first.

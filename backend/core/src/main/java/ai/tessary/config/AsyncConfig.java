@@ -17,10 +17,6 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * virtual threads are cheap, but the bounds are deliberate backpressure against Bedrock/Anthropic
  * account RPM/TPM, concurrent E2B microVMs, and the bounded HikariCP pool (production profile:
  * {@code maximum-pool-size: 10}).
- *
- * <p>Paced-provider (OpenRouter/Moonshot) RPM/TPM limiting is owned entirely by {@code LlmPacer}'s
- * own synchronized sliding window: it is correct under any number of concurrent callers, so no
- * executor here needs to single-thread to protect it.
  */
 @Configuration
 @EnableAsync
@@ -46,42 +42,20 @@ public class AsyncConfig {
     }
 
     /**
-     * Pool for the Slack surface's outbound work: posting a digest, brief, or case opening to a
-     * Slack workspace channel. Kept separate from every other pool so a Slack workspace that has
-     * gone slow never steals the classifier sweep's or an agentic lane's slot. Each task blocks on
-     * HTTP, so it runs on a virtual thread; the concurrency limit (2) is deliberate backpressure
-     * against Slack's own rate limits and the bounded HikariCP pool.
-     *
-     * <p>This bean has no consumer directly in this tree; it is resolved by string,
-     * {@code @Async("slackTaskExecutor")}, from code elsewhere, so the reference is invisible to
-     * the compiler and to a dead-code sweep. Removing it would leave that caller running on
-     * Spring's default executor, unbounded, against a rate-limited API. The name is the contract:
-     * do not rename or delete it without changing that annotation in the same commit.
-     */
-    @Bean(name = "slackTaskExecutor")
-    public SimpleAsyncTaskExecutor slackTaskExecutor() {
-        SimpleAsyncTaskExecutor ex = new SimpleAsyncTaskExecutor("slack-");
-        ex.setVirtualThreads(true);
-        ex.setConcurrencyLimit(2); // bound against the rate-limited model + Slack Web API and the JDBC pool
-        ex.setTaskDecorator(new MdcTaskDecorator("slack"));
-        return ex;
-    }
-
-    /**
      * Pool for the async signal-detection sweep. Separate from every other pool so a
      * substrate sweep never steals an agentic lane's slot. Built-in detectors are mostly
      * structural/heuristic (no LLM call, DB-IO-bound); the encoder-tier detectors, however,
-     * issue a scoring HTTP call per observation on the sweep against the standalone
-     * classify-service {@code /classify}, so a sweep is network-IO-bound against that service too.
+     * issue a scoring HTTP call per observation on the sweep against the groundedness model
+     * server's {@code /classify}, so a sweep is network-IO-bound against that server too.
      * The concurrency limit (2) bounds concurrent sweeps against the bounded HikariCP pool and the
-     * classify-service call while the {@code FOR UPDATE SKIP LOCKED} job queue spreads the rest
+     * encoder call while the {@code FOR UPDATE SKIP LOCKED} job queue spreads the rest
      * across instances. Runs on virtual threads.
      */
     @Bean(name = "signalTaskExecutor")
     public SimpleAsyncTaskExecutor signalTaskExecutor() {
         SimpleAsyncTaskExecutor ex = new SimpleAsyncTaskExecutor("signal-");
         ex.setVirtualThreads(true);
-        // mixed IO: DB-IO-bound built-ins + classify-service-IO-bound encoder tier; SKIP-LOCKED spreads the rest
+        // mixed IO: DB-IO-bound built-ins + network-IO-bound encoder tier; SKIP-LOCKED spreads the rest
         ex.setConcurrencyLimit(2);
         ex.setTaskDecorator(new MdcTaskDecorator("signal"));
         return ex;
@@ -108,7 +82,7 @@ public class AsyncConfig {
      * Pool for the behaviour-drift triage worker ({@code BehaviorTriageWorker}): each task
      * is one agent session in an E2B microVM over a repo clone, budgeted up to 20 minutes. It
      * gets its own pool for the same reason {@link #rcaTaskExecutor} does — sharing
-     * {@code signalTaskExecutor} (limit 2, sized for classify-service and JDBC work) would let two
+     * {@code signalTaskExecutor} (limit 2, sized for encoder and JDBC work) would let two
      * triages occupy it outright and stall the classifier sweep for the whole agent timeout.
      * The limit (2) bounds concurrent microVMs; triage is per-CAUSE, not per-trace, and has no
      * latency SLA — nothing downstream waits on the verdict.

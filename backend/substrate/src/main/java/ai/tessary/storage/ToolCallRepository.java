@@ -5,7 +5,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -80,26 +79,12 @@ public class ToolCallRepository {
         return source;
     }
 
-    /**
-     * One JDBC batch of {@link #insert}s.
-     */
+    /** Batch-inserts rows; ON CONFLICT DO NOTHING makes replays no-ops. */
     public void insertAll(List<ToolCallRow> rows) {
         if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
                 INSERT_SQL, rows.stream().map(ToolCallRepository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
-    }
-
-    public void insert(ToolCallRow row) {
-        jdbc.sql(INSERT_SQL).paramSource(params(row)).update();
-    }
-
-    public Optional<ToolCallRow> findById(String projectId, String id) {
-        return jdbc.sql("SELECT " + COLS + " FROM tool_call WHERE project_id = :pid AND id = :id")
-                .param("pid", projectId)
-                .param("id", id)
-                .query((rs, n) -> map(rs))
-                .optional();
     }
 
     /** One tool call together with the producer span id it hangs off — the detail read's grouping key. */

@@ -24,7 +24,6 @@ import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
@@ -259,7 +258,7 @@ public class SpanBatchWriter {
         // each block on the other's uncommitted insert until it commits. Outside a transaction that was a
         // momentary wait; inside one, holding locks either side of it, it is a deadlock.
         //
-        // Safe ahead of the timer update below because getOrCreate is ON CONFLICT DO NOTHING, which takes
+        // Safe ahead of the timer update below because getOrCreateAll is ON CONFLICT DO NOTHING, which takes
         // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
         // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
@@ -627,23 +626,11 @@ public class SpanBatchWriter {
      * payload is rewritten at write time and never on read. A carrier whose bytes are not in the column
      * stays in the bag.
      */
-    /**
-     * What redaction removed from this entry, for {@code span_payload.redactions}. A failure to serialize is
-     * logged and dropped rather than failing the write: the content is already redacted, so losing the stamp
-     * costs the leak detector a name, never exposes a credential.
-     */
+    /** What redaction removed from this entry, for {@code span_payload.redactions}. */
     private @Nullable String redactionsJson(RawEntry raw) {
         List<RedactionStamp> stamps = raw.redactions();
         if (stamps == null || stamps.isEmpty()) return null;
-        try {
-            return mapper.writeValueAsString(stamps);
-        } catch (JsonProcessingException e) {
-            StructuredLog.warn(log, Markers.OPS, "ingest.v2.redactions-dropped")
-                    .message("dropped %d redaction stamp(s) that would not serialize", stamps.size())
-                    .field("stamps", stamps.size())
-                    .log();
-            return null;
-        }
+        return mapper.valueToTree(stamps).toString();
     }
 
     private @Nullable String attributesJson(RawEntry raw) {
@@ -654,14 +641,7 @@ public class SpanBatchWriter {
                 .removeIf(e -> (PROMOTED_INPUT_KEYS.contains(e.getKey()) && promotedVerbatim(e.getValue(), raw.input()))
                         || (PROMOTED_OUTPUT_KEYS.contains(e.getKey()) && promotedVerbatim(e.getValue(), raw.output())));
         if (kept.isEmpty()) return null;
-        try {
-            return mapper.writeValueAsString(kept);
-        } catch (JsonProcessingException e) {
-            // The attribute bag is auxiliary; a span whose attributes will not serialize is still worth
-            // every typed column it carries.
-            log.debug("v2 span attributes dropped: not JSON-serializable", e);
-            return null;
-        }
+        return mapper.valueToTree(kept).toString();
     }
 
     /**

@@ -184,8 +184,9 @@ class ToolErrorClassifierIntegrationTest {
                 0,
                 byRole.getOrDefault(FindingEvidenceRow.Role.BASELINE, 0L),
                 "a CUSUM compares against a fitted rate, not a window of rows, so there is no baseline to write");
-        assertTrue(
-                evidence.exemplarTraceId(pid, finding.id()).isEmpty(),
+        assertEquals(
+                0,
+                byRole.getOrDefault(FindingEvidenceRow.Role.EXEMPLAR, 0L),
                 "naming one trace as the way in biases the run that reads it");
         assertTrue(
                 finding.payloadJson() != null && finding.payloadJson().contains("failing_traces"),

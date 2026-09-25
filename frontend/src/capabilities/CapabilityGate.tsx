@@ -10,9 +10,7 @@ import { useCapabilities } from "./useCapabilities";
  * renders a loading state rather than deciding — otherwise a hard navigation or reload to a gated route
  * reads `isEnabled` as false before the org's capabilities have arrived and redirects away before it ever
  * gets a real answer. Once the read settles: when the org has `capability`, renders `children`; when it
- * does not —
- *   - with a `fallback`, renders the fallback (pass `fallback={null}` to drop a nav link);
- *   - otherwise redirects to Triage, which is never gated (so no redirect loop).
+ * does not, redirects to Triage, which is never gated (so no redirect loop).
  *
  * There is ONE gating axis now: this one. `CapabilityService.require` on each gated endpoint is the
  * authority; this only keeps a user from reaching a surface their org doesn't have.
@@ -20,11 +18,9 @@ import { useCapabilities } from "./useCapabilities";
 export function CapabilityGate({
   capability,
   children,
-  fallback,
 }: {
   capability: CapabilityWire;
   children: ReactNode;
-  fallback?: ReactNode;
 }) {
   const { isEnabled, isLoading } = useCapabilities();
   const { orgSlug, projectSlug } = useTenant();
@@ -36,6 +32,5 @@ export function CapabilityGate({
     );
   }
   if (isEnabled(capability)) return <>{children}</>;
-  if (fallback !== undefined) return <>{fallback}</>;
   return <Navigate to={`/orgs/${orgSlug}/projects/${projectSlug}/triage`} replace />;
 }

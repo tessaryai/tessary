@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -204,14 +205,11 @@ public class FrustrationRateRepository {
     /**
      * Scored and frustrated conversations per call site per hour since {@code from}, oldest first, as the tallies
      * {@code ToolErrorTrend} replays: {@code calls} is conversations, {@code failures} is frustrated ones. A
-     * conversation with no call site on its first scored turn is keyed {@link #UNASSIGNED}. Empty while no
-     * frustration detection table is registered, since no conversation can then be a failure or a trial anyone
-     * acts on.
+     * conversation with no call site on its first scored turn is keyed {@link #UNASSIGNED}.
      */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, String scorerVersion, Instant from) {
-        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
-        if (table == null) return List.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         return jdbc.sql(HOURLY_TALLIES.replace("{detections}", table))
                 .param("pid", projectId)
                 .param("cid", classifierId)
@@ -227,7 +225,7 @@ public class FrustrationRateRepository {
 
     /**
      * Every frustrated session of one call site's stream in {@code [onset, until)}, newest first: the spell's
-     * witnesses. Empty while no frustration detection table is registered.
+     * witnesses.
      */
     public List<FrustratedConversation> frustratedSince(
             String projectId,
@@ -237,8 +235,7 @@ public class FrustrationRateRepository {
             Instant windowFrom,
             Instant onset,
             Instant until) {
-        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
-        if (table == null) return List.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         return spellSessions(FRUSTRATED_SINCE.replace("{detections}", table), projectId, classifierId, scorerVersion)
                 .param("callSite", callSiteId)
                 .param("windowFrom", Timestamp.from(windowFrom))
@@ -294,8 +291,8 @@ public class FrustrationRateRepository {
      */
     public WitnessPage witnessPage(
             String projectId, String classifierId, String findingId, @Nullable CauseRef cause, int limit, int offset) {
-        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
-        if (table == null || limit <= 0) return new WitnessPage(List.of(), 0);
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
+        if (limit <= 0) return new WitnessPage(List.of(), 0);
         JdbcClient.StatementSpec spec = jdbc.sql(WITNESS_PAGE
                         .replace("{detections}", table)
                         .replace("{filter}", cause == null ? "" : CAUSE_FILTER))
@@ -328,9 +325,9 @@ public class FrustrationRateRepository {
      * it.
      */
     public Map<String, FlaggedTurn> flaggedTurns(String projectId, String classifierId, List<String> traceIds) {
-        String table = detections.tableFor(BuiltInDetector.Kind.FRUSTRATION);
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         Map<String, FlaggedTurn> out = new HashMap<>();
-        if (table == null || traceIds.isEmpty()) return out;
+        if (traceIds.isEmpty()) return out;
         jdbc.sql("SELECT d.subject_trace_id, d.subject_session_id, d.evidence ->> 'score' AS score,"
                         + " d.evidence ->> 'call_site_id' AS call_site_id, d.subject_started_at, d.cleared_at,"
                         + " (SELECT a.request -> 'state' ->> 'current_user_message' FROM frustration_assessment a"
@@ -380,7 +377,7 @@ public class FrustrationRateRepository {
      */
     public Map<String, ConversationContext> conversationContext(String projectId, List<String> traceIds, int before) {
         Map<String, ConversationContext> out = new HashMap<>();
-        if (traceIds.isEmpty() || before <= 0) return out;
+        if (traceIds.isEmpty()) return out;
         Map<String, String> sessions = new HashMap<>();
         Map<String, List<String>> prior = new HashMap<>();
         jdbc.sql("""

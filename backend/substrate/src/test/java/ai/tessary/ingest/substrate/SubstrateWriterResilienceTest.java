@@ -41,7 +41,6 @@ class SubstrateWriterResilienceTest {
     private static RawEntry entry(String id) {
         return new RawEntry(
                 id,
-                null,
                 "span",
                 "in",
                 "out",
@@ -50,7 +49,6 @@ class SubstrateWriterResilienceTest {
                 null,
                 "trace-1",
                 Instant.now().toString(),
-                null,
                 null,
                 null,
                 null,
@@ -146,7 +144,6 @@ class SubstrateWriterResilienceTest {
     private static RawEntry sized(String id, int payloadChars) {
         return new RawEntry(
                 id,
-                null,
                 "span",
                 "x".repeat(payloadChars),
                 null,
@@ -155,7 +152,6 @@ class SubstrateWriterResilienceTest {
                 null,
                 "trace-1",
                 Instant.now().toString(),
-                null,
                 null,
                 null,
                 null,
@@ -185,7 +181,8 @@ class SubstrateWriterResilienceTest {
             // write rather than racing it: the reserved bytes are held until ack, so nothing above
             // this line depends on the timing.
             assertTrue(entered.await(10, TimeUnit.SECONDS), "the drainer must have claimed the first batch");
-            assertTrue(writer.queueDepth() <= 1, "one batch in flight, one queued: the count was never the bound");
+            assertTrue(
+                    writer.spoolStats().depth() <= 1, "one batch in flight, one queued: the count was never the bound");
         } finally {
             release.countDown();
         }
@@ -211,7 +208,7 @@ class SubstrateWriterResilienceTest {
         assertFalse(writer.enqueue("p1", List.of(sized("huge", 200_000))), "an oversized batch must be refused");
         assertEquals(1L, writer.oversizeBatches(), "counted apart from a shed: this one never clears on its own");
         assertEquals(0L, writer.shedBatches(), "an oversize refusal is not a shed");
-        assertEquals(0L, writer.queueBytes(), "the refusal must not have reserved anything");
+        assertEquals(0L, writer.spoolStats().bytes(), "the refusal must not have reserved anything");
 
         assertTrue(writer.enqueue("p1", List.of(sized("ok", 100))), "the queue must still accept normal work");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the queue was wedged by the refused batch");
@@ -241,7 +238,10 @@ class SubstrateWriterResilienceTest {
         }
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the queue must drain");
 
-        assertEquals(0L, writer.queueBytes(), "written, failed and dropped batches must all release their reservation");
+        assertEquals(
+                0L,
+                writer.spoolStats().bytes(),
+                "written, failed and dropped batches must all release their reservation");
     }
 
     /**

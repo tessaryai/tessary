@@ -19,6 +19,7 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -433,7 +434,7 @@ public class ClassifierArming {
             @Nullable String callSiteId,
             @Nullable String facet,
             @Nullable String confidence) {
-        Map<String, Object> body = new LinkedHashMap<>();
+        ObjectNode body = mapper.createObjectNode();
         body.put("cause_kind", FindingRow.Cause.ARMED_WINDOW);
         body.put("native_cause_key", facet == null ? classifierKey : facet);
         body.put("basis", config.basis());
@@ -447,10 +448,6 @@ public class ClassifierArming {
             if (callSiteId != null) body.put("call_site_id", callSiteId);
         }
         if (confidence != null) body.put(FindingRow.Confidence.PAYLOAD_KEY, confidence);
-        try {
-            return mapper.writeValueAsString(body);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            return "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
-        }
+        return body.toString();
     }
 }

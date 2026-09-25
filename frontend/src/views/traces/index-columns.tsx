@@ -47,8 +47,7 @@ export type ColumnKey =
   | "callSite"
   | "endedAt"
   | "traceId"
-  | "session"
-  | "sessionExpand";
+  | "session";
 
 export type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean; flex?: boolean; width: number };
 

@@ -91,8 +91,7 @@ class KafkaSpoolIntegrationTest {
 
     private static RawEntry span(String traceId, String id) {
         String now = Instant.now().toString();
-        return new RawEntry(
-                id, null, "span " + id, "in", "out", null, null, null, traceId, now, "llm", now, null, null, null);
+        return new RawEntry(id, "span " + id, "in", "out", null, null, null, traceId, now, "llm", now, null, null);
     }
 
     private static List<RawEntry> batch(String traceId, int spans) {

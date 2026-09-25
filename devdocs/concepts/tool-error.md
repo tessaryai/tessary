@@ -117,14 +117,13 @@ Rules 2–4 of §1 have no message. They signature as their own source: `error.t
 
 ### 3.1 The key
 
-**The bucket is the tool**, keyed by `ActionSymbol.of(kind, name, false)` — the same alphabet
+**The bucket is the tool**, keyed by `ActionSymbol.of(kind, name)` — the same alphabet
 `tool_duration` buckets on, so a tool-error finding and a tool-duration finding name the same thing
 and a reader can hold both at once. `environment_id` is in the scope for the reason metric drift puts
 it there: dev fails differently, permanently.
 
-`isError` is passed **false** into `ActionSymbol.of` deliberately, exactly as `MetricSource.toolMetrics`
-mints it. A tool's failures must stay in the same population as its successes — that population *is*
-the denominator. Keying failures into their own symbol would make the rate uncomputable.
+A tool's failures stay in the same population as its successes — that population *is* the
+denominator. Keying failures into their own symbol would make the rate uncomputable.
 
 ### 3.2 Why the signature is not in the key
 
@@ -518,10 +517,9 @@ per-call question is what `effect_size` answers. `statistic` is uncapped and kee
 spell runs, which is what lets criticality separate a catastrophic outage from a mild drift — the old
 `3h` ceiling pinned both to the same number within a day.
 
-`patterns` is ranked by `cur − ref` and **capped**; the cap is stated in the blob when it bites, so a
-reader never mistakes a truncated list for the whole story. Counts are carried for both windows
-because the interesting pattern is the one that *changed*, not the one that is largest — a tool whose
-timeouts held steady while its 5xx went up has one cause, and the ranking has to say which.
+`patterns` is ranked by current count (every pattern carries `ref = 0`: there is no reference side)
+and **capped**; the cap is stated in the blob when it bites, so a reader never mistakes a truncated
+list for the whole story.
 
 `call_sites` is the entry points whose traffic this window's failures came in through. Layer-2 needs
 it for the same reason metric drift's `workload` block exists: the triage agent reads a repo, and the
@@ -533,8 +531,8 @@ repo cannot say that a caller started hitting the tool differently this week.
 
 ### 8.1 Catalog
 
-One `ClassifierModelModule`, key `tool_error`, `Capability.TOOL_ERROR` (already declared, defaulted
-on, waiting for this), `detectorFactory = null`, `Lifecycle.EXPERIMENTAL`, and **seeded disabled** for
+One `ClassifierModelModule`, key `tool_error`, `Capability.TOOL_ERROR` (already declared,
+waiting for this), `detectorFactory = null`, `Lifecycle.EXPERIMENTAL`, and **seeded disabled** for
 the reason both metric classifiers are: §9.
 
 **`Grain.WINDOW`, dispatched to `ToolErrorSweep`** — the scored unit is a stretch of one tool's
@@ -616,9 +614,6 @@ them removes it.
 - Findings stream unbudgeted, but **Triage does not see them.** A case opens only after Layer-2 rules a
   deviation or a human presses *Real deviation* (§8.2), so the screen people are paged from is still
   gated on a judgement rather than on this threshold.
-- The magnitude gate (§4.4) is independent of the CUSUM's calibration. Even a badly-set
-  `decision_interval` cannot produce a finding about a move smaller than `min_effect_size`, so the
-  failure mode is *too many findings about real moves*, not findings about noise.
 - `decision_interval` is live-tunable per project, because there is no stored state to invalidate
   (§5). A bad number is a console edit away from a better one, not a deploy.
 

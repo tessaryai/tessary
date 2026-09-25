@@ -73,19 +73,17 @@ public final class FrustrationTurnBuilder {
         this.caps = caps;
     }
 
-    /** The state to send for {@code scored}, or empty when the turn is not eligible. */
-    public Optional<TurnState> build(SubstrateObservation scored) {
-        return buildTurn(scored).map(EligibleTurn::state);
-    }
-
-    /** {@link #build}, with the scored turn's position among its conversation's turns. */
+    /**
+     * The state to send for {@code scored}, with the scored turn's position among its conversation's
+     * turns, or empty when the turn is not eligible.
+     */
     public Optional<EligibleTurn> buildTurn(SubstrateObservation scored) {
         return assembler
                 .assembleStructured(scored)
                 .flatMap(thread -> format(thread, caps).map(state -> new EligibleTurn(state, thread.turn())));
     }
 
-    /** {@link #build}'s pure half: eligibility, pastes, caps and budget over an assembled thread. */
+    /** {@link #buildTurn}'s pure half: eligibility, pastes, caps and budget over an assembled thread. */
     static Optional<TurnState> format(StructuredThread thread, Caps caps) {
         List<StructuredThread.Message> earlier = thread.earlier();
         if (!thread.current().hasText() || earlier.size() < PRIOR_MESSAGES) {

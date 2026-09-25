@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -14,9 +13,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.Capability;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
 import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -28,8 +24,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,35 +33,22 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
- * The capability gate on the MCP surface: which tools an org is <b>offered</b>, and what a call to a tool it
- * is not offered does.
- *
- * <p>This surface's capability gate had no test. Every other MCP test stubs every
- * capability on — deliberately, and each says so ("these tests exercise the tools themselves, not the
- * gate") — so nothing anywhere asserted that a partner's {@code tools/list} is the short list. The registry
- * makes the argument for why that matters in its own javadoc: offering a tool to an org that cannot use it is
- * worse than a 403, because the model plans around a tool that cannot work and burns a turn discovering it.
- * An argument with no test is a comment.
- *
- * <p>Both halves are asserted, because they are separate code paths ({@code availableFor} for the catalogue,
- * {@code availableTool} for the call) and a client can hold a stale catalogue:
+ * What the MCP surface offers: which tools {@code tools/list} names, and what a call to a tool it does not name
+ * does.
  *
  * <ul>
- *   <li>{@code tools/list} omits every tool whose capability the org lacks, and keeps every open one.</li>
- *   <li>{@code tools/call} on a withheld tool reads as <b>unknown</b>, not forbidden — the deliberate
- *       posture, since there is nothing a partner can do about a capability they do not hold and naming it
- *       only tells them what is being withheld. The handler must not run.</li>
- *   <li>{@code initialize} instructions are built from the same offer, so the prose cannot advertise a tool
- *       the catalogue withholds.</li>
+ *   <li>{@code tools/list} names exactly the open set, 19 tools.</li>
+ *   <li>{@code tools/call} on a removed tool reads as <b>unknown</b>, and the handler never runs.</li>
+ *   <li>{@code initialize} instructions are built from the same catalogue, so the prose cannot advertise a
+ *       tool that is gone.</li>
  * </ul>
  *
- * <p><b>The surface is read-only and entirely ungated.</b> {@code Capability.RCA} used to
- * gate five tools here; it now gates none, because a case carries its own RCA report inline and an org
- * without RCA has no report rows to inline — the gate moved from the tool to the data. {@code GRADERS}
- * gated the last two, {@code list_graders} and {@code get_grader}; grading was deleted from the platform,
- * taking the capability with it. {@link #theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix} is the invariant that keeps
- * the surface read-only: it walks the full catalogue rather than a list maintained here, so a future write
- * tool fails this test at registration instead of shipping.
+ * <p><b>The surface is read-only and entirely ungated.</b> {@code Capability.RCA} used to gate five tools
+ * here; a case now carries its own RCA report inline, so the gate moved from the tool to the data. Grading
+ * was deleted from the platform, taking {@code list_graders} and {@code get_grader} with it.
+ * {@link #theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix} is the invariant that keeps the surface read-only:
+ * it walks the full catalogue rather than a list maintained here, so a future write tool fails this test at
+ * registration instead of shipping.
  */
 class McpCapabilityGateTest {
 
@@ -137,50 +118,22 @@ class McpCapabilityGateTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void launchPartnerIsOfferedOnlyTheOpenTools() throws Exception {
-        // The launch configuration: no capability at all. No tool on this surface is gated,
-        // so the open set IS the catalogue — which the next test asserts from the other direction.
-        Fixture f = fixture(EnumSet.noneOf(Capability.class));
+    void everyOrgIsOfferedExactlyTheOpenTools() throws Exception {
+        Set<String> offered = fixture().listToolNames();
 
-        Set<String> offered = f.listToolNames();
-
-        assertEquals(OPEN_TOOLS, offered, "a partner holding no capability should be offered exactly the open set");
-    }
-
-    /**
-     * The gate that no longer exists, asserted as an equality rather than an absence: holding RCA and holding
-     * nothing produce the same catalogue. Written this way because the old failure would have been silent —
-     * five tools reappearing for RCA orgs only, on a capability every launch partner has off, so no partner's
-     * `tools/list` would have shown it.
-     */
-    @Test
-    void rcaCapabilityChangesNothingAboutWhatIsOffered() throws Exception {
-        Set<String> withoutRca = fixture(EnumSet.noneOf(Capability.class)).listToolNames();
-        Set<String> withRca = fixture(EnumSet.of(Capability.RCA)).listToolNames();
-
-        assertEquals(withoutRca, withRca, "RCA gates no MCP tool — a report reaches MCP inlined on its case");
-    }
-
-    @Test
-    void everyToolIsOfferedWhenEveryCapabilityIsHeld() throws Exception {
-        Fixture f = fixture(EnumSet.allOf(Capability.class));
-
-        Set<String> offered = f.listToolNames();
-
-        assertEquals(OPEN_TOOLS, offered, "holding everything offers exactly the open set — no tool is gated");
+        assertEquals(OPEN_TOOLS, offered, "every org should be offered exactly the open set");
         assertEquals(19, offered.size(), "the surface is 19 tools, all open");
     }
 
     /**
      * The invariant behind the sentence {@code initialize} tells every client on connect: <i>every tool is
-     * read-only</i>. Walks the catalogue an org holding everything is offered — so it cannot be satisfied by a
-     * tool hiding behind a capability — and fails on a write-shaped name or on any of the six removed tools
+     * read-only</i>. Walks the whole catalogue, and fails on a write-shaped name or on any of the removed tools
      * coming back. A promise made to every client on connect should not rest on whoever reviews the next
      * {@code add(...)} call noticing.
      */
     @Test
     void theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix() throws Exception {
-        Set<String> everything = fixture(EnumSet.allOf(Capability.class)).listToolNames();
+        Set<String> everything = fixture().listToolNames();
 
         for (String name : everything) {
             for (String prefix : WRITE_PREFIXES) {
@@ -196,24 +149,20 @@ class McpCapabilityGateTest {
     }
 
     @Test
-    void callingAWithheldToolReadsAsUnknownAndNeverReachesTheHandler() throws Exception {
-        // A client holding a stale tool list, or one guessing: the gate has to hold at the call too, since
-        // tools/list is only advice.
-        Fixture f = fixture(EnumSet.noneOf(Capability.class));
+    void callingARemovedToolReadsAsUnknownAndNeverReachesTheHandler() throws Exception {
+        // A client holding a stale tool list, or one guessing: tools/list is only advice.
+        Fixture f = fixture();
 
         Map<String, Object> result = f.callTool("get_grader", "{\"grader_id\":\"g-1\"}");
 
         assertEquals(Boolean.TRUE, result.get("isError"));
         String text = errorText(result);
-        assertTrue(text.contains("unknown tool"), "a withheld tool must read as unknown, got: " + text);
-        assertFalse(
-                text.toLowerCase(java.util.Locale.ROOT).contains("capab"),
-                "the error must not name the capability being withheld, got: " + text);
+        assertTrue(text.contains("unknown tool"), "a removed tool must read as unknown, got: " + text);
     }
 
     @Test
-    void anOpenToolStillWorksWithNoCapabilities() throws Exception {
-        Fixture f = fixture(EnumSet.noneOf(Capability.class));
+    void anOpenToolWorks() throws Exception {
+        Fixture f = fixture();
 
         Map<String, Object> result = f.callTool("get_project", "{}");
 
@@ -223,8 +172,8 @@ class McpCapabilityGateTest {
     }
 
     @Test
-    void instructionsNeverAdvertiseAWithheldTool() throws Exception {
-        Fixture f = fixture(EnumSet.noneOf(Capability.class));
+    void instructionsNeverAdvertiseARemovedTool() throws Exception {
+        Fixture f = fixture();
 
         JsonRpc.Response r = f.dispatcher.dispatch(f.req(1, "initialize", mapper.readTree("{}")), f.ctx());
         assertNotNull(r);
@@ -244,12 +193,12 @@ class McpCapabilityGateTest {
 
     /**
      * The read-only sentence is unconditional, unlike every other sentence in the instructions, which are
-     * built from the offer. It states a property of the surface rather than of a tool, so a partner holding
-     * nothing must still be told it — otherwise the cheapest way to learn there is no write is to plan one.
+     * built from the catalogue. It states a property of the surface rather than of a tool — otherwise the
+     * cheapest way to learn there is no write is to plan one.
      */
     @Test
-    void instructionsStateTheSurfaceIsReadOnlyEvenWithNoCapabilities() throws Exception {
-        Fixture f = fixture(EnumSet.noneOf(Capability.class));
+    void instructionsStateTheSurfaceIsReadOnly() throws Exception {
+        Fixture f = fixture();
 
         JsonRpc.Response r = f.dispatcher.dispatch(f.req(1, "initialize", mapper.readTree("{}")), f.ctx());
         assertNotNull(r);
@@ -299,8 +248,7 @@ class McpCapabilityGateTest {
         }
     }
 
-    /** A dispatcher whose org holds exactly {@code held} and nothing else. */
-    private Fixture fixture(Set<Capability> held) {
+    private Fixture fixture() {
         ProjectRepository projects = mock(ProjectRepository.class);
         Project project =
                 new Project(PROJECT_ID, ORG_ID, "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
@@ -308,14 +256,6 @@ class McpCapabilityGateTest {
 
         PipelineService pipeline = mock(PipelineService.class);
         when(pipeline.getPipeline(PROJECT_ID)).thenReturn(ai.tessary.model.Pipeline.empty());
-
-        Map<Capability, Boolean> resolved = new EnumMap<>(Capability.class);
-        for (Capability c : Capability.values()) resolved.put(c, held.contains(c));
-        CapabilityService capabilities = mock(CapabilityService.class);
-        when(capabilities.resolve(eq(ORG_ID))).thenReturn(new CapabilitySet(resolved));
-        for (Capability c : Capability.values()) {
-            when(capabilities.isEnabled(eq(ORG_ID), eq(c))).thenReturn(held.contains(c));
-        }
 
         var registry = new McpToolRegistry(
                 pipeline,
@@ -325,7 +265,6 @@ class McpCapabilityGateTest {
                 mock(SpanPayloadRepository.class),
                 mock(TraceV2Repository.class),
                 mock(SessionReadService.class),
-                capabilities,
                 mock(FindingService.class),
                 mock(CaseService.class));
         return new Fixture(new McpDispatcher(registry, mapper), mapper);

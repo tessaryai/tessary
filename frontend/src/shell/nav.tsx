@@ -43,8 +43,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { CapabilityWire } from "../api/types-auth";
-// This build's settings-nav extension point; empty here, see src/paid/index.ts.
-import { paid } from "@paid";
 
 export type SurfaceState = "live" | "reserved";
 
@@ -203,8 +201,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     items: [
       { id: "organization", label: "Organization", icon: Building2 },
       { id: "members", label: "Members", icon: Users },
-      // Extra sections this build can register; empty here, see src/paid/index.ts.
-      ...(paid.settingsNav.Organization ?? []),
     ],
   },
   {
@@ -252,6 +248,3 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     ],
   },
 ];
-
-/** Every settings section, flat and in rail order. */
-export const SETTINGS_SECTIONS: SettingsSection[] = SETTINGS_GROUPS.flatMap((g) => g.items);

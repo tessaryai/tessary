@@ -5,10 +5,9 @@
 **Email security@tessary.ai.** That is the channel that works today. It is private,
 maintainer-only, and not auto-forwarded anywhere.
 
-**GitHub's private vulnerability reporting is not a channel here yet.** It is a
-public-repository feature and this repository is private, so the Security tab has no
-"Report a vulnerability" button to press. It becomes available once the repository is
-public and a maintainer enables it, and at that point it is as good as the email address:
+**GitHub's private vulnerability reporting is not a channel here yet.** It only works once
+a maintainer enables it, and until then the Security tab has no "Report a vulnerability"
+button to press. Once enabled it is as good as the email address:
 a private advisory thread with maintainers that never becomes a public issue while it's in
 progress. Until you can actually see that button, it hasn't been turned on — use the email
 address instead of falling back to a public issue.
@@ -35,17 +34,17 @@ up — that is the point of naming two people rather than one, and of a monthly 
 weekly rota a company this size cannot staff. Whoever is on it triages; anything that looks
 exploitable is escalated immediately rather than sitting for the rest of the month. The same two
 own a red run of this repository's secret scan (`.github/workflows/secret-scan.yml`, which runs
-gitleaks over the checkout against `.gitleaks.toml`; it is dispatch-only, so a run is something a
-human starts, not a weekly cron): its failures go to security@tessary.ai and are the month's
-primary's to clear, on a one-business-day clock.
+gitleaks over the checkout against `.gitleaks.toml` on every pull request and on demand): its
+failures go to security@tessary.ai and are the month's primary's to clear, on a one-business-day
+clock.
 
 ## Suppressing a known advisory
 
 Automated dependency scanning (`scripts/check-dependency-audit.sh`, run on demand by a human with their
 own NVD API key — it is not a CI job, and today it is the only dependency scanning that actually
-runs: Dependabot alerts are switched off for this repository, and the CodeQL workflow is authored
-but cannot run, because code scanning needs GitHub Advanced Security on a private repository.
-Both become available when this repository goes public, and arming them is part of that cutover)
+runs: Dependabot alerts are switched off for this repository. CodeQL code scanning, which looks at
+our own code rather than dependencies, runs weekly (Mondays 04:00 UTC) through
+`.github/workflows/codeql.yml`)
 sometimes flags something that isn't worth fixing right
 away — a transitive dependency with no runtime path, a fix that doesn't exist yet, or a risk the
 team has decided to accept for a stated reason. Add an entry to

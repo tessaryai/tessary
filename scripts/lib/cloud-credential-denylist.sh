@@ -17,17 +17,14 @@
 #     profile stays off — see check-open-boot.sh's scope-boundary comment) and live in the self-host
 #     leg (check-open-boot-selfhost.sh starts sandbox-runner), where this entry is what catches an
 #     ambient key quietly reaching the launcher container.
-#   HF_TOKEN — classify-service/Dockerfile's BuildKit --secret mount for the private repo of any
-#     head marked "gated" in models.json. Deliberately unset for this check's build (see
-#     check-open-boot.sh's boot-recipe comment) — a keyless build skips gated heads, and this entry
-#     is what catches an ambient HF_TOKEN in the CI runner's own env quietly reintroducing one.
-#   AWS_BEARER_TOKEN_BEDROCK — Tessary's Bedrock bearer-token scheme; ChatModelFactory forces SigV4
-#     over it specifically because AWS SDK v2 prefers a bearer token when this is present (the
-#     "Bedrock bearer token hijacks SigV4" trap). A self-hoster's own Bedrock key would arrive as the
+#   HF_TOKEN — a Hugging Face token. Nothing the booted stack builds or runs reads it; this entry
+#     is what catches an ambient HF_TOKEN in the CI runner's own env quietly reaching a container.
+#   AWS_BEARER_TOKEN_BEDROCK — Tessary's Bedrock bearer-token scheme; AWS SDK v2 prefers a bearer
+#     token over SigV4 when this is present (the "Bedrock bearer token hijacks SigV4" trap). A self-hoster's own Bedrock key would arrive as the
 #     SDK default chain's AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, not this — so this name is denied
 #     and the bare AWS_* pair deliberately is not (see the carve-out below). Still live: this
-#     concerns ChatModelFactory's own SDK client construction (a BYO/iam_role Bedrock judge
-#     credential), unrelated to the sandbox launcher's own credential handling.
+#     concerns the backend's own Bedrock SDK client construction (a BYO/iam_role credential),
+#     unrelated to the sandbox launcher's own credential handling.
 #   NGROK_AUTHTOKEN — fully absent from the tree (zero grep hits across *.java/*.yml/*.yaml/*.sh) but
 #     kept on Stripe's should-never-appear footing rather than dropped: an operator could still
 #     export NGROK_* into the boot env by habit, and the guard costs nothing to keep.

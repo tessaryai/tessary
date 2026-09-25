@@ -18,7 +18,6 @@ import org.jspecify.annotations.Nullable;
  */
 public record RcaReportRow(
         String id,
-        String projectId,
         String jobId,
         String subjectKind,
         String subjectId,
@@ -87,12 +86,12 @@ public record RcaReportRow(
         }
     }
 
-    /** {@code engine} values — which synthesis lane produced the report. {@code detailedReport} is
-     *  only ever non-null on {@link #AGENTIC} reports (the agent's full markdown investigation). */
+    /** {@code engine} values code writes. The column also allows the older {@code synthesis}.
+     *  {@code detailedReport} is only ever non-null on {@link #AGENTIC} reports (the agent's full
+     *  markdown investigation). */
     public static final class Engine {
         private Engine() {}
 
-        public static final String SYNTHESIS = "synthesis";
         public static final String AGENTIC = "agentic";
     }
 }

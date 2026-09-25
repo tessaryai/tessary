@@ -119,8 +119,6 @@
                                         shared is an OPEN module: it must not depend on the app
                                         (`app`), which assembles the application above it. Invert the
                                         dependency via an SPI interface in shared, or move the code.
-                                        The paid overlay is banned separately, for every module, by
-                                        `enforce-open-to-paid-direction` on the aggregator.
                                     </message>
                                 </bannedDependencies>
                             </rules>

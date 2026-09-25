@@ -50,49 +50,6 @@ public record SubstrateObservation(
          *  has aged out. */
         @Nullable String redactionsJson) {
 
-    /** A span redaction removed nothing from. */
-    public SubstrateObservation(
-            String observationId,
-            String projectId,
-            String traceId,
-            @Nullable String sessionId,
-            @Nullable String projectVersionId,
-            @Nullable String callSiteId,
-            @Nullable String kind,
-            @Nullable String name,
-            @Nullable String input,
-            @Nullable String output,
-            @Nullable String toolError,
-            String createdAt) {
-        this(
-                observationId,
-                projectId,
-                traceId,
-                sessionId,
-                projectVersionId,
-                callSiteId,
-                kind,
-                name,
-                input,
-                output,
-                toolError,
-                createdAt,
-                null);
-    }
-
-    /**
-     * What a verdict, annotation or review row over this span puts in its NOT-NULL {@code session_id}:
-     * the producer session id when the trace has one, else the producer trace id.
-     *
-     * <p>The column is NOT NULL and a trace need not belong to a session (spec §2.1), so the rule is
-     * "give it the truest available value" — the trace's own id standing for a conversation of one.
-     * Naming the rule once here is what keeps every writer of that column from picking a different
-     * fallback.
-     */
-    public String subjectSessionId() {
-        return sessionId != null ? sessionId : traceId;
-    }
-
     /** The user-side text of {@link #input}, unwrapped from the gen_ai message envelope. */
     public String inputText() {
         return ContentExtractor.columnText(input, "user");

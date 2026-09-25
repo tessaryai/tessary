@@ -114,7 +114,7 @@ class AuthControllerTest {
 
     @Test
     void getLoginDegradesToRedirectRatherThan500() throws Exception {
-        // With PasswordAuthProvider active (isEnabled()=true, supportsRedirectFlow()=false), the
+        // With PasswordAuthProvider active (supportsRedirectFlow()=false), the
         // OAuth GET must degrade to the dev-shortcut redirect, not call authorizationUrl() on a
         // provider that has no OAuth dance -- verifies the AuthController guard added in step 5.
         // The bounce target is the frontend's own /login screen, not the app root -- the app root
@@ -139,7 +139,7 @@ class AuthControllerTest {
 
     @Test
     void getAuthModeReportsPasswordPosture() throws Exception {
-        // PasswordAuthProvider (this file's whole posture, per the class javadoc) is enabled but
+        // PasswordAuthProvider (this file's whole posture, per the class javadoc) is active but
         // has no OAuth dance, so /auth/mode must report redirectFlow=false -- the signal the
         // Login/Signup views poll to decide whether to render a form or bounce to WorkOS.
         // firstRun is the second half of that answer: an account exists by the time this

@@ -140,10 +140,8 @@ class MetricSourceTest {
 
         // The counters are the instrument that would have caught this in production: a measure sitting at
         // zero derived and zero from column is a measure that abstained on everything.
-        assertEquals(0, tally.fromColumn(Measure.TURN_DURATION), "nothing came off a rollup column");
-        assertEquals(1, tally.derived(Measure.TURN_DURATION));
-        assertEquals(1.0, tally.abstentionRate(Measure.COST), 0.0);
-        assertEquals(0.0, tally.abstentionRate(Measure.TURN_DURATION), 0.0);
+        assertEquals("turn_duration n=1 (column 0, derived 1)", summaryOf(tally, Measure.TURN_DURATION));
+        assertEquals("cost n=0 (column 0, derived 0) absent {UNPRICED_MODEL=1}", summaryOf(tally, Measure.COST));
     }
 
     @Test
@@ -168,8 +166,10 @@ class MetricSourceTest {
         Measurement.Absent absent = assertInstanceOf(
                 Measurement.Absent.class, cost, "an unpriced model must not read as a value of any kind");
         assertEquals(Absence.UNPRICED_MODEL, absent.reason());
-        assertEquals(1, tally.absent(Measure.COST, Absence.UNPRICED_MODEL));
-        assertEquals(1.0, tally.abstentionRate(Measure.COST), 0.0, "cost abstained on all of its traffic");
+        assertEquals(
+                "cost n=0 (column 0, derived 0) absent {UNPRICED_MODEL=1}",
+                summaryOf(tally, Measure.COST),
+                "cost abstained on all of its traffic");
 
         // Duration is unaffected: the price book has nothing to do with how long the turn took, and one
         // measure abstaining must never take the others down with it.
@@ -197,8 +197,7 @@ class MetricSourceTest {
 
         assertEquals(1.00, cost.value(), 1e-9, "the price it was billed at, not the price it would cost today");
         assertEquals(Provenance.COLUMN, cost.provenance(), "every cost is recorded, never derived");
-        assertEquals(1, tally.fromColumn(Measure.COST));
-        assertEquals(0, tally.derived(Measure.COST));
+        assertEquals("cost n=1 (column 1, derived 0)", summaryOf(tally, Measure.COST));
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -228,8 +227,7 @@ class MetricSourceTest {
                 "the worker really did write an envelope, and it really does disagree with the root");
         assertEquals(999.0, duration.value(), 1.0, "the root's own interval is what the user waited");
         assertEquals(Provenance.DERIVED, duration.provenance(), "there is no column arm for this measure");
-        assertEquals(0, tally.fromColumn(Measure.TURN_DURATION));
-        assertEquals(1, tally.derived(Measure.TURN_DURATION));
+        assertEquals("turn_duration n=1 (column 0, derived 1)", summaryOf(tally, Measure.TURN_DURATION));
     }
 
     @Test
@@ -269,7 +267,7 @@ class MetricSourceTest {
         // Present in the page — excluding it would silently remove precisely the traffic a duration
         // detector most wants to see, and a rising count of stuck turns would then read as faster latency.
         assertEquals(Completion.UNTERMINATED, turn.completion());
-        assertEquals(1, tally.completions(Completion.UNTERMINATED));
+        assertEquals("turns {UNTERMINATED=1}", summaryOf(tally, "turns"));
         assertEquals(
                 Absence.NO_END_TIME,
                 assertInstanceOf(Measurement.Absent.class, turn.measurement(Measure.TURN_DURATION))
@@ -426,7 +424,7 @@ class MetricSourceTest {
         assertEquals("tool:search_docs", tool.bucketKey(), "the tool_call name wins over the span name");
         assertEquals("cs-search", tool.callSiteId(), "the TURN's entry point, so §6.1 can ask if this explains it");
         assertEquals(34000.0, present(tool.duration()).value(), 1.0);
-        assertEquals(1, tally.derived(Measure.TOOL_DURATION));
+        assertEquals("tool_duration n=1 (column 0, derived 1)", summaryOf(tally, Measure.TOOL_DURATION));
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -464,6 +462,14 @@ class MetricSourceTest {
     private static Measurement.Present present(Measurement measurement) {
         return assertInstanceOf(
                 Measurement.Present.class, measurement, "expected a value, got " + measurement + " instead");
+    }
+
+    /** The one clause of {@link Tally#summary()} that names {@code key}, the way the sweep's log reads. */
+    private static String summaryOf(Tally tally, String key) {
+        for (String clause : tally.summary().split("; ")) {
+            if (clause.startsWith(key + " ")) return clause;
+        }
+        throw new AssertionError("no " + key + " clause in: " + tally.summary());
     }
 
     /** Asked of the table itself, so a claim about what the rollup holds stays a fact rather than a hope. */

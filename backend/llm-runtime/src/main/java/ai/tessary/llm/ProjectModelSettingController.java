@@ -28,19 +28,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Which model each platform-funded {@link ModelLane} runs on for a project, and at which
- * {@link ServiceTier}.
+ * Which model each {@link ModelLane} runs on for a project.
  *
  * <p>Sibling of {@link ProviderCredentialController} and deliberately separate from it: that one is
  * "keys for models you bring and pay for", this one is "which of the platform's own models each of
  * our lanes uses". Mixing them would blur who is being billed.
  *
- * <p>The {@code GET} returns the capability matrix alongside the current settings, so the UI can
- * render tier options per model generically, the same shape as
- * {@link ProviderCredentialController#catalog}, and the reason the frontend needs no hardcoded
- * knowledge of which models support Flex.
+ * <p>The {@code GET} returns the model list alongside the current settings, the same shape as
+ * {@link ProviderCredentialController#catalog}, so the frontend needs no hardcoded model knowledge.
  *
- * <p>That claim is meant literally and is the constraint on this payload: the settings page must be
+ * <p>That is the constraint on this payload: the settings page must be
  * renderable with no lane, group or model knowledge of its own. So the sections it draws, the copy
  * under each heading, which controls a section shows, which models a lane offers and what it falls
  * back to all ship from here. A field dropped from this view does not simplify the wire, it moves a
@@ -51,7 +48,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectModelSettingController {
 
     private final ProjectModelSettings settings;
-    private final ChatModelFactory factory;
     private final TenantPathResolver resolver;
     private final ModelResolver priceModels;
     private final PriceBookRepository priceBooks;
@@ -60,13 +56,11 @@ public class ProjectModelSettingController {
 
     public ProjectModelSettingController(
             ProjectModelSettings settings,
-            ChatModelFactory factory,
             TenantPathResolver resolver,
             ModelResolver priceModels,
             PriceBookRepository priceBooks,
             ProviderCredentialRepository providerCredentials) {
         this.settings = settings;
-        this.factory = factory;
         this.resolver = resolver;
         this.priceModels = priceModels;
         this.priceBooks = priceBooks;
@@ -74,18 +68,12 @@ public class ProjectModelSettingController {
     }
 
     /**
-     * One section of the settings page: a {@link LaneGroup}, its heading, the line of copy under it,
-     * and which of the two per-request controls its rows should show at all.
+     * One section of the settings page: a {@link LaneGroup}, its heading and the line of copy under
+     * it.
      *
      * <p>Sent as its own list rather than folded into each lane because a section is drawn once:
      * repeating the heading and copy on all five lanes would invite a client to render whichever copy
      * it saw last and would make the section order an accident of lane order.
-     *
-     * <p>{@code tiered} and {@code effortTunable} are both false for {@link LaneGroup#AGENT_VM}: those
-     * lanes hand a model id to an agent inside a microVM and the agent composes every request, so
-     * neither control has anything to attach to. They are two fields rather than one because they are
-     * two controls; today they agree, and {@link LaneGroup} is where that stops being true if it ever
-     * does.
      *
      * <p>{@code modelSelectable} is false for {@link LaneGroup#DECISION_CALLS}: each provider serves
      * one decision model there, so the row is a provider select and nothing else.
@@ -94,8 +82,6 @@ public class ProjectModelSettingController {
             LaneGroup id,
             String label,
             String description,
-            boolean tiered,
-            @JsonProperty("effort_tunable") boolean effortTunable,
             @JsonProperty("model_selectable") boolean modelSelectable) {}
 
     /**
@@ -103,9 +89,6 @@ public class ProjectModelSettingController {
      * defaults.
      *
      * <p>{@code group} is the section this row belongs under, as the id of a {@link GroupView} above.
-     * It replaced a bare {@code tiered} boolean, which was the same fact told one control at a time:
-     * the group answers the tier question, the effort question and the section question together, and
-     * it is the grouping the page is actually built from.
      *
      * <p>{@code providerOptions} is this lane's option list, provider first and best first; see
      * {@link LanePriority}. Each entry names a provider, the models this lane offers on it (indexing
@@ -180,7 +163,7 @@ public class ProjectModelSettingController {
      * decision entries a {@link LaneGroup#DECISION_CALLS} lane runs, keyed the
      * same {@code "<PROVIDER>:<model_name>"} way {@link ProjectModelSettings#set} accepts. Kept as
      * its own list rather than folded into {@code models} because the two are genuinely different
-     * shapes (a catalog entry carries no Bedrock capability fields: tiers, cache TTLs, endpoint), and
+     * shapes (a catalog entry carries no Bedrock endpoint), and
      * because {@link ProviderCredentialController#catalog} already exposes this exact record over the
      * wire, so reusing it here adds no new schema.
      */
@@ -203,10 +186,9 @@ public class ProjectModelSettingController {
             @JsonProperty("configured_providers") Set<ModelProvider> configuredProviders) {}
 
     /**
-     * {@code model_key} + {@code service_tier} + {@code reasoning_effort}; the tier defaults to
-     * Standard when omitted, and an omitted/blank effort means "no reasoning parameter", which is the
-     * only valid value for a model that takes none. The levels a model accepts ride on its
-     * {@code effort_levels} in the {@code models} array, so the client never hardcodes them.
+     * {@code model_key}. {@code service_tier} and {@code reasoning_effort} are accepted and ignored:
+     * no lane has a request of ours for either to ride on, so every row is stored at Standard with no
+     * effort.
      */
     public record SetLaneModelRequest(
             @JsonProperty("model_key") @NotBlank String modelKey,
@@ -218,8 +200,7 @@ public class ProjectModelSettingController {
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         List<GroupView> groups = Arrays.stream(LaneGroup.values())
-                .map(g -> new GroupView(
-                        g, g.label(), g.description(), g.tiered(), g.effortTunable(), g.modelSelectable()))
+                .map(g -> new GroupView(g, g.label(), g.description(), g.modelSelectable()))
                 .toList();
         // The agentic ModelCatalog entries (GEMINI/GLM/GROK/CUSTOM) an AGENT_VM lane may also be
         // pointed at, and the decision entries a DECISION_CALLS lane runs; see
@@ -241,9 +222,8 @@ public class ProjectModelSettingController {
                                     .map(o -> new ProviderOptionView(
                                             o.provider(),
                                             PlatformCatalog.find(o.provider())
-                                                    .map(PlatformCatalog.PlatformDescriptor::label)
-                                                    .orElseGet(
-                                                            () -> o.provider().name()),
+                                                    .orElseThrow()
+                                                    .label(),
                                             o.modelKeys(),
                                             o.defaultModelKey()))
                                     .toList(),
@@ -303,9 +283,8 @@ public class ProjectModelSettingController {
     }
 
     /**
-     * Point one lane at a model + tier. The (model, tier) pair is validated against the capability
-     * matrix here rather than deferred to Bedrock: an unsupported pair (Flex on Haiku 4.5) would
-     * otherwise be accepted silently and then fail every call in that lane.
+     * Point one lane at a model. The (lane, model) pair is validated here rather than at run time: an
+     * unrunnable pair would otherwise be accepted silently and then fail every run in that lane.
      */
     @PutMapping("/{lane}")
     public ApiResponse<ModelSettingsView> put(
@@ -318,13 +297,7 @@ public class ProjectModelSettingController {
         // Parsed via fromWire, not Spring's default enum binding: the path segment is the lowercase
         // wire name ("grading"), and an unknown one must surface as our typed 400, not a 500.
         ModelLane parsed = ModelLane.fromWire(lane);
-        ServiceTier tier = req.serviceTier() == null ? ServiceTier.STANDARD : req.serviceTier();
-        // The org-gated overload: this is an explicit user choice from the picker, which should
-        // already have disabled any provider the org has no credential for.
-        settings.set(r.project().id(), r.org().id(), parsed, req.modelKey(), tier, req.reasoningEffort());
-        // The model cache keys on (model, tier, effort), so a lane that just changed any of them would
-        // keep serving the previous client until something else evicted it.
-        factory.invalidateAll();
+        settings.set(r.project().id(), r.org().id(), parsed, req.modelKey());
         return get(ctx, orgSlug, projectSlug);
     }
 
@@ -343,9 +316,6 @@ public class ProjectModelSettingController {
             @PathVariable String lane) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         settings.clear(r.project().id(), ModelLane.fromWire(lane));
-        // Same reason as the PUT: the model cache keys on (model, tier, effort), so a lane that just
-        // moved back to automatic would keep serving the previous client until something evicted it.
-        factory.invalidateAll();
         return get(ctx, orgSlug, projectSlug);
     }
 }

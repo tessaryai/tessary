@@ -2505,16 +2505,6 @@
               }
             ]
           },
-          "baseline" : {
-            "anyOf" : [
-              {
-                "$ref" : "#/components/schemas/ConformanceBaselineView"
-              },
-              {
-                "type" : "null"
-              }
-            ]
-          },
           "finding" : {
             "$ref" : "#/components/schemas/BehaviorFindingView"
           },
@@ -2581,7 +2571,6 @@
         },
         "required" : [
           "armedWindow",
-          "baseline",
           "finding",
           "frustration",
           "groundedness",
@@ -2612,23 +2601,11 @@
           "causeKind" : {
             "type" : "string"
           },
-          "conformanceKind" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
           "detector" : {
             "type" : [
               "string",
               "null"
             ]
-          },
-          "evidence" : {
-            "items" : {
-              "$ref" : "#/components/schemas/EvidenceRefView"
-            },
-            "type" : "array"
           },
           "firstSeenAt" : {
             "type" : "string"
@@ -2697,9 +2674,7 @@
           "caseId",
           "causeKey",
           "causeKind",
-          "conformanceKind",
           "detector",
-          "evidence",
           "firstSeenAt",
           "humanVerdictAt",
           "id",
@@ -2732,91 +2707,6 @@
         "required" : [
           "findings",
           "lane"
-        ],
-        "type" : "object"
-      },
-      "BehaviorProfileDebugView" : {
-        "properties" : {
-          "alphabet_size" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "armed_at" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "call_site_id" : {
-            "type" : "string"
-          },
-          "discovery_rate" : {
-            "format" : "double",
-            "type" : [
-              "number",
-              "null"
-            ]
-          },
-          "fit_carry_json" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "last_trace_at" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "max_order" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "opened_at" : {
-            "type" : "string"
-          },
-          "rare_symbols_json" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "reservoir_json" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "state" : {
-            "type" : "string"
-          },
-          "threshold_d2" : {
-            "format" : "double",
-            "type" : [
-              "number",
-              "null"
-            ]
-          },
-          "trace_count" : {
-            "format" : "int64",
-            "type" : "integer"
-          }
-        },
-        "required" : [
-          "alphabet_size",
-          "armed_at",
-          "call_site_id",
-          "discovery_rate",
-          "fit_carry_json",
-          "last_trace_at",
-          "max_order",
-          "opened_at",
-          "rare_symbols_json",
-          "reservoir_json",
-          "state",
-          "threshold_d2",
-          "trace_count"
         ],
         "type" : "object"
       },
@@ -3043,17 +2933,10 @@
               "type" : "boolean"
             },
             "type" : "object"
-          },
-          "unavailable" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
           }
         },
         "required" : [
-          "capabilities",
-          "unavailable"
+          "capabilities"
         ],
         "type" : "object"
       },
@@ -3871,15 +3754,6 @@
       },
       "ClassifierDebugView" : {
         "properties" : {
-          "behavior_profiles" : {
-            "items" : {
-              "$ref" : "#/components/schemas/BehaviorProfileDebugView"
-            },
-            "type" : [
-              "array",
-              "null"
-            ]
-          },
           "detector" : {
             "type" : "string"
           },
@@ -3903,7 +3777,6 @@
           }
         },
         "required" : [
-          "behavior_profiles",
           "detector",
           "family",
           "id",
@@ -4140,38 +4013,6 @@
             "type" : "string"
           }
         },
-        "type" : "object"
-      },
-      "ConformanceBaselineView" : {
-        "properties" : {
-          "applicableTurns" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "fittedAt" : {
-            "type" : "string"
-          },
-          "ruleKey" : {
-            "type" : "string"
-          },
-          "violatingTraceIds" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "violations" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        },
-        "required" : [
-          "applicableTurns",
-          "fittedAt",
-          "ruleKey",
-          "violatingTraceIds",
-          "violations"
-        ],
         "type" : "object"
       },
       "ConnectRequest" : {
@@ -4626,50 +4467,6 @@
         },
         "required" : [
           "code"
-        ],
-        "type" : "object"
-      },
-      "EvidenceRefView" : {
-        "properties" : {
-          "grain" : {
-            "type" : "string"
-          },
-          "rank" : {
-            "format" : "int32",
-            "type" : [
-              "integer",
-              "null"
-            ]
-          },
-          "role" : {
-            "type" : "string"
-          },
-          "sessionId" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "spanId" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "traceId" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required" : [
-          "grain",
-          "rank",
-          "role",
-          "sessionId",
-          "spanId",
-          "traceId"
         ],
         "type" : "object"
       },
@@ -5667,9 +5464,6 @@
           "host" : {
             "type" : "string"
           },
-          "observerCursorSha" : {
-            "type" : "string"
-          },
           "provider" : {
             "type" : "string"
           },
@@ -5683,7 +5477,6 @@
         "required" : [
           "defaultBranch",
           "host",
-          "observerCursorSha",
           "provider",
           "repoName",
           "repoOwner"
@@ -5843,12 +5636,8 @@
           "description" : {
             "type" : "string"
           },
-          "effort_tunable" : {
-            "type" : "boolean"
-          },
           "id" : {
             "enum" : [
-              "llm_calls",
               "agent_vm",
               "decision_calls"
             ],
@@ -5859,18 +5648,13 @@
           },
           "model_selectable" : {
             "type" : "boolean"
-          },
-          "tiered" : {
-            "type" : "boolean"
           }
         },
         "required" : [
           "description",
-          "effort_tunable",
           "id",
           "label",
-          "model_selectable",
-          "tiered"
+          "model_selectable"
         ],
         "type" : "object"
       },
@@ -6253,7 +6037,6 @@
           },
           "group" : {
             "enum" : [
-              "llm_calls",
               "agent_vm",
               "decision_calls"
             ],
@@ -6688,21 +6471,8 @@
           "agentic" : {
             "type" : "boolean"
           },
-          "api_path" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
           "display_name" : {
             "type" : "string"
-          },
-          "effort_levels" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array",
-            "uniqueItems" : true
           },
           "endpoint" : {
             "enum" : [
@@ -6711,48 +6481,11 @@
             ],
             "type" : "string"
           },
-          "explicit_cache_ttls" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array",
-            "uniqueItems" : true
-          },
-          "forced_tool_choice" : {
-            "type" : "boolean"
-          },
           "inference_profile_id" : {
             "type" : "string"
           },
-          "min_cache_checkpoint_tokens" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
           "model_key" : {
             "type" : "string"
-          },
-          "prompt_caching" : {
-            "type" : "boolean"
-          },
-          "structured_output" : {
-            "enum" : [
-              "NATIVE",
-              "TOOL_CALL"
-            ],
-            "type" : "string"
-          },
-          "supported_tiers" : {
-            "items" : {
-              "enum" : [
-                "standard",
-                "flex",
-                "priority",
-                "batch"
-              ],
-              "type" : "string"
-            },
-            "type" : "array",
-            "uniqueItems" : true
           },
           "vendor" : {
             "type" : "string"
@@ -6760,18 +6493,10 @@
         },
         "required" : [
           "agentic",
-          "api_path",
           "display_name",
-          "effort_levels",
           "endpoint",
-          "explicit_cache_ttls",
-          "forced_tool_choice",
           "inference_profile_id",
-          "min_cache_checkpoint_tokens",
           "model_key",
-          "prompt_caching",
-          "structured_output",
-          "supported_tiers",
           "vendor"
         ],
         "type" : "object"
@@ -7120,17 +6845,13 @@
           },
           "open_default" : {
             "type" : "boolean"
-          },
-          "unavailable" : {
-            "type" : "boolean"
           }
         },
         "required" : [
           "capability",
           "enabled",
           "has_override",
-          "open_default",
-          "unavailable"
+          "open_default"
         ],
         "type" : "object"
       },
@@ -8470,10 +8191,7 @@
       "RuledOutCheck" : {
         "properties" : {
           "assessment" : {
-            "type" : [
-              "string",
-              "null"
-            ]
+            "type" : "string"
           },
           "check" : {
             "type" : "string"
@@ -10378,9 +10096,6 @@
               "string",
               "null"
             ]
-          },
-          "owner" : {
-            "type" : "boolean"
           },
           "projectId" : {
             "type" : [

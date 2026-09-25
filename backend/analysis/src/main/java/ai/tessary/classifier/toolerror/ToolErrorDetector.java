@@ -203,22 +203,9 @@ public final class ToolErrorDetector {
     }
 
     /**
-     * Fold one tool call into both arms.
-     *
-     * <p>Called once per call in event order. Cheap by construction (two logs and two adds), because at
-     * real ingest volume this runs on every tool call the platform sees.
-     *
-     * @param eventAt the call's event time, recorded as the onset when an arm leaves zero
-     */
-    public static State advance(
-            State state, ToolErrorRate pinned, ToolErrorConfig config, boolean failed, String eventAt) {
-        return advanceBucket(state, pinned, config, 1, failed ? 1 : 0, eventAt);
-    }
-
-    /**
      * Fold a whole bucket of calls into both arms in one step: the grouped Bernoulli CUSUM.
      *
-     * <p>Closed form rather than a loop over {@link #advance}, and that is not only an optimization: a
+     * <p>Closed form rather than a per-call loop, and that is not only an optimization: a
      * busy tool over a month is millions of calls, and a per-call loop would make recompute-per-read
      * unaffordable for precisely the tools most worth watching.
      *

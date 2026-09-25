@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.tenant;
 
-import ai.tessary.tenant.rbac.Role;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
@@ -13,10 +12,7 @@ public record OrgMembership(
         @Nullable String attributes,
         @JsonProperty("created_at") String createdAt) {
     public static final String OWNER = "owner";
-    public static final String ADMIN = "admin";
     public static final String MEMBER = "member";
-    public static final String VIEWER = "viewer";
-    public static final String BILLING = "billing";
 
     /** A membership with the role's full permissions (empty scopes) and no attributes. */
     public static OrgMembership of(String orgId, String principalId, String role, String createdAt) {
@@ -25,10 +21,5 @@ public record OrgMembership(
 
     public boolean isOwner() {
         return OWNER.equals(role);
-    }
-
-    /** The strongly-typed role, defaulting to {@link Role#MEMBER} for an unrecognised value. */
-    public Role roleEnum() {
-        return Role.fromWireOrMember(role);
     }
 }

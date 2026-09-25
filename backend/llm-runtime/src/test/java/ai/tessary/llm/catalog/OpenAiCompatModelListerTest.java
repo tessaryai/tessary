@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -30,7 +31,7 @@ class OpenAiCompatModelListerTest {
     private final HttpClient http = mock(HttpClient.class);
 
     private OpenAiCompatModelLister lister() {
-        return new OpenAiCompatModelLister(http, new ObjectMapper(), "OpenAI");
+        return new OpenAiCompatModelLister(http, new ObjectMapper(), "OpenAI", Duration.ofSeconds(5));
     }
 
     @SuppressWarnings("unchecked")

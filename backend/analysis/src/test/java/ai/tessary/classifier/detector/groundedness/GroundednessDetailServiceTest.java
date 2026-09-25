@@ -354,7 +354,8 @@ class GroundednessDetailServiceTest {
                 question,
                 answer,
                 null,
-                "2026-09-23T14:41:00Z");
+                "2026-09-23T14:41:00Z",
+                null);
     }
 
     private static CitedAnswer cited(String traceId) {

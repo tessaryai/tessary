@@ -4,7 +4,6 @@ package ai.tessary.classifier.finding;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -40,26 +39,6 @@ public class BehaviorBaselineEventRepository {
                 .param("at", row.occurredAt())
                 .param("detail", row.detailJson())
                 .update();
-    }
-
-    /**
-     * The reason the epoch last stopped scoring, or empty if it never has.
-     *
-     * <p>The lifecycle already records this ({@code {"reason": "volume_collapse"}} or
-     * {@code "alphabet_churn"}) — it was simply never read, so the UI hedged with "either … or" over
-     * an answer the database had. {@code profile_stale} stays filtered out of the customer changelog
-     * as an ops kind; this reads it for the one place it actually answers a user's question.
-     */
-    public Optional<String> latestStaleReason(String profileId) {
-        return jdbc.sql("""
-            SELECT detail->>'reason' FROM behavior_baseline_event
-             WHERE profile_id = :pid AND event = :event AND detail->>'reason' IS NOT NULL
-             ORDER BY occurred_at DESC LIMIT 1
-            """)
-                .param("pid", profileId)
-                .param("event", BehaviorBaselineEventRow.Event.PROFILE_STALE)
-                .query(String.class)
-                .optional();
     }
 
     public List<BehaviorBaselineEventRow> listByProject(String projectId, int limit) {

@@ -9,11 +9,9 @@ import static ai.tessary.storage.TraceV2Repository.numericOrNull;
 import ai.tessary.config.SubstrateProperties;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -162,19 +160,7 @@ public class SpanRepository {
     }
 
     /**
-     * One JDBC batch for a whole batch of spans: the same statement, {@code event_ts} guard, SET list and
-     * re-arm contract as {@link #upsert}, applied per row. This is the production path; {@link #upsert}
-     * is the single-row form of it.
-     */
-    public void upsertAll(List<SpanRow> rows) {
-        if (rows.isEmpty()) return;
-        int[] applied = named.batchUpdate(
-                UPSERT_SQL, rows.stream().map(SpanRepository::params).toArray(SqlParameterSource[]::new));
-        BatchCounts.requireReal(applied);
-    }
-
-    /**
-     * Last-write-wins upsert against the natural key (§6.2).
+     * Last-write-wins upsert against the natural key (§6.2), one JDBC batch for a whole batch of spans.
      *
      * <p><b>The SET list is every producer-sourced column, including {@code parent_span_id}.</b> It
      * deliberately excludes {@code path}, {@code correlation_state} and {@code path_state}, everything the
@@ -195,11 +181,11 @@ public class SpanRepository {
      * <p>The caller must re-arm the trace timer on both paths, insert and conflict, because a version
      * replacement changes token counts and so must un-settle the trace exactly like a new span. And the
      * write must share its transaction with that re-arm (§6.1).
-     *
-     * @return the number of rows written: 0 when the guard rejected an older version.
      */
-    public int upsert(SpanRow row) {
-        return jdbc.sql(UPSERT_SQL).paramSource(params(row)).update();
+    public void upsertAll(List<SpanRow> rows) {
+        int[] applied = named.batchUpdate(
+                UPSERT_SQL, rows.stream().map(SpanRepository::params).toArray(SqlParameterSource[]::new));
+        BatchCounts.requireReal(applied);
     }
 
     // ----- resolver work queues (substrate-model.md §6.3, §6.4) ------------------------------------
@@ -439,14 +425,13 @@ public class SpanRepository {
 
     /**
      * The spans named by {@code keys}, in one query, the hydration read behind a page of spans that some
-     * other index chose (a keyword search page, a kNN ranking). A row per key would be fifty round trips for
+     * other index chose (a keyword search page). A row per key would be fifty round trips for
      * a fifty-row page.
      *
      * <p><b>The result is unordered and may be shorter than {@code keys}.</b> SQL has no inherent order over
-     * an id set, and the ordering that matters here, recency for a keyset page, cosine distance for a
-     * ranking, is the caller's, so the caller re-applies it. Short is a race, not an error: a span can be
-     * removed by the retention sweep between the index read and this one, and dropping it is right. Both
-     * facts are the same ones {@code QueryRepository.searchByIds} lives with.
+     * an id set, and the ordering that matters here, recency for a keyset page, is the caller's, so the
+     * caller re-applies it. Short is a race, not an error: a span can be removed by the retention sweep
+     * between the index read and this one, and dropping it is right.
      */
     public List<SpanRow> listByKeys(String projectId, List<SpanKey> keys) {
         if (keys.isEmpty()) {
@@ -466,148 +451,6 @@ public class SpanRepository {
                 .param("id", id)
                 .query((rs, n) -> map(rs))
                 .optional();
-    }
-
-    /**
-     * Everything a sub-agent did, at any depth, in one indexed query, {@code path <@ :prefix}, served by
-     * the gist index (§9).
-     *
-     * <p>Complete only once the trace's ancestry has resolved; on a settled trace it always is.
-     */
-    public List<SpanRow> listSubtree(String projectId, String pathPrefix) {
-        return jdbc.sql("SELECT " + COLS + " FROM span"
-                        + " WHERE project_id = :pid AND path <@ :prefix::ltree"
-                        + " ORDER BY started_at ASC, id ASC")
-                .param("pid", projectId)
-                .param("prefix", pathPrefix)
-                .query((rs, n) -> map(rs))
-                .list();
-    }
-
-    // ---- entry-shaped reads (substrate-as-source) ------------------------------------------------
-
-    /**
-     * One span in the shape the grading lane's source adapter wants: identity and correlation columns off
-     * {@code span}, plus the three payload fields off {@code span_payload}. A projection, not a row type:
-     * {@link SpanRow} deliberately carries no payload, because every list surface reads spans without ever
-     * touching the payload table, and this is the one read that needs both.
-     *
-     * <p>The join is a LEFT join: a span whose payload has aged out (spec §10) still exists, still grades
-     * as a step in the trace, and simply has no text. An INNER join would silently shorten a
-     * retention-trimmed trace instead of showing it with empty entries.
-     */
-    public record SpanEntry(
-            String projectId,
-            String traceId,
-            String id,
-            @Nullable String parentSpanId,
-            String kind,
-            @Nullable String name,
-            @Nullable String callSiteId,
-            @Nullable String providedModelName,
-            String startedAt,
-            @Nullable String endedAt,
-            @Nullable String input,
-            @Nullable String output,
-            @Nullable String attributes) {
-
-        /** The producer handle {@code "<trace_id>:<span_id>"}, the id a caller hands back to a point read. */
-        public String handle() {
-            return traceId + ':' + id;
-        }
-    }
-
-    private static final String ENTRY_COLS = "s.project_id, s.trace_id, s.id, s.parent_span_id, s.kind, s.name, "
-            + "s.call_site_id, s.provided_model_name, s.started_at, s.ended_at, "
-            + "p.input, p.output, p.attributes";
-
-    private static final String ENTRY_FROM = " FROM span s LEFT JOIN span_payload p"
-            + " ON p.project_id = s.project_id AND p.trace_id = s.trace_id AND p.span_id = s.id";
-
-    /**
-     * Project-scoped, time-bounded, paginated entry read backing the substrate-as-source adapter
-     * ({@code SubstrateSource} for the {@code sdk} provider). Newest first by {@code started_at} so a
-     * preview / live-dataset run sees the most recent ingested telemetry; bounds are inclusive ISO-8601
-     * strings, {@code null} imposes no bound. Paging is by {@code limit}/{@code offset}; the adapter walks
-     * pages until a short page signals exhaustion.
-     */
-    public List<SpanEntry> listEntriesByProject(
-            String projectId, @Nullable String fromIso, @Nullable String toIso, int limit, int offset) {
-        String sql = "SELECT " + ENTRY_COLS + ENTRY_FROM + " WHERE s.project_id = :pid"
-                + (fromIso != null ? " AND s.started_at >= :from::timestamptz" : "")
-                + (toIso != null ? " AND s.started_at <= :to::timestamptz" : "")
-                + " ORDER BY s.started_at DESC, s.trace_id DESC, s.id DESC"
-                + " LIMIT :limit OFFSET :offset";
-        var spec = jdbc.sql(sql).param("pid", projectId).param("limit", limit).param("offset", offset);
-        if (fromIso != null) {
-            spec = spec.param("from", fromIso);
-        }
-        if (toIso != null) {
-            spec = spec.param("to", toIso);
-        }
-        return spec.query((rs, n) -> mapEntry(rs)).list();
-    }
-
-    /** A trace's entries in event-time order, the primary-key-prefix read, with payloads joined on. */
-    public List<SpanEntry> listEntriesByTrace(String projectId, String traceId) {
-        return jdbc.sql("SELECT " + ENTRY_COLS + ENTRY_FROM
-                        + " WHERE s.project_id = :pid AND s.trace_id = :tid"
-                        + " ORDER BY s.started_at ASC, s.id ASC")
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .query((rs, n) -> mapEntry(rs))
-                .list();
-    }
-
-    /** One entry by its full identity. As everywhere in v2, the trace is part of the key. */
-    public Optional<SpanEntry> findEntry(String projectId, String traceId, String id) {
-        return jdbc.sql("SELECT " + ENTRY_COLS + ENTRY_FROM
-                        + " WHERE s.project_id = :pid AND s.trace_id = :tid AND s.id = :id")
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("id", id)
-                .query((rs, n) -> mapEntry(rs))
-                .optional();
-    }
-
-    /**
-     * Newest entries stamped with a given call site (served by {@code ix_span_call_site}). The
-     * substrate-direct trace-selection read that lets grader synthesis ground by {@code call_site_id}
-     * (tag-as-the-model) instead of re-deriving the call site via source mappings. Newest first by
-     * {@code started_at}; the caller groups the rows into distinct traces.
-     *
-     * @param notBefore when non-null, only rows with {@code started_at >= notBefore} are eligible, bounds
-     *     grounding to recent activity. {@code null} = no age bound.
-     */
-    public List<SpanEntry> recentEntriesByCallSite(
-            String projectId, String callSiteId, int limit, @Nullable Instant notBefore) {
-        String sql = "SELECT " + ENTRY_COLS + ENTRY_FROM
-                + " WHERE s.project_id = :pid AND s.call_site_id = :cs"
-                + (notBefore != null ? " AND s.started_at >= :notBefore::timestamptz" : "")
-                + " ORDER BY s.started_at DESC, s.trace_id DESC, s.id DESC"
-                + " LIMIT :limit";
-        var spec = jdbc.sql(sql).param("pid", projectId).param("cs", callSiteId).param("limit", limit);
-        if (notBefore != null) {
-            spec = spec.param("notBefore", notBefore.toString());
-        }
-        return spec.query((rs, n) -> mapEntry(rs)).list();
-    }
-
-    private static SpanEntry mapEntry(ResultSet rs) throws SQLException {
-        return new SpanEntry(
-                rs.getString("project_id"),
-                rs.getString("trace_id"),
-                rs.getString("id"),
-                rs.getString("parent_span_id"),
-                rs.getString("kind"),
-                rs.getString("name"),
-                rs.getString("call_site_id"),
-                rs.getString("provided_model_name"),
-                requireIso(rs, "started_at"),
-                Timestamps.iso(rs, "ended_at"),
-                rs.getString("input"),
-                rs.getString("output"),
-                rs.getString("attributes"));
     }
 
     private static SpanRow map(ResultSet rs) throws SQLException {

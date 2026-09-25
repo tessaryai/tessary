@@ -7,7 +7,7 @@ import org.springframework.core.task.TaskDecorator;
 
 /**
  * Propagates the submitting thread's MDC into a pooled worker thread so logs
- * emitted on the worker carry the parent's business context (runId/projectId),
+ * emitted on the worker carry the parent's business context (projectId),
  * and tags the worker's CPU samples with the pool and tenant that caused them.
  *
  * <p>Attached to the queue-drainer pools ({@code observerTaskExecutor},
@@ -47,7 +47,6 @@ public final class MdcTaskDecorator implements TaskDecorator {
      *   submitter had bound. Every queue drainer submits a bare job reference and binds the
      *   business context INSIDE the task body — e.g. ClassifierWorker executes `() -> sweep(job)`
      *   and only then does sweep() put PROJECT_ID. At capture time those keys do not exist yet.
-     *   (orgId was doubly dead: LogContext.ORG_ID has zero call sites in backend/app.)
      *
      * The result was a label that was always absent, which is worse than no label — an empty
      * tenant filter reads as "profiling is broken" rather than "never populated".

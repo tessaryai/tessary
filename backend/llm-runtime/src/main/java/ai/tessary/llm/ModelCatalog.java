@@ -3,9 +3,6 @@ package ai.tessary.llm;
 
 import ai.tessary.llm.catalog.ProviderModel;
 import ai.tessary.llm.catalog.SupportedMaker;
-import ai.tessary.llmspi.LaneGroup;
-import ai.tessary.llmspi.ModelLane;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,8 +36,7 @@ public final class ModelCatalog {
             @JsonProperty("strict_json_schema") boolean strictJsonSchema,
             /**
              * The reasoning-effort levels this model accepts, in ascending order; empty when it takes
-             * no effort parameter at all. Surfaced as a per-run selector in the run modal and applied
-             * in {@code ChatModelFactory}.
+             * no effort parameter at all.
              *
              * <p>A list rather than a boolean because the sets genuinely differ: the OpenAI line takes
              * low/medium/high, while the GPT-5.6 models on bedrock-mantle also take none, xhigh and max.
@@ -87,12 +83,6 @@ public final class ModelCatalog {
                     agentic,
                     false);
         }
-
-        /** Whether a reasoning effort is meaningful for this model at all. */
-        @JsonIgnore
-        public boolean supportsEffort() {
-            return !effortLevels.isEmpty();
-        }
     }
 
     /**
@@ -106,10 +96,16 @@ public final class ModelCatalog {
     private static final Set<String> NO_EFFORT = Set.of();
 
     /**
-     * Shared with {@link BedrockModelProfile} so a customer's own mantle credential offers exactly the
-     * levels the platform's own lanes do: one transcription of what the endpoint accepts, not two.
+     * The reasoning-effort levels the GPT-5.6 line accepts on mantle, in ascending order so a UI can
+     * render them as a scale.
+     *
+     * <p>Transcribed from what the endpoint itself enumerates, not from a doc page: AWS's launch blog
+     * lists these six, a secondary source claimed a seventh ({@code minimal}), and the API settles it
+     * by rejecting {@code minimal} with a message naming the supported set. Ordered, so
+     * {@code LinkedHashSet} rather than {@code Set.of}.
      */
-    private static final Set<String> MANTLE_GPT_EFFORTS = BedrockModelProfile.MANTLE_GPT_EFFORTS;
+    private static final Set<String> MANTLE_GPT_EFFORTS =
+            new LinkedHashSet<>(List.of("none", "low", "medium", "high", "xhigh", "max"));
 
     private static final List<CatalogEntry> ENTRIES = List.of(
             // OpenAI (direct), the GPT-5 line.
@@ -311,7 +307,7 @@ public final class ModelCatalog {
             // AWS Bedrock via the mantle endpoint, the only place the GPT-5.6 line exists, over the
             // OpenAI Responses API. Same AWS credential as Bedrock above, so the base URL stays null
             // here too. These take a reasoning effort, but the level set is not low/medium/high; see
-            // BedrockModelProfile.
+            // MANTLE_GPT_EFFORTS.
             new CatalogEntry(
                     ModelProvider.BEDROCK_MANTLE,
                     "OpenAI",
@@ -450,56 +446,9 @@ public final class ModelCatalog {
                     true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
-            // shows unqualified; ChatModelFactory#buildOpenAiCompat overrides it whenever the stored
-            // credential's customModelName is set.
+            // shows unqualified.
             new CatalogEntry(
                     ModelProvider.CUSTOM, "Custom", "custom-model", "Custom model", false, NO_EFFORT, null, true));
-
-    static {
-        verifyLanePriorities();
-    }
-
-    /**
-     * Fail at class load if what a {@link LanePriority} lane names and what that lane's group offers
-     * are not the same set of models.
-     *
-     * <p>Two directions, catching different mistakes: a model a lane names that its group doesn't
-     * offer renders in the dropdown and 400s on save, while a model the group offers that the lane
-     * doesn't name is missing from that lane's picker even though the group permits it.
-     */
-    private static void verifyLanePriorities() {
-        for (ModelLane lane : ModelLane.values()) {
-            Set<String> offered = offeredFor(lane.group());
-            Set<String> named = new LinkedHashSet<>(LanePriority.modelKeys(lane));
-            for (String key : named) {
-                if (!offered.contains(key)) {
-                    throw new IllegalStateException(
-                            "lane " + lane + " offers " + key + ", which " + lane.group() + " does not permit");
-                }
-            }
-            Set<String> missing = new LinkedHashSet<>(offered);
-            missing.removeAll(named);
-            if (!missing.isEmpty()) {
-                throw new IllegalStateException(lane.group() + " permits " + missing + ", which lane " + lane
-                        + " does not name, so its picker cannot offer them");
-            }
-        }
-    }
-
-    /**
-     * Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries for
-     * {@link LaneGroup#AGENT_VM} or the decision entries for {@link LaneGroup#DECISION_CALLS}.
-     */
-    private static Set<String> offeredFor(LaneGroup group) {
-        Set<String> offered = new LinkedHashSet<>(BedrockModelProfile.offeredFor(group));
-        if (group == LaneGroup.AGENT_VM) {
-            ENTRIES.stream().filter(CatalogEntry::agentic).forEach(e -> offered.add(key(e)));
-        }
-        if (group == LaneGroup.DECISION_CALLS) {
-            ENTRIES.stream().filter(CatalogEntry::decision).forEach(e -> offered.add(key(e)));
-        }
-        return offered;
-    }
 
     private ModelCatalog() {}
 
@@ -510,7 +459,7 @@ public final class ModelCatalog {
     /**
      * A catalog entry's {@code model_key} on the wire, {@code "<PROVIDER>:<model_name>"}, the
      * non-Bedrock half of the union {@link ProjectModelSettings} decodes. One function, because the
-     * settings payload, the lane priority check and the stored row all have to spell it the same way.
+     * settings payload, the lane priority list and the stored row all have to spell it the same way.
      */
     public static String key(CatalogEntry entry) {
         return entry.provider().name() + ":" + entry.modelName();

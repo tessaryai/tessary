@@ -178,7 +178,7 @@ These arrive without being rejected and survive verbatim in the attribute bag. T
 | Span links (`links[]`) | Not read today. Cross-trace linking is the sanctioned future mechanism and is deferred. `trace.parent_trace_id` exists but nothing on the wire writes it: a detached sub-agent is linked by the platform, not declared by the producer |
 | `span.kind`, `trace_state`, `span.flags`, dropped counts, instrumentation-scope attributes | Ignored |
 | `gen_ai.system`, `gen_ai.provider.name` | Carried in the attribute bag, not promoted to a column |
-| `tessary.sdk`, `tessary.upstream.*` | Provenance markers. Written, never read by processing |
+| `tessary.sdk` | A provenance marker the producer stamps. Carried through, never read by processing |
 | `gen_ai.evaluation.result` span event and the `gen_ai.evaluation.*` attributes under it | No longer read. They landed explicit user feedback as first-class rows until that feature was removed. Emitting the event is harmless and has no effect; the keys are unclaimed rather than reserved |
 | `deployment.environment.name` resource attribute | No longer read. It scoped a span to an environment row until the environment concept was removed. It is still accepted and survives verbatim, and it scopes nothing. A project is the only scope below an organization, so use separate projects for separate environments |
 

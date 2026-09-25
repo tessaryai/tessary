@@ -14,9 +14,8 @@
 # typically rely on multi-year gaps between abandonment and exploitation.
 #
 # Dispatch it before cutting a release, and after any change to the org's registry or GitHub account
-# state. A red run opens an issue for the security rota, the same routing
-# scrub-gate.yml uses and for the same reason: no mail credentials, and an issue is what the rota
-# can act on. This job covers namespace ownership only, not confusable-name scanning.
+# state. A red run opens an issue for the security rota: there are no mail credentials, and an
+# issue is what the rota can act on. This job covers namespace ownership only, not confusable-name scanning.
 name: namespace-recheck
 
 on:

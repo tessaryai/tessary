@@ -22,11 +22,11 @@ import org.jspecify.annotations.Nullable;
  * rename of the classifier does not change either.
  *
  * <p>A key allowlist silently stops firing the moment a project renames or forks a built-in classifier,
- * or a new one reuses an existing detector's evidence shape under a different key. The three detector
- * families this covers ({@code tool_error}, {@code metric_drift}, and any classifier that publishes a
- * {@code window} block) write payloads with a stable, documented internal shape
+ * or a new one reuses an existing detector's evidence shape under a different key. The detector
+ * families this covers ({@code tool_error} and {@code metric_drift}, plus frustration above) write
+ * payloads with a stable, documented internal shape
  * ({@code ToolErrorEvidence.toJson}, {@code MetricFindingEvidence.toJson}) — reading THAT is what stays
- * true across a rename. A payload matching none of the three known shapes falls through to {@code
+ * true across a rename. A payload matching none of the known shapes falls through to {@code
  * DossierPayload.forAgent}, unchanged: this class is additive, never a replacement for a classifier it
  * does not recognise.
  *
@@ -89,8 +89,6 @@ public final class ClassifierDossierAssembler {
             body = ToolErrorDossier.build(root);
         } else if (root.has("bucket") && (root.has("ratio") || root.has("w1_log"))) {
             body = MetricDriftDossier.build(root);
-        } else if (root.has("window")) {
-            body = WindowFindingDossier.build(root);
         } else {
             return Optional.empty();
         }

@@ -290,7 +290,7 @@ class ProjectPurgeIntegrationTest {
         projects.markDeleting(p.id(), Instant.now().toString());
 
         assertFalse(projects.findActive().stream().anyMatch(a -> a.id().equals(p.id())));
-        assertTrue(projects.findDeleting().stream().anyMatch(a -> a.id().equals(p.id())));
+        assertTrue(projects.findById(p.id()).orElseThrow().isDeleting());
 
         // This project is deliberately never enqueued or purged — undo the mark so it doesn't sit as an
         // orphan for a LATER test's worker.tick() to revive and win CLAIM_BATCH=1 over that test's own job.

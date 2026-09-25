@@ -12,14 +12,11 @@ import ai.tessary.pricing.ModelResolver;
 import ai.tessary.vitals.TokenUsage;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -216,10 +213,6 @@ public class MetricSource {
      *     metric-drift.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
      *     child would model "traces that happened to contain this tool" rather than "traffic that
      *     entered here".
-     * @param eventAt the trace's own start, falling back to ingest time, the clock windows are CUT on.
-     *     The sweep's keyset cursor stays on {@code created_at}; two clocks, two jobs.
-     * @param projectVersionId the deploy this turn ran under. Not part of the key, it is what the
-     *     pinned reference hangs on, so a deploy re-pins the reference instead of resetting the window.
      * @param tokens the four (disjoint) buckets summed over the trace's generations, or null when none
      *     reported usage. Carried so a caller can take a ratio without re-summing and arriving at a subtly
      *     different number.
@@ -229,10 +222,7 @@ public class MetricSource {
      *     Never a measure and never a covariate, see {@link MetricWorkload}.
      */
     public record TurnMetrics(
-            String traceId,
             String callSiteId,
-            String eventAt,
-            @Nullable String projectVersionId,
             Completion completion,
             @Nullable TokenUsage tokens,
             Map<String, Measurement> measurements,
@@ -375,7 +365,6 @@ public class MetricSource {
      *     the same instance to every page, so its summary describes the pass rather than its last page.
      */
     public List<TurnMetrics> turnMetrics(String projectId, List<TraceHead> heads, Tally tally) {
-        if (heads.isEmpty()) return List.of();
         List<String> traceIds = heads.stream().map(TraceHead::traceId).toList();
 
         Map<String, TurnFacts> facts = new HashMap<>();
@@ -401,10 +390,7 @@ public class MetricSource {
             tally.observed(completion);
             measurements.forEach(tally::observed);
             out.add(new TurnMetrics(
-                    head.traceId(),
                     head.callSiteId(),
-                    head.eventAt(),
-                    head.projectVersionId(),
                     completion,
                     spend.tokens(),
                     Map.copyOf(measurements),
@@ -634,8 +620,8 @@ public class MetricSource {
      * Every dispatchable span of one sweep page, with its own duration: the {@code tool_duration}
      * subjects. One query for the page.
      *
-     * <p>The bucket key is minted with {@code isError = false}, so a tool's failures stay in the same
-     * latency population as its successes. Splitting them would put half the samples in a bucket that
+     * <p>The bucket key carries no error flag, so a tool's failures stay in the same latency population
+     * as its successes. Splitting them would put half the samples in a bucket that
      * has no baseline, and it would hide the move worth catching: a tool that starts failing fast reads
      * as a shift in the one distribution rather than as traffic quietly migrating to a second one.
      *
@@ -644,7 +630,6 @@ public class MetricSource {
      * shrinking sample of fast calls.
      */
     public List<ToolMetrics> toolMetrics(String projectId, List<TraceHead> heads, Tally tally) {
-        if (heads.isEmpty()) return List.of();
         List<String> traceIds = heads.stream().map(TraceHead::traceId).toList();
         Map<String, String> callSites = new HashMap<>();
         for (TraceHead head : heads) {
@@ -663,7 +648,7 @@ public class MetricSource {
                     // spelled out rather than asserted because the scope of a stray span is genuinely
                     // unattributed, which is a bucket that already exists.
                     callSites.getOrDefault(span.traceId(), BehaviorSubstrateRepository.UNATTRIBUTED),
-                    ActionSymbol.of(span.kind(), span.name(), false),
+                    ActionSymbol.of(span.kind(), span.name()),
                     span.eventAt(),
                     duration));
         }
@@ -723,49 +708,6 @@ public class MetricSource {
             completions.merge(completion, 1L, Long::sum);
         }
 
-        /** The measures this pass touched, in first-seen order. */
-        public Set<String> measures() {
-            return Collections.unmodifiableSet(new LinkedHashSet<>(byMeasure.keySet()));
-        }
-
-        /** Values read straight off the rollup column; non-zero means the backfill has reached here. */
-        public long fromColumn(String measure) {
-            return counts(measure).fromColumn;
-        }
-
-        /** Values computed from leaf facts, the live path today, for every measure. */
-        public long derived(String measure) {
-            return counts(measure).derived;
-        }
-
-        public long present(String measure) {
-            Counts c = counts(measure);
-            return c.fromColumn + c.derived;
-        }
-
-        public long absent(String measure) {
-            long total = 0;
-            for (long n : counts(measure).absent.values()) total += n;
-            return total;
-        }
-
-        public long absent(String measure, Absence reason) {
-            return counts(measure).absent.getOrDefault(reason, 0L);
-        }
-
-        public long completions(Completion completion) {
-            return completions.getOrDefault(completion, 0L);
-        }
-
-        /**
-         * Share of this measure's subjects that produced no value, {@code 0.0} when none were seen at
-         * all. A measure sitting at {@code 1.0} is the alarm this class exists for.
-         */
-        public double abstentionRate(String measure) {
-            long seen = present(measure) + absent(measure);
-            return seen == 0 ? 0.0 : (double) absent(measure) / seen;
-        }
-
         /** One log line per pass: for each measure, where its values came from and why they did not. */
         public String summary() {
             StringBuilder sb = new StringBuilder();
@@ -789,13 +731,6 @@ public class MetricSource {
             }
             return sb.toString();
         }
-
-        private Counts counts(String measure) {
-            return byMeasure.getOrDefault(measure, EMPTY);
-        }
-
-        /** The answer for a measure nothing was ever folded into. Read-only by construction. */
-        private static final Counts EMPTY = new Counts();
 
         private static final class Counts {
             private long fromColumn;

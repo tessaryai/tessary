@@ -61,6 +61,10 @@ function clearRecords() {
   for (const f of fs.readdirSync(recordDir)) fs.rmSync(path.join(recordDir, f));
 }
 
+const SCHEMA = { type: 'object', required: ['verdict'], properties: { verdict: { type: 'string' } } };
+const OK_REPLY = JSON.stringify({ verdict: 'ok' });
+const MCP = { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' };
+
 /** Whether a process with this pid still exists. */
 function isAlive(pid) {
   try {
@@ -151,7 +155,7 @@ test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => 
   });
 
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
     (err) => {
       assert.ok(Array.isArray(err.turns), 'thrown error carries .turns');
       assert.equal(err.turns.length, 2, 'both sessions\' turns survive into the failure');
@@ -177,7 +181,7 @@ test('E: a session that already did real work is not silently retried at double 
   });
 
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
   );
   assert.equal(createCalls.length, 1, 'a session with real prior work must not trigger a second, fresh session');
   assert.equal(promptBodies.length, 1, 'no systemPrompt: the 4B turn-cap resume never applies, so this fails on the first prompt');
@@ -205,6 +209,8 @@ test('4B: triage resumes the same session once, no tools, when the turn cap empt
   const run = await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
+    mcp: MCP,
     systemPrompt: 'You are the triage agent.',
     timeoutMs: 1000,
   });
@@ -240,6 +246,8 @@ test('4B: still empty after the resume, the run rejects after exactly two prompt
     runAgent({
       model: 'anthropic/claude-sonnet-5',
       prompt: 'rule on this finding',
+      jsonSchema: SCHEMA,
+      mcp: MCP,
       systemPrompt: 'You are the triage agent.',
       timeoutMs: 1000,
     }),
@@ -269,6 +277,7 @@ test('C/F3: a schema-miss same-session retry does not double-count usage', async
   const run = await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'investigate',
+    mcp: MCP,
     jsonSchema: schema,
     timeoutMs: 1000,
   });
@@ -308,7 +317,7 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   // No mock of mcp-relay.js: it is cheap to run for real (binds a loopback port, does not touch
@@ -317,6 +326,7 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
     systemPrompt: 'You are the triage agent. Goals: ...',
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     maxTurns: 10,
@@ -347,12 +357,14 @@ test('5: triage opens external_directory to opencode\'s own tmp and tool-output 
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
+    mcp: MCP,
     systemPrompt: 'You are the triage agent.',
     timeoutMs: 1000,
   });
@@ -372,10 +384,10 @@ test('5: RCA (no systemPrompt) keeps external_directory as a blanket deny, uncha
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
-  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', timeoutMs: 1000 });
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
 
   assert.deepEqual(serverConfigs()[0].permission.external_directory, { '*': 'deny' });
 });
@@ -384,12 +396,13 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'investigate this finding',
+    jsonSchema: SCHEMA,
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     maxTurns: 10,
     timeoutMs: 1000,
@@ -441,6 +454,7 @@ test('decision 2: a failed server start still closes the relay, so it cannot han
     runAgent({
       model: 'anthropic/claude-sonnet-5',
       prompt: 'rule on this finding',
+      jsonSchema: SCHEMA,
       systemPrompt: 'You are the triage agent.',
       mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
       timeoutMs: 1000,
@@ -460,12 +474,13 @@ test('decision 2: a successful run also closes the relay once it is done', async
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
     systemPrompt: 'You are the triage agent.',
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     timeoutMs: 1000,
@@ -486,15 +501,15 @@ test('shutdown: runAgent does not return until an opencode that ignores SIGTERM 
   });
   const { runAgent } = require('../agent-stream');
 
-  mockSdk({ messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })] });
-  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 });
+  mockSdk({ messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })] });
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
   const [ok] = serverRecords();
   assert.equal(isAlive(ok.pid), false, 'a successful run returns only once the server process is gone');
 
   mock.reset();
   mockSdk({ messagesById: () => [assistantMessage({ usage: { input_tokens: 10, output_tokens: 0 } })] });
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
     /opencode produced no usable reply/,
   );
   const [failed] = serverRecords();

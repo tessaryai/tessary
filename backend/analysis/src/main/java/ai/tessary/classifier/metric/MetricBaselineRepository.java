@@ -32,7 +32,7 @@ public class MetricBaselineRepository {
     private static final String COLS = "id, project_id, classifier_id, measure, bucket_kind, bucket_key, "
             + "state, pinned_sketch_json, pinned_at, pinned_by_version_id, "
             + "current_sketch_json, pinned_workload_json, current_workload_json, "
-            + "pinned_tokens_json, pinned_refs_json, prev_tokens_json, current_tokens_json, "
+            + "pinned_tokens_json, pinned_refs_json, current_tokens_json, "
             + "current_refs_json, "
             + "control_json, current_opened_at, current_count, "
             + "counted_through_at, counted_through_id, last_event_at, created_at, updated_at";
@@ -69,7 +69,7 @@ public class MetricBaselineRepository {
         return jdbc.sql("INSERT INTO metric_baseline (" + COLS + ") VALUES (:id, :pid, :sid, :measure, "
                         + ":bucketKind, :bucketKey, :state, :pinnedSketch, :pinnedAt, :pinnedVersion, "
                         + ":currentSketch, :pinnedWorkload, :currentWorkload, "
-                        + ":pinnedTokens, :pinnedRefs, :prevTokens, :currentTokens, :currentRefs, :control, "
+                        + ":pinnedTokens, :pinnedRefs, :currentTokens, :currentRefs, :control, "
                         + ":currentOpenedAt, :currentCount, :countedThroughAt, "
                         + ":countedThroughId, :lastEventAt, :createdAt, :updatedAt) "
                         + "ON CONFLICT (" + SCOPE_KEY + ") DO UPDATE "
@@ -90,7 +90,6 @@ public class MetricBaselineRepository {
                 .param("currentWorkload", seed.currentWorkloadJson())
                 .param("pinnedTokens", seed.pinnedTokensJson())
                 .param("pinnedRefs", seed.pinnedRefsJson())
-                .param("prevTokens", seed.prevTokensJson())
                 .param("currentTokens", seed.currentTokensJson())
                 .param("currentRefs", seed.currentRefsJson())
                 .param("control", seed.controlJson())
@@ -103,21 +102,6 @@ public class MetricBaselineRepository {
                 .param("updatedAt", seed.updatedAt())
                 .query((rs, n) -> map(rs))
                 .single();
-    }
-
-    /** The per-scope lookup, matching {@code ux_metric_baseline_scope} exactly. */
-    public Optional<MetricBaselineRow> find(
-            String projectId, String classifierId, String measure, String bucketKind, String bucketKey) {
-        return jdbc.sql("SELECT " + COLS + " FROM metric_baseline "
-                        + "WHERE project_id = :pid AND classifier_id = :sid AND measure = :measure "
-                        + "AND bucket_kind = :bucketKind AND bucket_key = :bucketKey")
-                .param("pid", projectId)
-                .param("sid", classifierId)
-                .param("measure", measure)
-                .param("bucketKind", bucketKind)
-                .param("bucketKey", bucketKey)
-                .query((rs, n) -> map(rs))
-                .optional();
     }
 
     public Optional<MetricBaselineRow> findById(String projectId, String id) {
@@ -249,53 +233,33 @@ public class MetricBaselineRepository {
      * tail of the window just closed into the window just opened. {@code current_count} is the per-window
      * counter and is the only one that resets.
      *
-     * <p>The new window is opened with a CARRY rather than empty, because a batch legitimately straddles
-     * the cut: windows are cut on event time and a single ingest page can contain samples from both
-     * sides of the boundary. The caller splits the batch and hands back the far side, so those samples
-     * land in the window they belong to instead of being counted into the closed one or dropped. A
-     * close that happens to fall on a page boundary passes {@code null} / {@code 0}.
-     *
-     * @param openedAt event time to open the new window at, or null to let the next batch's earliest
-     *     sample set it.
+     * <p>The new window opens empty, its open time left for the next batch's earliest sample to set. A
+     * batch that straddles the cut writes its far side into the new window afterwards, through
+     * {@link #advanceWindow} and {@link #updateCurrentSketch}.
      */
-    public void closeWindow(
-            String id,
-            @Nullable String controlJson,
-            @Nullable String openedAt,
-            @Nullable String carriedSketchJson,
-            @Nullable String carriedWorkloadJson,
-            @Nullable String carriedTokensJson,
-            @Nullable String carriedRefsJson,
-            long carriedCount,
-            String now) {
+    public void closeWindow(String id, @Nullable String controlJson, String now) {
         jdbc.sql("""
             UPDATE metric_baseline
                SET control_json = CAST(:control AS text),
-                   current_sketch_json = CAST(:carriedSketch AS text),
+                   current_sketch_json = NULL,
                    -- Both sidecars rotate with the sketch they describe, in the same statement. A window,
                    -- its workload and its token decomposition are three summaries of ONE set of turns, and
                    -- a finding's whole argument is that they moved differently — which is only readable if
                    -- they are guaranteed to cover the same turns. That is also why the closed window's
                    -- three blobs go into the control ring TOGETHER, in the same day slot, rather than the
                    -- measure sketch rolling on its own.
-                   current_workload_json = CAST(:carriedWorkload AS text),
-                   current_tokens_json = CAST(:carriedTokens AS text),
+                   current_workload_json = NULL,
+                   current_tokens_json = NULL,
                    -- The refs rotate here too, and must: they are the rows the NEW window is a claim
                    -- about, so a close that folded the sketch but left the old list behind would open a
                    -- window already holding the closed window's population.
-                   current_refs_json = CAST(:carriedRefs AS text),
-                   current_opened_at = CAST(:openedAt AS text),
-                   current_count = :carriedCount,
+                   current_refs_json = NULL,
+                   current_opened_at = NULL,
+                   current_count = 0,
                    updated_at = :now
              WHERE id = :id
             """)
                 .param("control", controlJson)
-                .param("carriedSketch", carriedSketchJson)
-                .param("carriedWorkload", carriedWorkloadJson)
-                .param("carriedTokens", carriedTokensJson)
-                .param("carriedRefs", carriedRefsJson)
-                .param("openedAt", openedAt)
-                .param("carriedCount", carriedCount)
                 .param("now", now)
                 .param("id", id)
                 .update();
@@ -354,7 +318,7 @@ public class MetricBaselineRepository {
 
     /**
      * Move the state machine — {@code learning} → {@code armed} once the bucket has enough samples to be
-     * compared, or → {@code stale} when its sketch stopped describing it. Separate from
+     * compared. Separate from
      * {@link #advanceWindow} because arming is a decision about the row rather than an observation of
      * traffic, and the sweep must not be able to arm a bucket as a side effect of counting.
      */
@@ -383,7 +347,6 @@ public class MetricBaselineRepository {
                 rs.getString("current_workload_json"),
                 rs.getString("pinned_tokens_json"),
                 rs.getString("pinned_refs_json"),
-                rs.getString("prev_tokens_json"),
                 rs.getString("current_tokens_json"),
                 rs.getString("current_refs_json"),
                 rs.getString("control_json"),

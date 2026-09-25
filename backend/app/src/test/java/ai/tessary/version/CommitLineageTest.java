@@ -74,7 +74,8 @@ class CommitLineageTest {
         var fix = TenantFixture.bootstrap(tenants, "lineage-substrate");
         String pid = fix.project().id();
         String now = Instant.now().toString();
-        ProjectVersionRow ver = versions.findOrMaterialize(pid, "sha-substrate", ProjectVersionRow.REASON_BENCHMARK);
+        ProjectVersionRow ver =
+                versions.findOrMaterialize(pid, "sha-substrate", ProjectVersionRow.REASON_PIPELINE_SYNC);
 
         String sessionId = SubstrateV2Fixtures.sessionId();
         String traceId = SubstrateV2Fixtures.traceId();
@@ -91,13 +92,9 @@ class CommitLineageTest {
         assertSha(ver, lineage.resolve(pid, NodeKind.SESSION, sessionId), "session resolves as MAX over its traces");
         assertSha(ver, lineage.resolve(pid, NodeKind.TURN, traceId), "a turn IS a trace, under the legacy name");
         assertSha(ver, lineage.resolve(pid, NodeKind.TRACE, traceId), "trace resolves via its own column");
-        assertSha(
-                ver,
-                lineage.resolve(pid, NodeKind.SPAN, traceId, span.spanId()),
-                "a span resolves via its own column, addressed by the producer PAIR");
         assertTrue(
                 lineage.resolve(pid, NodeKind.SPAN, span.spanId()).isEmpty(),
-                "and a bare span id resolves to nothing rather than to whichever trace reused it");
+                "a bare span id resolves to nothing rather than to whichever trace reused it");
     }
 
     private static void assertSha(ProjectVersionRow expected, Optional<ProjectVersionRow> actual, String message) {

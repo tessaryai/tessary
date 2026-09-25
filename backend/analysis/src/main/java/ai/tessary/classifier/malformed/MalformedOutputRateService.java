@@ -21,7 +21,6 @@ import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
@@ -215,10 +214,6 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
         body.put("threshold", d.threshold());
         body.put("criticality", d.criticality());
         if (d.onsetAt() != null) body.put("onset_at", d.onsetAt());
-        try {
-            return mapper.writeValueAsString(body);
-        } catch (JsonProcessingException e) {
-            return "{\"call_site_id\":\"" + callSite + "\"}";
-        }
+        return mapper.valueToTree(body).toString();
     }
 }

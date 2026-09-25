@@ -155,14 +155,9 @@ public class DeviceLinkService {
         }
 
         // Throttle: enforce the advertised poll interval per code.
-        if (l.lastPolledAt() != null) {
-            try {
-                if (Instant.parse(l.lastPolledAt()).isAfter(Instant.now().minusSeconds(POLL_INTERVAL_SECONDS))) {
-                    return PollOutcome.of("slow_down");
-                }
-            } catch (Exception ignored) {
-                /* fall through */
-            }
+        if (l.lastPolledAt() != null
+                && Instant.parse(l.lastPolledAt()).isAfter(Instant.now().minusSeconds(POLL_INTERVAL_SECONDS))) {
+            return PollOutcome.of("slow_down");
         }
         links.recordPoll(l.id(), Instant.now().toString(), l.pollCount() + 1);
 
@@ -191,11 +186,7 @@ public class DeviceLinkService {
     }
 
     private static boolean isExpired(DeviceLink l) {
-        try {
-            return Instant.parse(l.expiresAt()).isBefore(Instant.now());
-        } catch (Exception e) {
-            return true;
-        }
+        return Instant.parse(l.expiresAt()).isBefore(Instant.now());
     }
 
     private String generateUserCode() {

@@ -85,18 +85,17 @@ public final class KindNormalizer {
      * call. No {@code tessary.*} attribute participates in kind resolution.
      *
      * @param operationName the (possibly foreign-normalized) OTel operation name; nullable
-     * @param attrs the span's flattened attribute bag (reads {@code gen_ai.tool.type}); may be null
+     * @param attrs the span's flattened attribute bag (reads {@code gen_ai.tool.type})
      */
     public static @Nullable String normalize(
-            @Nullable String operationName, @Nullable Map<String, ? extends @Nullable Object> attrs) {
+            @Nullable String operationName, Map<String, ? extends @Nullable Object> attrs) {
         if ("execute_tool".equals(operationName) && "extension".equals(str(attrs, GenAiAttributes.TOOL_TYPE))) {
             return MCP;
         }
         return normalize(operationName);
     }
 
-    private static @Nullable String str(@Nullable Map<String, ? extends @Nullable Object> attrs, String key) {
-        if (attrs == null) return null;
+    private static @Nullable String str(Map<String, ? extends @Nullable Object> attrs, String key) {
         Object v = attrs.get(key);
         return v == null ? null : v.toString();
     }

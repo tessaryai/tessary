@@ -14,7 +14,6 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetectorSupplier;
-import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.Capability;
@@ -100,18 +99,17 @@ class ClassifierModelModuleCatalogTest {
         BuiltInClassifierCatalog catalog = catalog();
         List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog.builtIns();
         assertEquals(
-                9,
+                7,
                 builtIns.size(),
-                "nine built-in classifiers ship (four observation/turn-grain + five fitting-tier: "
-                        + "behaviour drift, duration drift, cost drift, tool errors and SOP conformance)");
+                "seven built-in classifiers ship (four observation/turn-grain + three fitting-tier: "
+                        + "duration drift, cost drift and tool errors)");
         for (BuiltInClassifierCatalog.BuiltIn b : builtIns) {
             Grain grain = catalog.grainFor(b.detector());
-            if (Grain.TRACE == grain || Grain.WINDOW == grain) {
+            if (Grain.WINDOW == grain) {
                 // The fitting tier: these ship as per-project fitting procedures rather than models, so
-                // they contribute catalog metadata and no BuiltInDetector. Trace-grain behaviour drift
-                // implements TrajectoryDetector and is dispatched by BehaviorDriftSweep; the two
-                // window-grain metric classifiers are dispatched by MetricDriftSweep; window-grain SOP
-                // conformance and tool errors are peeled off ahead of it to their own sweeps.
+                // they contribute catalog metadata and no BuiltInDetector. The two window-grain metric
+                // classifiers are dispatched by MetricDriftSweep; tool errors are peeled off ahead of it
+                // to their own sweep.
                 assertNull(
                         catalog.detectorFor(b.detector()), b.classifierKey() + " is fitting-tier: no BuiltInDetector");
                 continue;
@@ -184,53 +182,6 @@ class ClassifierModelModuleCatalogTest {
         assertTrue(config.contains("\"settle_seconds\":300"), config);
     }
 
-    /**
-     * SOP conformance is flag-governed like every built-in: it seeds enabled, and the only thing
-     * between it and an org is {@code sop_conformance_enabled}, which stays off for everyone until a
-     * per-project bundle exists to deploy. Its config keys must also actually bind: this repo's
-     * known bug class is a config_json key that silently no-ops because nothing asserts it reaches
-     * what it configures. What is asserted here is the half that belongs to the catalog: the flag,
-     * the fitting-tier shape, the seeded version, and that {@code measures} reaches {@code
-     * MetricDriftConfig} as an explicit empty list, because this module is window-grain and an
-     * absent measures list falls back to the duration measures, which would open duration findings
-     * under the conformance switch.
-     *
-     * <p>The other half lives elsewhere: the assertions that the drift knobs reach {@code
-     * ConformanceConfig} sit in the package they are about, which this file has no dependency on.
-     */
-    @Test
-    void sopConformanceIsFlagGovernedAndItsConfigKeysBind() {
-        BuiltInClassifierCatalog catalog = catalog();
-        BuiltInClassifierCatalog.BuiltIn conformance = builtIn(catalog.builtIns(), "sop_conformance");
-        assertEquals(
-                Capability.SOP_CONFORMANCE,
-                conformance.capability(),
-                "the flag is the only thing between an inert-by-design classifier and an org — it must exist");
-        // Fitting-tier shape: WINDOW grain, no BuiltInDetector to dispatch.
-        assertEquals(Grain.WINDOW, catalog.grainFor(BuiltInDetector.Kind.SOP_CONFORMANCE));
-        assertNull(catalog.detectorFor(BuiltInDetector.Kind.SOP_CONFORMANCE));
-
-        String config = configOf(catalog.builtIns(), "sop_conformance");
-        assertNotNull(config);
-        ObjectMapper mapper = new ObjectMapper();
-
-        // The seeded blob's own text, which the catalog owns and can assert without naming a
-        // conformance type. That the values parse into ConformanceConfig is proven elsewhere.
-        assertTrue(config.contains("\"alpha\":0.01"), config);
-        assertTrue(config.contains("\"min_activations\":30"), config);
-        assertTrue(config.contains("\"settle_seconds\":300"), config);
-        assertTrue(config.contains("\"drift_window_turns\":2000"), config);
-        // shadow_mode (v3): a project opts into shadow, and a detector silently muted by a default
-        // would be the worst version of this bug class, so the seeded blob must surface it.
-        assertTrue(config.contains("\"shadow_mode\":false"), config);
-
-        // Binding 2: measures is present, empty, and keeps the WINDOW dispatch inert.
-        assertTrue(config.contains("\"measures\":[]"), config);
-        assertTrue(
-                MetricDriftConfig.of(mapper, config).measured().isEmpty(),
-                "an enabled sop_conformance row must no-op in the metric-drift fold, not open metric findings");
-    }
-
     private static BuiltInClassifierCatalog.BuiltIn builtIn(
             List<BuiltInClassifierCatalog.BuiltIn> builtIns, String key) {
         return builtIns.stream()
@@ -273,12 +224,6 @@ class ClassifierModelModuleCatalogTest {
         assertEquals(4, versionOf(builtIns, "duration_drift"));
         // 3: the same escalation cap, joined and then removed, kept in step with duration drift's blob.
         assertEquals(3, versionOf(builtIns, "cost_drift"));
-        // 4: the user-facing description gained the second gate annotation (gate precision
-        // degraded); description re-sync rides the same version gate as the blob. 3: shadow_mode
-        // joined the blob. 2 was the serving knobs (settle_seconds, drift_window_turns) when
-        // ConformanceSweep took over the dispatch. Any future change to its config blob must bump
-        // this or already-seeded projects never see it.
-        assertEquals(4, versionOf(builtIns, "sop_conformance"));
         // frustration and groundedness carry a shifted operating point; secret_leak carries its arming bar,
         // which its detector ignores and ClassifierArming reads.
         assertNotNull(configOf(builtIns, "frustration"));
@@ -298,7 +243,6 @@ class ClassifierModelModuleCatalogTest {
         // Frustration is the one turn-grain built-in: its subject is the user's message, and the
         // user says it once per turn however many spans the turn fans out into.
         assertEquals(Grain.TURN, catalog.grainFor(BuiltInDetector.Kind.FRUSTRATION));
-        assertEquals(Grain.TRACE, catalog.grainFor(BuiltInDetector.Kind.BEHAVIOR_DRIFT));
         // Duration drift's scored unit is a window of one bucket's traffic summarized as a
         // distribution: not a span, not a turn, not a trace. It also spans two candidate grains
         // (turns and tool calls) under one switch, which a single catalog grain could not have

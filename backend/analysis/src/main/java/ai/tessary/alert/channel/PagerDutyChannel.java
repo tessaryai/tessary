@@ -3,7 +3,6 @@ package ai.tessary.alert.channel;
 
 import ai.tessary.alert.AlertChannelKind;
 import ai.tessary.alert.AlertEventRow;
-import ai.tessary.alert.AlertRuleRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -50,7 +49,7 @@ public class PagerDutyChannel implements AlertChannel {
         ObjectNode payload = mapper.createObjectNode();
         payload.put("summary", AlertPayload.summary(event, mapper));
         payload.put("source", "tessary/" + event.projectId());
-        payload.put("severity", AlertRuleRow.RuleType.THRESHOLD.equals(event.ruleType()) ? "warning" : "info");
+        payload.put("severity", "info");
         payload.set("custom_details", AlertPayload.envelope(event, mapper));
 
         ObjectNode body = mapper.createObjectNode();
@@ -59,12 +58,7 @@ public class PagerDutyChannel implements AlertChannel {
         body.put("dedup_key", AlertPayload.dedupKey(event));
         body.set("payload", payload);
 
-        String json;
-        try {
-            json = mapper.writeValueAsString(body);
-        } catch (Exception e) {
-            return DeliveryResult.failure(null, "could not serialize pagerduty event");
-        }
+        String json = body.toString();
         try {
             HttpResponse<String> res = ChannelHttp.post(url, Map.of(), json);
             int code = res.statusCode();

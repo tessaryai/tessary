@@ -9,8 +9,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Append-only store for {@link AuditLog} rows. Insert + read only; there is no update
- * or delete path — the trail is immutable. Reads are available by project (the API-key audit surface) and
- * by typed subject (the general governance surface).
+ * or delete path — the trail is immutable. Reads are available by project (the API-key audit surface).
  */
 @Repository
 public class AuditLogRepository {
@@ -49,18 +48,6 @@ public class AuditLogRepository {
         return jdbc.sql("SELECT " + COLS
                         + " FROM audit_log WHERE project_id = :pid ORDER BY occurred_at DESC, id DESC LIMIT :lim")
                 .param("pid", projectId)
-                .param("lim", Math.max(1, limit))
-                .query(AuditLogRepository::map)
-                .list();
-    }
-
-    /** The trail for one typed subject (e.g. all actions on a given API key), newest first. */
-    public List<AuditLog> findBySubject(String projectId, String subjectKind, String subjectId, int limit) {
-        return jdbc.sql("SELECT " + COLS + " FROM audit_log WHERE project_id = :pid AND subject_kind = :sk "
-                        + "AND subject_id = :sid ORDER BY occurred_at DESC, id DESC LIMIT :lim")
-                .param("pid", projectId)
-                .param("sk", subjectKind)
-                .param("sid", subjectId)
                 .param("lim", Math.max(1, limit))
                 .query(AuditLogRepository::map)
                 .list();

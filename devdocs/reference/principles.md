@@ -13,7 +13,7 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
 - **Detectors are transparent, ownable, and portable.** Customers can inspect every classifier's
   threshold and the evidence behind every finding, and take the pipeline bundle with them if they
   leave. An opaque detector dies at the buyer's code review and is unadoptable by regulated buyers.
-  The proprietary asset is the trained classifier weights and the cross-customer priors, not any
+  The proprietary asset is the trained classifier weights, not any
   individual threshold. Model-backed detection runs on the operator's own provider credentials, so
   the escalation path is theirs to see and theirs to keep. *(This read "graders" until they were
   removed; the principle transferred to what the product actually detects with.)*
@@ -21,28 +21,12 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   substrate `sdk` source); we do not reach into vendor APIs to fetch them. This is an
   integration constraint, not a positioning claim — a design that polls another vendor's store
   should be surfaced before implementing.
-- **No shared-model training — a code-asserted guarantee, not a config knob.**
-  `PriorsService.noSharedModelTrainingPermitted()` returns `true` unconditionally, and
-  `NoSharedModelTrainingGuaranteeTest` is the tripwire proving customer data reaches no
-  training/fine-tune sink. There is deliberately no property to turn this off, because a
-  "shared-model training" mode must not exist as a product configuration. The only
-  customer-derived signal that crosses a tenant boundary is the consented, k-anonymity +
-  DP-ε-gated aggregate `DerivedPrior`, and it is never a training input. Two tests are the
-  code-side evidence: `NoSharedModelTrainingGuaranteeTest` proves a contribution reaches only the
-  platform's own store and no second sink, and `PriorContributionGuardTest` proves the only
-  cross-tenant type carries aggregates, never raw content. That the *inference provider* in the
-  path does not train on our traffic is an external contract claim, not something this code can
-  assert — which provider is in the path is a deployment choice, so it is the operator's to
-  confirm against their own configuration.
-- **Single-tenant intelligence mode is default-on and fail-closed.**
-  `tessary.intelligence-mode.single-tenant` (default `true`) is the coarse tenancy gate sitting above
-  the governed pooling pipeline's own switch (`tessary.priors.enabled`, default `false`) — two
-  independent gates, the outer one in the safe state, so an accidentally enabled `tessary.priors.*`
-  can never pool across tenants. With it on, `PriorsService` refuses every cross-tenant operation
-  before storage is touched: `optIn` is a no-op, `contribute` returns `false`, `derive` returns
-  `Optional.empty()`. `SingleTenantModeTest` asserts it with no database — even with pooling
-  enabled, consent reported and a publishable cohort, the mocked repository sees zero interactions.
-  Boot-time posture is evidenced in `intelligence_mode_audit`.
+- **No shared-model training.** Customer data reaches no training or fine-tune sink, and there is
+  deliberately no property to turn this off, because a "shared-model training" mode must not exist
+  as a product configuration. That the *inference provider* in the path does not train on our
+  traffic is an external contract claim, not something this code can assert — which provider is in
+  the path is a deployment choice, so it is the operator's to confirm against their own
+  configuration.
 
 ## The eval contract
 
@@ -156,8 +140,7 @@ never really about grading:
   that maps to a content type is a routed case in `ContentExtractor` at ingestion and render,
   never an analysis redesign. The model-facing media boundary was removed along with
   grading (`llm/ContentBlocks` and its 422 reject on `UNSUPPORTED_CONTENT_TYPE` are gone with
-  the judge's request build — `JudgeError.UNSUPPORTED_CONTENT_TYPE`/`MEDIA_NOT_FOUND` stay
-  declared in the wire catalogue but nothing raises them); an unrecoverable media block now
+  the judge's request build, and so is the `JudgeError` catalogue); an unrecoverable media block now
   degrades to a labeled placeholder on export (`[image: <url>]` / `[document omitted: ...]`),
   lossless-or-labeled, never a silent collapse to plain text.
 - **LLM inputs are never truncated.** Trace/span content fed to any platform LLM lane is bounded
@@ -167,7 +150,7 @@ never really about grading:
 - **Cheap detection runs on all traffic; LLM work is the escalation.** Deterministic
   pattern/telemetry detectors and the `groundedness` encoder, a token head the self-hoster serves on
   their own GPU with `classifiers/groundedness/serve.py`, run unsampled: model cost is paid at
-  train/serve time, not per event. classify-service serves no classifier head in the open edition.
+  train/serve time, not per event.
   (The per-project trained centroid classifier was removed along with the vector
   substrate; the only user-authored classifier kind today is the regex detector.) An
   LLM only runs once a cheap detector has already filed a finding. This was the "online

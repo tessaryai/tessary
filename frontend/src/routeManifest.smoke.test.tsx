@@ -10,12 +10,12 @@
  *
  * WHY MOUNT THE REAL APP rather than hand-select a provider stack per route: App.tsx itself
  * decides which of TenantProvider/CapabilityGate/ProtectedRoute apply to a given URL (some view
- * entries must NOT be wrapped in TenantProvider, which throws synchronously outside the tenant
- * prefix — see TenantContext.tsx). Mounting the real App and letting its own <Routes> tree pick
+ * entries must NOT be wrapped in TenantProvider, which needs the tenant prefix's params — see
+ * TenantContext.tsx). Mounting the real App and letting its own <Routes> tree pick
  * the wrapper avoids getting that call wrong here.
  *
- * MOCKING STRATEGY. auth.me()/getCapabilities()/getGradingStatus()/listProjects() are called
- * unconditionally on mount (AuthProvider, useCapabilities, the shell chrome's grading banner and
+ * MOCKING STRATEGY. auth.me()/getCapabilities()/listProjects() are called
+ * unconditionally on mount (AuthProvider, useCapabilities, the shell chrome's
  * sidebar) — these get fixed, realistic answers below so every route gets past the loading screen.
  * FAKE_ME.orgs stands in for the org list: RootRedirect, Sidebar, and Link all read it off
  * GET /auth/me. Every other `auth` method is a mutation, never invoked at mount, so it is stubbed
@@ -51,22 +51,18 @@ import type {
   MalformedOutputDetail,
   MalformedOutputPage,
   RcaReport,
-  SecretLeakDetail,
 } from "./api/types";
+import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
 import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
-// Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT
+// Capability defaults mirror CapabilityService.OFF_BY_DEFAULT
 // (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java): every wire key is true
-// except these three, which this deployment reports unavailable/off.
-const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
-  "triage_automatic_enabled",
-  "behavior_drift_enabled",
-  "sop_conformance_enabled",
-];
+// except this one.
+const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled"];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
   "rca_enabled",
@@ -82,12 +78,10 @@ const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "groundedness_enabled",
   "secret_leak_enabled",
   "malformed_output_enabled",
-  "behavior_drift_enabled",
-  "sop_conformance_enabled",
   "triage_automatic_enabled",
 ];
 const OPEN_EDITION_CAPABILITIES: Record<CapabilityWire, boolean> = Object.fromEntries(
-  ALL_CAPABILITY_KEYS.map((k) => [k, !UNAVAILABLE_OR_OFF_IN_OPEN_EDITION.includes(k)]),
+  ALL_CAPABILITY_KEYS.map((k) => [k, !OFF_IN_OPEN_EDITION.includes(k)]),
 ) as Record<CapabilityWire, boolean>;
 
 const FAKE_ME = {
@@ -130,8 +124,7 @@ function unusedMutation(name: string) {
 vi.mock("./api/client", () => {
   const auth = {
     me: vi.fn(() => Promise.resolve(FAKE_ME)),
-    getCapabilities: vi.fn(() => Promise.resolve({ capabilities: OPEN_EDITION_CAPABILITIES, unavailable: UNAVAILABLE_OR_OFF_IN_OPEN_EDITION })),
-    getGradingStatus: vi.fn(() => Promise.resolve({ paused: false, since: null })),
+    getCapabilities: vi.fn(() => Promise.resolve({ capabilities: OPEN_EDITION_CAPABILITIES })),
     listProjects: vi.fn(() => Promise.resolve([FAKE_PROJECT])),
     getOrg: vi.fn(() => Promise.resolve(FAKE_ORG)),
     listMembers: vi.fn(() => Promise.resolve([])),
@@ -143,19 +136,12 @@ vi.mock("./api/client", () => {
     login: unusedMutation("login"),
     signup: unusedMutation("signup"),
     logout: unusedMutation("logout"),
-    createOrg: unusedMutation("createOrg"),
     addMember: unusedMutation("addMember"),
     revokeInvitation: unusedMutation("revokeInvitation"),
     updateMember: unusedMutation("updateMember"),
     removeMember: unusedMutation("removeMember"),
     createProject: unusedMutation("createProject"),
-    getBilling: unusedMutation("getBilling"),
-    getLlmUsage: unusedMutation("getLlmUsage"),
-    getLlmUsageSeries: unusedMutation("getLlmUsageSeries"),
     updateOrg: unusedMutation("updateOrg"),
-    // archiveOrg/unarchiveOrg/deleteOrg/transferOwnership live elsewhere now -- the `auth` export
-    // here no longer has them to mock.
-    updateProject: unusedMutation("updateProject"),
     makeProjectDefault: unusedMutation("makeProjectDefault"),
     archiveProject: unusedMutation("archiveProject"),
     unarchiveProject: unusedMutation("unarchiveProject"),
@@ -489,7 +475,7 @@ const VIEW_ORG_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>>
 const T0 = "2026-01-06T10:00:00Z";
 const T1 = "2026-01-06T12:00:00Z";
 
-const SECRET_LEAK: SecretLeakDetail = {
+const SECRET_LEAK: components["schemas"]["SecretLeakDetail"] = {
   basis: "Any high-confidence match opens a case.",
   confidence: "high",
   firstAt: T0,
@@ -650,7 +636,6 @@ function findingDetail(
 ): BehaviorFindingDetail {
   return {
     armedWindow: null,
-    baseline: null,
     frustration: null,
     groundedness: null,
     malformedOutput: null,
@@ -662,9 +647,7 @@ function findingDetail(
       caseId: "case-1",
       causeKey: `${detector}:extract.order`,
       causeKind,
-      conformanceKind: null,
       detector,
-      evidence: [],
       firstSeenAt: T0,
       humanVerdictAt: null,
       id: "finding-1",
@@ -702,13 +685,13 @@ const FINISHED_RCA: RcaReport = {
   prior_value: 0.02,
   repo_available: true,
   report_kind: "degradation",
-  ruled_out: [{ assessment: null, check: "traffic_mix", detail: "Traffic mix unchanged.", measurement: null, passed: true }],
+  ruled_out: [{ assessment: "ruled_out", check: "traffic_mix", detail: "Traffic mix unchanged.", measurement: null, passed: true }],
   status: "done",
   subject_id: "extract.order",
   subject_kind: "call_site",
   subject_label: "extract.order",
   summary: "The prompt change dropped the sku field.",
-  verdict: "regression",
+  verdict: "behavior_change",
   window_from: "2026-01-05T10:00:00Z",
   window_split: T0,
   window_to: T1,
@@ -786,7 +769,7 @@ function renderApp(url: string) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <DensityProvider persist className="contents">
+        <DensityProvider className="contents">
           <MemoryRouter initialEntries={[url]}>
             <App />
           </MemoryRouter>
@@ -961,7 +944,7 @@ describe("route manifest render smoke test", () => {
 
     await waitFor(() => {
       // "Projects" -- the section that stays open -- must actually be there, so an absent
-      // "Organizations" heading means the paid section didn't render, not that the dropdown itself
+      // "Organizations" heading means no org section rendered, not that the dropdown itself
       // never opened.
       expect(container.textContent).toContain("Projects");
     });

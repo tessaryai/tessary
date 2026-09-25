@@ -80,15 +80,9 @@ public final class MetricFindingEvidence {
         };
     }
 
-    /** A sentence, not a metric: the finding's title as prose, rendered in place of the raw key. */
-    public static String title(String measure, String bucketKey, Decision decision) {
-        return title(measure, bucketKey, decision.ratio(), decision.direction());
-    }
-
     /**
-     * The same sentence built from a shift already written down, reading the numbers back out of the
-     * stored evidence ({@link #read}). Shared with the {@link Decision} overload rather than
-     * reimplemented, so a case and the finding it came from can never disagree about the number.
+     * A sentence, not a metric: the finding's title as prose, rendered in place of the raw key, built from
+     * a shift already written down by reading the numbers back out of the stored evidence ({@link #read}).
      */
     public static String title(String measure, String bucketKey, double ratio, Direction direction) {
         String subject = Measure.TOOL_DURATION.equals(measure) ? "calls" : "turns";
@@ -389,8 +383,8 @@ public final class MetricFindingEvidence {
             String bucketKind,
             String bucketKey,
             Decision decision,
-            MetricSketch ref,
-            MetricSketch cur,
+            MetricReading ref,
+            MetricReading cur,
             @Nullable MetricWorkload refWorkload,
             @Nullable MetricWorkload curWorkload,
             @Nullable MetricTokens refTokens,
@@ -532,7 +526,7 @@ public final class MetricFindingEvidence {
      * <p>Public because {@link ai.tessary.classifier.metric.MetricSuppression} decides in the same
      * units this blob prints; the two must not disagree about what a bucket's p50 is.
      */
-    public static OptionalDouble rawQuantile(MetricSketch sketch, double q) {
+    public static OptionalDouble rawQuantile(MetricReading sketch, double q) {
         if (sketch.count() == 0) return OptionalDouble.empty();
         Double logValue = sketch.quantile(q);
         return logValue == null ? OptionalDouble.empty() : OptionalDouble.of(Math.exp(logValue));

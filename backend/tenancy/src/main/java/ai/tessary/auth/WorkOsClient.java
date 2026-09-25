@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code GET /user_management/authorize?...} — returns the AuthKit redirect URL</li>
  *   <li>{@code POST /user_management/authenticate} (grant_type=authorization_code)</li>
  *   <li>{@code POST /user_management/authenticate} (grant_type=refresh_token)</li>
- *   <li>{@code GET /user_management/sessions/logout?...} — returns the WorkOS logout URL</li>
  *   <li>{@code POST /user_management/invitations} — sends an invitation email</li>
  *   <li>{@code POST /user_management/invitations/{id}/revoke} — revokes a pending invitation</li>
  * </ul>
@@ -55,11 +54,6 @@ public class WorkOsClient implements AuthProvider {
     public WorkOsClient(WorkOsProperties props, ObjectMapper mapper) {
         this.props = props;
         this.mapper = mapper;
-    }
-
-    @Override
-    public boolean isEnabled() {
-        return props.isEnabled();
     }
 
     /** Build the AuthKit authorisation URL the browser is redirected to. */
@@ -112,21 +106,13 @@ public class WorkOsClient implements AuthProvider {
     @Override
     public Invitation createInvitation(String email) {
         JsonNode body = postBearer("/user_management/invitations", Map.of("email", email));
-        return new Invitation(
-                body.path("id").asText(null), body.path("accept_invitation_url").asText(null));
+        return new Invitation(body.path("id").asText(null));
     }
 
     /** Revoke a previously-sent invitation. Best-effort; surfaces failure to the caller. */
     @Override
     public void revokeInvitation(String workosInvitationId) {
         postBearer("/user_management/invitations/" + enc(workosInvitationId) + "/revoke", Map.of());
-    }
-
-    /** Build a WorkOS-signed logout URL; client should redirect the browser to it. */
-    public String getLogoutUrl(String sessionId, @Nullable String returnTo) {
-        StringBuilder qs = new StringBuilder("session_id=").append(enc(sessionId));
-        if (returnTo != null && !returnTo.isBlank()) qs.append("&return_to=").append(enc(returnTo));
-        return BASE + "/user_management/sessions/logout?" + qs;
     }
 
     private JsonNode post(String path, Map<String, Object> body) {

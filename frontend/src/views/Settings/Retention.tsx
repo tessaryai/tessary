@@ -127,7 +127,7 @@ export function Retention() {
                         <Input
                           {...p}
                           inputMode="numeric"
-                          value={draft ?? ""}
+                          value={draft}
                           disabled={!canManage}
                           onChange={(e) => setDrafts((d) => ({ ...d, [c.data_class]: e.target.value }))}
                           className="max-w-[160px]"

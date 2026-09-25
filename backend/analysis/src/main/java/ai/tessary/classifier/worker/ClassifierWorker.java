@@ -84,7 +84,7 @@ public class ClassifierWorker {
      * {@code batch-size}: each observation is a model call, so a page is sized to finish well inside the
      * lease on a CPU encoder, the cursor lands after every page, and the scorer holds at most {@code
      * tessary.observer.encoder.max-inflight} requests open and backs off on a 429 — so a backlog reaches
-     * the classify service at the pace it can take, never as one tick's worth of calls.
+     * the encoder at the pace it can take, never as one tick's worth of calls.
      */
     private static final Set<String> DRAIN_TO_HEAD = Set.of(
             BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT, BuiltInDetector.Kind.GROUNDEDNESS);
@@ -239,7 +239,7 @@ public class ClassifierWorker {
     /**
      * Run one classifier's sweep: load its (enabled) definition, dispatch its detector over observations
      * past the cursor, write fired detections idempotently, advance the cursor to the last observation
-     * seen. An inert/unknown detector is a cursor-advancing no-op (so it doesn't re-scan forever).
+     * seen. A kind with no detection table completes without scoring (so it doesn't re-scan forever).
      */
     private void sweep(ClassifierJobRow job) {
         Map<String, String> ctx = new LinkedHashMap<>();
@@ -351,7 +351,7 @@ public class ClassifierWorker {
     /**
      * The body of one sweep, once the signal is resolved and its {@code classifierKey} is bound to
      * MDC. The grain enum is the single source of truth for which seam runs: the fitting tier
-     * (TRACE and WINDOW) scores a unit larger than an observation against fitted per-project state,
+     * (WINDOW) scores a unit larger than an observation against fitted per-project state,
      * so it can't ride the observation-grain detector seam, but it reuses this job's cursor, lease,
      * and dead-letter budget verbatim. There's no new scheduler and no new job table for any of it.
      *
@@ -361,7 +361,7 @@ public class ClassifierWorker {
     private void sweepSignal(ClassifierJobRow job, ClassifierRow signal, Instant start) {
         Grain grain = catalog.grainFor(signal.detector());
         switch (grain) {
-            case TRACE, WINDOW -> {
+            case WINDOW -> {
                 Optional<ClassifierSweep> sweep = sweeps.forKind(signal.detector());
                 if (sweep.isEmpty()) {
                     // Inert, deliberately: not a throw and not a dead-letter, since this job is
@@ -398,58 +398,11 @@ public class ClassifierWorker {
     }
 
     /**
-     * Drop turns whose conversation this classifier has already flagged at the HIGH band.
-     *
-     * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on
-     * is the conversation, which is one event, not one per turn: one project measured 8.12
-     * frustration detections per conversation, each a separate encoder call, all saying the same
-     * thing.
-     *
-     * <p>HIGH is the ceiling, which is what makes this safe to skip rather than merely de-duplicate
-     * on write: no later turn can move a conversation already flagged at the top band. A
-     * conversation flagged only at LOW is deliberately still scored so it can escalate; suppressing
-     * on any band would freeze a mild early turn as the conversation's final answer.
-     *
-     * <p>Turns with no session id are never suppressed: a trace with no conversation has none to
-     * have been flagged, and {@code sessionId} is legitimately null for producers that send none.
-     *
-     * <p>This doesn't narrow what the classifier flags; a conversation still gets flagged the first
-     * time it earns it. It removes repeat rows about conversations already flagged, a volume and
-     * cost property, not a precision one.
-     */
-    private List<SubstrateObservation> suppressAlreadyFlaggedConversations(
-            String projectId,
-            ClassifierRow signal,
-            @Nullable BuiltInDetector detector,
-            List<SubstrateObservation> candidates) {
-        if (detector != null
-                && detector.conversationSuppression() == BuiltInDetector.ConversationSuppression.FLAGGED_UNCLEARED) {
-            return suppressUnclearedConversations(projectId, signal, candidates);
-        }
-        Set<String> sessions = candidates.stream()
-                .map(SubstrateObservation::sessionId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (sessions.isEmpty()) return candidates;
-        Set<String> flagged =
-                detections.sessionsAlreadyFlaggedHigh(signal.detector(), projectId, signal.id(), sessions);
-        if (flagged.isEmpty()) return candidates;
-        List<SubstrateObservation> kept = candidates.stream()
-                .filter(o -> o.sessionId() == null || !flagged.contains(o.sessionId()))
-                .toList();
-        StructuredLog.debug(log, "signal.sweep.conversation-suppressed")
-                .message("skipped %d turn(s) in conversations already flagged at high", candidates.size() - kept.size())
-                .field("signal", signal.classifierKey())
-                .field("suppressed", candidates.size() - kept.size())
-                .field("scored", kept.size())
-                .log();
-        return kept;
-    }
-
-    /**
-     * {@link #suppressAlreadyFlaggedConversations} for a detector that declares
-     * {@link BuiltInDetector.ConversationSuppression#FLAGGED_UNCLEARED}: a conversation with any detection
+     * Drop turns whose conversation this classifier has already flagged: a conversation with any detection
      * nobody has cleared is not scored again, whatever its band, and one whose flag was cleared is.
+     *
+     * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on is
+     * the conversation, which is one event, not one per turn.
      */
     private List<SubstrateObservation> suppressUnclearedConversations(
             String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
@@ -479,9 +432,8 @@ public class ClassifierWorker {
      * armed after its cursor lands, so a failure part way loses at most the page in hand.
      */
     private void sweepObservationGrain(ClassifierJobRow job, ClassifierRow signal, Grain grain, Instant start) {
-        // A detector with no registered DetectionTable has nowhere to write a fired detection:
-        // ClassifierDetectionWriteRepository#insert throws IllegalArgumentException for exactly this
-        // case, and the writer's own javadoc says the caller checks writesDetections first. Applies
+        // A detector with no registered DetectionTable has nowhere to write a fired detection, and
+        // ClassifierDetectionWriteRepository's own javadoc says the caller checks writesDetections first. Applies
         // to CLASSIFIER and REGEX too, since both route through this same TURN/OBSERVATION grain and
         // share user_classifier_detection.
         if (!detections.writesDetections(signal.detector())) {
@@ -501,7 +453,8 @@ public class ClassifierWorker {
             sweepFailures.clear(job.id());
             return;
         }
-        BuiltInDetector detector = catalog.detectorFor(signal.detector());
+        // writesDetections above guarantees a detector for this kind.
+        BuiltInDetector detector = Objects.requireNonNull(catalog.detectorFor(signal.detector()));
         String detectorConfig = signal.configJson();
         boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
         Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
@@ -654,7 +607,7 @@ public class ClassifierWorker {
             ClassifierJobRow job,
             ClassifierRow signal,
             Grain grain,
-            @Nullable BuiltInDetector detector,
+            BuiltInDetector detector,
             @Nullable String detectorConfig,
             @Nullable String cursorAt,
             @Nullable String cursorId,
@@ -670,10 +623,9 @@ public class ClassifierWorker {
             window = candidates.stream()
                     .map(SubstrateReadRepository.TurnCandidate::observation)
                     .toList();
-            obs = suppressAlreadyFlaggedConversations(
+            obs = suppressUnclearedConversations(
                     job.projectId(),
                     signal,
-                    detector,
                     oneScoredObservationPerTurn(candidates.stream()
                             .filter(SubstrateReadRepository.TurnCandidate::turnRoot)
                             .map(SubstrateReadRepository.TurnCandidate::observation)
@@ -684,7 +636,7 @@ public class ClassifierWorker {
         }
         if (window.isEmpty()) return null;
         if (detector instanceof PagedDetector<?> paged) {
-            return pagedPage(job, signal, grain, paged, window, obs);
+            return pagedPage(job, signal, paged, window, obs);
         }
 
         int fired = 0;
@@ -692,43 +644,30 @@ public class ClassifierWorker {
         // What this page flagged, in sweep order, as evidence refs, handed to the arming gate so a
         // finding it opens is already pointing at the spans that opened it.
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
-        if (detector != null) {
-            // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier
-            // scores the whole batch in one serving call. Inert/unknown kinds (detector == null)
-            // advance the cursor only.
-            List<Detection> scored = detector.sweepBatch(signal, obs, detectorConfig);
-            StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
-                    .field("job", job.id())
-                    .field("signal", signal.classifierKey())
-                    .field("classifierId", signal.id())
-                    .field("detector", signal.detector())
-                    .field("batchSize", obs.size())
-                    .log();
-            for (int i = 0; i < obs.size(); i++) {
-                Detection d = scored.get(i);
-                if (!d.fired()) continue;
-                // Write EVERY fired detection into this classifier's own table regardless of the
-                // classifier's mode, stamping the confidence band; the discovery/tracking mode gate is a
-                // READ-time filter, so flipping mode never loses history. Idempotent via the table's
-                // own subject index, so a genuinely-new firing is the one that inserts.
-                SubstrateObservation o = obs.get(i);
-                NewDetection nd = writeDetection(job.projectId(), signal, o, d);
-                if (nd != null) {
-                    if (firstNew == null) firstNew = nd;
-                    fired++;
-                    firedRefs.add(
-                            grain == Grain.TURN
-                                    ? FindingEvidenceRepository.Ref.trace(o.traceId())
-                                    : FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
-                }
+        // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier scores the
+        // whole batch in one serving call.
+        List<Detection> scored = detector.sweepBatch(signal, obs, detectorConfig);
+        StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
+                .field("job", job.id())
+                .field("signal", signal.classifierKey())
+                .field("classifierId", signal.id())
+                .field("detector", signal.detector())
+                .field("batchSize", obs.size())
+                .log();
+        for (int i = 0; i < obs.size(); i++) {
+            Detection d = scored.get(i);
+            if (!d.fired()) continue;
+            // Write EVERY fired detection into this classifier's own table regardless of the
+            // classifier's mode, stamping the confidence band; the discovery/tracking mode gate is a
+            // READ-time filter, so flipping mode never loses history. Idempotent via the table's
+            // own subject index, so a genuinely-new firing is the one that inserts.
+            SubstrateObservation o = obs.get(i);
+            NewDetection nd = writeDetection(job.projectId(), signal, o, d);
+            if (nd != null) {
+                if (firstNew == null) firstNew = nd;
+                fired++;
+                firedRefs.add(FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
             }
-        } else {
-            StructuredLog.info(log, Markers.OPS, "signal.sweep.inert-detector")
-                    .field("job", job.id())
-                    .field("signal", signal.classifierKey())
-                    .field("classifierId", signal.id())
-                    .field("detector", signal.detector())
-                    .log();
         }
 
         // Cursor advances over the WINDOW, not the scored subset: a per-turn duplicate dropped above must
@@ -759,7 +698,6 @@ public class ClassifierWorker {
     private <P extends PagedDetector.ScoredPage> Page pagedPage(
             ClassifierJobRow job,
             ClassifierRow signal,
-            Grain grain,
             PagedDetector<P> detector,
             List<SubstrateObservation> window,
             List<SubstrateObservation> obs) {
@@ -792,10 +730,7 @@ public class ClassifierWorker {
         for (PagedDetector.FiredTurn f : newlyFired) {
             if (firstNew == null) firstNew = new NewDetection(f.detectionId(), f.severity());
             SubstrateObservation o = f.turn();
-            firedRefs.add(
-                    grain == Grain.TURN
-                            ? FindingEvidenceRepository.Ref.trace(o.traceId())
-                            : FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
+            firedRefs.add(FindingEvidenceRepository.Ref.trace(o.traceId()));
         }
         return new Page(
                 window.size(),

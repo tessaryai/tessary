@@ -24,11 +24,11 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@code defaultConfigJson}: the per-classifier operating point (e.g. an encoder's
  *       confidence-band thresholds). A band edge must not sit where scores cluster, since scores
  *       wobble a few hundredths by batch composition and a near-threshold verdict could flip between runs.
- *   <li>{@code grain}: what the classifier scores, one observation, one user-facing turn, or a whole
- *       trace (see {@link Grain}). The worker reads this to pick the sweep's candidate query.
+ *   <li>{@code grain}: what the classifier scores, one observation, one user-facing turn, or a window
+ *       of one bucket (see {@link Grain}). The worker reads this to pick the sweep's candidate query.
  *   <li>{@code detectorFactory}: builds the detector from the shared {@link Deps}. {@code null} for
- *       a classifier that is not observation-grain (behaviour-drift implements the trace-grain
- *       {@code TrajectoryDetector} seam instead) or whose detector is supplied externally through the
+ *       a classifier that is not observation-grain (a window-grain classifier is dispatched through
+ *       its {@code ClassifierSweep} instead) or whose detector is supplied externally through the
  *       {@link DetectorSupplier} seam rather than built here. {@code grainFor} still answers
  *       correctly either way, since grain comes from this manifest's {@code grain} field, not from
  *       whether a factory is present.
@@ -112,17 +112,14 @@ public record ClassifierModelModule(
      *   <li>{@link #TURN}: one user-facing turn, scored on that turn's root observation. Correct for
      *       conversation-level heads whose subject is what the user said (frustration): the user spoke
      *       once, so the classifier must fire at most once.
-     *   <li>{@link #TRACE}: one whole trace, dispatched through the {@code ClassifierSweep} seam and
-     *       its {@code TrajectoryDetector} port rather than the observation-grain {@link BuiltInDetector}.
-     *   <li>{@link #WINDOW}: one window of one bucket. Several families share it, SOP conformance,
-     *       tool errors, and the metric-drift classifiers, and the worker routes between them by
+     *   <li>{@link #WINDOW}: one window of one bucket. Several families share it, tool errors and
+     *       the metric-drift classifiers, and the worker routes between them by
      *       looking the detector kind up in {@code ClassifierSweepRegistry}, with no fallthrough.
      * </ul>
      */
     public enum Grain {
         OBSERVATION,
         TURN,
-        TRACE,
 
         /**
          * One window of one bucket: a stretch of a call site's (or a tool's) own recent traffic,

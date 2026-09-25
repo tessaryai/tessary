@@ -154,9 +154,8 @@ test('providerConfig: the ANTHROPIC default baseURL carries the /v1 segment', ()
   // only `/messages`, so a bare `https://api.anthropic.com` POSTs to a 404. OpenCode's SERVER mode
   // folds that 404 into an EMPTY assistant turn instead of an error, so the whole run fails as
   // "opencode produced no usable reply" with zero tokens and a perfectly valid key — a failure that
-  // reads like a bad credential and is not one. langchain4j on the backend appends the bare path
-  // the same way (its own default already carries /v1/), so PlatformCatalog holds the /v1 form too
-  // and the two agree literally.
+  // reads like a bad credential and is not one. The backend's PlatformCatalog holds the /v1 form
+  // too, and the two agree literally.
   const cfg = providerConfig({ provider: 'ANTHROPIC', api_key: 'canary-anthropic' }, 'anthropic/claude-sonnet-5');
   assert.equal(cfg.provider.anthropic.options.baseURL, 'https://api.anthropic.com/v1');
   assert.equal(cfg.provider.anthropic.options.apiKey, 'canary-anthropic');

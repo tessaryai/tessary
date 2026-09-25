@@ -33,6 +33,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.sql.Timestamp;
@@ -422,17 +423,13 @@ class GroundednessRateIntegrationTest {
                 "job-1",
                 pid,
                 findingId,
-                null,
-                BuiltInDetector.Kind.GROUNDEDNESS,
                 "claimed",
                 null,
                 null,
                 0,
                 null,
                 "2026-09-01T00:00:00Z",
-                "2026-09-01T00:00:00Z",
-                null,
-                null);
+                "2026-09-01T00:00:00Z");
     }
 
     /** Whether a seeded trace had a second flagged answer: the even-numbered flagged ones do. */
@@ -480,7 +477,7 @@ class GroundednessRateIntegrationTest {
 
     private ClassifierRow groundedness(String pid) {
         classifierService.seedBuiltIns(pid);
-        return classifiers.findByKey(pid, "groundedness").orElseThrow();
+        return ClassifierRows.byKey(classifiers, pid, "groundedness").orElseThrow();
     }
 
     /**

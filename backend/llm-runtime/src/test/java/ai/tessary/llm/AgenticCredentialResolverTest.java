@@ -57,7 +57,7 @@ class AgenticCredentialResolverTest {
         resolver = new AgenticCredentialResolver(repo, secretBox, new ProjectOrgResolver(projectRepo()));
     }
 
-    /** projectId → orgId, the shared cached lookup ChatModelFactory and this resolver both use. */
+    /** projectId → orgId, the shared cached lookup ProjectModelSettings and this resolver both use. */
     private static ProjectRepository projectRepo() {
         ProjectRepository p = mock(ProjectRepository.class);
         when(p.findById(PROJECT))

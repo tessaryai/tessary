@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.model.JobStatus;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -95,7 +96,7 @@ class ClassifierJobRepositoryTest {
                 .findFirst();
 
         assertTrue(after.isPresent());
-        assertEquals(ClassifierJobRow.FAILED, after.get().status());
+        assertEquals(JobStatus.FAILED, after.get().status());
         assertEquals("classify: connection refused", after.get().lastError());
     }
 

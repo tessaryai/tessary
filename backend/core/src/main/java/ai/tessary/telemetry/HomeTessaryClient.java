@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Thin JDK-{@link HttpClient} seam for {@code home.tessary.ai}. Mirrors the house outbound-HTTP style
- * ({@code ingest/HttpJson}, {@code llm}/{@code WorkOsClient}, and the {@code MixpanelSender} this class
+ * ({@code llm}/{@code WorkOsClient}, and the {@code MixpanelSender} this class
  * replaces): a shared client with a connect timeout and a per-request timeout, no third-party SDK.
  *
  * <p>Payloads are posted as raw JSON to whatever {@code path} the caller supplies — unlike

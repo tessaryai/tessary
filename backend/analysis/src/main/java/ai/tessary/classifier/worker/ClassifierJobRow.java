@@ -30,12 +30,9 @@ public record ClassifierJobRow(
         String updatedAt,
         int pageRetries) {
     public static final String PENDING = JobStatus.PENDING;
-    public static final String CLAIMED = JobStatus.CLAIMED;
-    public static final String DONE = JobStatus.DONE;
-    public static final String FAILED = JobStatus.FAILED;
 
     /**
-     * Terminal past the attempt cap, distinct from {@link #FAILED} (still retryable). A signal job is
+     * Terminal past the attempt cap, distinct from {@link JobStatus#FAILED} (still retryable). A signal job is
      * resurrected by every heartbeat's re-pend, so its cap-crossing needs a state that routine re-pend
      * won't touch until the dead-letter cooldown elapses. Both exhaustion legs write it: a fast-failing
      * sweep via {@code ClassifierJobRepository#markFailed}, and a hung/crashed sweep whose lease expired via

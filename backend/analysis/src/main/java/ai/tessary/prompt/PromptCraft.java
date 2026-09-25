@@ -26,8 +26,7 @@ import org.springframework.core.io.ClassPathResource;
  *
  * <p><b>Static on purpose.</b> The prompt builders are static and pure so tests can call them
  * without a Spring context ({@code AgenticRcaPromptTest} does exactly that), so their inputs have to
- * be reachable statically too. {@code CraftLibrary} delegates here rather than duplicating the read,
- * which keeps one home for how a prompt resource is found and cached.
+ * be reachable statically too.
  *
  * <p>Resources resolve across the whole classpath, so each module ships its own prompts:
  * {@code analysis} owns {@code prompt-craft/triage/} without {@code evaluation} knowing it exists.
@@ -52,14 +51,5 @@ public final class PromptCraft {
                 throw new UncheckedIOException("missing prompt resource: prompt-craft/" + key, e);
             }
         });
-    }
-
-    /** {@link #text(String, String)} with {@code {{key}}} placeholders substituted. */
-    public static String text(String purpose, String file, Map<String, String> vars) {
-        String out = text(purpose, file);
-        for (Map.Entry<String, String> v : vars.entrySet()) {
-            out = out.replace("{{" + v.getKey() + "}}", v.getValue());
-        }
-        return out;
     }
 }

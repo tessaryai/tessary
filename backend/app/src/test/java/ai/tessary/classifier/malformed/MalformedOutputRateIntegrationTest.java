@@ -24,6 +24,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -240,7 +241,8 @@ class MalformedOutputRateIntegrationTest {
         assertNull(classifiers.readiness(pid, signal), "one schema is enough to start judging");
         assertNull(
                 classifiers.readiness(
-                        pid, classifierRows.findByKey(pid, "secret_leak").orElseThrow()),
+                        pid,
+                        ClassifierRows.byKey(classifierRows, pid, "secret_leak").orElseThrow()),
                 "no other classifier waits on a schema");
     }
 
@@ -255,12 +257,13 @@ class MalformedOutputRateIntegrationTest {
     /** The seeded Malformed Output row, with the reference minimum lowered to something a test can reach. */
     private ClassifierRow malformedOutput(String pid) {
         classifiers.seedBuiltIns(pid);
-        ClassifierRow seeded = classifierRows.findByKey(pid, "malformed_output").orElseThrow();
+        ClassifierRow seeded =
+                ClassifierRows.byKey(classifierRows, pid, "malformed_output").orElseThrow();
         jdbc.sql("UPDATE classifier SET config_json = :cfg WHERE id = :id")
                 .param("cfg", "{\"min_baseline_calls\":50}")
                 .param("id", seeded.id())
                 .update();
-        return classifierRows.findByKey(pid, "malformed_output").orElseThrow();
+        return ClassifierRows.byKey(classifierRows, pid, "malformed_output").orElseThrow();
     }
 
     private void callSite(String pid, String id, @org.jspecify.annotations.Nullable String schema) {

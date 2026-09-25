@@ -41,7 +41,6 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectCreatedEvent;
 import ai.tessary.tenant.ProjectRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -91,8 +90,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * {@code tenant/} having to know any of them exist.
  *
  * <p>A second deviation: {@code job}/{@code finding}/{@code eval_case}/{@code rca_report} rows are
- * written with raw SQL ({@link SampleDataRepository}) rather than through {@code
- * FindingRepository#recordFiring}/{@code CaseRepository#open}/{@code RcaReportRepository#complete}.
+ * written with raw SQL ({@link SampleDataRepository}) rather than through the finding writers,
+ * {@code CaseRepository#open} or {@code RcaReportRepository#complete}.
  * Those methods model the LIVE detection
  * state machine — severity computed from a real deviation, evidence assembled from real spans,
  * a case opened by a real classifier run. Replaying that machinery to fabricate a finished, static
@@ -120,7 +119,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * Frustration conversations to score; each opens a case on the rate it learned before
  * {@link SampleShowcase#UNGROUNDED_ONSET_DAY}. The
  * substrate volume is inserted as batched multi-row SQL ({@link SampleDataRepository#insertTraces}
- * and friends) rather than through the substrate repositories' single-row upsert methods, which
+ * and friends) rather than through the substrate repositories' batch write methods, which
  * exist for live ingest's replay semantics this one-shot seed does not need.
  *
  * <h2>Every seeded row has to be one the LIVE pipeline would have written</h2>
@@ -224,7 +223,7 @@ public class SampleProjectSeedListener {
         classifiers.seedBuiltIns(projectId);
 
         Map<String, ClassifierRow> classifierRows = classifiers.list(projectId).stream()
-                .collect(Collectors.toMap(ClassifierRow::classifierKey, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toMap(ClassifierRow::classifierKey, Function.identity()));
         String costDriftId = idOf(classifierRows.get("cost_drift"));
         String durationDriftId = idOf(classifierRows.get("duration_drift"));
 
@@ -318,7 +317,6 @@ public class SampleProjectSeedListener {
                 MetricBaselineRow.BucketKind.CALL_SITE,
                 stat.callSiteId(),
                 "armed",
-                null,
                 null,
                 null,
                 null,
@@ -569,43 +567,37 @@ public class SampleProjectSeedListener {
 
         String detailedReport = caseADetailedReport(stat, onsetDate, preInputTokens, postInputTokens, ratio);
 
-        try {
-            sampleData.insertCompletedRcaReport(new SampleDataRepository.SampleRcaReport(
-                    Ids.ulid(),
-                    projectId,
-                    rcaJobId,
-                    finding.caseSubjectKind(),
-                    finding.caseSubjectId(),
-                    stat.subjectLabel(),
-                    stat.callSiteId(),
-                    finding.caseMetric(),
-                    Instant.now()
-                            .minus(SampleShowcase.WINDOW_DAYS, ChronoUnit.DAYS)
-                            .toString(),
-                    stat.onsetAt(),
-                    now,
-                    stat.meanPost(),
-                    stat.meanPre(),
-                    stat.meanPost() - stat.meanPre(),
-                    RcaReportRow.Verdict.BEHAVIOR_CHANGE,
-                    String.format(
-                            Locale.ROOT,
-                            "classify_intent's cost per call rose %.2f× on %s, driven by input tokens roughly"
-                                    + " doubling while output stayed flat. Traced upstream: assemble_ticket_context"
-                                    + " started forwarding the full ticket-thread history instead of only the"
-                                    + " current message, which is what classify_intent actually pays to read.",
-                            ratio,
-                            onsetDate),
-                    mapper.writeValueAsString(ruledOut),
-                    mapper.writeValueAsString(hypotheses),
-                    detailedReport,
-                    RcaReportRow.Engine.AGENTIC,
-                    Instant.now().minusSeconds(600).toString(),
-                    now,
-                    finding.id()));
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("case A RCA report serialization failed", e);
-        }
+        sampleData.insertCompletedRcaReport(new SampleDataRepository.SampleRcaReport(
+                Ids.ulid(),
+                projectId,
+                rcaJobId,
+                finding.caseSubjectKind(),
+                finding.caseSubjectId(),
+                stat.subjectLabel(),
+                stat.callSiteId(),
+                finding.caseMetric(),
+                Instant.now().minus(SampleShowcase.WINDOW_DAYS, ChronoUnit.DAYS).toString(),
+                stat.onsetAt(),
+                now,
+                stat.meanPost(),
+                stat.meanPre(),
+                stat.meanPost() - stat.meanPre(),
+                RcaReportRow.Verdict.BEHAVIOR_CHANGE,
+                String.format(
+                        Locale.ROOT,
+                        "classify_intent's cost per call rose %.2f× on %s, driven by input tokens roughly"
+                                + " doubling while output stayed flat. Traced upstream: assemble_ticket_context"
+                                + " started forwarding the full ticket-thread history instead of only the"
+                                + " current message, which is what classify_intent actually pays to read.",
+                        ratio,
+                        onsetDate),
+                writeJson(ruledOut),
+                writeJson(hypotheses),
+                detailedReport,
+                RcaReportRow.Engine.AGENTIC,
+                Instant.now().minusSeconds(600).toString(),
+                now,
+                finding.id()));
     }
 
     private String caseADetailedReport(
@@ -614,13 +606,10 @@ public class SampleProjectSeedListener {
             double preInputTokens,
             double postInputTokens,
             double ratio) {
-        String traceCitations = stat.sampleTraceIdsPost().isEmpty()
-                ? "no traces sampled"
-                : String.join(
-                        ", ",
-                        stat.sampleTraceIdsPost()
-                                .subList(
-                                        0, Math.min(3, stat.sampleTraceIdsPost().size())));
+        String traceCitations = String.join(
+                ", ",
+                stat.sampleTraceIdsPost()
+                        .subList(0, Math.min(3, stat.sampleTraceIdsPost().size())));
         return "## Cost drift on `classify_intent`\n\n"
                 + String.format(
                         Locale.ROOT,
@@ -1009,11 +998,7 @@ public class SampleProjectSeedListener {
     }
 
     private String writeJson(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("sample showcase payload serialization failed", e);
-        }
+        return mapper.valueToTree(value).toString();
     }
 
     private static double round(double value) {

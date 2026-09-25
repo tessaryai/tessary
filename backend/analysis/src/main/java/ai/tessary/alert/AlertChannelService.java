@@ -112,8 +112,6 @@ public class AlertChannelService {
         }
         try {
             return secretBox.seal(mapper.writeValueAsString(config));
-        } catch (TessaryException e) {
-            throw e;
         } catch (Exception e) {
             throw new TessaryException(AlertError.INVALID_CHANNEL_CONFIG, e, "could not seal config");
         }

@@ -15,13 +15,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The project's version timeline — one entry per commit SHA the platform has
- * attached to (pipeline sync, benchmark run, or observer finding). Drives the
- * benchmark-by-version selector in the UI so metrics never blend across SHAs.
+ * The project's version timeline — one entry per commit SHA a pipeline sync has
+ * attached to.
  *
  * <p>{@code /lineage/{nodeKind}/{nodeId}} is the resolution surface of the commit-SHA lineage
- * spine: any node — verdict, substrate grain, entry, run, observer alert — resolves to the
- * exact commit it belongs to (see {@link CommitLineageService}).
+ * spine: a substrate node resolves to the exact commit it belongs to (see
+ * {@link CommitLineageService}).
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/versions")

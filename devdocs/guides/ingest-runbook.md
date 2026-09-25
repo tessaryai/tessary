@@ -249,8 +249,7 @@ right now. If it is above zero, turning the model off pauses those projects' gro
 which reads like a quiet week rather than an outage.
 
 The event is about the groundedness model server (`classifiers/groundedness/serve.py`, at
-`tessary.observer.encoder.url`), not classify-service. classify-service serves no classifier head in
-the open edition, so this event says nothing about scaling it to zero.
+`tessary.observer.encoder.url`).
 
 ---
 

@@ -20,7 +20,7 @@ class CallSiteResolverTest {
     void explicitTag_onPlainOtlp_resolves() {
         // OTLP-first: a plain OTLP producer sets tessary.call_site.id by hand — no SDK required.
         Map<String, Object> meta =
-                Map.of(GenAiAttributes.TESSARY_CALL_SITE_ID, "explicit_site", GenAiAttributes.TESSARY_SDK, "python");
+                Map.of(GenAiAttributes.TESSARY_CALL_SITE_ID, "explicit_site", "tessary.sdk", "python");
         assertEquals("explicit_site", CallSiteResolver.resolve(meta));
     }
 
@@ -35,7 +35,7 @@ class CallSiteResolverTest {
         // There is no code.filepath fallback: an untagged span is unassigned (null), regardless of any
         // code.filepath attribute or provenance marker it carries.
         assertNull(CallSiteResolver.resolve(Map.of("code.filepath", "/app/src/checkout.py")));
-        assertNull(CallSiteResolver.resolve(Map.of(GenAiAttributes.TESSARY_SDK, "python")));
+        assertNull(CallSiteResolver.resolve(Map.of("tessary.sdk", "python")));
     }
 
     @Test

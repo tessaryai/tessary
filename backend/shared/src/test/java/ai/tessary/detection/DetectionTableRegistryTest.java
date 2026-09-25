@@ -93,11 +93,4 @@ class DetectionTableRegistryTest {
         assertTrue(sql.contains("'trace'::text AS subject_kind"));
         assertTrue(sql.contains("'span'::text AS subject_kind"));
     }
-
-    @Test
-    void unionSqlWithNoRegistrationsIsAWellTypedEmptyRelation() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of()));
-        assertEquals("SELECT NULL WHERE false", registry.unionSql());
-        assertTrue(registry.tables().isEmpty());
-    }
 }

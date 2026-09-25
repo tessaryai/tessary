@@ -24,7 +24,6 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
@@ -66,8 +65,7 @@ import org.springframework.transaction.support.TransactionOperations;
  * <p>What a persisted page writes, in one transaction: an assessment row for every turn sent, flagged
  * or not, with the exact request and response bodies, and a detection row for every flagged turn
  * whose {@code subject_session_id} is the conversation key. The detection row is the conversation's
- * flag: while it stands uncleared the sweep sends no more of that conversation's turns
- * ({@link BuiltInDetector.ConversationSuppression#FLAGGED_UNCLEARED}). Ineligible turns, and turns
+ * flag: while it stands uncleared the sweep sends no more of that conversation's turns. Ineligible turns, and turns
  * whose call failed, leave no row anywhere.
  */
 @Component
@@ -138,11 +136,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     @Override
     public String kind() {
         return BuiltInDetector.Kind.FRUSTRATION;
-    }
-
-    @Override
-    public ConversationSuppression conversationSuppression() {
-        return ConversationSuppression.FLAGGED_UNCLEARED;
     }
 
     @Override
@@ -428,11 +421,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     }
 
     private String json(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("frustration row not serializable", e);
-        }
+        return mapper.valueToTree(value).toString();
     }
 
     private void logPage(ClassifierRow signal, Page page, PageAction action, int fired, long durationMs) {

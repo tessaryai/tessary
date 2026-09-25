@@ -5,7 +5,6 @@ import ai.tessary.config.RetentionProperties;
 import ai.tessary.ops.RetentionPolicyRepository;
 import ai.tessary.ops.RetentionPolicyRow;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -85,13 +84,6 @@ public class RetentionResolver {
         int max = maxTtlDays(projectId, dataClass);
         if (max == 0) return ttlDays;
         return ttlDays == 0 ? max : Math.min(ttlDays, max);
-    }
-
-    /** The same answer keyed for a caller that wants one class. */
-    public Map<DataClass, EffectiveRetention> resolveByDataClass(String projectId) {
-        Map<DataClass, EffectiveRetention> out = new EnumMap<>(DataClass.class);
-        for (EffectiveRetention e : resolve(projectId)) out.put(e.dataClass(), e);
-        return out;
     }
 
     public int platformDefault(DataClass dataClass) {

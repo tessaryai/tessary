@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.version;
 
-import java.util.List;
-
-/** HTTP-shaped DTOs for /api/.../versions (the benchmark-by-version timeline). */
+/** HTTP-shaped DTOs for /api/.../versions (the version timeline). */
 public final class ProjectVersionDtos {
 
     private ProjectVersionDtos() {}
@@ -31,6 +29,4 @@ public final class ProjectVersionDtos {
                     r.updatedAt());
         }
     }
-
-    public record TimelineView(List<ProjectVersionView> versions) {}
 }

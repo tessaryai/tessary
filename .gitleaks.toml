@@ -7,12 +7,10 @@
 # the half that can be public without paradox — a stock rule set, plus the exemptions, each with the
 # reason it was granted.
 #
-# THE EXEMPTIONS PUBLISH ON PURPOSE. They are ported from scripts/lib/scrub-allowlist.txt, which
-# says it in its own header: "a public-repo reviewer who cannot see what was exempted cannot review
-# the exemption." So this is one block per file with that file's written reason as its description,
-# not a squashed regex — a reviewer must be able to see WHICH file was exempted and WHY, and a
-# combined `paths` array would lose the pairing. Fifteen entries, matching that file row for row;
-# keep them in step by hand, and keep the reasons.
+# THE EXEMPTIONS PUBLISH ON PURPOSE: a public-repo reviewer who cannot see what was exempted cannot
+# review the exemption. So this is one block per file with that file's written reason as its
+# description, not a squashed regex — a reviewer must be able to see WHICH file was exempted and WHY,
+# and a combined `paths` array would lose the pairing. Keep the reasons.
 #
 # WHAT IS EXTENDED, AND THE REASON THAT WAS WRONG. `useDefault = true` adds gitleaks' built-in rules
 # rather than replacing them, and `path` adds scripts/lib/gitleaks-self-minted.toml — the five
@@ -21,9 +19,7 @@
 #
 # An earlier revision of this file left that ruleset out, on the stated ground that a self-minted
 # rule set "cannot publish without publishing the strings it looks for". That reason does not hold:
-# gitleaks-self-minted.toml and its enumeration
-# scripts/lib/self-minted-credential-formats.txt are BOTH open files on no denylist row, so they
-# publish either way — what would have been withheld is the detection, not the disclosure. The
+# gitleaks-self-minted.toml is an open file on no denylist row, so it publishes either way — what would have been withheld is the detection, not the disclosure. The
 # reason it does hold for is the FORBIDDEN-CONTENT sweep, which is a list of specific secrets rather
 # than of shapes; that runs separately and this file runs none of it.
 #
@@ -32,8 +28,8 @@
 # on its own cadence, so between a contributor's push and the next scrub the public
 # repo's own scan was the only thing looking, and no stock rule matches `tsy_w_…`.
 #
-# The top-level `[[allowlists]]` below apply to the extended rules too, so the fifteen reviewed
-# exemptions cover both rule sets.
+# The top-level `[[allowlists]]` below apply to the extended rules too, so the reviewed exemptions
+# cover both rule sets.
 
 title = "Tessary open tree"
 

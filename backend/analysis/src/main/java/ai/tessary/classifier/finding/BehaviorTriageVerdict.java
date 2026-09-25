@@ -63,13 +63,7 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Citation(
-            String path, String reason, @Nullable String stdout) {
-
-        /** An evidence pointer or an id — a citation with nothing computed behind it. */
-        public static Citation of(String path, String reason) {
-            return new Citation(path, reason, null);
-        }
-    }
+            String path, String reason, @Nullable String stdout) {}
 
     /** The action this verdict fixes. One mapping, defined once, in {@link FindingRow.TriageAction}. */
     public String action() {
@@ -81,9 +75,7 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
      *
      * <p>Assigned from a method rather than a text block directly, and that is load-bearing rather
      * than style: javac inlines a compile-time constant into <em>every</em> class file that reads it,
-     * so a 2 kB schema would ship a full copy inside the engine and its test. {@link
-     * ai.tessary.observer.AgentVerdict#JSON_SCHEMA} escapes the same trap by going through
-     * {@code String.format}; this one has nothing to interpolate, so it says so instead.
+     * so a 2 kB schema would ship a full copy inside the engine and its test.
      */
     public static final String JSON_SCHEMA = schema();
 
@@ -135,26 +127,21 @@ public record BehaviorTriageVerdict(String verdict, String summary, List<Citatio
     public static @Nullable BehaviorTriageVerdict parse(ObjectMapper mapper, String text) {
         JsonNode node = ruling(mapper, text);
         if (node == null) return null;
-        try {
-            String verdict = node.path("verdict").asText("");
-            if (!FindingRow.TriageVerdict.POSITIVE.equals(verdict)
-                    && !FindingRow.TriageVerdict.NEGATIVE.equals(verdict)) {
-                return null;
-            }
-            List<Citation> citations = new ArrayList<>();
-            for (JsonNode c : node.path("citations")) {
-                String path = c.path("path").asText("");
-                if (path.isBlank()) continue;
-                citations.add(new Citation(path, c.path("reason").asText(""), stdout(c.path("stdout"))));
-            }
-            // A ruling with nothing behind it is exactly the fabrication this analysis exists to avoid,
-            // so it is not trusted: no verdict is recorded, the caller throws, and the job retries.
-            if (citations.isEmpty()) return null;
-            String summary = node.path("summary").asText("");
-            return new BehaviorTriageVerdict(verdict, summary, List.copyOf(citations));
-        } catch (Exception e) {
+        String verdict = node.path("verdict").asText("");
+        if (!FindingRow.TriageVerdict.POSITIVE.equals(verdict) && !FindingRow.TriageVerdict.NEGATIVE.equals(verdict)) {
             return null;
         }
+        List<Citation> citations = new ArrayList<>();
+        for (JsonNode c : node.path("citations")) {
+            String path = c.path("path").asText("");
+            if (path.isBlank()) continue;
+            citations.add(new Citation(path, c.path("reason").asText(""), stdout(c.path("stdout"))));
+        }
+        // A ruling with nothing behind it is exactly the fabrication this analysis exists to avoid,
+        // so it is not trusted: no verdict is recorded, the caller throws, and the job retries.
+        if (citations.isEmpty()) return null;
+        String summary = node.path("summary").asText("");
+        return new BehaviorTriageVerdict(verdict, summary, List.copyOf(citations));
     }
 
     /**

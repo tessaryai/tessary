@@ -21,8 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  * {@code UrlGuard.requirePublicHttp} on every send (via {@link ChannelHttp}) — the URL is validated
  * at config time, but DNS can rebind to an internal address (IMDS / RFC1918) before the send.
  *
- * <p>The native Slack-app path can register as a second SLACK-typed seam later; until then
- * {@link SlackChannel} delivers via a self-contained Slack incoming webhook.
+ * <p>{@link SlackChannel} delivers via a self-contained Slack incoming webhook.
  */
 public interface AlertChannel {
 

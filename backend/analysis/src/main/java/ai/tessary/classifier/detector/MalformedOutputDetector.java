@@ -255,10 +255,6 @@ public final class MalformedOutputDetector implements BuiltInDetector {
             n.put("keyword", v.keyword());
             n.put("message", v.message());
         }
-        try {
-            return mapper.writeValueAsString(root);
-        } catch (JsonProcessingException e) {
-            return "{\"reason\":\"schema_violation\"}";
-        }
+        return root.toString();
     }
 }

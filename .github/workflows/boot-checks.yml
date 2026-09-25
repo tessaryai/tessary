@@ -23,9 +23,8 @@ on:
 
 jobs:
   open-edition-boot:
-    name: Detached open-edition boot (clean-room export, tessary-paid/ stripped, authenticated triage)
-    # The one job in this repo's CI that genuinely needs Docker: it builds and starts the real
-    # slim dev stack inside a clean-room export of the working tree with tessary-paid/ removed
+    name: Detached open-edition boot (clean-room export, authenticated triage)
+    # Builds and starts the real dev stack inside a clean-room export of the working tree
     # (scripts/lib/export-simulate.sh's copy + `git init` recipe, not `git archive`, which only
     # materializes the last commit and would silently miss an uncommitted boundary violation).
     # ubuntu-latest ships Docker and Compose preinstalled, no extra setup step needed.

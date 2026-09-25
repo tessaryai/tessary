@@ -11,8 +11,7 @@ import org.jspecify.annotations.Nullable;
  * {@link BuiltInClassifierCatalog}; {@code classifierKey} is unique per project so a built-in is
  * enabled/disabled and versioned independently per tenant.
  *
- * @param detector the {@link BuiltInDetector.Kind} the worker dispatches on; {@code inert} means
- *     defined-but-not-evaluated.
+ * @param detector the {@link BuiltInDetector.Kind} the worker dispatches on.
  * @param configJson detector parameters (e.g. keyword lists), opaque to the schema; {@code null}
  *     falls back to the catalog defaults baked into the detector.
  * @param mode the operating point ({@link Mode}): {@code discovery} (high recall, the default) or

@@ -6,20 +6,17 @@ import { cn } from "./cn";
 export function Collapsible({
   title,
   meta,
-  defaultOpen,
   onToggle,
   children,
 }: {
   title: string;
   meta?: ReactNode;
-  defaultOpen?: boolean;
   /** Fires with the open state on every expand/collapse (e.g. to gate lazy queries). */
   onToggle?: (open: boolean) => void;
   children: ReactNode;
 }) {
   return (
     <details
-      open={defaultOpen}
       onToggle={onToggle ? (e) => onToggle(e.currentTarget.open) : undefined}
       className={cn("rounded-control border border-border")}
     >

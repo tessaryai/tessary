@@ -39,9 +39,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class VitalsService {
 
-    /** How many days a window spans when the caller does not say. */
-    public static final int DEFAULT_WINDOW_DAYS = 7;
-
     /** Widest window we will scan; beyond this the read stops being interactive. */
     public static final int MAX_WINDOW_DAYS = 90;
 

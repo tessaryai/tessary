@@ -10,10 +10,6 @@
 import type { Case } from "../../api/types";
 import { RCA_VERDICT_LABEL } from "../rcaLabels";
 
-// The unified § citation renderer lives in ../components/citation; re-exported
-// here so existing triage imports keep working.
-export { CitedText } from "../components/citation";
-
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -41,41 +37,15 @@ export function truncateId(id: string, keep = 8): string {
   return id.length <= keep ? id : `${id.slice(0, keep)}…`;
 }
 
-/**
- * A 0–1 detector value as a percentage. Every grader lane normalizes onto 0–1
- * server-side, so one formatter reads for both pass rates and rubric scores.
- */
-export function unitPercent(value: number | null | undefined): string {
-  return value == null ? "—" : `${Math.round(value * 100)}%`;
-}
-
-/**
- * The magnitude pair a case row shows ("100% → 33%"), or null when the detector
- * has no before/after to show. Behaviour-drift and classifier cases count
- * occurrences rather than moving a rate, so they render their basis instead of a
- * pair that would misread as a percentage.
- */
-export function magnitudePair(c: Case): string | null {
-  if (c.detector !== "grader_degradation") return null;
-  if (c.baseline_value == null || c.current_value == null) return null;
-  return `${unitPercent(c.baseline_value)} → ${unitPercent(c.current_value)}`;
-}
-
 /** Human label for the detector tag on a case's meta line. */
 export function detectorLabel(detector: string): string {
   switch (detector) {
-    case "grader_degradation":
-      return "Grader degradation";
-    case "behavior_drift":
-      return "Behavior drift";
     case "classifier":
       return "Classifier";
     case "metric_drift":
       return "Metric drift";
     case "tool_error":
       return "Tool errors";
-    case "sop_conformance":
-      return "SOP conformance";
     case "secret_leak":
       return "Secret leak";
     case "malformed_output":

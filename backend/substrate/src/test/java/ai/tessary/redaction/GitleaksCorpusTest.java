@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.redaction;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.redaction.GitleaksCorpus.Finding;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -20,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The vendored credential corpus: that every rule survives the move to Java, that it finds credentials the way
- * gitleaks does, and that the per-name fast path finds exactly what a scan of the whole text would.
+ * gitleaks does, and that the per-name fast path finds what a scan of the whole text would.
  *
  * <p>The credentials below are FAKE: structurally valid shapes minted for this test, exempted from this
  * repo's own secret scan in {@code .gitleaks.toml} with that reason.
@@ -30,9 +31,19 @@ class GitleaksCorpusTest {
     private static final GitleaksCorpus CORPUS = GitleaksCorpus.get();
 
     @Test
-    void everyVendoredRuleCompilesInJava() {
-        assertTrue(CORPUS.size() >= 220, "the pinned release plus the self-minted rules, not a stub: " + CORPUS.size());
-        assertEquals(List.of(), CORPUS.uncompiled(), "a rule that does not compile would never run, silently");
+    void everyVendoredRuleCompilesInJava() throws Exception {
+        JsonNode rules;
+        try (InputStream in = GitleaksCorpusTest.class.getClassLoader().getResourceAsStream(GitleaksCorpus.RESOURCE)) {
+            rules = new ObjectMapper().readTree(in).path("rules");
+        }
+        assertTrue(rules.size() >= 220, "the pinned release plus the self-minted rules, not a stub: " + rules.size());
+        for (JsonNode rule : rules) {
+            String id = rule.path("id").asText();
+            assertDoesNotThrow(
+                    () -> Pattern.compile(
+                            GitleaksCorpus.toJava(rule.path("regex").asText())),
+                    "a rule that does not compile would never run, silently: " + id);
+        }
     }
 
     @Test
@@ -120,25 +131,32 @@ class GitleaksCorpusTest {
     }
 
     @Test
-    void theVendorNameFastPathFindsExactlyWhatAWholeTextScanFinds() {
-        StringBuilder text = new StringBuilder();
-        String[] lines = {
-            "api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"",
-            "adobe_client_id = \"d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0\"",
-            "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
-            "the access token expires in an hour; ask for another",
-            "config: {\"secret\": \"Zk8pQ2rT5wY8bE1hK4nR7uX0\", \"auth\": null}",
-            "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\" and a password: q7Zr2mK9xW4vN8pL",
-            "a-very-long-identifier-name-that-runs-well-past-fifty-characters_api_key = \"Zk8pQ2rT5wY8bE1hK4nR\"",
-            "keyboard layout: dvorak, token count: 12, secret santa: bob",
-        };
-        for (int i = 0; i < 40; i++) {
-            for (String line : lines) text.append(line).append('\n');
-        }
-        String corpus = text.toString();
-        List<Finding> fast = CORPUS.find(corpus);
-        assertFalse(fast.isEmpty(), "the fixture carries credentials, or this proves nothing");
-        assertEquals(CORPUS.findExhaustive(corpus), fast);
+    void theVendorNameFastPathFindsWhatAWholeTextScanFinds() {
+        // The expected list is what a scan of every rule over the whole text found here, recorded when that
+        // reference scan still existed beside the fast path.
+        String text = String.join(
+                "\n",
+                "api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"",
+                "adobe_client_id = \"d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0\"",
+                "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
+                "the access token expires in an hour; ask for another",
+                "config: {\"secret\": \"Zk8pQ2rT5wY8bE1hK4nR7uX0\", \"auth\": null}",
+                "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\" and a password: q7Zr2mK9xW4vN8pL",
+                "a-very-long-identifier-name-that-runs-well-past-fifty-characters_api_key = \"Zk8pQ2rT5wY8bE1hK4nR\"",
+                "keyboard layout: dvorak, token count: 12, secret santa: bob");
+        List<String> found = CORPUS.find(text).stream()
+                .map(f -> f.ruleId() + " " + text.substring(f.start(), f.end()))
+                .toList();
+        assertEquals(
+                List.of(
+                        "generic-api-key q7Zr2mK9xW4vN8pLr5Tq",
+                        "adobe-client-id d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0",
+                        "new-relic-browser-api-token NRJS-3a7f9c2e1b8d4f6a0c5",
+                        "generic-api-key Zk8pQ2rT5wY8bE1hK4nR7uX0",
+                        "aws-access-token AKIA" + "QYLPMN5HHHFPZAM2",
+                        "generic-api-key q7Zr2mK9xW4vN8pL",
+                        "generic-api-key Zk8pQ2rT5wY8bE1hK4nR"),
+                found);
     }
 
     @Test

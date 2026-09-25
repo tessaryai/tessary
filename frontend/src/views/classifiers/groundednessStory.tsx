@@ -71,7 +71,7 @@ export function GroundednessHeader({
           </span>
         ) : (
           <span className="flex flex-wrap items-center gap-2">
-            <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />
+            <ResolveVerbs busy={busy} onResolve={onResolve} />
             <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
           </span>
         )

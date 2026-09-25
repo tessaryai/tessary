@@ -12,6 +12,7 @@ import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.model.JobStatus;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -99,7 +100,7 @@ class ClassifierHealthTest {
                 "job-1",
                 PID,
                 "sig-b",
-                ClassifierJobRow.FAILED,
+                JobStatus.FAILED,
                 null,
                 null,
                 null,
@@ -113,7 +114,7 @@ class ClassifierHealthTest {
 
         ClassifierHealthView v = service.health(PID).get(0);
 
-        assertEquals(ClassifierJobRow.FAILED, v.status());
+        assertEquals(JobStatus.FAILED, v.status());
         assertEquals(3, v.attempts());
         assertEquals("classify: connection refused", v.lastError());
         assertEquals("2026-01-05T12:00:00Z", v.lastSweptAt());
@@ -127,7 +128,7 @@ class ClassifierHealthTest {
                 "job-2",
                 PID,
                 "sig-c",
-                ClassifierJobRow.DONE,
+                JobStatus.DONE,
                 "2026-01-05T00:00:00Z",
                 "obs-9",
                 null,
@@ -141,7 +142,7 @@ class ClassifierHealthTest {
 
         ClassifierHealthView v = service.health(PID).get(0);
 
-        assertEquals(ClassifierJobRow.DONE, v.status());
+        assertEquals(JobStatus.DONE, v.status());
         assertEquals(0, v.attempts());
         assertNull(v.lastError());
     }

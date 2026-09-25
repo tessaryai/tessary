@@ -98,7 +98,7 @@ export function Login() {
     return <Navigate to={`/signup${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`} replace />;
   }
 
-  const error = submit.isError ? ((submit.error as ApiError).message ?? "Could not sign in") : null;
+  const error = submit.isError ? (submit.error as ApiError).message : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center px-6">

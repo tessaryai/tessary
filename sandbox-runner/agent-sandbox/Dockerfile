@@ -1,4 +1,4 @@
-# Plain OCI build of the observer-analyzer runtime — the "agent image" D7's Docker sandbox
+# Plain OCI build of the agent runtime — the "agent image" D7's Docker sandbox
 # driver (sandbox-runner/launcher/server.js, SANDBOX_BACKEND=docker) spawns as a fresh sibling
 # container per request. `template.ts` (same directory) builds the SAME runtime as an E2B v2 SDK
 # template instead, for the `e2b` backend. TWO INDEPENDENTLY MAINTAINED RECIPES FOR ONE RUNTIME —
@@ -7,12 +7,8 @@
 # names that move between opencode-ai releases, and the two recipes silently drifting apart is
 # exactly the "authored but nobody kept it current" failure mode this comment exists to prevent.
 #
-# BUILD CONTEXT IS THE REPO ROOT, not this directory — the second image (after frontend/Dockerfile,
-# see the repo-root .dockerignore's own header) that needs it. This recipe COPYs from two places a
-# per-directory context can't reach: `contract/` (the bundle-contract source of truth, staged into
-# `./vendor/` by template.ts's sibling build.ts at E2B-build time — this Dockerfile reads the
-# ORIGINAL files directly instead of relying on that gitignored staging step having already run)
-# and this directory's own script files. `-f` is resolved against the CURRENT DIRECTORY, not the
+# BUILD CONTEXT IS THE REPO ROOT, not this directory: every COPY below carries the full
+# `sandbox-runner/agent-sandbox/` prefix. `-f` is resolved against the CURRENT DIRECTORY, not the
 # context (Compose is the other way around), so the path below carries the full prefix and the
 # context does not repeat it:
 #
@@ -23,20 +19,7 @@
 #
 # BASE IMAGE: node:24-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
 # Why 24 and not 22: 22 has been maintenance-only since 2025-10-21 and is EOL 2027-04-30; 24 runs
-# to 2028-04-30. `re2@1.26.1` — pinned by every recipe, unchanged — declares
-# `engines.node: "^22.22.2 || ^24.15.0 || >=26.0.0"`, so 24 is in range where 20 never was (under
-# 20, npm's own resolved node-gyp fails to even configure with an unrelated undici crash,
-# `TypeError: webidl.util.markAsUncloneable is not a function`, verified on both linux/amd64 and
-# linux/arm64).
-#
-# WHAT THE 22->24 MOVE COSTS, and why `linux-headers` is in the apk list below: re2 publishes
-# prebuilt binaries per Node ABI, and its install script tries those before compiling. Node 22 is
-# ABI 127 and has a musl prebuild; Node 24 is ABI 137 and does NOT, so `npm install re2` now falls
-# through to a from-source node-gyp build — which needs kernel headers for abseil's
-# direct_mmap.h (`fatal error: linux/unistd.h: No such file or directory`, hit on the first
-# 24 build). Keep linux-headers as long as re2 is in the install list below, whatever the Node
-# major: the source path is ABI-agnostic and is now the path this image always takes.
-# The launcher's own Dockerfile is on the same base for the same reasons.
+# to 2028-04-30. The launcher's own Dockerfile is on the same base for the same reasons.
 #
 # Why ALPINE and not Debian: every remaining CRITICAL on the Debian recipe was an unfixable Debian
 # package. bookworm carried 16; moving to trixie cleared libsqlite3-0 and zlib1g and left 13, all
@@ -58,8 +41,8 @@
 #   2. `apk add`, not `.aptInstall()`. The e2b builder exposes aptInstall/pipInstall/npmInstall but
 #      has NO apkInstall, so template.ts's mirror of this line has to be a raw `.runCmd`.
 #
-# The musl swap itself is verified, not assumed: re2@1.26.1 compiles under Alpine's g++ and matches
-# correctly, opencode-ai 1.18.30 installs and runs, PyYAML imports, and @opencode-ai/sdk loads.
+# The musl swap itself is verified, not assumed: opencode-ai 1.18.30 installs and runs, and
+# @opencode-ai/sdk loads.
 FROM node:24-alpine3.24
 
 # NO TAR PATCH HERE ANY MORE, and it should not come back. This used to copy tar@7.5.19 over the
@@ -68,17 +51,14 @@ FROM node:24-alpine3.24
 # node:24-alpine3.24 ships npm 11.19.0, whose vendored tar is ALREADY 7.5.19 — verified on the
 # base, not assumed — so the patch was a no-op the moment the base moved. Bumping npm itself is
 # still the wrong fix if this ever recurs: npm>=12 flips `allowScripts` off by default, so
-# `npm install re2@^1.26.1` below would complete with only a WARNING, never run node-gyp, and ship
-# an re2 that throws MODULE_NOT_FOUND at require time. Patch the vendored copy, don't bump npm.
+# `npm install -g opencode-ai` below would complete with only a WARNING and skip its install
+# script. Patch the vendored copy, don't bump npm.
 
-# git + the agent's clone; python3/py3-pip run the baked bundle validator; make/g++/linux-headers
-# build re2 from source (a native addon with no Node 24 prebuild — see the header); bash because
-# the e2b SDK execs /bin/bash (see the header); jq so triage's own checks/ scripts can shape MCP
-# JSON on the command line rather than reach for a scripting language for every breakdown. Mirrored
-# by template.ts's `.runCmd('apk add ...')` — which is a raw runCmd because the builder has no
-# apkInstall. The base's python3 ships WITHOUT pip and WITHOUT PyYAML, so the validator
-# (validate.py + pipeline_io.py, both of which `import yaml`) is a hard in-container crash without
-# this.
+# git + the agent's clone; python3/py3-pip/make/g++ for the agent's own scripts (see below); bash
+# because the e2b SDK execs /bin/bash (see the header); jq so triage's own checks/ scripts can shape
+# MCP JSON on the command line rather than reach for a scripting language for every breakdown.
+# Mirrored by template.ts's `.runCmd('apk add ...')` — which is a raw runCmd because the builder has
+# no apkInstall.
 #
 # `apk upgrade` first, for the same reason as launcher/Dockerfile's: node:24-alpine3.24 is rebuilt
 # on Node's cadence, not Alpine's, so its openssl lags the 3.24 repo and is the only critical this
@@ -88,13 +68,7 @@ FROM node:24-alpine3.24
 # PIP_BREAK_SYSTEM_PACKAGES below exists precisely so the agent can `pip install` mid-run. "Delete
 # what you don't run" is the right rule and it simply does not reach anything here.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ linux-headers jq
-
-# PyYAML is the validator's only required third-party Python dep, baked at build time (no
-# per-run network install). --break-system-packages: Alpine's python3, like Debian's, marks the
-# system environment PEP 668 externally-managed; PIP_BREAK_SYSTEM_PACKAGES below lets the agent
-# `pip install` further deps at runtime without the flag.
-RUN python3 -m pip install --no-cache-dir --break-system-packages pyyaml
+    && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ jq
 
 # OpenCode — provides the `opencode` binary agent-stream.js starts as a server. PINNED TO THE SAME
 # VERSION AS @opencode-ai/sdk BELOW AND AS template.ts's own two installs — they ship in lockstep,
@@ -127,12 +101,6 @@ RUN set -e; \
     [ -x "$(command -v opencode)" ] && opencode --version >/dev/null; \
     npm cache clean --force
 
-# Wrapper on PATH so a prompt can run validation as `tessary-evals-validate` without knowing the
-# baked layout (see the script's own header). Lives under /usr/local/bin, so it is copied while
-# this stage is still root — everything below this line runs as `node`.
-COPY sandbox-runner/agent-sandbox/tessary-evals-validate /usr/local/bin/tessary-evals-validate
-RUN chmod +x /usr/local/bin/tessary-evals-validate
-
 ENV HOME=/home/user
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
@@ -142,31 +110,20 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # time. Creating the directory owned by `node` up front and doing the writes AS `node` produces the
 # identical ownership for free. The COPYs below still carry --chown because BuildKit applies COPY
 # ownership from the flag, not from the current USER.
-RUN mkdir -p /home/user/tessary-contract && chown -R node:node /home/user
+RUN mkdir -p /home/user && chown -R node:node /home/user
 USER node
 WORKDIR /home/user
 
 # Modules the in-VM scripts require from /home/user — @opencode-ai/sdk drives the opencode server,
-# undici lifts fetch's 300s headers timeout. acorn/acorn-walk/re2 backed the codegen
-# self-correction harness that was deleted and are left here to stay byte-identical to template.ts's
-# line — see that file for why trimming them waits for the next E2B rebuild.
+# undici lifts fetch's 300s headers timeout.
 # DELIBERATELY npm though the repo is otherwise on pnpm — see template.ts's own comment;
 # the same reasoning applies unchanged here (no lockfile to honor, the container is disposable, npm
 # is already in the base image). undici pins to ^6 so this line stays byte-identical to
 # template.ts's (bump every recipe together; undici 8 needs node >=22.19, comfortably clear on
 # node:24-alpine3.24).
 # The cache clean is size only: npm leaves ~38 MB in $HOME/.npm that nothing at runtime reads.
-RUN npm install acorn@^8.18.0 acorn-walk@^8.3.5 re2@^1.26.1 @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
+RUN npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force
-
-# The bundle contract, copied straight from its repo-root source of truth (contract/) rather than
-# from the gitignored ./vendor/ staging directory template.ts's build.ts populates — this recipe
-# has no separate staging step because its build context already reaches the real files.
-COPY --chown=node:node contract/validate.py /home/user/tessary-contract/validate.py
-COPY --chown=node:node contract/pipeline_io.py /home/user/tessary-contract/pipeline_io.py
-COPY --chown=node:node contract/AUTHORING_CONTRACT.md /home/user/tessary-contract/AUTHORING_CONTRACT.md
-COPY --chown=node:node contract/output_format.md /home/user/tessary-contract/output_format.md
-COPY --chown=node:node contract/grader.schema.json /home/user/tessary-contract/grader.schema.json
 
 # Shared OpenCode runner required by rca.js/triage.js — must be baked beside them or their
 # `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by

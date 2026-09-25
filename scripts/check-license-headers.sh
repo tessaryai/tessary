@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# License-header gate: every source file in the publishable tree carries
+# License-header gate: every source file in the tree carries
 # `SPDX-License-Identifier: Apache-2.0` near its top, in the comment syntax that file type actually
 # understands. `bash scripts/check-license-headers.sh` checks; `bash scripts/check-license-headers.sh
 # --fix` inserts the missing headers in place, once, mechanically; see the FIX MODE paragraph below.
-#
-# SCOPE: the publishable tree, not the whole checkout. This scanner reuses
-# scripts/lib/export-denylist.txt, the single must-not-publish declaration already read by
-# scripts/lib/export-simulate.sh, scripts/check-open-boundary.sh and
-# scripts/lib/check-export-denylist.sh, as another consumer, rather than inventing a second
-# exclusion list that could drift from it. Every `delete` row is out of scope here for the same
-# reason it never reaches the public export: that code is not redistributed under Apache-2.0, so
-# stamping an Apache-2.0 SPDX header on it would assert a license that does not actually travel
-# with it. If a directory is ever un-deleted from export-denylist.txt, this scanner starts covering
-# it automatically, with no second list to remember to update.
 #
 # EXTENSIONS COVERED, AND WHY THESE AND NOT OTHERS. .java, .py, .ts, .tsx, .js and .mjs, the
 # languages this codebase ships in, all with a real line-comment syntax. Not covered, as a
@@ -34,7 +24,7 @@
 #                     between a package's content and its build tooling.
 #
 # THE PER-PATH EXCEPTIONS FILE: scripts/lib/license-header-exceptions.txt. Specific, checked-in,
-# one path per line, reviewed same as scripts/lib/scrub-allowlist.txt; never a directory glob, so a
+# one path per line; never a directory glob, so a
 # new file added under an already-exempted path is not silently exempt. That file's own header logs
 # the category audit performed (vendored files, test fixtures, generated files) and which of them
 # actually produced a row today.
@@ -42,8 +32,8 @@
 # MERGE ENFORCEMENT, THE INTERIM POSTURE. Nothing GitHub-native makes this check's failure actually
 # block a merge today, so:
 #   - it is wired into `task check`, the thing every contributor is expected to run before opening
-#     a PR, the same de facto per-PR enforcement point `task check` already is for
-#     check-open-boundary.sh, check-docs-links.sh and every other fast source-tree gate here;
+#     a PR, the same de facto per-PR enforcement point `task check` already is for every other
+#     fast source-tree gate here;
 #   - it also runs on every pull request through check.yml, which calls scripts/check.sh, a backstop that
 #     covers a skipped local run.
 #   Until a merge-blocking required status check is available, a broken header reaching `main` is
@@ -57,17 +47,14 @@
 # same holds for a leading comment ahead of a `package-info.java` Javadoc or a TypeScript
 # triple-slash reference directive, since only a real statement ahead of them would). It never
 # touches a file that already has the header anywhere in its first 5 lines, and never touches a
-# file in the exceptions list or outside scope above.
+# file in the exceptions list.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 P="license-headers"
 
-DENYLIST="scripts/lib/export-denylist.txt"
 EXCEPTIONS="scripts/lib/license-header-exceptions.txt"
-for f in "$DENYLIST" "$EXCEPTIONS"; do
-    [ -f "$f" ] || { echo "$P: $f is missing." >&2; exit 1; }
-done
+[ -f "$EXCEPTIONS" ] || { echo "$P: $EXCEPTIONS is missing." >&2; exit 1; }
 
 FIX=0
 case "${1:-}" in
@@ -76,11 +63,10 @@ case "${1:-}" in
     *) echo "$P: unknown argument '$1' (only --fix)" >&2; exit 1 ;;
 esac
 
-FIX="$FIX" DENYLIST="$DENYLIST" EXCEPTIONS="$EXCEPTIONS" python3 - <<'PY'
-import fnmatch, os, re, subprocess, sys
+FIX="$FIX" EXCEPTIONS="$EXCEPTIONS" python3 - <<'PY'
+import os, re, subprocess, sys
 
 fix = os.environ['FIX'] == '1'
-denylist_path = os.environ['DENYLIST']
 exceptions_path = os.environ['EXCEPTIONS']
 P = 'license-headers'
 
@@ -103,36 +89,6 @@ def rows(path):
         yield line
 
 
-# ---- publishable-tree scope, derived from export-denylist.txt's `delete` rows ----
-deleted_dirs, deleted_files, deleted_globs = [], set(), []
-for line in rows(denylist_path):
-    parts = line.split('|')
-    if len(parts) != 4:
-        continue
-    pattern, kind, scope, _reason = parts
-    if kind != 'delete':
-        continue
-    if scope == 'dir':
-        deleted_dirs.append(pattern)
-    elif scope == 'file':
-        deleted_files.add(pattern)
-    elif scope == 'glob':
-        deleted_globs.append(pattern)
-
-
-def out_of_scope(path):
-    if path in deleted_files:
-        return True
-    for d in deleted_dirs:
-        if path == d or path.startswith(d + '/'):
-            return True
-    base = os.path.basename(path)
-    for g in deleted_globs:
-        if fnmatch.fnmatch(base, g):
-            return True
-    return False
-
-
 # ---- the reviewed, per-path exceptions list ----
 exceptions = []
 fail = False
@@ -150,7 +106,7 @@ for line in rows(exceptions_path):
 exceptions = set(exceptions)
 
 # ---- the file list: tracked + untracked-not-ignored, so a file added in this very change is
-# checked too (same rationale as check-docs-links.sh's tracked_files()) ----
+# checked too ----
 tracked = subprocess.run(
     ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
     capture_output=True, text=True, check=True,
@@ -163,14 +119,11 @@ for path in tracked:
     _, ext = os.path.splitext(path)
     if ext not in EXT_COMMENT:
         continue
-    if out_of_scope(path):
-        continue
     if path in exceptions:
         continue
     targets.append(path)
 
-# An exception row for a file that is out of scope for another reason (moved under a denylist
-# directory, or no longer an in-scope extension) is not a dead row by the check above: it still
+# An exception row for a file that is no longer an in-scope extension is not a dead row by the check above: it still
 # resolves on disk, it is just not doing anything. That is a smaller problem than a dead row and
 # not one this gate fails on; a reviewer can see it is a no-op the moment they read the diff.
 
@@ -231,7 +184,7 @@ if fix:
 
 # ---- check mode ----
 if missing:
-    print(f"{P}: {len(missing)} file(s) in the publishable tree are missing "
+    print(f"{P}: {len(missing)} file(s) are missing "
           f"'{HEADER_TEXT}' in the correct comment syntax:", file=sys.stderr)
     for path, comment, _start, _lines in missing:
         print(f"  {path} (expected `{comment} {HEADER_TEXT}`)", file=sys.stderr)

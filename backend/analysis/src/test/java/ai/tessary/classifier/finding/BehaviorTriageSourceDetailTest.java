@@ -6,7 +6,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
@@ -82,9 +81,6 @@ class BehaviorTriageSourceDetailTest {
                 null,
                 null,
                 null,
-                null,
-                TestObjectProvider.of(List.of()),
-                null,
                 mock(MalformedOutputDetailService.class),
                 mock(SecretLeakDetailService.class),
                 mock(FrustrationDetailService.class),
@@ -96,10 +92,10 @@ class BehaviorTriageSourceDetailTest {
         return new FindingRow(
                 id,
                 PROJECT,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
+                BuiltInDetector.Kind.DURATION_DRIFT,
                 "cause:" + id,
-                FindingRow.SubjectKind.BEHAVIOR_PROFILE,
-                "prof_1",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "clf_1",
                 null,
                 null,
                 FindingRow.Status.OPEN,

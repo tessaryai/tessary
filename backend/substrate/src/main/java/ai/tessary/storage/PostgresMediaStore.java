@@ -2,11 +2,9 @@
 package ai.tessary.storage;
 
 import ai.tessary.open.media.MediaStore;
+import ai.tessary.pricing.PriceSnapshot;
 import ai.tessary.tenant.Ids;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -26,7 +24,7 @@ public class PostgresMediaStore implements MediaStore {
 
     @Override
     public MediaRef put(String projectId, byte[] bytes, String mediaType) {
-        String digest = sha256(bytes);
+        String digest = PriceSnapshot.sha256Hex(bytes);
         // Dedup: identical bytes in this project reuse the existing row (stable ref, no duplicate write).
         Optional<String> existing = repo.findIdByDigest(projectId, digest);
         if (existing.isPresent()) {
@@ -49,13 +47,5 @@ public class PostgresMediaStore implements MediaStore {
     @Override
     public Optional<StoredMedia> get(String projectId, MediaRef ref) {
         return repo.findById(projectId, ref.id());
-    }
-
-    private static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable on this JRE", e); // never on a standard JRE
-        }
     }
 }

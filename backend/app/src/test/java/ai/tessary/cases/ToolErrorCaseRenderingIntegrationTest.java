@@ -101,8 +101,12 @@ class ToolErrorCaseRenderingIntegrationTest {
                         Instant.parse("2020-01-01T00:00:00Z").toString(),
                         Instant.now().toString()))
                 .findingId();
-        findingEvidence.recordExemplarTrace(
-                p.id(), findingId, "trace-tool-1", Instant.now().toString());
+        findingEvidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.EXEMPLAR,
+                List.of(FindingEvidenceRepository.Ref.trace("trace-tool-1")),
+                Instant.now().toString());
         behaviorFindings.recordTriage(
                 p.id(),
                 findingId,

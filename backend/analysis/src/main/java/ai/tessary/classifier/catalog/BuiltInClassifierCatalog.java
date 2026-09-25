@@ -31,24 +31,22 @@ import org.springframework.stereotype.Component;
  * detector-dispatch map from {@link #MODULES}, so adding or changing a classifier is a single
  * declaration here, not edits scattered across the catalog, the detector list, and seeding.
  *
- * <p>Nine built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
+ * <p>Seven built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
  * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
  * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
  * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, a TOKEN head that reads
  * the retrieved passages and the whole answer in one pass ({@link GroundednessDetector}), scored by
- * the standalone classify-service {@code /classify} with a deterministic filter in front of it. The
+ * the groundedness model server's {@code /classify} with a deterministic filter in front of it. The
  * <b>decision</b> tier is Frustration: each eligible user turn is one question to a hosted decision
  * model on the org's own key, and a call site's rate of frustrated conversations is watched with Tool
  * Error's sequential test. Its detector is not named here by class: it is supplied through the {@link
  * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see that module's
- * {@code detectorFactory} comment below. The <b>fitting</b> tier holds five modules that ship as
- * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all:
- * trace-grain Behaviour Drift ({@code BehaviorDriftDetector}), the two window-grain metric classifiers
- * (Duration Drift and Cost Drift), Tool Errors, and SOP Conformance, scored against an authored
- * rulebook plus a fitted per-project reference bundle. All ship project-local state rather than a
- * model, because "atypical for this agent", "slow for this call site", "expensive for this call site"
- * and "compliant with this SOP" are definitionally project-relative and none has a transferable model
- * to ship.
+ * {@code detectorFactory} comment below. The <b>fitting</b> tier holds three modules that ship as
+ * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all: the two
+ * window-grain metric classifiers (Duration Drift and Cost Drift) and Tool Errors. All ship
+ * project-local state rather than a model, because "slow for this call site", "expensive for this call
+ * site" and "failing more than usual" are definitionally project-relative and none has a transferable
+ * model to ship.
  *
  * <p>Duration and cost are <b>two switches rather than one or seven</b>. A classifier is one decision
  * a human makes: "do I want to hear about latency here" is a different decision from "do I want to
@@ -248,31 +246,6 @@ public class BuiltInClassifierCatalog {
                     // it on, through the setup flow that checks the model answers.
                     false),
             new ClassifierModelModule(
-                    "behavior_drift",
-                    "Behaviour Drift",
-                    "The agent is doing something it does not usually do — atypical action sequences, "
-                            + "new capabilities appearing, established steps quietly disappearing. Ships as "
-                            + "a fitting procedure, not a model: it learns this project's normal from this "
-                            + "project's own traces, with no labels, and stays silent until the learned "
-                            + "baseline saturates.",
-                    Kind.BEHAVIOR_DRIFT,
-                    1,
-                    // No measured operating point yet: there is no portable gold set for "atypical for
-                    // this agent" and there cannot be one, so the eval is synthetic injection (recall at
-                    // a fixed alert budget, per perturbation operator) and the gate is set from the first
-                    // measured run rather than guessed here.
-                    Capability.BEHAVIOR_DRIFT,
-                    // Trace grain: an action skeleton only exists across a whole trace.
-                    Grain.TRACE,
-                    // The BehaviorDriftConfig policy defaults, stated explicitly so a project can move
-                    // its own operating point without a redeploy.
-                    "{\"alert_budget_per_1k\":3,\"min_support\":30,\"graduation_sessions\":50,"
-                            + "\"graduation_span_days\":3,\"omission_support\":0.9,\"rare_floor\":0.001,"
-                            + "\"max_order\":3,\"arm_min_traces\":300,\"arm_discovery_floor\":2.0,"
-                            + "\"arm_sustained_fits\":2,\"novelty_count_floor\":10,"
-                            + "\"trace_settle_seconds\":300}",
-                    null),
-            new ClassifierModelModule(
                     "duration_drift",
                     "Duration Drift",
                     // User-facing, and re-synced onto every seeded project by the version bump below, so
@@ -322,9 +295,9 @@ public class BuiltInClassifierCatalog {
                     "{\"measures\":[\"turn_duration\",\"tool_duration\"],\"window_target_count\":500,"
                             + "\"window_max_hours\":24,\"min_sample\":100,\"w1_floor\":0.139,"
                             + "\"explained_by_fraction\":0.5,\"settle_seconds\":300,\"hist_bins\":320}",
-                    // No detector factory, exactly as behaviour drift has none: this is a per-project
-                    // fitting procedure dispatched through the ClassifierSweep registered for this kind on
-                    // ClassifierWorker's Grain.WINDOW branch, not an observation-grain BuiltInDetector.
+                    // No detector factory: this is a per-project fitting procedure dispatched through the
+                    // ClassifierSweep registered for this kind on ClassifierWorker's Grain.WINDOW branch,
+                    // not an observation-grain BuiltInDetector.
                     //
                     // callSiteFactsRead() is deliberately empty, worth saying since there's no object here
                     // to say it on. It exists for detectors gated on a call_site column captured from the
@@ -365,11 +338,9 @@ public class BuiltInClassifierCatalog {
                     // MetricSource and printed inside the cost finding's evidence as the decomposition
                     // that explains it.
                     //
-                    // settle_seconds matters here and not for duration_drift: cost sums over a trace's
-                    // spans, so it has to wait for every span to arrive, or measuring early would read as
-                    // cheap and surface as a permanent drift toward cheaper whenever ingest lags. Duration
-                    // is read off a single span whose arrival is its own completion signal, so it needs no
-                    // such wait.
+                    // settle_seconds is not a per-measure wait: the sweep reads only settled traces, and
+                    // settle_seconds only caps how long a page is held open for a trace whose root span
+                    // never lands.
                     //
                     // w1_floor is the same simulated 0.139 as duration drift, unvalidated for the same
                     // reason.
@@ -405,87 +376,19 @@ public class BuiltInClassifierCatalog {
                     // classifier, with the WINDOW branch looking this detector kind up in
                     // ClassifierSweepRegistry rather than falling into metric drift.
                     Grain.WINDOW,
-                    // Every key here is one ToolErrorConfig parses. decision_interval is the CUSUM
-                    // threshold and it is a guess: 6.0 buys a false alarm about every 250,000 calls under
-                    // independent Bernoulli trials, and real tool failures are bursty in a way that
-                    // arithmetic cannot price; a null run against a real corpus is what replaces it, and it
-                    // will very likely move up.
+                    // decision_interval is the CUSUM threshold and it is a guess: 6.0 buys a false alarm
+                    // about every 250,000 calls under independent Bernoulli trials, and real tool failures
+                    // are bursty in a way that arithmetic cannot price; a null run against a real corpus is
+                    // what replaces it, and it will very likely move up.
                     //
-                    // min_effect_size is not a second threshold on the same thing, it is the guard that
-                    // makes a sequential test usable at volume: a CUSUM accumulates evidence indefinitely,
-                    // so on a busy tool it eventually crosses on a tenth of a percentage point, which is
-                    // real and is nobody's problem.
+                    // ToolErrorConfig does not read min_effect_size or settle_seconds; it ignores keys it
+                    // does not know.
                     "{\"decision_interval\":6.0,\"shift_multiple\":2.0,\"shift_floor\":0.005,"
                             + "\"min_effect_size\":0.05,\"min_baseline_calls\":500,"
                             + "\"down_arm_min_rate\":0.01,\"settle_seconds\":300,\"max_patterns\":8}",
                     // No detector factory and no sweep. callSiteFactsRead() is moot for the same reason it
                     // is empty on the metric modules: this reads tool_call, the observation attribute bag
                     // and the trace spine, nothing captured onto call_site from a repository.
-                    null),
-            new ClassifierModelModule(
-                    "sop_conformance",
-                    "SOP Conformance",
-                    // User-facing. It says both halves, per-turn conformance and windowed drift,
-                    // because "did the agent follow the SOP on this turn" and "did compliance fall
-                    // below what history predicts" are the two questions the classifier answers, and
-                    // an operator reading only one would mis-file the findings it raises.
-                    "The agent is drifting from a written SOP — for every authored rule, each turn is "
-                            + "judged (did the rule apply, was it satisfied), and each rule's compliance "
-                            + "rate is tested against what the reference period predicts for this traffic "
-                            + "(one-sided, Bonferroni, minimum effect). Turns whose intent the reference "
-                            + "never saw stay out of the test's evidence, and a rule whose activation "
-                            + "gate itself shifted carries a \"reference stale — refit the gate\" "
-                            + "annotation instead of a silent verdict; a second, distinct gate annotation "
-                            + "(\"gate precision degraded (PACC)\") marks windows where the gate is "
-                            + "admitting turns the rule does not apply to even inside intents the "
-                            + "reference knew — same remediation, refit the gate, but the deficit likely "
-                            + "belongs to falsely-admitted turns rather than the agent. Requires an "
-                            + "authored SOP and a "
-                            + "fitted artifact bundle from the conformance engine. Interim serving "
-                            + "posture: turn-text embedding runs in-process on the backend, bounded to a "
-                            + "configured number of concurrent encoder passes (the classify-service "
-                            + "exists because of the 2026-07-12 OOM incident; in-JVM was chosen so the "
-                            + "fit arithmetic stays parity-pinnable) — the accepted plan moves embedding "
-                            + "behind a classify-service /embed endpoint before any project is enabled.",
-                    Kind.SOP_CONFORMANCE,
-                    // Description and config here re-sync onto an already-seeded project only when this
-                    // version advances (ClassifierService.seedBuiltIns), so a description or config-key
-                    // change needs a bump or an existing project keeps the stale text or an absent key
-                    // reading as unset. shadow_mode is a case in point: a project seeded before it existed
-                    // would otherwise read the key as absent and default to surfacing findings rather than
-                    // staying quiet.
-                    4,
-                    // Seeds enabled, like every built-in, and is held back by its flag alone, which is
-                    // targeted on for no org yet: the engine's zero-false-alarm figure was measured on one
-                    // corpus with synthetic injected drift, and no per-project bundle exists until an
-                    // operator deploys one (ConformanceArtifactStore). Behind the flag, an
-                    // enabled-but-bundle-less row's sweep is a cursor-preserving no-op, which is the second
-                    // fence.
-                    Capability.SOP_CONFORMANCE,
-                    // WINDOW grain: the drift test fires on a window of a rule's admitted activations,
-                    // never on one turn; a per-turn verdict row is evidence, not a finding. An enabled
-                    // row rides ClassifierWorker's WINDOW branch, which resolves this kind to its own
-                    // registered sweep, one lookup, no ordering between classifiers to get wrong.
-                    Grain.WINDOW,
-                    // measures stays [] as belt-and-braces: dispatch resolves this kind to its own sweep,
-                    // but if that routing ever regresses, an empty list keeps the metric-drift fold inert
-                    // (an absent list falls back to the duration measures, which would open duration
-                    // findings under the conformance switch). alpha / min_activations / min_effect are the
-                    // engine's frozen drift knobs (Bonferroni across the SOP's rules, windows of at least
-                    // 30 activations, 0.10 minimum effect), parsed by conformance.ConformanceConfig.
-                    // settle_seconds and drift_window_turns are serving knobs with no engine counterpart,
-                    // since the engine scores a finished file while the sweep scores a live stream: how
-                    // old a turn's trace must be before it is scored, and how many stored per-turn
-                    // verdicts one rule's windowed drift test reads. shadow_mode is the third, and the
-                    // only one about who sees the output rather than how it is computed: true keeps
-                    // scoring and recording while withholding automatic escalation and case opening
-                    // (ConformanceShadowMode). Seeded false, so a project opts into shadow rather than a
-                    // detector ever being muted by an absent key.
-                    "{\"measures\":[],\"alpha\":0.01,\"min_activations\":30,\"min_effect\":0.1,"
-                            + "\"settle_seconds\":300,\"drift_window_turns\":2000,\"shadow_mode\":false}",
-                    // No detector factory, exactly as the other fitting-tier classifiers: nothing
-                    // observation-grain to dispatch. The ClassifierSweep registered for this kind owns the
-                    // dispatch, feeding the scoring service with the phase-A repositories and the encoder.
                     null));
 
     private final List<BuiltIn> builtIns;
@@ -511,8 +414,8 @@ public class BuiltInClassifierCatalog {
 
         // One dispatch-only detector is NOT a catalog built-in but is registered so the worker
         // dispatches its kind for USER-authored signals:
-        //  - RegexDetector backs USER-authored `regex` classifiers; empty default phrases (each such row
-        //    supplies its own via config_json), ClassifierField.BOTH so a phrase can match either side of
+        //  - RegexDetector backs USER-authored `regex` classifiers; each such row supplies its phrases
+        //    via config_json, ClassifierField.BOTH so a phrase can match either side of
         //    the exchange, WARN because a user tracker feeds metrics, not incident escalation. Nothing
         //    mints one of these any more, but the kind stays dispatched so rows already on disk keep
         //    scoring.
@@ -520,7 +423,6 @@ public class BuiltInClassifierCatalog {
                 Kind.REGEX,
                 ClassifierField.BOTH,
                 Detection.Severity.WARN,
-                List.of(),
                 true,
                 new DeterministicNlPhraseCompiler(),
                 mapper);

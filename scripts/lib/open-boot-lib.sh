@@ -7,8 +7,8 @@
 #
 # Callers must source scripts/lib/cloud-credential-denylist.sh first (CLOUD_CREDENTIAL_DENYLIST).
 #
-# Lives under scripts/lib/, not scripts/, so scripts/check.sh's manifest glob and
-# check-open-boundary.sh rule 5 don't pick it up as a gate.
+# Lives under scripts/lib/, not scripts/, so scripts/check.sh's manifest glob doesn't pick it up as
+# a gate.
 
 # open_boot_wait_for <prefix> <desc> <url> <want-http-code> [tries]
 # Polls rather than sleeping blind: 45 tries at 2s (90s) covers a cold `--build`. Returns 1 (and
@@ -139,61 +139,4 @@ open_boot_check_denied_credentials() {
         fi
     done
     return "$hits"
-}
-
-# open_boot_overlay_table_names <overlay-db-resources-dir>
-# Resolves db/changelog/paid/db.changelog-paid.yaml under <dir>, walks the changeset SQL files
-# it includes, and prints the deduped, sorted `CREATE TABLE public.<name>` names, one per line.
-#
-# The table-name-derivation expression is copied, not sourced, from check-overlay-schema.sh's own
-# rule1(): sourcing it from this file would cross the boundary check-open-boundary.sh's rule 5
-# enforces. Keep the two in sync by hand; it's two lines of grep, not worth sharing a file both
-# sides would have to reach.
-#
-# Two non-error outcomes, both deliberate:
-#   - no overlay checkout under <dir> (unset, absent, or missing the changelog): a documented
-#     SKIP. One line to stderr, empty stdout, returns 0.
-#   - the changelog is present but derives zero table names: a real changelog always resolves at
-#     least the baseline tables, so zero means a listed file went missing or the CREATE TABLE
-#     shape changed underneath this grep. Treated as a hard failure, matching
-#     check-overlay-schema.sh's own judgment call.
-open_boot_overlay_table_names() {
-    local dir="$1" master files f names
-
-    if [ -z "$dir" ] || [ ! -d "$dir" ]; then
-        echo "open_boot_overlay_table_names: no overlay directory given (or '$dir' does not exist) - skipping, nothing to derive table names from" >&2
-        return 0
-    fi
-
-    master="$dir/db/changelog/paid/db.changelog-paid.yaml"
-    if [ ! -f "$master" ]; then
-        echo "open_boot_overlay_table_names: '$dir' has no db/changelog/paid/db.changelog-paid.yaml - not a paid db module resources root, skipping, nothing to derive table names from" >&2
-        return 0
-    fi
-
-    # Same "file: db/changelog/paid/changes/…" line shape check-overlay-schema.sh's
-    # paid_included_files() parses.
-    files="$(sed -n 's|^ *file: *\(db/changelog/paid/changes/.*\)$|\1|p' "$master")"
-    if [ -z "$files" ]; then
-        echo "open_boot_overlay_table_names: $master includes no changes/ file - nothing to derive table names from" >&2
-        return 1
-    fi
-
-    names=""
-    for f in $files; do
-        if [ ! -f "$dir/$f" ]; then
-            echo "open_boot_overlay_table_names: $master includes $f, which does not exist on disk" >&2
-            return 1
-        fi
-        names="$names $(grep -oE '^CREATE TABLE public\.[A-Za-z0-9_]+' "$dir/$f" | sed 's/^CREATE TABLE public\.//')"
-    done
-    names="$(printf '%s\n' $names | sort -u | grep -v '^$' || true)"
-
-    if [ -z "$names" ]; then
-        echo "open_boot_overlay_table_names: derived zero overlay table names from $master's own CREATE TABLE statements - failing loud rather than treating zero-to-check-against as trivially true" >&2
-        return 1
-    fi
-
-    printf '%s\n' "$names"
-    return 0
 }

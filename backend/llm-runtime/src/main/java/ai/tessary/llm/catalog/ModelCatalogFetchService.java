@@ -28,7 +28,7 @@ import org.springframework.stereotype.Component;
  * ai.tessary.llm.ModelCatalog} stays the static per-model CAPABILITY table (agentic, effort levels, strict JSON schema); this
  * service answers the orthogonal question, "what models does this org's credential actually see
  * right now" — {@code ModelCatalog#mergeLive} is where the two are reconciled into what the settings
- * page and {@code ChatModelFactory} actually use.
+ * page and {@code ProjectModelSettings} actually use.
  *
  * <h2>Cache key: {@code (provider, region)}, never {@code (org, provider)}</h2>
  *
@@ -52,8 +52,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>{@link #refreshingRead} blocks on a fetch when the entry is missing or past its TTL — the
  * settings page and catalog endpoints use this, where a slower response is an acceptable price for
- * fresher data. {@link #cachedRead} never fetches — {@code ChatModelFactory}'s hot judge-call path
- * uses this, so a vendor being slow or down adds no latency to grading; a cold entry there simply
+ * fresher data. {@link #cachedRead} never fetches — {@code ProjectModelSettings}'s lane resolution
+ * uses this, so a vendor being slow or down adds no latency to a run; a cold entry there simply
  * contributes nothing until some other reader has warmed it.
  */
 @Component
@@ -104,7 +104,7 @@ public class ModelCatalogFetchService {
         // Deliberately never closed: this HttpClient is shared across every OpenAI-compat/Anthropic/
         // OpenRouter lister for the lifetime of the service (retained inside the Map this method
         // returns), the same pattern every other long-lived HttpClient field in this codebase uses
-        // (WorkOsClient, GithubClient, HttpJson, ...). PMD's CloseResource check cannot trace the
+        // (WorkOsClient, GithubClient, ...). PMD's CloseResource check cannot trace the
         // reference escaping into eight separate constructor calls in a fan-out like this one.
         //
         // connectTimeout stays a fixed 5s rather than tessary.model-catalog.fetch-timeout: that property
@@ -153,12 +153,6 @@ public class ModelCatalogFetchService {
 
     private List<ProviderModel> fetch(CacheKey key, ModelProvider provider, ProviderCredential cred) {
         ProviderModelLister lister = listers.get(provider);
-        if (lister == null) {
-            // No lister wired for this provider (should not happen for a real ModelProvider value —
-            // defaultListers() covers every one — but a test-injected map may be intentionally partial).
-            // Contribute nothing rather than throw, matching the no-credential case above.
-            return List.of();
-        }
         try {
             List<ProviderModel> models = lister.list(resolveCredential(provider, cred));
             cache.put(key, new CacheEntry(Instant.now(), models, false));

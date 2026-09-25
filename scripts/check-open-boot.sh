@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Detached boot check for a stack with tessary-paid/ removed: with the directory genuinely gone
-# (not just moved aside), the slim dev stack must still come up: backend healthy, frontend up,
-# caddy serving the dev port, and no tessary-paid/ skeleton left on disk afterward.
+# Detached boot check: in a clean-room export of the working tree, the dev stack must come up:
+# backend healthy, frontend up, caddy serving the dev port.
 #
-# Also checks a credential deny-list before and after boot, brings the classify service into the
-# stack keyless, and drives an authenticated triage flow through tessary's own identity provider.
+# Also checks a credential deny-list before and after boot, and drives an authenticated triage
+# flow through tessary's own identity provider.
 #
 # NEVER RUN AGENT-SIDE. This needs Docker and Compose to build and boot a real stack; run it via
-# `task check:open:boot` or the dispatch-only `.github/workflows/boot-checks.yml`, never as
+# `task check:open:boot` or `.github/workflows/boot-checks.yml`, never as
 # part of `task check` or `scripts/check.sh`.
 #
-# Exports the working tree into a scratch copy, deletes tessary-paid/ from the copy, then runs a
-# fresh `git init && git add -A` there instead of `mv`-ing the directory aside: a bare `mv` leaves
-# the original git index believing tessary-paid/ files still exist, which breaks any gate that
-# enumerates tracked files via `git ls-files`. See scripts/lib/export-simulate.sh.
+# Exports the working tree into a scratch copy and runs a fresh `git init && git add -A` there, so
+# the copy holds exactly the files a clone would. See scripts/lib/export-simulate.sh.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,24 +61,18 @@ _cleanup() {
 trap _cleanup EXIT
 
 echo "check-open-boot: exporting the working tree (faithful export) -> $TMP"
-# export-simulate.sh owns the tessary-paid/-survived assertion; it exits non-zero itself if the
-# strip failed, so a bare call is enough here.
+# export-simulate.sh exits non-zero itself if the export failed, so a bare call is enough here.
 bash "$ROOT/scripts/lib/export-simulate.sh" "$TMP"
 
 # Computed before booting so a boot that fails partway still gets torn down by the trap.
 COMPOSE="$(cd "$TMP" && bash scripts/lib/dev-compose.sh)"
 
-# --- three knobs this recipe deliberately changes from the plain dev:up:slim recipe above ---
+# --- two knobs this recipe deliberately changes from the plain `task dev:up` recipe ---
 #
-# 1. TESSARY_SKIP_CLASSIFY is dropped entirely: this gate exists to prove the classify service
-#    itself builds and boots keyless, so skipping it would skip the thing under test. Note that
-#    `frustration` and `groundedness` are the only built-in classifiers that read it, and both are
-#    in CapabilityService.UNAVAILABLE_IN_OPEN_EDITION, so this proves the container builds and
-#    serves healthy with no credential, not that a classifier verdict flows through it today.
-# 2. SANDBOX_BACKEND=docker is exported explicitly as documentation of intent: the `launcher`
+# 1. SANDBOX_BACKEND=docker is exported explicitly as documentation of intent: the `launcher`
 #    compose profile stays off here (see the SCOPE BOUNDARY note further down), so E2B_API_KEY is
 #    never read either way.
-# 3. TESSARY_AUTH_DISABLED=false overrides docker-compose.dev.yml's default of "true" (`task
+# 2. TESSARY_AUTH_DISABLED=false overrides docker-compose.dev.yml's default of "true" (`task
 #    dev`'s unauthenticated convenience). Leaving it unset would make AuthFilter bypass itself for
 #    every path, so /auth/me would 401 unconditionally and silently defeat the authenticated-
 #    triage assertion below with no signal anything was wrong.
@@ -94,7 +85,7 @@ for _cred_var in "${CLOUD_CREDENTIAL_DENYLIST[@]}"; do
     _empty_cred_assignments+=("${_cred_var}=")
 done
 
-echo "check-open-boot: booting the slim stack WITH classify (keyless), SANDBOX_BACKEND=docker, auth enabled, no denied credential…"
+echo "check-open-boot: booting the dev stack, SANDBOX_BACKEND=docker, auth enabled, no denied credential…"
 # Two run-scoped, generated values, minted fresh here and never stored or reused. The clean-room
 # export has no .env, so without them the BYO-provider credential PUT in step (e) 412s
 # (SecretBox has nothing to seal with) and signup can't seal a session cookie.
@@ -114,13 +105,6 @@ _run_cookie_password="$(openssl rand -base64 32)"
 DEV_PORT="${TESSARY_DEV_PORT:-80}"
 BASE="http://localhost:${DEV_PORT}"
 
-# Auto-detect tessary-paid/ on $ROOT (the pre-export checkout) so the post-boot table-absence
-# assertion below runs without a caller having to remember to set this. An explicit value wins.
-OPEN_BOOT_OVERLAY_DIR="${OPEN_BOOT_OVERLAY_DIR:-}"
-if [ -z "$OPEN_BOOT_OVERLAY_DIR" ] && [ -f "$ROOT/tessary-paid/pom.xml" ]; then
-    OPEN_BOOT_OVERLAY_DIR="$ROOT/tessary-paid/db/src/main/resources"
-fi
-
 # Poll rather than sleep-and-hope: docker-compose.dev.yml gates the frontend and caddy's own start
 # on the backend's `condition: service_healthy`, but caddy has no such gate on its own readiness —
 # it is a reverse_proxy that can be listening in front of an upstream that is not yet. 45 tries at
@@ -132,65 +116,11 @@ _wait_for() {
 
 fail=0
 
-# classify's own readiness, checked directly on its host-published port: /healthz answers 503
-# until warmAll()/warmAllEmbedders() resolve and only 200 once every baked head/embedder is
-# resident. A heavier, colder-starting container than the rest of the stack, hence its own wider
-# budget rather than trusting the 45x2s general one below to also cover it.
-_wait_for "GET /healthz         (classify, direct :18080)"     "http://localhost:18080/healthz" 200 90 || fail=1
-
 # A public page, the OpenAPI document, and an authenticated-only route correctly answering
 # unauthenticated, all through caddy on the dev port, since that's what a real deployment reaches.
 _wait_for "GET /              (frontend, via caddy)" "$BASE/"             200 || fail=1
 _wait_for "GET /v3/api-docs   (backend,  via caddy)" "$BASE/v3/api-docs"  200 || fail=1
 _wait_for "GET /api/v1/me     (backend,  via caddy)" "$BASE/api/v1/me"    401 || fail=1
-
-# Checked again post-boot: a bind mount could manufacture a ghost tessary-paid/ directory in an
-# export that never had one.
-if [ -e "$TMP/tessary-paid" ]; then
-    echo "check-open-boot: tessary-paid/ reappeared on disk after boot - the ghost-directory" >&2
-    echo "                 regression is back. Check docker-compose.dev.yml for a bind mount" >&2
-    echo "                 naming a path that tessary-paid/docker-compose.dev.yml's probe does not cover." >&2
-    fail=1
-fi
-
-# Table-absence check, post-boot: proves no paid-overlay table leaked into the database this
-# open-only boot created. OPEN_BOOT_OVERLAY_DIR only derives the table-name list from disk; it is
-# never itself booted or applied here.
-if [ -n "$OPEN_BOOT_OVERLAY_DIR" ]; then
-    # A non-empty OPEN_BOOT_OVERLAY_DIR commits this run to the assertion, so a directory that
-    # does not exist must fail loud here rather than read as a legitimately-empty overlay.
-    if [ ! -d "$OPEN_BOOT_OVERLAY_DIR" ]; then
-        echo "check-open-boot: OPEN_BOOT_OVERLAY_DIR='$OPEN_BOOT_OVERLAY_DIR' does not exist - cannot verify the paid-overlay-table-absence assertion, failing rather than silently skipping it" >&2
-        fail=1
-    else
-        _overlay_table_check_failed=0
-        _overlay_tables="$(open_boot_overlay_table_names "$OPEN_BOOT_OVERLAY_DIR")" || _overlay_table_check_failed=1
-        if [ "$_overlay_table_check_failed" = 1 ]; then
-            echo "check-open-boot: could not derive the paid overlay's table names from OPEN_BOOT_OVERLAY_DIR - see above" >&2
-            fail=1
-        else
-            echo "check-open-boot: checking that no paid overlay table exists in this open-only boot's database…"
-            for _overlay_table in $_overlay_tables; do
-            # `|| true` is load-bearing: under `set -euo pipefail`, a `$COMPOSE exec`/`psql` error
-            # would otherwise kill the script silently instead of letting the `elif` below fail
-            # loud on an unconfirmed result.
-            _overlay_hit="$( (cd "$TMP" && $COMPOSE exec -T postgres \
-                psql -U tessary -d tessary -tAc \
-                "select to_regclass('public.${_overlay_table}') is not null" 2>/dev/null) \
-                | tr -d '[:space:]' || true)"
-            if [ "$_overlay_hit" = "t" ]; then
-                echo "check-open-boot: paid overlay table 'public.${_overlay_table}' exists in this open-only boot's database - the open master changelog created a table it should not know about" >&2
-                fail=1
-            elif [ "$_overlay_hit" != "f" ]; then
-                echo "check-open-boot: could not confirm 'public.${_overlay_table}' is absent (query returned '${_overlay_hit}', not 't' or 'f') - treating as a failure, not a pass" >&2
-                fail=1
-            fi
-        done
-    fi
-    fi
-else
-    echo "check-open-boot: OPEN_BOOT_OVERLAY_DIR is not set - skipping the paid-overlay-table-absence assertion."
-fi
 
 # Credential deny-list, post-boot. The pre-boot unset + empty-assignment above only stops the
 # `${VAR}`/`${VAR:-default}` shell-interpolation leak; this proves the stack itself never resolved
@@ -203,17 +133,16 @@ fi
 # interpolation and env_file resolves, catches a default value baked into the compose YAML
 # itself; (b) `docker exec <container> env` on every running service catches a value baked into a
 # Dockerfile ENV line, which (a) cannot see. Both passes live in scripts/lib/open-boot-lib.sh. The
-# service list is every service this boot's `dev_up_services` starts.
+# service list is every service this boot starts.
 open_boot_check_denied_credentials "check-open-boot" "$TMP" "$COMPOSE" \
-    backend frontend caddy classify postgres || fail=1
+    backend frontend caddy postgres || fail=1
 
 [ "$fail" = 0 ] || {
     echo "check-open-boot: FAILED before the authenticated-triage assertion — see above." >&2
     exit 1
 }
-echo "check-open-boot: the open edition boots keyless - backend healthy, frontend up, classify" \
-     "warm with no HF_TOKEN, caddy serving :${DEV_PORT}, no denied credential anywhere, no" \
-     "tessary-paid/ left behind"
+echo "check-open-boot: the open edition boots keyless - backend healthy, frontend up," \
+     "caddy serving :${DEV_PORT}, no denied credential anywhere"
 
 # --------------------------------------------------------------------------------------------------
 # AUTHENTICATED TRIAGE FLOW: drives an account created through PasswordAuthProvider, tessary's own
@@ -298,8 +227,7 @@ echo "check-open-boot: minted an mcp-token (tsy_… redacted)"
 #
 # No test or check may require a real credential, local or CI. A placeholder proves everything
 # this step can: the PUT accepts it, seals it via SecretBox, and the GET below reads back
-# has_api_key:true. Nothing downstream ever calls a provider with it — every model-graded
-# classifier is in CapabilityService.UNAVAILABLE_IN_OPEN_EDITION, so the step (g) verdict is
+# has_api_key:true. Nothing downstream ever calls a provider with it, so the step (g) verdict is
 # proven by the deterministic `secret_leak` classifier alone. Clearly fake on its face so it can
 # never be mistaken for a working credential.
 OPEN_BOOT_PLACEHOLDER_KEY="sk-open-boot-placeholder-not-a-real-key-$$"
@@ -374,8 +302,8 @@ if [ "$_events_found" != 1 ]; then
     echo "                 detection. Either the triage pipeline silently no-op'd (the false-green" >&2
     echo "                 defect this check exists to catch) or the worker's heartbeat has not" >&2
     echo "                 ticked yet within this budget." >&2
-    # Print the backend/classify logs and the endpoint's last body on the way out: telling "worker
-    # never ticked" from "worker ticked and found nothing" from "classify unreachable" needs them.
+    # Print the backend log and the endpoint's last body on the way out: telling "worker never
+    # ticked" from "worker ticked and found nothing" needs them.
     echo "check-open-boot: --- last /classifiers/events body (HTTP $_code) ---" >&2
     head -c 2000 "$BODY_FILE" >&2 || true
     echo >&2
@@ -383,8 +311,6 @@ if [ "$_events_found" != 1 ]; then
     (cd "$TMP" && $COMPOSE logs --no-color --tail=1500 backend 2>/dev/null) \
         | grep -iE 'classif|observ|substrate|ingest|otlp|/v1/traces|scorer|encoder|WARN|ERROR' \
         | tail -80 >&2 || true
-    echo "check-open-boot: --- classify log (tail) ---" >&2
-    (cd "$TMP" && $COMPOSE logs --no-color --tail=40 classify 2>/dev/null) >&2 || true
     exit 1
 fi
 

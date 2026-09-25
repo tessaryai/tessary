@@ -13,8 +13,8 @@
 
     <artifactId>product</artifactId>
     <description>
-        What a customer configures: the ingest pipeline definition, the pre-deploy gate, the plan
-        and capability model, and the SOP intake and compile seams.
+        What a customer configures: the ingest pipeline definition, the pre-deploy gate, and the plan
+        and capability model.
 
         These are the nouns a user edits in the UI. They sit on the substrate because defining a call
         site means pointing at traces that already exist, and below analysis because a pipeline is
@@ -43,32 +43,8 @@
         </dependency>
 
         <dependency>
-            <groupId>ai.tessary</groupId>
-            <artifactId>test-support</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- A logback ListAppender is the only way to assert what a class actually EMITS, and one
-             assertion here needs it: `SopIntakeDispatch`'s no-intake line must be latched to once per
-             process, because that branch is this build's permanent steady state and `/import` is a
-             per-REQUEST path. (It used to be `SopCompileWorker`'s no-compiler line, on the same
-             argument; that class later moved out of this build and the dependency followed the
-             assertion rather than the class.) Same two test-scope artifacts the corresponding
-             conformance module declares, and the same pattern
-             `ClassifierWorkerLoggingTest` uses in `analysis`. -->
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

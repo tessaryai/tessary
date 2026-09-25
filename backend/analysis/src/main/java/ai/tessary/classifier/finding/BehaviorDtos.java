@@ -51,8 +51,7 @@ public final class BehaviorDtos {
      *
      * @param role which set this belongs to: {@code exemplar} / {@code member} / {@code baseline} /
      *     {@code witness} / {@code changepoint}
-     * @param rank the detector's own order within the role (conformance ranks exemplars
-     *     most-surprising-first), or null where the set is unordered
+     * @param rank the detector's own order within the role, or null where the set is unordered
      */
     public record EvidenceRefView(
             String grain,
@@ -60,41 +59,23 @@ public final class BehaviorDtos {
             @Nullable String traceId,
             @Nullable String spanId,
             String role,
-            @Nullable Integer rank) {
-
-        public static EvidenceRefView of(FindingEvidenceRow row) {
-            return new EvidenceRefView(
-                    row.grain(), row.sessionId(), row.traceId(), row.spanId(), row.role(), row.rank());
-        }
-
-        /** The trace-grain exemplars a legacy caller used to read off a single column. */
-        public static List<EvidenceRefView> exemplarTraces(List<String> traceIds) {
-            List<EvidenceRefView> out = new java.util.ArrayList<>();
-            for (int i = 0; i < traceIds.size(); i++) {
-                out.add(new EvidenceRefView("trace", null, traceIds.get(i), null, FindingEvidenceRow.Role.EXEMPLAR, i));
-            }
-            return List.copyOf(out);
-        }
-    }
+            @Nullable Integer rank) {}
 
     /**
-     * A page of one finding's evidence refs, plus both readings of how big the set is.
-     *
-     * <p>What this returns is ids, never bodies: an agent follows a ref with {@code get_trace} /
-     * {@code get_span} / {@code list_spans}, so a citation and the thing cited are the same identifier.
+     * How big one finding's evidence set is, in both readings. Counts only: {@code refs} is always
+     * empty, {@code nextCursor} null and {@code rowsOmitted} true, kept for wire compatibility.
      *
      * <p>The two count maps disagree on purpose. {@code counts} is a live {@code count(*)}: what
      * survives and can still be opened. {@code recordedCounts} is {@code finding.evidence_counts},
      * written by the same call that inserted the rows. Live below recorded is retention (refs age
      * out with the substrate they point at); live above recorded cannot happen. Both zero for a
-     * role is a fact about the detector, not a failed write: behaviour drift, conformance's
-     * windowed drift test, and metric drift's rolling-control arm all compare against a fitted
-     * summary and have no {@code baseline} rows to enumerate (see
+     * role is a fact about the detector, not a failed write: metric drift's rolling-control arm
+     * compares against a fitted summary and has no {@code baseline} rows to enumerate (see
      * {@link FindingEvidenceRow.Role#BASELINE}). Every role appears in both maps, zeros included,
      * so "none" is never indistinguishable from "not reported".
      *
-     * @param rowsOmitted true when the caller asked for counts only, so an empty {@code refs}
-     *     beside non-zero counts doesn't read as an evidence set that vanished.
+     * @param rowsOmitted always true, so an empty {@code refs} beside non-zero counts doesn't read as an
+     *     evidence set that vanished.
      */
     public record FindingEvidencePage(
             List<EvidenceRefView> refs,
@@ -219,12 +200,6 @@ public final class BehaviorDtos {
             @Nullable ShiftDetail metric,
             @Nullable RateDetail toolError,
             /**
-             * Set exactly on a BASELINE conformance finding, and the only evidence block that is not a
-             * measured shift. Null on everything else, including a conformance DRIFT finding, whose
-             * argument is the rates in its title.
-             */
-            @Nullable ConformanceBaselineView baseline,
-            /**
              * Set exactly on a {@code malformed_rate} finding: the rate, the declared schema annotated
              * with per-field failure counts, and the not-JSON / pre-rework buckets. Built off the
              * database rather than the payload alone (unlike {@link #metric} and {@link #toolError}), so
@@ -258,26 +233,10 @@ public final class BehaviorDtos {
              */
             @Nullable GroundednessDetail groundedness) {
 
-        /** For a caller with no malformed-output or secret-leak detail to attach. */
-        public static BehaviorFindingDetailView of(FindingRow row) {
-            return of(row, null, null);
-        }
-
-        public static BehaviorFindingDetailView of(
-                FindingRow row, @Nullable MalformedDetail malformedOutput, @Nullable SecretLeakDetail secretLeak) {
-            return of(row, malformedOutput, secretLeak, null);
-        }
-
-        /** As above, carrying the finding's dead-lettered triage when it has one; see {@link BehaviorFindingView#of(FindingRow, FailedTriage)}. */
-        public static BehaviorFindingDetailView of(
-                FindingRow row,
-                @Nullable MalformedDetail malformedOutput,
-                @Nullable SecretLeakDetail secretLeak,
-                @Nullable FailedTriage failed) {
-            return of(row, malformedOutput, secretLeak, null, null, failed);
-        }
-
-        /** As above, with a frustration or groundedness finding's own block. */
+        /**
+         * The detail view, with the DB-backed blocks the caller read for this finding's cause and its
+         * dead-lettered triage when it has one; see {@link BehaviorFindingView#of(FindingRow, FailedTriage)}.
+         */
         public static BehaviorFindingDetailView of(
                 FindingRow row,
                 @Nullable MalformedDetail malformedOutput,
@@ -292,7 +251,6 @@ public final class BehaviorDtos {
                             ? MetricFindingEvidence.detail(evidence)
                             : null,
                     FindingRow.Cause.RATE_SHIFT.equals(row.causeKind()) ? ToolErrorEvidence.detail(evidence) : null,
-                    null,
                     malformedOutput,
                     secretLeak,
                     secretLeak == null && FindingRow.Cause.ARMED_WINDOW.equals(row.causeKind())
@@ -302,23 +260,6 @@ public final class BehaviorDtos {
                     groundedness);
         }
     }
-
-    /**
-     * What a rule was already failing when its detector was fitted: a count over the fit's own
-     * reference period, with no test behind it.
-     *
-     * <p>Deliberately carries no rate, no z, and no expected-vs-observed pair: those were never
-     * computed for a baseline, and printing {@code 0.0%} where a statistic should be would be
-     * claiming one was.
-     *
-     * @param applicableTurns how many activations the violations were counted over
-     * @param violatingTraceIds every violating trace, not a sample: the audit pins the population,
-     *     and a ruling is only reproducible against the set the fit actually saw
-     * @param fittedAt the epoch this audit describes ({@code first_seen_at}), when the rulebook
-     *     was fitted rather than when anything changed
-     */
-    public record ConformanceBaselineView(
-            String ruleKey, long applicableTurns, int violations, List<String> violatingTraceIds, String fittedAt) {}
 
     /**
      * What a hand-pressed <em>Run analysis</em> on a finding produced.
@@ -352,7 +293,7 @@ public final class BehaviorDtos {
      */
     public record BehaviorFindingView(
             String id,
-            /** Null for a finding filed against a scope no call site owns: an SOP rule, or a tool. */
+            /** Null for a finding filed against a scope no call site owns: a tool. */
             @Nullable String callSiteId,
             String causeKind,
             String causeKey,
@@ -377,15 +318,6 @@ public final class BehaviorDtos {
             String firstSeenAt,
             String lastSeenAt,
             long traceCount,
-            /**
-             * What the claim is based on: references into substrate, the finding's own evidence set,
-             * in the order the detector wrote it. A reader who wants only the exemplar gets it as the
-             * first element of {@code role='exemplar'}.
-             *
-             * <p>Empty is a real state, not a failure: a finding whose traces have aged out keeps its
-             * claim and loses its evidence, and the page says so rather than 404ing.
-             */
-            List<EvidenceRefView> evidence,
             String status,
             @Nullable String triageVerdict,
             /**
@@ -400,17 +332,6 @@ public final class BehaviorDtos {
             String triageStatus,
             /** When a human ruled on this cause; null while it is still an unreviewed lead. */
             @Nullable String humanVerdictAt,
-            /**
-             * Which of the two claims an SOP-conformance row is making: {@code drift} ("this got
-             * worse") or {@code baseline} ("this has always been broken"). Null for every finding
-             * that is not one.
-             *
-             * <p>Exposed because the two are read differently and nothing else on the row says which:
-             * a baseline's {@link #traceCount()} is the population its violations were counted over,
-             * not a number of firings, and a reader who took it for one would read a fitted fact as a
-             * recurring event.
-             */
-            @Nullable String conformanceKind,
             /** The case this finding opened or joined ({@code finding.case_id}), or null while it backs
              *  none — a negative verdict, or a positive still waiting on {@code CaseOpener}. */
             @Nullable String caseId) {
@@ -452,13 +373,7 @@ public final class BehaviorDtos {
             return failed == null ? TriageStatus.IN_FLIGHT : TriageStatus.FAILED;
         }
 
-        /**
-         * Parse the stored citations; a malformed blob degrades to none rather than failing the row.
-         *
-         * <p>Public because the conformance projection reads the same {@code triage_citations}
-         * column through the same reader; two copies of "a bad blob means no citations" is one too
-         * many.
-         */
+        /** Parse the stored citations; a malformed blob degrades to none rather than failing the row. */
         public static List<BehaviorTriageVerdict.Citation> citations(@Nullable String json) {
             if (json == null || json.isBlank()) return List.of();
             try {
@@ -475,21 +390,9 @@ public final class BehaviorDtos {
          *
          * <p>Carries no evidence: a list render that attached every ref of every finding would ship
          * an unbounded population to draw a page that shows none of them. The population is paged
-         * through {@code GET /findings/{id}/evidence}. {@code evidence} survives on this record
-         * because the conformance projection fills it from its own {@code exemplar_trace_ids}
-         * column, a handful of ids and not a population.
+         * through {@code GET /findings/{id}/evidence}.
          */
         public static BehaviorFindingView of(FindingRow row, @Nullable FailedTriage failed) {
-            return build(row, List.of(), failed);
-        }
-
-        /** The evidence-less form, for a caller rendering a row whose set it has not read. */
-        public static BehaviorFindingView of(FindingRow row) {
-            return build(row, List.of(), null);
-        }
-
-        private static BehaviorFindingView build(
-                FindingRow row, List<EvidenceRefView> evidence, @Nullable FailedTriage failed) {
             return new BehaviorFindingView(
                     row.id(),
                     row.callSiteId(),
@@ -505,7 +408,6 @@ public final class BehaviorDtos {
                     row.onsetAt(),
                     row.lastSeenAt(),
                     row.sampleCount(),
-                    evidence,
                     row.status(),
                     row.triageVerdict(),
                     row.triageAction(),
@@ -514,8 +416,12 @@ public final class BehaviorDtos {
                     row.triagedAt(),
                     triageStatus(row, failed),
                     row.humanVerdictAt(),
-                    null,
                     row.caseId());
+        }
+
+        /** The form for a caller that has not read the finding's triage job. */
+        public static BehaviorFindingView of(FindingRow row) {
+            return of(row, null);
         }
 
         /**
@@ -541,7 +447,6 @@ public final class BehaviorDtos {
                     firstSeenAt,
                     lastSeenAt,
                     traceCount,
-                    evidence,
                     status,
                     null,
                     null,
@@ -553,7 +458,6 @@ public final class BehaviorDtos {
                     // ruling like any other, so leaving this set would tell RCA the direction a person
                     // decided even though the columns that say what they decided are gone.
                     null,
-                    conformanceKind,
                     // caseId survives: it says which case this finding backs, carrying no opinion about
                     // who ruled it or which way — the same reason triageStatus survives just above.
                     caseId);

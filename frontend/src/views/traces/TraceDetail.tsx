@@ -6,8 +6,7 @@
  * the execution views switch underneath.
  *
  * URL contract (every state a URL):
- *   ?view=tree|timeline (conversation default) · ?span=<spanId> ·
- *   ?case=C-118 (evidence mode — the banner back to the case).
+ *   ?view=tree|timeline (conversation default) · ?span=<spanId>.
  */
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -39,7 +38,6 @@ export function TraceDetail() {
 
   const view = (sp.get("view") as TraceView | null) ?? "conversation";
   const focusId = sp.get("span");
-  const caseRef = sp.get("case");
 
   const spans = useMemo(() => detail?.spans ?? [], [detail]);
 
@@ -56,19 +54,6 @@ export function TraceDetail() {
         </span>
         <span className="font-mono text-fg">{trace?.id ?? traceId}</span>
       </nav>
-
-      {/* Evidence mode: arriving from a case, the way back is pinned. */}
-      {caseRef && (
-        <div
-          className="flex items-center bg-surface border border-border gap-3 py-2.5 px-3.5 mb-4.5 text-small"
-          style={{ borderRadius: "var(--radius-card)" }}
-        >
-          <Link to={`${basePath}/cases/${caseRef}`} className="text-link hover:text-link-hover hover:underline">
-            Back to {caseRef}
-          </Link>
-          <span className="text-subtle">You are reading this trace as evidence for a case.</span>
-        </div>
-      )}
 
       {/*
        * Exhaustive by construction: with no trace to show we are either still fetching, or we are not

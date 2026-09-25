@@ -14,8 +14,7 @@ import org.springframework.stereotype.Component;
  * turns server-side redaction off entirely if the guard ever misbehaves; client-side SDK
  * redaction and per-rule {@code enabled} toggles still apply independently.
  *
- * <p>Defaults live here in code (no yaml entries needed), mirroring {@link SubstrateProperties} and
- * {@link IngestProperties}.
+ * <p>Defaults live here in code (no yaml entries needed), mirroring {@link SubstrateProperties}.
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.redaction")

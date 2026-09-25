@@ -17,7 +17,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { auth as authApi } from "../api/client";
-import { paid } from "@paid";
 import { useTenant } from "../tenant/TenantContext";
 import { useAuth } from "../auth/AuthContext";
 import { cn } from "../ui";
@@ -178,15 +177,6 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const currentOrg = orgs.find((o) => o.slug === orgSlug);
   const currentProject = projects.data?.find((p) => p.slug === projectSlug);
 
-  /*
-    orgSwitcherRows renders the multi-org section of this dropdown (an "Organizations" header, one
-    row per org, and "+ New organization"). This build's default renders null, so the switcher
-    shows only Projects, with no dead action pointing at a route this build doesn't ship. Held in a
-    variable rather than called inline because the section divider below has to know whether there
-    is a section above it at all.
-  */
-  const orgRows = paid.orgSwitcherRows(orgs, orgSlug);
-
   const go = (to: string) => {
     setOpen(false);
     nav(to);
@@ -242,13 +232,6 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
           className="absolute left-full bottom-0 w-60 max-h-[70vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1 z-50"
           style={{ boxShadow: "var(--shadow-md)" }}
         >
-          {orgRows}
-
-          {/* Separates the two sections, so it only exists when there are two: this build's
-              `orgSwitcherRows` returns null, and an unconditional rule left a divider hanging above
-              the Projects header with nothing above it to divide. */}
-          {orgRows != null && <div className="my-1 border-t border-border" />}
-
           <div className="px-3 pt-1.5 pb-1 text-label uppercase text-subtle">Projects</div>
           {(projects.data ?? []).map((p) => (
             <SwitcherRow
@@ -267,8 +250,7 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
-export function SwitcherRow({
+function SwitcherRow({
   name,
   selected,
   onClick,
@@ -293,8 +275,7 @@ export function SwitcherRow({
   );
 }
 
-/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
-export function SwitcherAction({ label, onClick }: { label: string; onClick: () => void }) {
+function SwitcherAction({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -368,7 +349,8 @@ function NavLinkRow({
 }
 
 function AccountRow({ collapsed }: { collapsed: boolean }) {
-  const { user } = useAuth();
+  // Rendered only inside ProtectedRoute, which does not mount its children without a user.
+  const user = useAuth().user!;
   const { open, setOpen, ref } = useDropdown();
   const onSignOut = async () => {
     try {
@@ -379,7 +361,6 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
     }
   };
 
-  if (!user) return null;
   const initial = (user.email ?? "?").charAt(0).toUpperCase();
   return (
     <div ref={ref} className="px-2 py-2 border-t border-border relative">

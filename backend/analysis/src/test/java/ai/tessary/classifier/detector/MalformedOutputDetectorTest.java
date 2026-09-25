@@ -42,7 +42,19 @@ class MalformedOutputDetectorTest {
 
     private static SubstrateObservation obs(@Nullable String callSiteId, @Nullable String output) {
         return new SubstrateObservation(
-                "obs-1", "p", "t", "s", null, callSiteId, "llm", "chat", null, output, null, "2026-01-01T00:00:00Z");
+                "obs-1",
+                "p",
+                "t",
+                "s",
+                null,
+                callSiteId,
+                "llm",
+                "chat",
+                null,
+                output,
+                null,
+                "2026-01-01T00:00:00Z",
+                null);
     }
 
     @Test

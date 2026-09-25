@@ -133,11 +133,6 @@ class GroundednessAssessmentIntegrationTest {
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
         EncoderScorer head = new EncoderScorer() {
             @Override
-            public List<Double> score(String h, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public List<ResponseScore> scoreResponses(String h, List<Response> responses) {
                 return responses.stream()
                         .map(r -> new ResponseScore(
@@ -222,7 +217,8 @@ class GroundednessAssessmentIntegrationTest {
                 "[{\"role\":\"user\",\"content\":\"what happened to my refund and my plan?\"}]",
                 "[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]",
                 null,
-                RAN.toString());
+                RAN.toString(),
+                null);
     }
 
     private long rowsFor(Fixture f) {

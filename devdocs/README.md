@@ -30,7 +30,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [modules.md](./modules.md) | The eleven-module Maven reactor: the layering, why each package sits where it does, and the invariants the poms enforce. |
 | [reference/data-model.md](./reference/data-model.md) | The full Postgres schema as a UML/ER diagram + table inventory. |
 | [reference/prompt-craft.md](./reference/prompt-craft.md) | Where every prompt the platform sends a model lives, what belongs in markdown vs code, and how to change one without silently changing a lane's behaviour. |
-| [reference/classifier-extension-interface.md](./reference/classifier-extension-interface.md) | The public classifier extension interface: the six ports a classifier attaches through, auto-configuration discovery, packaging, versioning, failure isolation, and where an extension may run. |
+| [reference/classifier-extension-interface.md](./reference/classifier-extension-interface.md) | The public classifier extension interface: the four ports a classifier attaches through, auto-configuration discovery, packaging, versioning, failure isolation, and where an extension may run. |
 | [reference/trace-schema.md](./reference/trace-schema.md) | How heterogeneous traces normalise into the canonical substrate. |
 | [reference/ingestion-contract/](./reference/ingestion-contract/README.md) | **The wire contract**: every field producers send that the platform consumes (single table). Doc-first — change it before changing producer/ingest code. |
 | [`frontend/DESIGN_SYSTEM.md`](../frontend/DESIGN_SYSTEM.md) | Frontend design language: tokens, components, data-viz vocabulary, density modes. Lives beside `frontend/tokens.css`, which it documents, rather than being mirrored here. |

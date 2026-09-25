@@ -36,8 +36,8 @@ import org.springframework.stereotype.Component;
  * and a fresh install that had never run it failed the sweep five times a tick and dead-lettered.
  *
  * <p>Up means a 200 whose JSON body lists {@code groundedness} in {@code heads}. A bare 200 is not
- * enough: classify-service answers one with an empty model manifest, and that service does not
- * serve this head.
+ * enough: a server with no groundedness model loaded answers one with an empty {@code heads}, and
+ * it does not serve this head.
  *
  * <p>Probed on boot and every {@code tessary.observer.encoder.probe-interval-ms}, never on a request
  * thread: {@link #available()} is a field read. {@link #markUnreachable} flips it down at once when a
@@ -62,17 +62,11 @@ public class EncoderAvailability implements HealthIndicator {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /**
-     * What the last probe found, and when. {@code lastAvailableAt} is the newest time the model was
-     * found up, kept while it is down; it lives in memory only, so a restart clears it.
-     */
+    /** What the last probe found, and when. */
     public record Snapshot(
-            boolean available,
-            String reason,
-            @Nullable Instant checkedAt,
-            @Nullable Instant lastAvailableAt) {}
+            boolean available, String reason, @Nullable Instant checkedAt) {}
 
-    private static final Snapshot UNPROBED = new Snapshot(false, "not probed yet", null, null);
+    private static final Snapshot UNPROBED = new Snapshot(false, "not probed yet", null);
 
     private final ObserverProperties props;
     private final HttpClient client;
@@ -121,12 +115,7 @@ public class EncoderAvailability implements HealthIndicator {
      */
     public Snapshot refresh() {
         Snapshot before = snapshot;
-        Snapshot probed = probe();
-        Snapshot after = new Snapshot(
-                probed.available(),
-                probed.reason(),
-                probed.checkedAt(),
-                probed.available() ? probed.checkedAt() : before.lastAvailableAt());
+        Snapshot after = probe();
         snapshot = after;
         logIfChanged(before, after);
         return after;
@@ -139,7 +128,7 @@ public class EncoderAvailability implements HealthIndicator {
      */
     public void markUnreachable(String reason) {
         Snapshot before = snapshot;
-        Snapshot after = new Snapshot(false, reason, Instant.now(), before.lastAvailableAt());
+        Snapshot after = new Snapshot(false, reason, Instant.now());
         snapshot = after;
         logIfChanged(before, after);
     }
@@ -159,29 +148,29 @@ public class EncoderAvailability implements HealthIndicator {
         Instant now = Instant.now();
         String base = props.getEncoder().getUrl();
         if (base == null || base.isBlank()) {
-            return new Snapshot(false, "tessary.observer.encoder.url is unset", now, null);
+            return new Snapshot(false, "tessary.observer.encoder.url is unset", now);
         }
         URI uri;
         try {
             uri = URI.create(base.endsWith("/") ? base + "healthz" : base + "/healthz");
         } catch (IllegalArgumentException e) {
-            return new Snapshot(false, "tessary.observer.encoder.url is not a URL", now, null);
+            return new Snapshot(false, "tessary.observer.encoder.url is not a URL", now);
         }
         HttpRequest request = HttpRequest.newBuilder(uri).GET().timeout(TIMEOUT).build();
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                return new Snapshot(false, "healthz answered " + response.statusCode(), now, null);
+                return new Snapshot(false, "healthz answered " + response.statusCode(), now);
             }
             if (!listsHead(response.body())) {
-                return new Snapshot(false, "healthz answered 200 without the groundedness head", now, null);
+                return new Snapshot(false, "healthz answered 200 without the groundedness head", now);
             }
-            return new Snapshot(true, "healthz answered 200", now, null);
+            return new Snapshot(true, "healthz answered 200", now);
         } catch (IOException e) {
-            return new Snapshot(false, "unreachable: " + e.getClass().getSimpleName(), now, null);
+            return new Snapshot(false, "unreachable: " + e.getClass().getSimpleName(), now);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new Snapshot(false, "probe interrupted", now, null);
+            return new Snapshot(false, "probe interrupted", now);
         }
     }
 

@@ -109,9 +109,8 @@ class CasePageCodecTest {
     private static CaseRow sample(String id, double severity, String openedAt, @Nullable String resolvedAt) {
         return new CaseRow(
                 id,
-                "proj-1",
                 1L,
-                CaseRow.Detector.BEHAVIOR_DRIFT,
+                CaseRow.Detector.CLASSIFIER,
                 CaseRow.SubjectKind.CLASSIFIER,
                 "subject-" + id,
                 "Subject " + id,
@@ -131,12 +130,11 @@ class CasePageCodecTest {
                 openedAt,
                 openedAt,
                 resolvedAt,
-                resolvedAt == null ? null : CaseRow.Resolution.RECOVERED,
+                resolvedAt == null ? null : CaseRow.Resolution.ABSORBED,
                 null,
                 null,
                 null,
                 null,
-                null,
-                openedAt);
+                null);
     }
 }

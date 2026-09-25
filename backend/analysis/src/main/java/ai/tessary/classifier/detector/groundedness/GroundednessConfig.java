@@ -132,10 +132,8 @@ public record GroundednessConfig(
                 arlTarget,
                 shiftMultiple,
                 shiftFloor,
-                ToolErrorConfig.DEFAULT_MIN_EFFECT_SIZE,
                 minBaselineTraces,
                 ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
-                ToolErrorConfig.DEFAULT_SETTLE_SECONDS,
                 ToolErrorConfig.DEFAULT_MAX_PATTERNS,
                 minDecisionInterval,
                 freezeBaselineTraces);

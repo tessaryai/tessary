@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
  * allows and returns the detections it newly inserted.
  *
  * <p>Such a detector writes its own rows, because what it records per page is more than a detection
- * per fired observation. {@link #detect} and {@link #detectBatch} are not its path and refuse.
+ * per fired observation. {@link #detect} is not its path and refuses.
  *
  * @param <P> the detector's own scored page, handed back to {@link #complete} unchanged
  */
@@ -37,11 +37,6 @@ public interface PagedDetector<P extends PagedDetector.ScoredPage> extends Built
 
     @Override
     default Detection detect(SubstrateObservation obs, @Nullable String config) {
-        throw new IllegalStateException(kind() + " scores whole pages through PagedDetector");
-    }
-
-    @Override
-    default List<Detection> detectBatch(List<SubstrateObservation> batch, @Nullable String config) {
         throw new IllegalStateException(kind() + " scores whole pages through PagedDetector");
     }
 

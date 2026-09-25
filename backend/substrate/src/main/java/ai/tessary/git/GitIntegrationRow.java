@@ -15,7 +15,6 @@ public record GitIntegrationRow(
         String repoName,
         String defaultBranch,
         String credentialsEnc,
-        String observerCursorSha,
         String createdAt,
         String updatedAt) {
     public GitProvider providerEnum() {

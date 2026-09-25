@@ -24,8 +24,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -60,8 +58,6 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class OtlpSpanMapper {
-
-    private static final Logger log = LoggerFactory.getLogger(OtlpSpanMapper.class);
 
     private final ObjectMapper mapper;
 
@@ -110,12 +106,10 @@ public final class OtlpSpanMapper {
         // OpenInference inputs route through the standalone normalizer (reused, never forked).
         if (OpenInferenceNormalizer.isOpenInference(attrs)) {
             RawEntry oi = OpenInferenceNormalizer.toRawEntry(
-                    mapper.valueToTree(attrs), spanId, null, name, parentId, traceId, start, attrs);
-            if (oi != null) {
-                // Thread the OTLP-native structural fields the normalizer doesn't know about
-                // (end-time for latency; OI messages are already folded into input/output text).
-                return withOtlpFields(oi, end, null, null);
-            }
+                    mapper.valueToTree(attrs), spanId, name, parentId, traceId, start, attrs);
+            // Thread the OTLP-native structural fields the normalizer doesn't know about
+            // (end-time for latency; OI messages are already folded into input/output text).
+            return withOtlpFields(oi, end, null, null);
         }
 
         // Native gen_ai.* read.
@@ -151,7 +145,6 @@ public final class OtlpSpanMapper {
 
         return new RawEntry(
                 spanId,
-                null,
                 name,
                 input,
                 output,
@@ -173,7 +166,6 @@ public final class OtlpSpanMapper {
             @Nullable String outputMessagesJson) {
         return new RawEntry(
                 base.sourceExternalId(),
-                base.sourceUrl(),
                 base.name(),
                 base.input(),
                 base.output(),
@@ -231,7 +223,7 @@ public final class OtlpSpanMapper {
         for (ObjectNode msg : byIndex.values()) {
             arr.add(msg);
         }
-        return writeJson(arr);
+        return arr.toString();
     }
 
     private static @Nullable Integer parseIndex(String segment) {
@@ -276,32 +268,21 @@ public final class OtlpSpanMapper {
     }
 
     /** Serialize a complex array attribute to a JSON string (kept whole — never clipped). */
-    private @Nullable String arrayValueJson(ArrayValue arr) {
+    private String arrayValueJson(ArrayValue arr) {
         List<Object> list = new ArrayList<>(arr.getValuesCount());
         for (AnyValue v : arr.getValuesList()) {
             list.add(anyValue(v));
         }
-        return writeJson(list);
+        return mapper.valueToTree(list).toString();
     }
 
     /** Serialize a nested key-value-list attribute to a JSON object string. */
-    private @Nullable String kvListJson(KeyValueList kvl) {
+    private String kvListJson(KeyValueList kvl) {
         ObjectNode node = mapper.createObjectNode();
         for (KeyValue kv : kvl.getValuesList()) {
             node.set(kv.getKey(), mapper.valueToTree(anyValue(kv.getValue())));
         }
-        return writeJson(node);
-    }
-
-    private @Nullable String writeJson(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            // Primitive-derived values never fail here; log so a genuinely unserializable complex
-            // attribute isn't dropped into a silent black hole.
-            log.debug("otlp attribute dropped: not JSON-serializable", e);
-            return null;
-        }
+        return node.toString();
     }
 
     // ----- scalar helpers --------------------------------------------------------------------------

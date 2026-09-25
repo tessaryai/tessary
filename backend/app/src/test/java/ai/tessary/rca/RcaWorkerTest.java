@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -40,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -61,13 +63,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * {@code baseline} is the "before", everything else is what the classifier flagged. Nothing here is
  * time-sliced any more — a trace is on the side the classifier filed it under.
  */
-// Parks the scheduled drain so `runForTest` is the ONLY thing that executes a job. Scheduling is
+// Parks the scheduled drain so a direct `run` is the ONLY thing that executes a job. Scheduling is
 // live in @SpringBootTest, and these tests enqueue a job and then run it by hand — if a tick lands
 // in that window the worker claims and runs it a second time, and the `verify(engine)` in
 // capturedDossier() fails with two invocations.
 //
 // batch-size=0 is what actually parks it: claimBatch's LIMIT 0 returns nothing, tickInner breaks on
-// the empty batch, and no job is ever dispatched. runForTest bypasses claiming, so the tests are
+// the empty batch, and no job is ever dispatched. A direct `run` bypasses claiming, so the tests are
 // unaffected. Lengthening the heartbeat CANNOT do this on its own — @Scheduled(fixedDelay) has no
 // initial delay, so the first tick always fires at context startup, inside the test window.
 //
@@ -160,7 +162,7 @@ class RcaWorkerTest {
 
         stubEngine(RcaReportRow.Verdict.BEHAVIOR_CHANGE, List.of());
         RcaJobRow job = enqueue(pid, findingId);
-        worker.runForTest(job);
+        worker.run(job);
 
         String checklist = capturedDossier().get("checklist.md");
         assertNotNull(checklist);
@@ -198,7 +200,7 @@ class RcaWorkerTest {
                         true));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(passingTrace), List.of(failingTrace)));
-        worker.runForTest(job);
+        worker.run(job);
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
@@ -267,7 +269,7 @@ class RcaWorkerTest {
                 Instant.now().toString());
 
         stubEngine(RcaReportRow.Verdict.BEHAVIOR_CHANGE, List.of());
-        worker.runForTest(enqueue(pid, findingId));
+        worker.run(enqueue(pid, findingId));
 
         String dossier = String.join("\n", capturedDossier().values()).toLowerCase(Locale.ROOT);
         for (String word : List.of(
@@ -293,7 +295,7 @@ class RcaWorkerTest {
                 .thenThrow(new TessaryException(RcaError.NO_EVIDENCE_DOOR, "mcp base url unset"));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
-        worker.runForTest(job);
+        worker.run(job);
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("failed", report.status());
@@ -306,7 +308,7 @@ class RcaWorkerTest {
         String pid = fix.project().id();
 
         RcaJobRow job = enqueue(pid, "fnd_does_not_exist");
-        worker.runForTest(job);
+        worker.run(job);
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("failed", report.status());
@@ -377,7 +379,7 @@ class RcaWorkerTest {
                         true));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
-        worker.runForTest(job);
+        worker.run(job);
 
         ArgumentCaptor<Set<String>> citableSessions = ArgumentCaptor.forClass(Set.class);
         ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
@@ -463,7 +465,7 @@ class RcaWorkerTest {
                         true));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
-        worker.runForTest(job);
+        worker.run(job);
 
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
         ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
@@ -527,22 +529,27 @@ class RcaWorkerTest {
 
     // ---- seeding -----------------------------------------------------------------------------
 
-    /** One open behaviour-drift finding, citing {@code baseline} and {@code flagged} traces as its
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    /** One open classifier finding, citing {@code baseline} and {@code flagged} traces as its
      *  two evidence sides — the input the analysis dereferences. */
     private String seedFinding(String pid, List<String> baseline, List<String> flagged) {
         String now = Instant.now().toString();
-        String findingId = findings.recordFiring(
+        String cause = "cause-" + Ids.ulid();
+        String findingId = Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         pid,
-                        "profile-1",
-                        FindingRow.Cause.NOVELTY,
-                        "cause-" + Ids.ulid(),
-                        FindingRow.GLOBAL_WORKFLOW,
+                        BuiltInDetector.Kind.SECRET_LEAK,
+                        "clf-" + cause,
+                        cause,
                         1,
-                        null,
-                        null,
                         "cs_extract",
-                        now)
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
         for (String traceId : baseline) {
             evidence.record(
@@ -569,7 +576,7 @@ class RcaWorkerTest {
 
     private RcaJobRow enqueue(String pid, String findingId, String reportKind) {
         String jobId = jobs.createOrGet(
-                pid, findingId, "behavior_profile", "profile-1", "behavior_drift", FROM, SPLIT, TO, "user-1");
+                pid, findingId, "behavior_profile", "profile-1", "behavior_drift", FROM, SPLIT, TO, "user-1", null);
         reports.insertPendingIfAbsent(
                 pid,
                 jobId,
@@ -587,7 +594,7 @@ class RcaWorkerTest {
                 0.0,
                 0.62,
                 RcaReportRow.Engine.AGENTIC);
-        return jobs.findById(pid, jobId).orElseThrow();
+        return new RcaJobRow(jobId, pid, findingId, "behavior_profile", "profile-1", "behavior_drift", "user-1");
     }
 
     private String seedSession(String pid) {

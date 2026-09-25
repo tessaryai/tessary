@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.tenant.Ids;
@@ -124,10 +125,10 @@ class CaseRepositoryIntegrationTest {
     @Test
     void pageFiltersOnStateDetectorAndCallSiteTogether() {
         Project p = project("repo-page-filters");
-        open(p, "drift-a", CaseRow.Detector.BEHAVIOR_DRIFT, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
-        open(p, "drift-b", CaseRow.Detector.BEHAVIOR_DRIFT, "cs-2", 0.5, at("2026-08-10T00:00:00Z"));
+        open(p, "drift-a", CaseRow.Detector.CLASSIFIER, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
+        open(p, "drift-b", CaseRow.Detector.CLASSIFIER, "cs-2", 0.5, at("2026-08-10T00:00:00Z"));
         open(p, "tool-a", CaseRow.Detector.TOOL_ERROR, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
-        CaseRow muted = open(p, "drift-c", CaseRow.Detector.BEHAVIOR_DRIFT, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
+        CaseRow muted = open(p, "drift-c", CaseRow.Detector.CLASSIFIER, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
         cases.mute(p.id(), muted.id(), "priya@example.com", Instant.now());
 
         assertEquals(3, ids(page(p, CaseRow.State.OPEN, null, null)).size(), "the muted case is not open");
@@ -137,11 +138,11 @@ class CaseRepositoryIntegrationTest {
                 "muted is a state you can ask for, not a hidden bucket");
         assertEquals(
                 2,
-                ids(page(p, CaseRow.State.OPEN, CaseRow.Detector.BEHAVIOR_DRIFT, null))
+                ids(page(p, CaseRow.State.OPEN, CaseRow.Detector.CLASSIFIER, null))
                         .size());
         assertEquals(
                 1,
-                ids(page(p, CaseRow.State.OPEN, CaseRow.Detector.BEHAVIOR_DRIFT, "cs-1"))
+                ids(page(p, CaseRow.State.OPEN, CaseRow.Detector.CLASSIFIER, "cs-1"))
                         .size(),
                 "detector AND call site, not detector OR call site");
         assertEquals(4, ids(page(p, null, null, null)).size(), "a null state is every state, live and closed alike");
@@ -159,11 +160,11 @@ class CaseRepositoryIntegrationTest {
     void livePageWalksWorstFirstAndTheKeysetNeitherSkipsNorRepeats() {
         Project p = project("repo-page-keyset");
         Instant sameMoment = at("2026-08-10T00:00:00Z");
-        CaseRow worst = open(p, "s-worst", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.9, at("2026-08-09T00:00:00Z"));
-        CaseRow tieNewer = open(p, "s-tie-newer", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.5, sameMoment);
-        CaseRow tieSame = open(p, "s-tie-same", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.5, sameMoment);
-        CaseRow older = open(p, "s-older", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.5, at("2026-08-01T00:00:00Z"));
-        CaseRow mildest = open(p, "s-mildest", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.1, sameMoment);
+        CaseRow worst = open(p, "s-worst", CaseRow.Detector.CLASSIFIER, null, 0.9, at("2026-08-09T00:00:00Z"));
+        CaseRow tieNewer = open(p, "s-tie-newer", CaseRow.Detector.CLASSIFIER, null, 0.5, sameMoment);
+        CaseRow tieSame = open(p, "s-tie-same", CaseRow.Detector.CLASSIFIER, null, 0.5, sameMoment);
+        CaseRow older = open(p, "s-older", CaseRow.Detector.CLASSIFIER, null, 0.5, at("2026-08-01T00:00:00Z"));
+        CaseRow mildest = open(p, "s-mildest", CaseRow.Detector.CLASSIFIER, null, 0.1, sameMoment);
 
         List<String> walked = new ArrayList<>();
         CaseRepository.PageKey key = null;
@@ -192,10 +193,10 @@ class CaseRepositoryIntegrationTest {
     @Test
     void resolvedPageWalksNewestClosureFirst() {
         Project p = project("repo-page-resolved");
-        CaseRow first = open(p, "r-1", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.9, at("2026-08-01T00:00:00Z"));
-        CaseRow second = open(p, "r-2", CaseRow.Detector.BEHAVIOR_DRIFT, null, 0.1, at("2026-08-02T00:00:00Z"));
-        cases.resolve(p.id(), first.id(), CaseRow.Resolution.RECOVERED, null, null, at("2026-08-05T00:00:00Z"));
-        cases.resolve(p.id(), second.id(), CaseRow.Resolution.RECOVERED, null, null, at("2026-08-06T00:00:00Z"));
+        CaseRow first = open(p, "r-1", CaseRow.Detector.CLASSIFIER, null, 0.9, at("2026-08-01T00:00:00Z"));
+        CaseRow second = open(p, "r-2", CaseRow.Detector.CLASSIFIER, null, 0.1, at("2026-08-02T00:00:00Z"));
+        cases.resolve(p.id(), first.id(), CaseRow.Resolution.ABSORBED, null, null, at("2026-08-05T00:00:00Z"));
+        cases.resolve(p.id(), second.id(), CaseRow.Resolution.ABSORBED, null, null, at("2026-08-06T00:00:00Z"));
 
         List<CaseRow> firstPage = cases.page(p.id(), CaseRow.State.RESOLVED, null, null, 1, null);
         assertEquals(
@@ -256,7 +257,7 @@ class CaseRepositoryIntegrationTest {
 
     private CaseDetection detection(Project p, String subjectId) {
         return new CaseDetection(
-                new CaseKey(CaseRow.Detector.BEHAVIOR_DRIFT, CaseRow.SubjectKind.CLASSIFIER, subjectId, "pass_rate"),
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, subjectId, "pass_rate"),
                 subjectId,
                 null,
                 findingIds.computeIfAbsent(p.id() + ":" + subjectId, k -> finding(p, subjectId)),
@@ -269,20 +270,25 @@ class CaseRepositoryIntegrationTest {
                 -0.4);
     }
 
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
     /** Every case points at a finding — the forward CHECK on {@code eval_case} requires one. */
     private String finding(Project p, String subjectId) {
-        return findings.recordFiring(
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-" + subjectId,
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + subjectId,
                         "cause-" + subjectId,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "call-site-a",
-                        Instant.now().toString())
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
     }
 }

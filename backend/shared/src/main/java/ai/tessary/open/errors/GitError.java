@@ -4,13 +4,8 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 public enum GitError implements ErrorCode {
-    INTEGRATION_NOT_FOUND(HttpStatus.NOT_FOUND, "No git integration for project '%s'"),
-    GITHUB_REQUIRED(
-            HttpStatus.CONFLICT,
-            "Grader generation needs the project's repo: connect the GitHub App to project '%s' first"),
     DUPLICATE_INTEGRATION(HttpStatus.CONFLICT, "Project '%s' is already bound to a repo"),
     UNSUPPORTED_PROVIDER(HttpStatus.BAD_REQUEST, "Unsupported git provider '%s'"),
-    INVALID_SIGNATURE(HttpStatus.UNAUTHORIZED, "Webhook signature verification failed"),
     INSTALLATION_NOT_FOUND(HttpStatus.BAD_REQUEST, "No installation '%s' on record"),
     TOKEN_MINT_FAILED(HttpStatus.BAD_GATEWAY, "Could not mint a %s access token"),
     PROVIDER_CALL_FAILED(HttpStatus.BAD_GATEWAY, "%s API call failed: %s"),

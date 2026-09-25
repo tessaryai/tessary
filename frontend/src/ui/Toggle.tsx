@@ -16,13 +16,11 @@ export function Toggle({
   checked,
   onChange,
   label,
-  className,
   disabled = false,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label?: string;
-  className?: string;
   disabled?: boolean;
 }) {
   return (
@@ -38,7 +36,6 @@ export function Toggle({
         "relative inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-pill transition-colors",
         checked ? "bg-accent" : "bg-border-strong",
         disabled && "opacity-50 cursor-not-allowed",
-        className,
       )}
       style={{ transitionDuration: "var(--duration-micro)" }}
     >

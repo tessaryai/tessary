@@ -32,8 +32,8 @@ import org.jspecify.annotations.Nullable;
  * {@code examples/sample_traces.jsonl}). {@code trace_id} is preserved verbatim
  * so the plugin's multi-turn grouping (spans sharing a trace) stays intact.
  *
- * <p><b>The ids that come out are now the ids that went in.</b> The substrate's own source
- * ({@code SubstrateSource}) hands this mapper the producer's trace id and the composite span handle, so
+ * <p><b>The ids that come out are now the ids that went in.</b> The export ({@link SpanRowMapper}) hands
+ * this mapper the producer's trace id and the composite span handle, so
  * {@code context.trace_id} and {@code context.span_id} carry what the SDK actually emitted rather than
  * surrogates the platform minted. Nothing in this class changed to make that true — it always wrote
  * {@code raw.traceId()} and {@code raw.sourceExternalId()} through untouched — which is why the round trip
@@ -48,32 +48,13 @@ public final class TraceSpanMapper {
 
     private TraceSpanMapper() {}
 
-    /** {@link #toSpanLine(RawEntry, String, MediaStore, String)} with no media preservation — media
-     *  blocks fall straight to their labeled placeholder (the previous behavior). Kept for the existing
-     *  test call sites and any caller with no {@link MediaStore}/project id to hand; a real caller
-     *  should use the four-arg overload so {@code image_ref}/{@code document_ref} blocks can inline. */
-    public static String toSpanLine(RawEntry raw, String serviceName) {
-        return toSpanLine(raw, serviceName, null, null);
-    }
-
     /** One OTel GenAI span as a compact JSON string (no trailing newline). {@code mediaStore} +
      *  {@code projectId} let an {@code image_ref}/{@code document_ref} block re-hydrate to real bytes
      *  (see {@link #toSpan(RawEntry, String, MediaStore, String)}); pass {@code null} for both to keep
      *  such blocks as their honest {@code omitted} label instead. */
     public static String toSpanLine(
             RawEntry raw, String serviceName, @Nullable MediaStore mediaStore, @Nullable String projectId) {
-        try {
-            return MAPPER.writeValueAsString(toSpan(raw, serviceName, mediaStore, projectId));
-        } catch (Exception e) {
-            // Should not happen for an ObjectNode; fail loud rather than emit junk.
-            throw new IllegalStateException("failed to serialize span for " + raw.sourceExternalId(), e);
-        }
-    }
-
-    /** {@link #toSpan(RawEntry, String, MediaStore, String)} with no media preservation. See that
-     *  overload's doc and {@link #toSpanLine(RawEntry, String)}'s note on when to prefer it. */
-    public static ObjectNode toSpan(RawEntry raw, String serviceName) {
-        return toSpan(raw, serviceName, null, null);
+        return toSpan(raw, serviceName, mediaStore, projectId).toString();
     }
 
     /**
@@ -349,11 +330,7 @@ public final class TraceSpanMapper {
     }
 
     private static String writeArray(ArrayNode node) {
-        try {
-            return MAPPER.writeValueAsString(node);
-        } catch (Exception e) {
-            return "[]";
-        }
+        return node.toString();
     }
 
     /**

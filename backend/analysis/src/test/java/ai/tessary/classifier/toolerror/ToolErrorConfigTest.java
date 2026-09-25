@@ -23,7 +23,7 @@ class ToolErrorConfigTest {
 
     @Test
     void theEightArgumentShapeKeepsTheFloorAtSix() {
-        ToolErrorConfig c = new ToolErrorConfig(250_000L, 2.0, 0.005, 0.05, 500, 0.01, 300, 8);
+        ToolErrorConfig c = new ToolErrorConfig(250_000L, 2.0, 0.005, 500, 0.01, 8);
         assertEquals(6.0, c.minDecisionInterval());
         assertEquals(6.0, ToolErrorConfig.defaults().minDecisionInterval());
     }
@@ -47,22 +47,22 @@ class ToolErrorConfigTest {
 
     @Test
     void anExplicitFloorIsClampedAndUsed() {
-        ToolErrorConfig low = new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 0.5);
+        ToolErrorConfig low = new ToolErrorConfig(10_000L, 2.0, 0.02, 200, 0.01, 8, 0.5);
         assertEquals(ToolErrorConfig.LOWEST_DECISION_INTERVAL, low.minDecisionInterval());
-        ToolErrorConfig high = new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 40.0);
+        ToolErrorConfig high = new ToolErrorConfig(10_000L, 2.0, 0.02, 200, 0.01, 8, 40.0);
         assertEquals(ToolErrorConfig.MAX_DECISION_INTERVAL, high.minDecisionInterval());
-        ToolErrorConfig four = new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+        ToolErrorConfig four = new ToolErrorConfig(10_000L, 2.0, 0.02, 200, 0.01, 8, 4.0);
         assertEquals(4.0, four.decisionIntervalFor(0.01), "below the fit the per-classifier floor binds");
         assertEquals(4.0, four.decisionIntervalFor(0.0));
     }
 
     @Test
     void freezeIsClampedToAtLeastTheMinimum() {
-        ToolErrorConfig below = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 100);
+        ToolErrorConfig below = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 100);
         assertEquals(200, below.freezeBaselineCalls(), "a reference cannot stop learning before judging starts");
-        ToolErrorConfig unset = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+        ToolErrorConfig unset = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0);
         assertEquals(200, unset.freezeBaselineCalls(), "unset freezes it the moment judging starts");
-        ToolErrorConfig huge = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 5_000_000);
+        ToolErrorConfig huge = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 5_000_000);
         assertEquals(1_000_000, huge.freezeBaselineCalls());
         assertEquals(
                 ToolErrorConfig.DEFAULT_MIN_BASELINE_CALLS,
@@ -80,10 +80,10 @@ class ToolErrorConfigTest {
     @Test
     void theFreezeIsInTheEpoch() {
         String schema = ToolErrorTrend.STATE_SCHEMA_VERSION;
-        ToolErrorConfig toOneThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 1000);
-        ToolErrorConfig toTwoThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0, 2000);
-        ToolErrorConfig judgedFromThree = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 300, 0.01, 300, 8, 4.0, 1000);
-        ToolErrorConfig frozen = new ToolErrorConfig(50_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+        ToolErrorConfig toOneThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 1000);
+        ToolErrorConfig toTwoThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 2000);
+        ToolErrorConfig judgedFromThree = new ToolErrorConfig(50_000L, 2.0, 0.02, 300, 0.01, 8, 4.0, 1000);
+        ToolErrorConfig frozen = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0);
 
         assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(toTwoThousand, schema));
         assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(judgedFromThree, schema));

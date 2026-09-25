@@ -13,6 +13,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -141,13 +142,13 @@ class ClassifierCursorKeysetIntegrationTest {
         for (int tick = 0; tick < 3 * SAME_TS_COUNT + 2; tick++) {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
             worker.tick();
-            if (service.eventsForClassifier(pid, frustration.id(), 100).size() >= SAME_TS_COUNT) break;
+            if (service.eventsForClassifier(pid, frustration.id(), null, 100).size() >= SAME_TS_COUNT) break;
             sleep(200);
         }
 
         assertEquals(
                 SAME_TS_COUNT,
-                service.eventsForClassifier(pid, frustration.id(), 100).size(),
+                service.eventsForClassifier(pid, frustration.id(), null, 100).size(),
                 "every span sharing one created_at is detected — the keyset cursor drops none at a boundary");
 
         // The cursor is only doing its job if it parses. A sweep that stamps a bare span id restarts
@@ -193,7 +194,7 @@ class ClassifierCursorKeysetIntegrationTest {
     private ClassifierRow seedAndFindFrustration(String pid) {
         for (int i = 0; i < 50; i++) {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
-            var maybe = signals.findByKey(pid, "frustration");
+            var maybe = ClassifierRows.byKey(signals, pid, "frustration");
             if (maybe.isPresent()) return service.setEnabled(pid, maybe.get().id(), true);
             sleep(100);
         }

@@ -24,9 +24,9 @@ import org.jspecify.annotations.Nullable;
  * leak into prior turns. Backs user-authored regex signals; the one-time NL→regex {@code compile} step
  * is the only work beyond {@link Matcher#find}.
  *
- * <p>The default phrases are compiled to patterns at construction. A classifier's per-project
- * {@code config_json} ({@code {"phrases":[...], "field":"OUTPUT", "word_boundary":true}}) overrides them;
- * those overrides are compiled lazily and memoized in a bounded cache (keyed by phrase + word-boundary),
+ * <p>The phrases come only from a classifier's per-project {@code config_json}
+ * ({@code {"phrases":[...], "field":"OUTPUT", "word_boundary":true}}); a row without them matches
+ * nothing. They are compiled lazily and memoized in a bounded cache (keyed by phrase + word-boundary),
  * so evaluation never recompiles per observation and never calls a model.
  */
 public final class RegexDetector implements BuiltInDetector {
@@ -37,7 +37,6 @@ public final class RegexDetector implements BuiltInDetector {
     private final ClassifierField defaultField;
     private final String severity;
     private final boolean defaultWordBoundary;
-    private final List<Pattern> defaultPatterns;
     private final NlPhraseCompiler compiler;
     private final ObjectMapper mapper;
     private final Map<String, Pattern> compiledCache;
@@ -46,7 +45,6 @@ public final class RegexDetector implements BuiltInDetector {
             String kind,
             ClassifierField field,
             String severity,
-            List<String> defaultPhrases,
             boolean wordBoundary,
             NlPhraseCompiler compiler,
             ObjectMapper mapper) {
@@ -57,11 +55,6 @@ public final class RegexDetector implements BuiltInDetector {
         this.compiler = compiler;
         this.mapper = mapper;
         this.compiledCache = new ConcurrentHashMap<>();
-        List<Pattern> compiled = new ArrayList<>(defaultPhrases.size());
-        for (String phrase : defaultPhrases) {
-            if (!phrase.isBlank()) compiled.add(compiler.compile(phrase, wordBoundary));
-        }
-        this.defaultPatterns = List.copyOf(compiled);
     }
 
     @Override
@@ -85,16 +78,16 @@ public final class RegexDetector implements BuiltInDetector {
     }
 
     private List<Pattern> patterns(@Nullable ConfigShape shape) {
-        if (shape == null) return defaultPatterns;
+        if (shape == null) return List.of();
         List<String> phrases = shape.phrases();
-        if (phrases == null || phrases.isEmpty()) return defaultPatterns;
+        if (phrases == null || phrases.isEmpty()) return List.of();
         Boolean wb = shape.wordBoundary();
         boolean wordBoundary = wb == null ? defaultWordBoundary : wb;
         List<Pattern> overrides = new ArrayList<>(phrases.size());
         for (String phrase : phrases) {
             if (!phrase.isBlank()) overrides.add(compiled(phrase, wordBoundary));
         }
-        return overrides.isEmpty() ? defaultPatterns : overrides;
+        return overrides;
     }
 
     private Pattern compiled(String phrase, boolean wordBoundary) {
@@ -137,14 +130,11 @@ public final class RegexDetector implements BuiltInDetector {
 
     private String evidence(Pattern pattern, String matched, ClassifierField field) {
         String span = matched.length() > 200 ? matched.substring(0, 200) : matched;
-        try {
-            return mapper.writeValueAsString(Map.of(
-                    "matched", span,
-                    "pattern", pattern.pattern(),
-                    "field", field.name().toLowerCase(Locale.ROOT)));
-        } catch (JsonProcessingException e) {
-            return "{}";
-        }
+        return mapper.valueToTree(Map.of(
+                        "matched", span,
+                        "pattern", pattern.pattern(),
+                        "field", field.name().toLowerCase(Locale.ROOT)))
+                .toString();
     }
 
     /**
@@ -152,8 +142,8 @@ public final class RegexDetector implements BuiltInDetector {
      * {@code config_json} is shared with features that key off the same blob (the pre-deploy loop
      * reads {@code surfaces} from it), and the platform mapper is a bare {@code new ObjectMapper()}
      * with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one foreign key made {@link
-     * #parse} throw, the catch returned null, and the detector fell back to its EMPTY default
-     * patterns — so the signal silently matched nothing, with no error anywhere.
+     * #parse} throw, the catch returned null, and the detector had no phrases — so the signal silently
+     * matched nothing, with no error anywhere.
      */
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     private record ConfigShape(

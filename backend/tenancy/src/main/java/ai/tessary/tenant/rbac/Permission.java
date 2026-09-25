@@ -13,7 +13,7 @@ public enum Permission {
     ORG_VIEW,
     /** Create/rename/archive projects and edit organization-level (non-billing) settings. */
     ORG_MANAGE,
-    /** Irreversible organization lifecycle: rename/archive/delete the org, transfer ownership. */
+    /** Irreversible organization lifecycle: rename/archive/delete the org. */
     ORG_ADMIN,
     /** Invite members, change their roles, and remove them. */
     MEMBERS_MANAGE,

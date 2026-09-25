@@ -157,8 +157,7 @@ public final class InProcessSpool implements IngestSpool {
                     + len(e.outputMessagesJson())
                     + len(e.name())
                     + len(e.model())
-                    + len(e.sourceExternalId())
-                    + len(e.sourceUrl());
+                    + len(e.sourceExternalId());
             Map<String, Object> metadata = e.metadata();
             if (metadata != null) {
                 for (Map.Entry<String, Object> kv : metadata.entrySet()) {

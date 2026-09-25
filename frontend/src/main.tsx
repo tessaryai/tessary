@@ -21,7 +21,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <DensityProvider persist className="contents">
+        <DensityProvider className="contents">
           <BrowserRouter>
             <App />
           </BrowserRouter>

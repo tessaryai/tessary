@@ -5,14 +5,13 @@
  *
  * <h2>The seam contract</h2>
  *
- * <p>Four rules:
+ * <p>Three rules:
  *
  * <ol>
  *   <li><b>Ports live here, and adapters are discovered rather than referenced.</b> A port is
  *       injected as a Spring {@code List<T>}, ordered by {@code @Order}, or as {@code
  *       Optional<T>}. No port declares a classifier's own type in its signature.
- *       {@link ai.tessary.classifier.finding.TriageSource} and
- *       {@link ai.tessary.classifier.finding.CauseResolver} are the two.
+ *       {@link ai.tessary.classifier.finding.TriageSource} is the one.
  *   <li><b>Ports key on the open {@code BuiltInDetector.Kind} constants</b>, which stay constant.
  *       {@code BuiltInClassifierCatalog.builtIns()} is never filtered by availability:
  *       {@code ClassifierService.retireDroppedBuiltIns} keys on catalog membership, and
@@ -20,10 +19,6 @@
  *       retire a customer's.
  *   <li><b>An absent adapter degrades to what the surface already shows for a classifier with no
  *       data</b>: an empty list, a null block, a 404, never a wiring failure and never a 500.
- *   <li><b>Wire records are open; their factories are adapter-side.</b>
- *       {@link ai.tessary.classifier.finding.BehaviorReadiness} stays open even where its
- *       factory, {@code BehaviorProfileViews.readiness(...)}, reads types that cannot: the
- *       record/factory split holds for it alone.
  * </ol>
  *
  * <p>The prefixed names ({@code BehaviorDtos}, {@code BehaviorTriage*}) are wire lineage, not

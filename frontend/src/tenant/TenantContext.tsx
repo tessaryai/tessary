@@ -15,24 +15,21 @@ const TenantContext = createContext<TenantValue | null>(null);
 
 /**
  * Reads {orgSlug, projectSlug} from the URL and binds a {@link ProjectApi}
- * to it. Throws if used outside a tenant-prefixed route.
+ * to it. Mounted only under /orgs/:orgSlug/projects/:projectSlug, so both params are set.
  */
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { orgSlug, projectSlug } = useParams<{ orgSlug: string; projectSlug: string }>();
 
-  const value = useMemo<TenantValue | null>(() => {
-    if (!orgSlug || !projectSlug) return null;
-    return {
-      orgSlug,
-      projectSlug,
-      api: projectApi(orgSlug, projectSlug),
-      orgApi: orgApi(orgSlug),
-    };
-  }, [orgSlug, projectSlug]);
+  const value = useMemo<TenantValue>(
+    () => ({
+      orgSlug: orgSlug!,
+      projectSlug: projectSlug!,
+      api: projectApi(orgSlug!, projectSlug!),
+      orgApi: orgApi(orgSlug!),
+    }),
+    [orgSlug, projectSlug],
+  );
 
-  if (!value) {
-    throw new Error("TenantProvider used outside /orgs/:orgSlug/projects/:projectSlug");
-  }
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }
 

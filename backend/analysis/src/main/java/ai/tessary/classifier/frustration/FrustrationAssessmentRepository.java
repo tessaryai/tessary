@@ -8,7 +8,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -92,41 +91,6 @@ public class FrustrationAssessmentRepository {
                         .param("latencyMs", a.latencyMs())
                         .update()
                 > 0;
-    }
-
-    /** The row this scorer wrote for a turn, if any. */
-    public Optional<Assessment> find(String projectId, String classifierId, String traceId, String scorerVersion) {
-        return jdbc.sql("""
-                        SELECT id, project_id, classifier_id, trace_id, span_id, conversation_id, call_site_id,
-                               turn_started_at, frustrated, scorer_version, provider, model, request::text AS request,
-                               response::text AS response, input_tokens, cost_usd, latency_ms
-                          FROM frustration_assessment
-                         WHERE project_id = :pid AND classifier_id = :cid AND trace_id = :traceId
-                           AND scorer_version = :scorerVersion
-                        """)
-                .param("pid", projectId)
-                .param("cid", classifierId)
-                .param("traceId", traceId)
-                .param("scorerVersion", scorerVersion)
-                .query((rs, n) -> new Assessment(
-                        rs.getString("id"),
-                        rs.getString("project_id"),
-                        rs.getString("classifier_id"),
-                        rs.getString("trace_id"),
-                        rs.getString("span_id"),
-                        rs.getString("conversation_id"),
-                        rs.getString("call_site_id"),
-                        rs.getTimestamp("turn_started_at").toInstant(),
-                        rs.getBoolean("frustrated"),
-                        rs.getString("scorer_version"),
-                        rs.getString("provider"),
-                        rs.getString("model"),
-                        rs.getString("request"),
-                        rs.getString("response"),
-                        (Integer) rs.getObject("input_tokens"),
-                        rs.getBigDecimal("cost_usd"),
-                        (Integer) rs.getObject("latency_ms")))
-                .optional();
     }
 
     /** The conversation key and start time of each of {@code traceIds} that still exists. */

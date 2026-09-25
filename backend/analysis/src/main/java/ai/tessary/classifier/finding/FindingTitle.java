@@ -10,10 +10,6 @@ import java.util.Locale;
  * What a finding is called, in a sentence — {@code "policy-gpt.member-chat turns are 1.47× more expensive"}
  * rather than {@code "cost:policy-gpt.member-chat:dearer:pinned"}.
  *
- * <p>Conformance has its own sentence in {@code ConformanceFindingViews.title}, on the other side of the
- * triage seam: its rates are columns rather than an evidence blob, so it shares the reason this class
- * exists (a finding and its case are named identically) without sharing a line of its dispatch.
- *
  * <p><b>One implementation, because two surfaces name the same object.</b> A finding on the Classifiers
  * page and the case it opens in Triage are the same event seen at two stages, and they used to be named
  * by two different pieces of code: Triage built a sentence from the stored evidence, while Classifiers
@@ -29,8 +25,8 @@ import java.util.Locale;
  *
  * <p><b>It never invents a number.</b> Every title is read back out of the finding's own evidence blob
  * through that classifier's reader, exactly as {@code MetricDriftSource} already did it. When the blob
- * is missing or unreadable — a behaviour-drift cause, which carries no measured shift, or a row written
- * before the evidence was recorded — this falls back to a form of the cause key rather than guessing at
+ * is missing or unreadable — a cause that carries no measured shift, or a row written before the
+ * evidence was recorded — this falls back to a form of the cause key rather than guessing at
  * a magnitude. A title that says less is survivable; one that says the wrong multiple is not.
  */
 public final class FindingTitle {
@@ -52,8 +48,6 @@ public final class FindingTitle {
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
             case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
             case FindingRow.Cause.GROUNDEDNESS_RATE -> groundednessRate(finding);
-            // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
-            // much" to put in a sentence, and the cause key already reads as the action sequence.
             default -> finding.nativeCauseKey();
         };
     }

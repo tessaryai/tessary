@@ -132,7 +132,7 @@ class GithubManifestControllerTest {
 
         assertTrue(
                 location(resp).endsWith("/orgs/acme/projects/web/settings/git?github_app_connected=1"), location(resp));
-        verify(appConfig).persist("999", appNode.path("pem").asText(), "whsec", "tessary-byo", "cid", "csec");
+        verify(appConfig).persist("999", appNode.path("pem").asText(), "tessary-byo", "cid", "csec");
     }
 
     @Test
@@ -158,8 +158,7 @@ class GithubManifestControllerTest {
         ResponseEntity<Void> resp = controller.callback(stateParam, "reused");
 
         assertTrue(location(resp).contains("GIT.MANIFEST_CONVERSION_FAILED"), location(resp));
-        verify(appConfig, never())
-                .persist(anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(appConfig, never()).persist(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test

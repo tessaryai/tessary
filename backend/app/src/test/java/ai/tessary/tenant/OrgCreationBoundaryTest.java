@@ -77,12 +77,6 @@ class OrgCreationBoundaryTest {
     @Autowired
     TenantService tenants;
 
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    OrganizationRepository orgs;
-
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
 
@@ -217,107 +211,5 @@ class OrgCreationBoundaryTest {
         }
         assertEquals(1, created, "exactly one racer may take the last slot");
         assertEquals(1, rejected, "the other must be told the cap is reached, not handed a second org");
-    }
-
-    private String signup(String email) throws Exception {
-        MockHttpServletResponse res = mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
-                                Map.of("email", email, "password", "correct-horse-battery-staple"))))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse();
-        JsonNode body = mapper.readTree(res.getContentAsString());
-        return (body.has("data") ? body.get("data") : body).get("id").asText();
-    }
-
-    /**
-     * The sibling of the create race above. Two orgs owned by one user, one recipient who is a
-     * member of both and has exactly one free slot under the cap; two concurrent transfers race at
-     * the service layer and exactly one may win. Lives here because
-     * {@code TenantService.transferOwnership} owns the transactional logic and this module has the
-     * real-Postgres harness.
-     */
-    @Test
-    void concurrentOwnershipTransfersCannotExceedTheRecipientsCap() throws Exception {
-        String giver = signup("giver-" + Ids.ulid().toLowerCase(Locale.ROOT) + "@example.com");
-        String taker = signup("taker-" + Ids.ulid().toLowerCase(Locale.ROOT) + "@example.com");
-        // giver already owns their bootstrap org; add a second so there are two orgs to transfer
-        tenants.bootstrapOrg(
-                new Organization(
-                        Ids.ulid(),
-                        null,
-                        tenants.uniqueSlug("second-" + Ids.ulid().toLowerCase(Locale.ROOT)),
-                        "Second",
-                        Instant.now().toString(),
-                        null,
-                        null),
-                giver,
-                Integer.MAX_VALUE);
-        // the giver created both of their orgs, so "member of" and "owner of" coincide for them
-        List<Organization> owned = orgs.findByUserId(giver);
-        assertEquals(2, owned.size(), "giver must be in exactly the bootstrap org plus one more");
-        assertEquals(2, orgs.countOwnedBy(giver), "giver must OWN both");
-        for (Organization o : owned) {
-            memberships.insert(OrgMembership.of(
-                    o.id(), taker, OrgMembership.MEMBER, Instant.now().toString()));
-        }
-        // taker owns 1 (their bootstrap org); cap 2 leaves exactly one slot for two racing transfers
-        int cap = 2;
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        CountDownLatch go = new CountDownLatch(1);
-        List<Future<Object>> results = new ArrayList<>();
-        for (Organization o : owned) {
-            results.add(pool.submit(() -> {
-                go.await();
-                try {
-                    tenants.transferOwnership(o.id(), giver, taker, cap);
-                    return o;
-                } catch (ResponseStatusException e) {
-                    return e;
-                }
-            }));
-        }
-        go.countDown();
-        int transferred = 0;
-        int rejected = 0;
-        Organization won = null;
-        try {
-            for (Future<Object> f : results) {
-                Object r = f.get(30, TimeUnit.SECONDS);
-                if (r instanceof Organization o) {
-                    transferred++;
-                    won = o;
-                } else if (r instanceof ResponseStatusException e
-                        && e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
-                    rejected++;
-                } else {
-                    throw new AssertionError("unexpected racer outcome: " + r);
-                }
-            }
-        } finally {
-            pool.shutdownNow();
-        }
-        assertEquals(1, transferred, "exactly one transfer may take the recipient's last slot");
-        assertEquals(1, rejected, "the other must see the cap, not hand the recipient a third org");
-        assertEquals(2, orgs.countOwnedBy(taker), "the recipient ends at the cap, not over it");
-        assertEquals(1, orgs.countOwnedBy(giver), "the giver keeps exactly the org that was not transferred");
-        // the whole promote-then-demote must have landed on the won org, and only there
-        assertNotNull(won);
-        for (Organization o : owned) {
-            boolean isWon = o.id().equals(won.id());
-            assertEquals(
-                    isWon ? OrgMembership.OWNER : OrgMembership.MEMBER,
-                    role(o.id(), taker),
-                    "taker's role on " + (isWon ? "the won org" : "the rejected org"));
-            assertEquals(
-                    isWon ? OrgMembership.MEMBER : OrgMembership.OWNER,
-                    role(o.id(), giver),
-                    "giver's role on " + (isWon ? "the won org" : "the rejected org"));
-        }
-    }
-
-    private String role(String orgId, String userId) {
-        return memberships.find(orgId, userId).orElseThrow().role();
     }
 }

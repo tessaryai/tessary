@@ -3,7 +3,6 @@ package ai.tessary.plan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.config.ObserverProperties;
@@ -14,7 +13,6 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -65,21 +63,19 @@ class EncoderAvailabilityTest {
 
         assertTrue(s.available(), s.reason());
         assertTrue(encoder.available());
-        assertEquals(s.checkedAt(), s.lastAvailableAt());
         assertEquals(Status.UP, encoder.health().getStatus());
         assertEquals("GET /healthz HTTP/1.1", requestLines.getFirst(), "the probe asks the service's own health path");
     }
 
     @Test
     void a200WithoutTheGroundednessHeadIsUnavailable() throws IOException {
-        // What classify-service answers with an empty model manifest: healthy, but not this model.
+        // A server with no groundedness model loaded: healthy, but not this model.
         EncoderAvailability encoder = serve(200, "{\"ok\": true, \"heads\": []}");
 
         EncoderAvailability.Snapshot s = encoder.refresh();
 
         assertFalse(s.available());
         assertEquals("healthz answered 200 without the groundedness head", s.reason());
-        assertNull(s.lastAvailableAt());
     }
 
     @Test
@@ -111,12 +107,12 @@ class EncoderAvailabilityTest {
      * the stub's in-flight {@code accept()} returned, so the next probe could still be answered 200.
      */
     @Test
-    void anUnreachableServiceIsUnavailableAndKeepsWhenItWasLastUp() throws IOException {
+    void anUnreachableServiceIsUnavailable() throws IOException {
         EncoderAvailability encoder = serve(200, HEALTHY);
-        Instant up = encoder.refresh().checkedAt();
+        encoder.refresh();
 
         // The model goes away: the next probe flips the answer, so sweeps pause rather than run
-        // against nothing, and the last time it answered survives for the status read.
+        // against nothing.
         EncoderAvailability.Snapshot s;
         try (ServerSocket peer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
                 Socket held = new Socket(peer.getInetAddress(), peer.getLocalPort())) {
@@ -126,19 +122,17 @@ class EncoderAvailabilityTest {
 
         assertFalse(s.available());
         assertTrue(s.reason().startsWith("unreachable: "), s.reason());
-        assertEquals(up, s.lastAvailableAt());
     }
 
     @Test
     void markUnreachableFlipsItDownAtOnceAndTheNextProbeFlipsItBack() throws IOException {
         EncoderAvailability encoder = serve(200, HEALTHY);
-        Instant up = encoder.refresh().checkedAt();
+        encoder.refresh();
 
         encoder.markUnreachable("unreachable: ConnectException");
 
         assertFalse(encoder.available());
         assertEquals("unreachable: ConnectException", encoder.snapshot().reason());
-        assertEquals(up, encoder.snapshot().lastAvailableAt());
 
         assertTrue(encoder.refresh().available(), "a probe that finds it up again lifts the mark");
     }

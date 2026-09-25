@@ -32,7 +32,7 @@ class MetricDriftCaseShapeTest {
         assertTrue(source.owns(BuiltInDetector.Kind.DURATION_DRIFT));
         assertTrue(source.owns(BuiltInDetector.Kind.COST_DRIFT));
         assertFalse(source.owns(BuiltInDetector.Kind.TOOL_ERROR));
-        assertFalse(source.owns(BuiltInDetector.Kind.BEHAVIOR_DRIFT));
+        assertFalse(source.owns(BuiltInDetector.Kind.SECRET_LEAK));
     }
 
     @Test

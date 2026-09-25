@@ -361,7 +361,7 @@ final class RcaSynthesisOutput {
             log.warn(
                     "rca analysis project={} unparseable body ({} chars), starts: {}",
                     projectId,
-                    text == null ? 0 : text.length(),
+                    text.length(),
                     abbreviate(text));
             throw new TessaryException(RcaError.UPSTREAM_FAILED, failure, "analysis was not the expected JSON shape");
         }
@@ -442,9 +442,8 @@ final class RcaSynthesisOutput {
      * already drops what it cannot accept (hallucinated trace ids, invented check ids) rather than
      * failing the run; binding did the opposite, which contradicted the class's own design.
      */
-    private static @Nullable ReportBody bind(ObjectMapper mapper, @Nullable String candidate)
-            throws java.io.IOException {
-        if (candidate == null || candidate.isBlank()) return null;
+    private static @Nullable ReportBody bind(ObjectMapper mapper, String candidate) throws java.io.IOException {
+        if (candidate.isBlank()) return null;
         return mapper.readerFor(ReportBody.class)
                 .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .readValue(candidate);
@@ -464,8 +463,7 @@ final class RcaSynthesisOutput {
      *  Mirrors {@code BehaviorTriageVerdict#extractObject}, the triage lane's equivalent; kept local
      *  rather than shared because the two lanes' envelope handling is otherwise unrelated. Only ever
      *  reached when the text is not already clean JSON, so a well-formed reply never goes near it. */
-    private static String extractObject(@Nullable String text) {
-        if (text == null) return "";
+    private static String extractObject(String text) {
         int open = text.indexOf('{');
         int close = text.lastIndexOf('}');
         return (open < 0 || close <= open) ? "" : text.substring(open, close + 1);
@@ -473,8 +471,8 @@ final class RcaSynthesisOutput {
 
     /** A bounded prefix for the failure log — never the whole body, which carries the agent's full
      *  markdown report over the traces it read. */
-    private static String abbreviate(@Nullable String text) {
-        if (text == null || text.isBlank()) return "<empty>";
+    private static String abbreviate(String text) {
+        if (text.isBlank()) return "<empty>";
         String flat = text.strip().replaceAll("\\s+", " ");
         return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
     }

@@ -33,7 +33,7 @@ final class EvidenceEnumeration {
         }
 
         int cap = ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP;
-        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, null, cap, null);
+        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, cap);
         List<FindingEvidenceRow> rows = page.rows();
         boolean complete = total <= cap && page.nextCursor() == null;
 

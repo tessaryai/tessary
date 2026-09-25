@@ -20,6 +20,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -100,7 +101,9 @@ class ClassifierWorkerIntegrationTest {
                 .id();
         service.seedBuiltIns(pid);
         service.setEnabled(
-                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), true);
+                pid,
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
+                true);
         Instant now = Instant.now();
 
         // Substrate: one session, one turn (= one trace); a tool span that FAILED, and an llm span
@@ -138,8 +141,9 @@ class ClassifierWorkerIntegrationTest {
         List<ClassifierDtos.ClassifierEventView> all = service.events(pid, 100);
         assertTrue(all.size() >= 1, "the sweep produced the frustration event");
 
-        ClassifierRow frustration = signals.findByKey(pid, "frustration").orElseThrow();
-        List<ClassifierDtos.ClassifierEventView> fr = service.eventsForClassifier(pid, frustration.id(), 100);
+        ClassifierRow frustration =
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow();
+        List<ClassifierDtos.ClassifierEventView> fr = service.eventsForClassifier(pid, frustration.id(), null, 100);
         assertEquals(1, fr.size(), "Frustration fired once on the keyword");
         String frustrationSubjectId = fr.get(0).subjectId();
 
@@ -223,7 +227,7 @@ class ClassifierWorkerIntegrationTest {
 
         // tool_error is a classifier again, but it still writes nothing through this worker: it has
         // no sweep and no per-observation detector, so the row exists and the tick leaves it alone.
-        assertTrue(signals.findByKey(pid, "tool_error").isPresent(), "tool_error is a classifier again");
+        assertTrue(ClassifierRows.byKey(signals, pid, "tool_error").isPresent(), "tool_error is a classifier again");
         assertEquals(
                 0L,
                 jdbc.sql("SELECT COUNT(*) FROM (" + detectionTables.unionSql() + ") d"
@@ -266,7 +270,7 @@ class ClassifierWorkerIntegrationTest {
     /** Poll up to ~10s for at least {@code expected} events on a specific signal. */
     private void awaitEventsForSignal(String pid, String classifierId, int expected) {
         for (int i = 0; i < 100; i++) {
-            if (service.eventsForClassifier(pid, classifierId, 100).size() >= expected) return;
+            if (service.eventsForClassifier(pid, classifierId, null, 100).size() >= expected) return;
             sleep(100);
         }
     }

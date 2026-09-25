@@ -4,7 +4,7 @@
  *
  * Conforming trace table — When · Name · Call site · Input · Output · Status ·
  * Latency · Cost (Verdict opt-in behind Columns, uncolored). Status is RUNTIME
- * ONLY: `ok` as plain muted text, `error` as the errored StatusPill — grader
+ * ONLY: a trace that errored carries a red dot on its name, and grader
  * verdicts never color this table. Row click → ?trace=<id>, a rail floating
  * over this same page (not a route change) so the table stays visible behind it.
  */
@@ -88,9 +88,8 @@ export function TracesIndex() {
   // Submitted separately from the typed value: `q` is a server-side filter, so
   // firing it per keystroke would be a query per character.
   const [submittedQuery, setSubmittedQuery] = useState("");
-  // Deep-link filters: Vitals rows land here with ?call_site=<slug>, Classifiers'
-  // "Raw detections live in Traces" with ?events=classifier. Chips mirror the URL;
-  // removing a chip removes its param.
+  // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
+  // the URL; removing a chip removes its param.
   const [searchParams, setSearchParams] = useSearchParams();
   const { state, setRange, setFacet, clearAll, activeCount } = useTraceQueryState();
   const { range, facets } = state;
@@ -146,7 +145,6 @@ export function TracesIndex() {
       q: submittedQuery || undefined,
       callSite: facets.call_site ?? undefined,
       status: facets.status ?? undefined,
-      model: facets.model ?? undefined,
       kind: facets.kind ?? undefined,
       from: bounds.from,
       to: bounds.to,
@@ -203,7 +201,6 @@ export function TracesIndex() {
     next.delete("trace");
     next.delete("view");
     next.delete("span");
-    next.delete("verdicts");
     setSearchParams(next);
   };
 
@@ -316,15 +313,10 @@ export function TracesIndex() {
         up here too. No running count: the range and the filters are already
         stated by the controls above, and the footer says when the list ends.
       */}
-      {(facets.call_site || submittedQuery || filtered) && (
+      {filtered && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3 mx-0 mb-0">
           {facets.call_site && (
             <FilterChip label={`call site: ${facets.call_site}`} onRemove={() => setFacet("call_site", null)} />
-          )}
-          {/* Model has no dropdown — the vocabulary is a span fact the list no longer reads — but a deep
-              link can still scope to one, so it needs a way back out. */}
-          {facets.model && (
-            <FilterChip label={`model: ${facets.model}`} onRemove={() => setFacet("model", null)} />
           )}
           {submittedQuery && (
             <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSubmittedQuery("")} />
@@ -655,8 +647,6 @@ function SessionCell({ col, row }: { col: ColumnKey; row: SessionListItem }) {
       return <Text>{row.dominant_call_site_id ? sessionName(row) : "—"}</Text>;
     case "session":
       return <Text>{row.id}</Text>;
-    case "sessionExpand":
-      return null;
   }
 }
 
@@ -862,10 +852,6 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
       return (
         <Rollup row={row} value={row.total_tokens} render={formatTokens} title={exactTokens(row.total_tokens)} />
       );
-    case "sessionExpand":
-      // Never rendered for a flat (unpinned) row — the pinned expand column only exists in grouped mode,
-      // where SessionCell/SessionGroupRows render it instead.
-      return null;
   }
 }
 
