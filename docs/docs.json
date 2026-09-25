@@ -40,7 +40,8 @@
           {
             "group": "Frameworks",
             "pages": [
-              "instrument/frameworks/claude-agent-sdk"
+              "instrument/frameworks/claude-agent-sdk",
+              "instrument/frameworks/openai-agents-sdk"
             ]
           },
           "instrument/troubleshooting"
