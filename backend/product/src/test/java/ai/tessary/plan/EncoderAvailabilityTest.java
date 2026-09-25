@@ -35,6 +35,7 @@ class EncoderAvailabilityTest {
     private final List<String> requestLines = new ArrayList<>();
     private ServerSocket socket;
     private Thread acceptor;
+    private ObserverProperties props;
 
     @AfterEach
     void stop() throws IOException, InterruptedException {
@@ -103,6 +104,12 @@ class EncoderAvailabilityTest {
         assertEquals("healthz answered 503", encoder.health().getDetails().get("reason"));
     }
 
+    /**
+     * The model goes away by moving the URL to the local port of an open loopback client connection:
+     * nothing listens there, so the connect is refused, and while the connection holds the port the
+     * kernel hands it to no one else. Closing the stub's socket instead left it listening on Linux until
+     * the stub's in-flight {@code accept()} returned, so the next probe could still be answered 200.
+     */
     @Test
     void anUnreachableServiceIsUnavailableAndKeepsWhenItWasLastUp() throws IOException {
         EncoderAvailability encoder = serve(200, HEALTHY);
@@ -110,8 +117,12 @@ class EncoderAvailabilityTest {
 
         // The model goes away: the next probe flips the answer, so sweeps pause rather than run
         // against nothing, and the last time it answered survives for the status read.
-        socket.close();
-        EncoderAvailability.Snapshot s = encoder.refresh();
+        EncoderAvailability.Snapshot s;
+        try (ServerSocket peer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                Socket held = new Socket(peer.getInetAddress(), peer.getLocalPort())) {
+            props.getEncoder().setUrl("http://127.0.0.1:" + held.getLocalPort());
+            s = encoder.refresh();
+        }
 
         assertFalse(s.available());
         assertTrue(s.reason().startsWith("unreachable: "), s.reason());
@@ -138,7 +149,7 @@ class EncoderAvailabilityTest {
         acceptor = new Thread(() -> serveLoop(status, body), "stub-healthz");
         acceptor.setDaemon(true);
         acceptor.start();
-        ObserverProperties props = new ObserverProperties();
+        props = new ObserverProperties();
         props.getEncoder().setUrl("http://127.0.0.1:" + socket.getLocalPort());
         return new EncoderAvailability(props);
     }
