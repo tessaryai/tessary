@@ -178,7 +178,7 @@ public class AuthController {
         if (!provider.supportsRedirectFlow()) {
             return new RedirectView(entryPageUrl(returnTo));
         }
-        if (returnTo != null && !returnTo.isBlank() && isSafeReturnTo(returnTo)) {
+        if (isSafeReturnTo(returnTo)) {
             res.addHeader(
                     HttpHeaders.SET_COOKIE,
                     buildCookie(RETURN_TO_COOKIE, URLEncoder.encode(returnTo, StandardCharsets.UTF_8), RETURN_TO_TTL)
@@ -496,16 +496,17 @@ public class AuthController {
         // Both callers are degrade branches, i.e. reached only when the provider drives no redirect
         // flow, so the redirectFlow half of isFirstRun is already false here.
         String base = frontendBase() + (users.anyHumanExists() ? "/login" : "/signup");
-        if (returnTo != null && !returnTo.isBlank() && isSafeReturnTo(returnTo)) {
+        if (isSafeReturnTo(returnTo)) {
             return base + "?returnTo=" + URLEncoder.encode(returnTo, StandardCharsets.UTF_8);
         }
         return base;
     }
 
-    private static boolean isSafeReturnTo(String returnTo) {
+    private static boolean isSafeReturnTo(@Nullable String returnTo) {
         // Same-origin relative paths only. We require: starts with '/' AND the
         // second char is not '/' or '\' (Chromium normalises a leading "/\"
-        // into "//host", the same open-redirect class as "//evil").
+        // into "//host", the same open-redirect class as "//evil"). Absent, empty
+        // and blank values all fail here, so callers pass the raw parameter.
         if (returnTo == null || returnTo.length() < 1) return false;
         if (returnTo.charAt(0) != '/') return false;
         if (returnTo.length() >= 2) {

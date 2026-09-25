@@ -11,13 +11,14 @@ import ai.tessary.auth.link.DeviceLinkService.View;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -47,10 +48,19 @@ public class DeviceLinkController {
     private static final int MAX_PER_WINDOW = 60; // poll is ~20/min/code; allow a few concurrent links
     private final ConcurrentMap<String, long[]> ipWindows = new ConcurrentHashMap<>();
 
+    /** What the per-IP window and {@code expires_in} are measured against: the system clock outside tests. */
+    private final Clock clock;
+
+    @Autowired
     public DeviceLinkController(DeviceLinkService service, TenantPathResolver resolver, AuthProperties props) {
+        this(service, resolver, props, Clock.systemUTC());
+    }
+
+    DeviceLinkController(DeviceLinkService service, TenantPathResolver resolver, AuthProperties props, Clock clock) {
         this.service = service;
         this.resolver = resolver;
         this.props = props;
+        this.clock = clock;
     }
 
     public record StartRequest(String client_label) {}
@@ -87,7 +97,7 @@ public class DeviceLinkController {
         String verifyUri = linkUri(null);
         String verifyComplete = linkUri(s.userCode());
         long expiresIn =
-                Math.max(0, s.expiresAt().getEpochSecond() - Instant.now().getEpochSecond());
+                Math.max(0, s.expiresAt().getEpochSecond() - clock.instant().getEpochSecond());
         return ApiResponse.ok(new StartResponse(
                 s.deviceCode(),
                 s.userCode(),
@@ -163,7 +173,7 @@ public class DeviceLinkController {
         // makes Tomcat resolve X-Forwarded-For from the trusted proxy. Reading the raw
         // header here instead would be client-spoofable, defeating the limiter.
         String ip = http.getRemoteAddr();
-        long nowWindow = Instant.now().getEpochSecond() / WINDOW_SECONDS;
+        long nowWindow = clock.instant().getEpochSecond() / WINDOW_SECONDS;
         if (ipWindows.size() > MAX_TRACKED_IPS) ipWindows.clear();
         long[] w = ipWindows.compute(ip, (k, v) -> {
             if (v == null || v[0] != nowWindow) return new long[] {nowWindow, 1};

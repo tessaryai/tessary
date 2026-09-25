@@ -254,4 +254,34 @@ class RateLimitFilterTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("an authenticated caller gets its own 60-request burst, keyed by user, not shared")
+    void authenticatedCallersAreThrottledPerUser() throws ServletException, IOException {
+        RateLimitFilter f = filter();
+        for (int i = 0; i < 60; i++) {
+            assertEquals(200, apiCall(f, "usr_busy").getStatus(), "call " + (i + 1) + " is inside the burst");
+        }
+        MockHttpServletResponse limited = apiCall(f, "usr_busy");
+        assertEquals(429, limited.getStatus(), "the 61st rapid call must 429");
+        assertEquals("1", limited.getHeader("Retry-After"), "the per-user pool refills ten a second");
+        assertEquals(200, apiCall(f, "usr_quiet").getStatus(), "another user's allowance is untouched");
+    }
+
+    private static MockHttpServletResponse apiCall(RateLimitFilter f, String userId)
+            throws ServletException, IOException {
+        MockHttpServletRequest req = request("GET", "/api/orgs/acme/projects/web/traces");
+        // Same address for everyone: the per-user pool must not fall back to keying by IP.
+        req.setRemoteAddr("203.0.113.50");
+        req.setAttribute(TenantContext.ATTRIBUTE, new TenantContext(userId, null, null, null, null, null));
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        f.doFilterInternal(req, res, chain);
+        if (res.getStatus() == 429) {
+            assertNull(chain.getRequest(), "a throttled call must not reach the controller");
+        } else {
+            assertNotNull(chain.getRequest(), "an admitted call must reach the controller");
+        }
+        return res;
+    }
 }

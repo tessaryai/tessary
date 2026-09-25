@@ -236,4 +236,66 @@ class PasswordAuthProviderTest {
                         + "s), not a hardcoded 7-day literal; got "
                         + r.accessTokenExpiresAt());
     }
+
+    @Test
+    @DisplayName("the redirect-flow methods fail loudly rather than answer something a caller could follow")
+    void redirectFlowMethodsFailLoudly() {
+        PasswordAuthProvider provider = new PasswordAuthProvider(mock(PrincipalRepository.class), new AuthProperties());
+
+        assertThrows(UnsupportedOperationException.class, () -> provider.authorizationUrl("state"));
+        assertThrows(UnsupportedOperationException.class, () -> provider.authenticateWithCode("code"));
+        assertThrows(UnsupportedOperationException.class, () -> provider.refresh("rt", null));
+    }
+
+    @Test
+    @DisplayName("invitations are local bookkeeping only: no provider id, and revoking is a no-op, not a failure")
+    void invitationsAreLocalOnly() {
+        PrincipalRepository users = mock(PrincipalRepository.class);
+        PasswordAuthProvider provider = new PasswordAuthProvider(users, new AuthProperties());
+
+        assertEquals(new AuthProvider.Invitation(null), provider.createInvitation("bob@example.com"));
+        provider.revokeInvitation("inv_1");
+        org.mockito.Mockito.verifyNoInteractions(users);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(
+            nullValues = "NULL",
+            value = {
+                "'', long-enough-password, email is required",
+                "'   ', long-enough-password, email is required",
+                "NULL, long-enough-password, email is required",
+                "a@example.com, '', password is required",
+                "a@example.com, '   ', password is required",
+                "a@example.com, NULL, password is required"
+            })
+    @SuppressWarnings("NullAway") // deliberate: a null field is what a hand-built request can carry
+    @DisplayName("signup: a missing or blank email or password is refused before any lookup or insert")
+    void signupRequiresEmailAndPassword(String email, String password, String reason) {
+        PrincipalRepository users = mock(PrincipalRepository.class);
+        PasswordAuthProvider provider = new PasswordAuthProvider(users, new AuthProperties());
+
+        AuthProvider.AuthException e =
+                assertThrows(AuthProvider.AuthException.class, () -> provider.signupWithCredentials(email, password));
+
+        assertEquals(reason, e.getMessage());
+        org.mockito.Mockito.verifyNoInteractions(users);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(
+            nullValues = "NULL",
+            value = {"NULL, pw", "a@example.com, NULL"})
+    @SuppressWarnings("NullAway") // deliberate: a null field is what a hand-built request can carry
+    @DisplayName("login: a missing email or password is invalid credentials, without a lookup")
+    void loginRequiresEmailAndPassword(String email, String password) {
+        PrincipalRepository users = mock(PrincipalRepository.class);
+        PasswordAuthProvider provider = new PasswordAuthProvider(users, new AuthProperties());
+
+        AuthProvider.AuthException e = assertThrows(
+                AuthProvider.AuthException.class, () -> provider.authenticateWithCredentials(email, password));
+
+        assertEquals("invalid credentials", e.getMessage());
+        org.mockito.Mockito.verifyNoInteractions(users);
+    }
 }

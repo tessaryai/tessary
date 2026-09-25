@@ -297,4 +297,207 @@ class AuthFilterPostureTest {
                 "the pre-existing CSRF call site's code and message text must survive the reject403(code, "
                         + "message) signature change byte-for-byte: " + body);
     }
+
+    // ---------------------------------------------------------------------------------------
+    // The cookie session: a real SessionCipher seals each cookie, so every case below is a cookie
+    // the filter could genuinely receive, and a reissued cookie can be opened and read back.
+    // ---------------------------------------------------------------------------------------
+
+    private static final String GUARDED_API = "/api/orgs/acme/projects/web/traces";
+    private static final String FAR_FUTURE = "2099-01-01T00:00:00Z";
+    private static final String LONG_AGO = "2020-01-01T00:00:00Z";
+
+    private static AuthProperties cookieProps() {
+        AuthProperties p = new AuthProperties();
+        p.setCookieName("sid");
+        p.setCookieSecure(true);
+        p.setCookiePassword(java.util.Base64.getEncoder().encodeToString(new byte[32]));
+        return p;
+    }
+
+    private static final SessionCipher CIPHER = new SessionCipher(cookieProps(), new ObjectMapper());
+
+    private static PrincipalRepository knowsWos1() {
+        PrincipalRepository users = mock(PrincipalRepository.class);
+        when(users.findByWorkosId("wos_1"))
+                .thenReturn(java.util.Optional.of(ai.tessary.tenant.Principal.human(
+                        "usr_1", "wos_1", "ada@example.com", null, null, "2026-01-01T00:00:00Z", null)));
+        return users;
+    }
+
+    private static AuthFilter cookieFilter(AuthProvider provider, PrincipalRepository users) {
+        return new AuthFilter(
+                cookieProps(),
+                provider,
+                CIPHER,
+                users,
+                mock(BearerTokenAuthenticator.class),
+                new ObjectMapper(),
+                notStaff());
+    }
+
+    private static MockHttpServletRequest withCookie(String method, String path, jakarta.servlet.http.Cookie... c) {
+        MockHttpServletRequest req = new MockHttpServletRequest(method, path);
+        req.setCookies(c);
+        return req;
+    }
+
+    private static jakarta.servlet.http.Cookie session(
+            @org.jspecify.annotations.Nullable String refreshToken,
+            @org.jspecify.annotations.Nullable String expiresAt,
+            String workosUserId) {
+        return new jakarta.servlet.http.Cookie(
+                "sid", CIPHER.seal(new SealedSession(refreshToken, expiresAt, workosUserId, "org_old")));
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> untrustedCookies() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "no session cookie among others", new jakarta.servlet.http.Cookie("theme", "dark")),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "tampered or foreign-key cookie", new jakarta.servlet.http.Cookie("sid", "not-a-sealed-value")),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "principal gone since the cookie was issued", session("rt_1", FAR_FUTURE, "wos_gone")),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "expired with no refresh token", session(null, LONG_AGO, "wos_1")),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "unparseable expiry reads as expired", session(null, "yesterday", "wos_1")),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "absent expiry reads as expired", session(null, null, "wos_1")));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.MethodSource("untrustedCookies")
+    @DisplayName("a cookie that cannot vouch for a live principal is no session: the API answers 401")
+    void untrustedCookieIsNoSession(String why, jakarta.servlet.http.Cookie cookie)
+            throws ServletException, IOException {
+        AuthProvider provider = mock(AuthProvider.class);
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        cookieFilter(provider, knowsWos1()).doFilterInternal(withCookie("GET", GUARDED_API, cookie), res, chain);
+
+        assertEquals(401, res.getStatus(), why);
+        assertNull(chain.getRequest(), why);
+        // With no refresh token there is nothing to refresh with: the provider is never asked.
+        org.mockito.Mockito.verifyNoInteractions(provider);
+    }
+
+    @Test
+    @DisplayName("an expired session whose refresh fails or comes back without a token is no session")
+    void failedRefreshIsNoSession() throws ServletException, IOException {
+        AuthProvider provider = mock(AuthProvider.class);
+        when(provider.refresh("rt_1", "org_old"))
+                .thenThrow(new AuthProvider.AuthException("revoked"))
+                .thenReturn(new AuthProvider.AuthResult(
+                        null, "rt_2", java.time.Instant.parse(FAR_FUTURE), null, null, null, null, null, null));
+        AuthFilter filter = cookieFilter(provider, knowsWos1());
+
+        for (String attempt : new String[] {"provider throws", "2xx without access_token"}) {
+            MockHttpServletResponse res = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            filter.doFilterInternal(withCookie("GET", GUARDED_API, session("rt_1", LONG_AGO, "wos_1")), res, chain);
+
+            assertEquals(401, res.getStatus(), attempt);
+            assertNull(res.getCookie("sid"), attempt + ": a failed refresh must not reissue the cookie");
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(
+            nullValues = "NULL",
+            value = {"NULL, NULL, wos_1, org_old", "wos_2, org_new, wos_2, org_new"})
+    @DisplayName("a refreshed session is resealed, keeping the old ids where the provider sent none")
+    void expiredSessionIsRefreshedAndReissued(
+            @org.jspecify.annotations.Nullable String newUser,
+            @org.jspecify.annotations.Nullable String newOrg,
+            String sealedUser,
+            String sealedOrg)
+            throws ServletException, IOException {
+        AuthProvider provider = mock(AuthProvider.class);
+        when(provider.refresh("rt_1", "org_old"))
+                .thenReturn(new AuthProvider.AuthResult(
+                        "at_2", "rt_2", java.time.Instant.parse(FAR_FUTURE), newUser, null, null, null, null, newOrg));
+        MockHttpServletRequest req = withCookie("GET", GUARDED_API, session("rt_1", LONG_AGO, "wos_1"));
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        cookieFilter(provider, knowsWos1()).doFilterInternal(req, res, chain);
+
+        assertEquals(req, chain.getRequest());
+        assertEquals(
+                new TenantContext("usr_1", "ada@example.com", null, null, null, null),
+                req.getAttribute(TenantContext.ATTRIBUTE));
+        jakarta.servlet.http.Cookie reissued = java.util.Objects.requireNonNull(res.getCookie("sid"));
+        assertEquals(new SealedSession("rt_2", FAR_FUTURE, sealedUser, sealedOrg), CIPHER.unseal(reissued.getValue()));
+        assertEquals(
+                "maxAge=604800 path=/ secure=true httpOnly=true sameSite=Lax",
+                "maxAge=" + reissued.getMaxAge() + " path=" + reissued.getPath() + " secure=" + reissued.getSecure()
+                        + " httpOnly=" + reissued.isHttpOnly() + " sameSite="
+                        + ((org.springframework.mock.web.MockCookie) reissued).getSameSite());
+    }
+
+    @Test
+    @DisplayName("a request with no method is not a mutation, so a cookie session passes without the CSRF header")
+    void nullMethodIsNotMutating() throws ServletException, IOException {
+        MockHttpServletRequest req = withCookie("GET", GUARDED_API, session("rt_1", FAR_FUTURE, "wos_1"));
+        req.setMethod(null);
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        cookieFilter(mock(AuthProvider.class), knowsWos1()).doFilterInternal(req, res, chain);
+
+        assertEquals(req, chain.getRequest());
+    }
+
+    @Test
+    @DisplayName("a public probe driven straight into the filter skips the staff check")
+    void publicProbeSkipsTheStaffCheck() throws ServletException, IOException {
+        AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), notStaff());
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/actuator/health");
+        req.addHeader("Authorization", "Bearer irrelevant-to-the-stub");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilterInternal(req, new MockHttpServletResponse(), chain);
+
+        assertEquals(req, chain.getRequest(), "the probes stay reachable for any caller, staff or not");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The path the decisions are made on.
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the container's servlet path wins over the raw URI")
+    void servletPathWinsOverTheRawUri() {
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/orgs/acme/projects/web/traces");
+        req.setServletPath("/auth/login");
+        assertTrue(filter(false).shouldNotFilter(req));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(
+            strings = {
+                "/auth/login;jsessionid=1",
+                "/v3/api-docs/../api/orgs",
+                "/v3/api-docs/..%2Fapi%2Forgs",
+                "/v3/api-docs/..%2fapi",
+                "/v3/api-docs/%5C..%5Capi",
+            })
+    @DisplayName("a raw URI carrying traversal or parameter tricks never matches a bypass")
+    void obfuscatedUrisAreFiltered(String uri) {
+        assertFalse(filter(false).shouldNotFilter(new MockHttpServletRequest("GET", uri)), uri);
+    }
+
+    @Test
+    @DisplayName("a request with no URI at all is filtered, not bypassed, and does not crash the filter")
+    void missingUriIsFiltered() throws ServletException, IOException {
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/ignored");
+        req.setRequestURI(null);
+        MockFilterChain chain = new MockFilterChain();
+
+        assertFalse(filter(false).shouldNotFilter(req));
+        filter(false).doFilterInternal(req, new MockHttpServletResponse(), chain);
+        assertEquals(req, chain.getRequest(), "an empty path is not under /api/, so it is the controller's call");
+    }
 }

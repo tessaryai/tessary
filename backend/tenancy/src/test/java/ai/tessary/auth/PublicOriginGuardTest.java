@@ -146,4 +146,15 @@ class PublicOriginGuardTest {
         env.setProperty("tessary.classifier.triage-mcp-base-url", "http://backend:8080");
         guard("tessary.acme-corp.com", "upstream", "").verify();
     }
+
+    @Test
+    void anUnresolvableIpShapedHostIsNotTreatedAsLocal() {
+        // Dots and hex letters only, so it passes the IP-literal pre-check, yet it is a hostname no
+        // resolver answers for. Unresolvable is not loopback: it must be refused as another host,
+        // not silently replaced by the derived origin as a local default would be.
+        PublicOriginGuard g = guard("tessary.acme-corp.com", "owncert", "");
+        auth.setFrontendUrl("http://1.2.3.a/");
+        assertThrows(IllegalStateException.class, g::verify);
+        assertEquals("http://1.2.3.a/", auth.getFrontendUrl(), "a refused origin is never rewritten");
+    }
 }
