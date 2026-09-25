@@ -11,6 +11,7 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,12 @@ class TraceSubstrateRepositoryTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    ToolCallRepository toolCalls;
+
+    @Autowired
+    RetrievedDocRepository retrievedDocs;
 
     private SubstrateV2Fixtures fx;
 
@@ -324,6 +331,287 @@ class TraceSubstrateRepositoryTest {
         assertEquals(2, totals.traceCount());
         assertEquals(1, totals.unsettledTraces(), "one addend is still moving, and the caller is told so");
         assertEquals(Long.valueOf(120L), totals.totalTokens(), "summed from the rollup column, not from spans");
+    }
+
+    /**
+     * The token and latency sorts order on their own rollup column, not on cost or on time, and a cursor
+     * that sits in the null tail pages on through it instead of starting over at the priced rows.
+     */
+    @Test
+    void tokenAndLatencySortsOrderOnTheirColumnAndPageOnWithinTheNullTail() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-token-sort").project().id();
+        Instant t0 = Instant.parse("2026-08-12T06:00:00Z");
+        String many = rolledTrace(pid, t0, 100L, 5L, null);
+        String few = rolledTrace(pid, t0.plusSeconds(1), 50L, 10L, null);
+        String olderPending = rolledTrace(pid, t0.plusSeconds(2), null, null, null);
+        String newerPending = rolledTrace(pid, t0.plusSeconds(3), null, null, null);
+
+        assertEquals(
+                List.of(many, few, newerPending, olderPending),
+                ids(v2traces.list(pid, NO_FILTER, "TOKENS", 10, null, null, null)),
+                "most tokens first, then the traces with no total yet, newest first");
+        assertEquals(
+                List.of(few, many, newerPending, olderPending),
+                ids(v2traces.list(pid, NO_FILTER, TraceV2Repository.Sort.LATENCY, 10, null, null, null)),
+                "slowest first");
+        assertEquals(
+                List.of(newerPending, olderPending, few, many),
+                ids(v2traces.list(pid, NO_FILTER, "when", 10, null, null, null)),
+                "an unknown sort key falls back to newest first, not to an error or a rollup column");
+
+        var head = v2traces.list(pid, NO_FILTER, TraceV2Repository.Sort.TOKENS, 3, null, null, null);
+        var last = head.get(2);
+        assertEquals(newerPending, last.id());
+        assertEquals(
+                List.of(olderPending),
+                ids(v2traces.list(
+                        pid, NO_FILTER, TraceV2Repository.Sort.TOKENS, 10, null, last.startedAt(), last.id())),
+                "a cursor in the null tail continues through it rather than repeating the counted rows");
+    }
+
+    /**
+     * {@code status} answers only for traces that have rolled up, and {@code q} is a case-insensitive
+     * substring match on the trace's name.
+     */
+    @Test
+    void statusAndTextFiltersNarrowTheListAndSkipTracesWithNoAnswer() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-status").project().id();
+        Instant t0 = Instant.parse("2026-08-12T07:00:00Z");
+        String failing = SubstrateV2Fixtures.traceId();
+        fx.namedTrace(pid, failing, "checkout", t0);
+        setRollup(pid, failing, null, null, 2);
+        String healthy = SubstrateV2Fixtures.traceId();
+        fx.namedTrace(pid, healthy, "search", t0.plusSeconds(1));
+        setRollup(pid, healthy, null, null, 0);
+        String pending = SubstrateV2Fixtures.traceId();
+        fx.namedTrace(pid, pending, "checkout-retry", t0.plusSeconds(2));
+
+        assertEquals(List.of(failing), ids(v2traces.list(pid, query("error", null), null, 10, null, null, null)));
+        assertEquals(
+                List.of(healthy),
+                ids(v2traces.list(pid, query("ok", null), null, 10, null, null, null)),
+                "a trace that has not rolled up has no error count, so it is neither failing nor healthy");
+        assertEquals(
+                List.of(pending, failing),
+                ids(v2traces.list(pid, query(null, "CHECKOUT"), null, 10, null, null, null)));
+        assertEquals(
+                List.of(healthy),
+                ids(v2traces.list(
+                        pid,
+                        new TraceV2Repository.TraceQuery(
+                                null,
+                                null,
+                                null,
+                                t0.plusSeconds(1).toString(),
+                                t0.plusSeconds(1).toString(),
+                                null,
+                                null),
+                        null,
+                        10,
+                        null,
+                        null,
+                        null)),
+                "both ends of the time window are inclusive");
+    }
+
+    /**
+     * The key-addressed span reads behind the MCP trace tools: bounded when asked, and scoped to the
+     * caller's project even when another project holds a span under the very same producer ids.
+     */
+    @Test
+    void keyedSpanReadsAreBoundedAndNeverCrossIntoAnotherProject() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-keyed-reads").project().id();
+        String other = TenantFixture.bootstrap(tenants, "v2-keyed-reads-other")
+                .project()
+                .id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow first = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, null);
+        SpanRow second = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(1), null);
+        SpanRow third = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(2), null);
+        fx.payload(first, "mine", null, null);
+        fx.payload(third, "also mine", null, null);
+        SpanRow twin = fx.span(other, traceId, first.id(), null, "llm", t0, null);
+        fx.payload(twin, "theirs", null, null);
+        SpanKey k1 = new SpanKey(traceId, first.id());
+        SpanKey k2 = new SpanKey(traceId, second.id());
+        SpanKey k3 = new SpanKey(traceId, third.id());
+
+        assertEquals(
+                List.of(first.id(), second.id()),
+                spans.listByTrace(pid, traceId, 2).stream().map(SpanRow::id).toList(),
+                "the bounded read stops at its limit, oldest first");
+        assertEquals(
+                Set.of(first.id(), third.id()),
+                spans.listByKeys(pid, List.of(k1, k3, new SpanKey(traceId, "gone"))).stream()
+                        .map(SpanRow::id)
+                        .collect(java.util.stream.Collectors.toSet()),
+                "a key with no span is dropped, not an error");
+        assertEquals(List.of(), spans.listByKeys(pid, List.of()));
+        assertEquals(
+                Set.of("mine", "also mine"),
+                payloads.listByKeys(pid, List.of(k1, k2, k3)).stream()
+                        .map(SpanPayloadRow::input)
+                        .collect(java.util.stream.Collectors.toSet()),
+                "the other project's payload under the same key never answers for this one");
+        assertEquals(List.of(), payloads.listByKeys(pid, List.of()));
+        assertEquals(
+                Set.of(k1, k3),
+                payloads.existingKeys(pid, List.of(k1, k2, k3)),
+                "a span whose payload is absent is reported absent");
+        assertEquals(Set.of(), payloads.existingKeys(pid, List.of()));
+    }
+
+    /** The tool-call and retrieved-document side tables read back every column they were written with. */
+    @Test
+    void toolCallAndRetrievedDocRowsRoundTripEveryColumn() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-side-tables").project().id();
+        Instant t0 = Instant.parse("2026-08-12T09:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow span = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0, null);
+        String at = "2026-08-12T09:00:01Z";
+        ToolCallRow full = new ToolCallRow(
+                "tc-full-" + span.id(),
+                pid,
+                "search",
+                "call-1",
+                "function",
+                "server",
+                "{\"q\": \"x\"}",
+                "q=x",
+                "{\"ok\": false}",
+                "Timeout",
+                "timed out after 30s",
+                true,
+                3,
+                1234L,
+                "ext-9",
+                at,
+                false,
+                "{\"k\": 1}",
+                "2026-08-12T09:00:00Z",
+                at,
+                traceId,
+                span.id());
+        ToolCallRow sparse = new ToolCallRow(
+                "tc-sparse-" + span.id(),
+                pid,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-08-12T09:00:02Z",
+                traceId,
+                span.id());
+        toolCalls.insertAll(List.of(full, sparse));
+
+        assertEquals(
+                List.of(
+                        new ToolCallRepository.SpanToolCall(span.id(), full),
+                        new ToolCallRepository.SpanToolCall(span.id(), sparse)),
+                toolCalls.listByTrace(pid, traceId));
+        assertEquals(toolCalls.listByTrace(pid, traceId), toolCalls.listByTraceIds(pid, List.of(traceId)));
+        assertEquals(List.of(), toolCalls.listByTraceIds(pid, List.of()));
+
+        RetrievedDocRow doc = new RetrievedDocRow(
+                "rd-full-" + span.id(),
+                pid,
+                0,
+                "result",
+                1,
+                "doc-1",
+                "Title",
+                "passage",
+                0.25,
+                "s3://bucket/doc-1",
+                "kb-1",
+                "{\"m\": \"v\"}",
+                "ext-10",
+                at,
+                false,
+                at,
+                traceId,
+                span.id());
+        RetrievedDocRow bare = new RetrievedDocRow(
+                "rd-bare-" + span.id(),
+                pid,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-08-12T09:00:02Z",
+                traceId,
+                span.id());
+        retrievedDocs.insertAll(List.of(doc, bare));
+
+        assertEquals(
+                List.of(
+                        new RetrievedDocRepository.SpanRetrievedDoc(span.id(), doc),
+                        new RetrievedDocRepository.SpanRetrievedDoc(span.id(), bare)),
+                retrievedDocs.listByTrace(pid, traceId));
+        assertEquals(retrievedDocs.listByTrace(pid, traceId), retrievedDocs.listByTraceIds(pid, List.of(traceId)));
+        assertEquals(List.of(), retrievedDocs.listByTraceIds(pid, List.of()));
+    }
+
+    private String rolledTrace(
+            String pid,
+            Instant at,
+            @org.jspecify.annotations.Nullable Long tokens,
+            @org.jspecify.annotations.Nullable Long latencyMs,
+            @org.jspecify.annotations.Nullable Integer errors) {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.namedTrace(pid, traceId, null, at);
+        setRollup(pid, traceId, tokens, latencyMs, errors);
+        return traceId;
+    }
+
+    private void setRollup(
+            String pid,
+            String traceId,
+            @org.jspecify.annotations.Nullable Long tokens,
+            @org.jspecify.annotations.Nullable Long latencyMs,
+            @org.jspecify.annotations.Nullable Integer errors) {
+        // latency_ms is generated from the end, so the latency is set by ending the trace that long after it began.
+        jdbc.sql("UPDATE trace SET total_tokens = :tokens, error_count = :errors,"
+                        + " ended_at = started_at + make_interval(secs => CAST(:latency AS bigint) / 1000.0)"
+                        + " WHERE project_id = :pid AND id = :id")
+                .param("tokens", tokens, java.sql.Types.BIGINT)
+                .param("latency", latencyMs, java.sql.Types.BIGINT)
+                .param("errors", errors, java.sql.Types.INTEGER)
+                .param("pid", pid)
+                .param("id", traceId)
+                .update();
+    }
+
+    private static TraceV2Repository.TraceQuery query(
+            @org.jspecify.annotations.Nullable String status, @org.jspecify.annotations.Nullable String q) {
+        return new TraceV2Repository.TraceQuery(null, null, null, null, null, status, q);
     }
 
     /** Roll one trace up synchronously: arm it, bring the deadline forward, run the worker once. */

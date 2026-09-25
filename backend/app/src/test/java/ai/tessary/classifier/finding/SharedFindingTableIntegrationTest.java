@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.ingest.PreviewCursor;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Ids;
@@ -367,6 +368,91 @@ class SharedFindingTableIntegrationTest {
     }
 
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    /**
+     * The evidence table's span page resumes after the last row of the page it was minted from, never after
+     * the row it over-fetched, so a walk reads every ref exactly once. A cursor whose rank is not a number,
+     * or of another generation, restarts at page one rather than resuming from a point off the ordering.
+     * A ref whose span has aged out still reads, with no start time. The secret-leak and malformed-output
+     * pages join their own detection tables and page the same way.
+     */
+    @Test
+    @DisplayName("the span page resumes after its own last row and restarts on a cursor it cannot read")
+    void spanPageResumesAfterItsLastRowAndRestartsOnAnUnreadableCursor() {
+        Project p = project("finding-span-page");
+        String findingId = firing(p, "gram-span-page");
+        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>();
+        for (int i = 0; i < 3; i++) refs.add(FindingEvidenceRepository.Ref.span("trace-" + i, "span-" + i));
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                refs,
+                Instant.now().toString());
+
+        for (boolean joined : new boolean[] {false, true}) {
+            FindingEvidenceRepository.SpanPage first =
+                    evidence.spanPage(p.id(), findingId, null, 2, null, joined, joined);
+            FindingEvidenceRepository.SpanPage second =
+                    evidence.spanPage(p.id(), findingId, null, 2, first.nextCursor(), joined, joined);
+
+            assertEquals(List.of("trace-0", "trace-1"), traces(first));
+            assertNotNull(first.nextCursor());
+            assertEquals(List.of("trace-2"), traces(second));
+            assertNull(second.nextCursor());
+            assertNull(second.rows().get(0).startedAt(), "the span aged out; the ref still reads");
+        }
+        String sep = "\u001f";
+        for (String token : List.of(
+                "v1" + sep + "member" + sep + "first" + sep + "x",
+                "v0" + sep + "member" + sep + "1" + sep + "x",
+                "v1" + sep + "" + sep + "1" + sep + "x",
+                "v1" + sep + "member" + sep + "1")) {
+            assertEquals(
+                    List.of("trace-0", "trace-1"),
+                    traces(evidence.spanPage(p.id(), findingId, null, 2, PreviewCursor.encode(token, 0), false, false)),
+                    "an unreadable cursor restarts at page one: " + token);
+        }
+    }
+
+    /**
+     * A cause key naming a tool with quotes, backslashes and control characters in it is spliced into the
+     * payload as escaped JSON. Unescaped, the jsonb cast rejects the write and the finding is never filed.
+     */
+    @Test
+    void aCauseKeyWithCharactersJsonMustEscapeIsRecordedIntact() {
+        Project p = project("finding-escaped-key");
+        String nasty = "tool:\"quoted\" \\path\n\r\t\u0001end";
+        String now = Instant.now().toString();
+
+        FindingRepository.Recorded recorded = Objects.requireNonNull(findings.recordRecomputedRate(
+                Ids.ulid(),
+                p.id(),
+                BuiltInDetector.Kind.TOOL_ERROR,
+                "clf-escape:" + nasty,
+                FindingRow.Cause.RATE_SHIFT,
+                nasty,
+                FindingRow.SubjectKind.TOOL,
+                "search_docs",
+                "search_docs",
+                12,
+                null,
+                null,
+                "{\"n_cur\":12}",
+                now,
+                now,
+                now));
+
+        assertEquals(
+                nasty,
+                findings.findById(p.id(), recorded.findingId()).orElseThrow().nativeCauseKey());
+    }
+
+    private static List<String> traces(FindingEvidenceRepository.SpanPage page) {
+        return page.rows().stream()
+                .map(FindingEvidenceRepository.SpanRef::traceId)
+                .toList();
+    }
+
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
     /** One classifier firing against {@code gram}, returning the finding that owns the cause. */

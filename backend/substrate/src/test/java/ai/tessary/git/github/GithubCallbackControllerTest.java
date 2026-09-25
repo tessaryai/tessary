@@ -168,4 +168,16 @@ class GithubCallbackControllerTest {
         // Multiple installations short-circuit straight to the picker — no per-installation repo listing here.
         verify(tokenService, never()).listInstallationRepos(org.mockito.ArgumentMatchers.anyLong(), anyString());
     }
+
+    @Test
+    void singleInstallationWithNoRepos_redirectsWithNoInstalledReposInsteadOfBinding() {
+        // An install that granted no repositories has nothing to bind; the user must go back to GitHub and
+        // pick one, so the redirect names that rather than connecting an empty integration.
+        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
+        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(111L));
+        when(tokenService.listInstallationRepos(111L, HOST)).thenReturn(List.of());
+        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), "code", "install");
+        assertTrue(location(resp).contains("/settings/git?github_error=GIT.NO_INSTALLED_REPOS"), location(resp));
+        verify(integrations, never()).connect(anyString(), any());
+    }
 }

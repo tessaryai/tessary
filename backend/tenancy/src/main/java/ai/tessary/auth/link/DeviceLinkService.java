@@ -11,6 +11,7 @@ import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -18,6 +19,7 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -51,16 +53,29 @@ public class DeviceLinkService {
     private final ProjectRepository projects;
     private final OrganizationRepository orgs;
     private final SecureRandom rng = new SecureRandom();
+    /** What link expiry and the poll throttle are measured against: the system clock outside tests. */
+    private final Clock clock;
 
+    @Autowired
     public DeviceLinkService(
             DeviceLinkRepository links,
             ApiKeyService mcpTokens,
             ProjectRepository projects,
             OrganizationRepository orgs) {
+        this(links, mcpTokens, projects, orgs, Clock.systemUTC());
+    }
+
+    DeviceLinkService(
+            DeviceLinkRepository links,
+            ApiKeyService mcpTokens,
+            ProjectRepository projects,
+            OrganizationRepository orgs,
+            Clock clock) {
         this.links = links;
         this.mcpTokens = mcpTokens;
         this.projects = projects;
         this.orgs = orgs;
+        this.clock = clock;
     }
 
     public record Started(String deviceCode, String userCode, Instant expiresAt) {}
@@ -86,8 +101,8 @@ public class DeviceLinkService {
                 DEVICE_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
         String prefix = deviceCode.substring(0, Math.min(PREFIX_LEN, deviceCode.length()));
         String hash = BCrypt.withDefaults().hashToString(BCRYPT_COST, deviceCode.toCharArray());
-        String now = Instant.now().toString();
-        String expires = Instant.now().plus(TTL).toString();
+        String now = clock.instant().toString();
+        String expires = clock.instant().plus(TTL).toString();
 
         // user_code uniqueness is enforced by the DB; retry on the rare collision.
         for (int attempt = 0; attempt < 5; attempt++) {
@@ -156,10 +171,10 @@ public class DeviceLinkService {
 
         // Throttle: enforce the advertised poll interval per code.
         if (l.lastPolledAt() != null
-                && Instant.parse(l.lastPolledAt()).isAfter(Instant.now().minusSeconds(POLL_INTERVAL_SECONDS))) {
+                && Instant.parse(l.lastPolledAt()).isAfter(clock.instant().minusSeconds(POLL_INTERVAL_SECONDS))) {
             return PollOutcome.of("slow_down");
         }
-        links.recordPoll(l.id(), Instant.now().toString(), l.pollCount() + 1);
+        links.recordPoll(l.id(), clock.instant().toString(), l.pollCount() + 1);
 
         if (DeviceLink.PENDING.equals(l.status())) return PollOutcome.of("authorization_pending");
 
@@ -185,8 +200,8 @@ public class DeviceLinkService {
         return isExpired(l) && !DeviceLink.CLAIMED.equals(l.status()) ? DeviceLink.EXPIRED : l.status();
     }
 
-    private static boolean isExpired(DeviceLink l) {
-        return Instant.parse(l.expiresAt()).isBefore(Instant.now());
+    private boolean isExpired(DeviceLink l) {
+        return Instant.parse(l.expiresAt()).isBefore(clock.instant());
     }
 
     private String generateUserCode() {

@@ -2,6 +2,7 @@
 package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -92,5 +93,27 @@ class SessionCipherTest {
 
         assertNull(c.unseal("anything"));
         assertThrows(IllegalStateException.class, () -> c.seal(sample()));
+    }
+
+    @Test
+    void construction_refusesAPasswordThatIsNotBase64() {
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> cipher("not base64 at all!"));
+        assertInstanceOf(IllegalArgumentException.class, e.getCause());
+    }
+
+    @Test
+    void seal_aSerializationFailureIsAnIllegalStateNotASilentCookie() throws Exception {
+        AuthProperties p = new AuthProperties();
+        p.setCookiePassword(validKey());
+        ObjectMapper broken = org.mockito.Mockito.mock(ObjectMapper.class);
+        com.fasterxml.jackson.core.JsonProcessingException cause =
+                new com.fasterxml.jackson.core.JsonProcessingException("cannot write") {};
+        org.mockito.Mockito.when(broken.writeValueAsBytes(sample())).thenThrow(cause);
+        SessionCipher c = new SessionCipher(p, broken);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> c.seal(sample()));
+
+        assertEquals("SessionCipher.seal failed", e.getMessage());
+        org.junit.jupiter.api.Assertions.assertSame(cause, e.getCause());
     }
 }

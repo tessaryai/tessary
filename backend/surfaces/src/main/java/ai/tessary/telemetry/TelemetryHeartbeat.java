@@ -219,9 +219,15 @@ public class TelemetryHeartbeat {
     /** A coarse host OS family, not the full {@code os.name} string (which carries version numbers,
      *  e.g. "Windows 11") — the contract's example is the bare family ({@code "linux"}). */
     private static String osFamily() {
-        String raw = System.getProperty("os.name", "unknown").toLowerCase(Locale.ROOT);
-        if (raw.contains("win")) return "windows";
+        return osFamily(System.getProperty("os.name", "unknown"));
+    }
+
+    /** {@link #osFamily()} over a given {@code os.name} value. */
+    static String osFamily(String osName) {
+        String raw = osName.toLowerCase(Locale.ROOT);
+        // mac/darwin first: "darwin" contains "win".
         if (raw.contains("mac") || raw.contains("darwin")) return "macos";
+        if (raw.contains("win")) return "windows";
         if (raw.contains("linux")) return "linux";
         return raw.isEmpty() ? "unknown" : raw;
     }

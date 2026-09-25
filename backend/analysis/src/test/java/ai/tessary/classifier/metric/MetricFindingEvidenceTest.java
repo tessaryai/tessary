@@ -6,9 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Explains;
+import ai.tessary.classifier.metric.MetricFindingEvidence.Read;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import java.util.OptionalDouble;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@link MetricFindingEvidence#detail} on the fields R3 added: {@code bucket.kind}, {@code
@@ -76,5 +83,45 @@ class MetricFindingEvidenceTest {
         assertNull(detail.control(), "the pinned arm's reference is a window, not a ring");
         assertTrue(detail.explains().isEmpty(), "absence is the accurate statement, not an empty array read as one");
         assertNull(detail.sinceVersionId());
+    }
+
+    /** The headline a case is built from: the direction read as written, and the p50 pair split into its sides. */
+    @Test
+    void read_takesTheHeadlineNumbersAndTheMedianPair() {
+        assertEquals(
+                new Read(
+                        "turn_duration",
+                        "cs-1",
+                        "previous",
+                        0.35,
+                        1.42,
+                        Direction.UP,
+                        80,
+                        OptionalDouble.of(2000.0),
+                        OptionalDouble.of(2840.0)),
+                MetricFindingEvidence.read(ROLLING_ARM_BLOB));
+        Read down = MetricFindingEvidence.read(
+                "{\"measure\":\"cost\",\"bucket\":{\"key\":\"cs-2\"},\"direction\":\"down\",\"quantiles\":{}}");
+        assertNotNull(down);
+        assertEquals(Direction.DOWN, down.direction(), "a fall read as a rise would page on the wrong side");
+        assertEquals(OptionalDouble.empty(), down.refP50(), "an absent pair is unavailable, not a 0 ms median");
+    }
+
+    /**
+     * A blob that is empty, unreadable, or missing its measure or bucket is unavailable to both readers:
+     * null, never an exception that 500s the case page and never a zeroed record shown as the finding's own.
+     */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(
+            strings = {
+                "   ",
+                "{not json",
+                "{\"bucket\":{\"key\":\"cs-1\"}}",
+                "{\"measure\":\"turn_duration\",\"bucket\":{}}"
+            })
+    void anUnreadableOrKeylessBlobIsUnavailableToBothReaders(@Nullable String blob) {
+        assertNull(MetricFindingEvidence.read(blob));
+        assertNull(MetricFindingEvidence.detail(blob));
     }
 }

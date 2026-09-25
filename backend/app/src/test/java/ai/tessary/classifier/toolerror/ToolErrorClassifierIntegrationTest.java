@@ -21,10 +21,13 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -386,6 +389,40 @@ class ToolErrorClassifierIntegrationTest {
                 pinned.failures() > 0,
                 "the failures ride with the calls — folding only the denominator would make the tool look"
                         + " better than the traffic it was just judged over");
+    }
+
+    /**
+     * A negative ruling the fold cannot account for moves only what it can. An unreadable payload or a tool
+     * with no state moves nothing. A payload written before the onset rework counts the tool's whole history,
+     * so adding it to the reference would count that history twice: the arm clears, the reference stays.
+     */
+    @Test
+    @DisplayName("a fold that cannot trust the ruling's counts clears the arm at most, never the reference")
+    void aFoldThatCannotTrustTheCountsLeavesTheReferenceAlone() throws Exception {
+        String pid = TenantFixture.bootstrap(tenants, "toolerr-fold-refused")
+                .project()
+                .id();
+        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, start, QUIET_HOURS, 1);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        service.refresh(pid);
+        FindingRow finding = firedFinding(pid);
+        double armed = armOf(pid);
+        assertTrue(armed > 0, "the fixture has to leave a fired arm, or this asserts nothing");
+        String now = Instant.now().toString();
+
+        service.foldRuledNegative(pid, finding.subjectId(), finding.id(), "{not json", now);
+        service.foldRuledNegative(pid, "tool:never_called", finding.id(), finding.payloadJson(), now);
+        assertEquals(armed, armOf(pid), 1e-9, "neither refusal touched the arm");
+
+        ObjectNode preOnset = (ObjectNode) new ObjectMapper().readTree(Objects.requireNonNull(finding.payloadJson()));
+        assertNotNull(preOnset.remove("counts_basis"), "the fixture blob has to carry counts_basis");
+        service.foldRuledNegative(pid, finding.subjectId(), finding.id(), preOnset.toString(), now);
+
+        assertEquals(0.0, armOf(pid), 1e-9, "the ruling stands, so the arm still clears");
+        assertNull(
+                references.byTool(pid).get(finding.subjectId()),
+                "whole-history counts must not be added to the reference");
     }
 
     /**

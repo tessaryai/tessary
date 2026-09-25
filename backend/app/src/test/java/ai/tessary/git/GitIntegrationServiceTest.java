@@ -3,20 +3,32 @@ package ai.tessary.git;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
+import ai.tessary.auth.TenantPathResolver;
+import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
+import ai.tessary.git.GitIntegrationDtos.DeleteResponse;
+import ai.tessary.git.GitIntegrationDtos.GitIntegrationView;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.tenant.OrgMembership;
+import ai.tessary.tenant.OrgMembershipRepository;
+import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest
 class GitIntegrationServiceTest {
@@ -35,6 +47,12 @@ class GitIntegrationServiceTest {
 
     @Autowired
     ObjectMapper mapper;
+
+    @Autowired
+    TenantPathResolver resolver;
+
+    @Autowired
+    OrgMembershipRepository memberships;
 
     /** A service whose one provider answers however this test needs it to. */
     private GitIntegrationService withProvider(GitProviderClient client) {
@@ -141,5 +159,92 @@ class GitIntegrationServiceTest {
                 withProvider(new StubClient(null, new IllegalStateException("verifyAccess must not be called here")));
 
         assertEquals("acme", svc.connect(pid, pat("main")).repoOwner());
+    }
+
+    // ---- the endpoints and the refusals behind them --------------------------------------------
+
+    private static TenantContext session(Principal u) {
+        return new TenantContext(u.id(), u.email(), null, null, null, null);
+    }
+
+    @Test
+    void controller_anOwnerConnectsReadsAndDisconnects_andASecondDisconnectDeletesNothing() {
+        TenantFixture.Setup fix = TenantFixture.bootstrap(tenants, "git-ctl-owner");
+        GitIntegrationController ctl = new GitIntegrationController(
+                withProvider(new StubClient(new GitProviderClient.RepoAccess("trunk"), null)), resolver);
+        TenantContext owner = session(fix.user());
+        String org = fix.org().slug();
+        String proj = fix.project().slug();
+
+        assertNull(ctl.get(owner, org, proj).data(), "nothing is connected yet");
+        GitIntegrationView view = ctl.connect(owner, org, proj, pat(null)).data();
+        assertEquals(new GitIntegrationView("github", null, "acme", "web", "trunk"), view);
+        assertEquals(view, ctl.get(owner, org, proj).data());
+        assertEquals(new DeleteResponse(true), ctl.disconnect(owner, org, proj).data());
+        assertEquals(new DeleteResponse(false), ctl.disconnect(owner, org, proj).data(), "already gone");
+    }
+
+    /** A member can see the binding but not change it: the credential it stores reads the org's code. */
+    @Test
+    void controller_aMemberCanReadButNotConnectOrDisconnect() {
+        TenantFixture.Setup fix = TenantFixture.bootstrap(tenants, "git-ctl-member");
+        Principal member = tenants.upsertUserFromWorkos(
+                "user_git_member_" + System.nanoTime(), "git-member+" + System.nanoTime() + "@example.com", "m", null);
+        memberships.insert(OrgMembership.of(
+                fix.org().id(), member.id(), "member", Instant.now().toString()));
+        GitIntegrationController ctl = new GitIntegrationController(
+                withProvider(new StubClient(new GitProviderClient.RepoAccess("trunk"), null)), resolver);
+        TenantContext ctx = session(member);
+        String org = fix.org().slug();
+        String proj = fix.project().slug();
+
+        assertNull(ctl.get(ctx, org, proj).data());
+        assertEquals(
+                HttpStatus.FORBIDDEN,
+                assertThrows(ResponseStatusException.class, () -> ctl.connect(ctx, org, proj, pat(null)))
+                        .getStatusCode());
+        assertEquals(
+                HttpStatus.FORBIDDEN,
+                assertThrows(ResponseStatusException.class, () -> ctl.disconnect(ctx, org, proj))
+                        .getStatusCode());
+        assertTrue(service.find(fix.project().id()).isEmpty());
+    }
+
+    @Test
+    void connect_rejectsAProviderItDoesNotSupport() {
+        String pid = TenantFixture.bootstrap(tenants, "git-gitlab").project().id();
+        ConnectRequest gitlab = new ConnectRequest("gitlab", "acme", "web", null, "main", null, "glpat_x");
+
+        TessaryException e = assertThrows(TessaryException.class, () -> service.connect(pid, gitlab));
+        assertEquals(GitError.UNSUPPORTED_PROVIDER, e.error());
+        assertTrue(service.find(pid).isEmpty());
+    }
+
+    private GitIntegrationService unkeyed() {
+        return new GitIntegrationService(
+                repo, new SecretBox(new TessaryProperties()), mapper, new GitProviderFactory(List.of(), List.of()));
+    }
+
+    @Test
+    void connect_withoutASecretKey_neverStoresATokenInTheClear() {
+        String pid = TenantFixture.bootstrap(tenants, "git-nokey").project().id();
+        ConnectRequest req = new ConnectRequest("github", "acme", "web", null, "main", null, "ghp_example");
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> unkeyed().connect(pid, req));
+        assertEquals(GitError.SECRET_KEY_MISSING, e.error());
+        assertTrue(repo.findByProject(pid).isEmpty());
+    }
+
+    /** A blank token is no credential at all: it neither demands a server key nor gets sealed and stored. */
+    @Test
+    void connect_aBlankTokenStoresNoCredentials() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "git-blank-token").project().id();
+        ConnectRequest req = new ConnectRequest("github", "acme", "web", null, "main", null, "  ");
+
+        unkeyed().connect(pid, req);
+
+        assertNull(repo.findByProject(pid).orElseThrow().credentialsEnc());
     }
 }

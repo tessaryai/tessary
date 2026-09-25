@@ -110,8 +110,7 @@ public final class ContentExtractor {
         try {
             node = MAPPER.readTree(raw);
         } catch (JsonProcessingException e) {
-            String text = raw.strip();
-            return text.isEmpty() ? List.of() : List.of(new RoleMessage(fallbackRole, text));
+            return List.of(new RoleMessage(fallbackRole, raw.strip())); // non-blank: checked above
         }
         if (!isMessageEnvelope(node)) {
             String text = flattenContentText(node);

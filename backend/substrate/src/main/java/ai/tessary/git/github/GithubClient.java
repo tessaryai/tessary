@@ -20,6 +20,7 @@ import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -34,11 +35,19 @@ public class GithubClient implements GitProviderClient {
     private final ObjectMapper mapper;
     private final HttpClient http;
 
+    @Autowired
     public GithubClient(GithubTokenService tokenService, ObjectMapper mapper) {
+        this(
+                tokenService,
+                mapper,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
+    }
+
+    /** The transport as a seam, so a test can answer GitHub without a network. */
+    GithubClient(GithubTokenService tokenService, ObjectMapper mapper, HttpClient http) {
         this.tokenService = tokenService;
         this.mapper = mapper;
-        this.http =
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        this.http = http;
     }
 
     @Override

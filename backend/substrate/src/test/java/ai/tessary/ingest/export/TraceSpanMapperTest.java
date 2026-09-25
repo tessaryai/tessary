@@ -16,6 +16,8 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Verifies the exporter produces OTel GenAI spans the evals plugin's Path A can
@@ -358,5 +360,73 @@ class TraceSpanMapperTest {
         assertEquals("google", TraceSpanMapper.inferSystem("gemini-2.0-flash"));
         assertEquals("other", TraceSpanMapper.inferSystem("llama-3.1-70b"));
         assertEquals("other", TraceSpanMapper.inferSystem(null));
+    }
+
+    /**
+     * A payload that is not a role-tagged message array still exports as one message: a role-less part
+     * list keeps its text, a message whose content is null (a tool-call-only turn) keeps its role with an
+     * empty text part, and JSON that does not parse is carried verbatim rather than lost.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "[{\"type\":\"text\",\"text\":\"hi\"}] | [{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"hi\"}]}]",
+                "[{\"role\":\"tool\",\"content\":null}] | [{\"role\":\"tool\",\"parts\":[{\"type\":\"text\",\"content\":\"\"}]}]",
+                "[{\"role\": | [{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"[{\\\"role\\\":\"}]}]"
+            })
+    void nonMessagePayloads_exportAsASingleMessage(String input, String expectedMessages) {
+        ObjectNode span = TraceSpanMapper.toSpan(raw(input, "ok", "gpt-4o"), "svc", null, null);
+
+        assertEquals(
+                expectedMessages,
+                span.get("attributes").get("gen_ai.input.messages").asText());
+    }
+
+    /**
+     * A stored document whose media type came through blank still says what it is when its bytes are gone:
+     * its extracted text is labelled as the PDF a document defaults to, never as an image or as nothing.
+     */
+    @Test
+    void documentRef_withABlankMediaType_isLabelledAsAPdf() throws Exception {
+        ObjectNode span = TraceSpanMapper.toSpan(
+                raw(
+                        "[{\"role\":\"user\",\"content\":[{\"type\":\"document_ref\",\"data\":\"gone\","
+                                + "\"mediaType\":\"\",\"text\":\"Revenue rose.\"}]}]",
+                        "ok",
+                        "gpt-4o"),
+                "svc",
+                fakeStore(Map.of()),
+                "p1");
+
+        assertEquals(
+                "[document: application/pdf]\nRevenue rose.",
+                parseAttr(span, "gen_ai.input.messages")
+                        .get(0)
+                        .get("parts")
+                        .get(0)
+                        .get("content")
+                        .asText());
+    }
+
+    /** Token counts a producer sent as text are exported as numbers, skipping an alias that is not one. */
+    @Test
+    void usageCountsSentAsText_areExportedAsNumbers() {
+        RawEntry entry = new RawEntry(
+                "span-1",
+                "chat",
+                "q",
+                "a",
+                "gpt-4o",
+                Map.of("prompt_tokens", " 12 ", "output_tokens", "n/a", "completion_tokens", "7"),
+                null,
+                "trace-1",
+                "2026-05-22T10:00:00Z",
+                null);
+
+        JsonNode attrs = TraceSpanMapper.toSpan(entry, "svc", null, null).get("attributes");
+
+        assertEquals(12L, attrs.get("gen_ai.usage.input_tokens").asLong());
+        assertEquals(7L, attrs.get("gen_ai.usage.output_tokens").asLong());
     }
 }

@@ -2,6 +2,7 @@
 package ai.tessary.pricing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -204,6 +205,16 @@ class PriceBookFetcherTest {
                 .getBytes(eq(PriceBookFetcher.artifactPath(DIGEST)), anyInt());
         assertEquals(PriceBookFetcher.Outcome.UNREACHABLE, fetcher.refresh());
 
+        verify(books, never()).importBook(any(), any());
+    }
+
+    /** A refresh interrupted mid-fetch gives up as unreachable and hands the interrupt back to its caller. */
+    @Test
+    void anInterruptedFetchIsUnreachableAndKeepsTheInterrupt() throws Exception {
+        when(client.getBytes(anyString(), anyInt())).thenThrow(new InterruptedException("shutting down"));
+
+        assertEquals(PriceBookFetcher.Outcome.UNREACHABLE, fetcher.refresh());
+        assertTrue(Thread.interrupted(), "the interrupt is restored, not swallowed");
         verify(books, never()).importBook(any(), any());
     }
 }

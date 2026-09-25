@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.substrate.v2;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -247,6 +248,63 @@ class SpanBatchWriterIntegrationTest {
         assertEquals(1, isolated.write(pid, batch), "one writable row of four");
         assertEquals(3, isolated.droppedSpans(), "no id, no start time, and an id that is not an identifier");
         assertEquals(1, spans.listByTrace(pid, traceId).size(), "a poison row costs only itself");
+    }
+
+    @Test
+    @DisplayName("an oversized payload or session id drops only its own span, and a leap-second start is kept")
+    void write_oversizedRowsAreDroppedAndALeapSecondStartIsKept() {
+        String traceId = traceId("oversized");
+        SpanBatchWriter isolated = newWriter(traces);
+        List<RawEntry> batch = new ArrayList<>();
+        batch.add(span("ok", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()));
+        batch.add(new RawEntry(
+                "huge-input", "n", "x".repeat(8_000_001), "o", null, Map.of(), null, traceId, t0.toString(), null));
+        batch.add(span("long-session", null, traceId, KindNormalizer.LLM, t0, t0, meta("s".repeat(513))));
+        batch.add(new RawEntry("bad-start", "n", "i", "o", null, Map.of(), null, traceId, "yesterday", null));
+        // ISO-8601 allows a 60th second; an offset parser refuses it, an instant parser reads it as :59.
+        batch.add(new RawEntry("leap", "n", "i", "o", null, Map.of(), null, traceId, "2026-08-12T23:59:60Z", null));
+
+        assertEquals(2, isolated.write(pid, batch), "the ordinary span and the leap-second one");
+        assertEquals(3, isolated.droppedSpans(), "the oversized input, the oversized session id, the unreadable start");
+        assertEquals(
+                "2026-08-12T23:59:59Z",
+                spans.findById(pid, traceId, "leap").orElseThrow().startedAt());
+    }
+
+    @Test
+    @DisplayName("§7.6: a span landing after its trace rolled up is measured against that rollup's watermark")
+    void lateness_measuresASpanAgainstItsTracesLastRollup() {
+        String traceId = traceId("late");
+        SpanLateness own = new SpanLateness();
+        SpanBatchWriter isolated = new SpanBatchWriter(
+                sessions,
+                traces,
+                spans,
+                payloads,
+                toolCalls,
+                retrievedDocs,
+                sideTables,
+                pricer,
+                mediaExternalizer,
+                mediaRefs,
+                callSites,
+                own,
+                mapper,
+                transactionManager);
+
+        isolated.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(1), Map.of())));
+        assertArrayEquals(new long[6], own.drain(), "a trace that never rolled up has nothing to be late against");
+
+        settle(traceId);
+        isolated.write(
+                pid,
+                List.of(span(
+                        "s2", "s1", traceId, KindNormalizer.TOOL, t0.plusSeconds(2), t0.plusMillis(3_500), Map.of())));
+
+        assertArrayEquals(
+                new long[] {0, 0, 1, 0, 0, 0},
+                own.drain(),
+                "ended 2.5s after the watermark (the rolled-up span's end): one sample in the 1s-10s bucket");
     }
 
     // ---- §6.1 atomicity ------------------------------------------------------------------------------

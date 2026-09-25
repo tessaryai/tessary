@@ -25,7 +25,6 @@ import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -259,10 +258,10 @@ public class FrustrationRateService implements ClassifierCatchUp {
         }
 
         String onset = d.onsetAt();
-        Instant since = onset != null ? parse(onset, windowFrom) : windowFrom;
+        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
         // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
         Instant until =
-                spell.lastBucket() != null ? parse(spell.lastBucket(), at).plus(Duration.ofHours(1)) : at;
+                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
         List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
         for (String session :
                 rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until)) {
@@ -301,18 +300,6 @@ public class FrustrationRateService implements ClassifierCatchUp {
     /** Onsets compare as instants: {@code Instant#toString} drops a zero fraction, so strings may differ. */
     private static boolean sameInstant(@Nullable String a, @Nullable String b) {
         if (a == null || b == null) return a == null && b == null;
-        try {
-            return Instant.parse(a).equals(Instant.parse(b));
-        } catch (DateTimeParseException e) {
-            return a.equals(b);
-        }
-    }
-
-    private static Instant parse(String instant, Instant fallback) {
-        try {
-            return Instant.parse(instant);
-        } catch (DateTimeParseException e) {
-            return fallback;
-        }
+        return Instant.parse(a).equals(Instant.parse(b));
     }
 }

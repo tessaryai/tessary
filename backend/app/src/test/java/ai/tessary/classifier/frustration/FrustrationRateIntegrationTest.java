@@ -89,6 +89,9 @@ class FrustrationRateIntegrationTest {
     JdbcClient jdbc;
 
     @Autowired
+    FrustrationRateRepository rates;
+
+    @Autowired
     TenantService tenants;
 
     @Autowired
@@ -290,6 +293,40 @@ class FrustrationRateIntegrationTest {
                 .param("causes", causes)
                 .update();
         return report;
+    }
+
+    /**
+     * A page past the last frustrated session still carries how many the finding cites, and a stored score the
+     * reader cannot parse shows the session unscored rather than failing the finding page.
+     */
+    @Test
+    void aPagePastTheEndKeepsTheTotalAndAnUnreadableScoreIsUnscored() {
+        String pid = project("fr-past-end");
+        ClassifierRow signal = frustration(pid);
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
+        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        service.refresh(pid, signal, Instant.now());
+        FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
+                .get(0);
+
+        FrustratedSessionPage past = frustrationDetail.page(finding, null, 50, "500");
+        assertEquals(List.of(), past.rows());
+        assertEquals(72, past.total(), "the finding still cites every frustrated session");
+        assertNull(past.nextCursor());
+
+        String trace = "cs-chat-12-00";
+        jdbc.sql("UPDATE frustration_detection SET evidence = CAST(:evidence AS jsonb)"
+                        + " WHERE project_id = :pid AND subject_trace_id = :trace")
+                .param("evidence", "{\"score\":\"high\",\"call_site_id\":\"cs-chat\"}")
+                .param("pid", pid)
+                .param("trace", trace)
+                .update();
+        FrustrationRateRepository.FlaggedTurn turn =
+                rates.flaggedTurns(pid, signal.id(), List.of(trace)).get(trace);
+        assertNotNull(turn);
+        assertNull(turn.score());
+        assertEquals("cs-chat", turn.callSiteId());
     }
 
     private String project(String slug) {

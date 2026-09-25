@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pipeline;
 
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +21,9 @@ final class CanonicalJson {
 
     private CanonicalJson() {}
 
+    @ExcludeFromJacocoGeneratedReport(
+            "defensive: the mapper is the app's own, and a JsonNode converted to plain maps, lists and scalars"
+                    + " always serialises")
     static String of(ObjectMapper mapper, JsonNode json) {
         try {
             return mapper.writer(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)

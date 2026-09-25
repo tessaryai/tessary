@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.tenant;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import ai.tessary.open.hash.Sha256;
 import java.time.Clock;
 import java.util.Base64;
 import java.util.Iterator;
@@ -234,11 +232,6 @@ public final class VerifiedTokenCache {
     }
 
     private static String digest(String presented) {
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            return Base64.getEncoder().encodeToString(sha.digest(presented.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by every Java platform", e);
-        }
+        return Base64.getEncoder().encodeToString(Sha256.digest(presented));
     }
 }

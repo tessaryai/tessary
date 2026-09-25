@@ -4,12 +4,14 @@ package ai.tessary.llm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.pricing.ModelResolver;
 import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.tenant.Organization;
@@ -189,5 +191,30 @@ class ProjectModelSettingControllerTest {
                 lane.providerOptions().stream()
                         .flatMap(o -> o.modelKeys().stream())
                         .toList());
+    }
+
+    /**
+     * The lane arrives as the lowercase wire name in the path and is parsed by our own reader, so a
+     * differently-cased segment still reaches the right lane. Tier and effort are accepted and ignored:
+     * no lane has a request of ours for either to ride on.
+     */
+    @Test
+    void putPointsTheParsedLaneAtTheModelAndIgnoresTierAndEffort() {
+        controller.put(
+                ctx,
+                ORG_SLUG,
+                PROJECT_SLUG,
+                " RCA ",
+                new ProjectModelSettingController.SetLaneModelRequest(
+                        "anthropic.claude-haiku-4-5", ServiceTier.FLEX, "high"));
+
+        verify(settings).set(PROJECT_ID, ORG_ID, ModelLane.RCA, "anthropic.claude-haiku-4-5");
+    }
+
+    @Test
+    void resetReturnsThatLaneToTheAutomaticAnswer() {
+        controller.reset(ctx, ORG_SLUG, PROJECT_SLUG, "triage");
+
+        verify(settings).clear(PROJECT_ID, ModelLane.TRIAGE);
     }
 }

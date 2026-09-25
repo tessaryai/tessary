@@ -5,7 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The one place the OTel {@code gen_ai.operation.name} standard maps to the platform's canonical operation
@@ -60,5 +63,28 @@ class KindNormalizerTest {
         // no attributes → falls back to the op-name mapping.
         assertEquals(KindNormalizer.LLM, KindNormalizer.normalize("chat", Map.of()));
         assertEquals(KindNormalizer.TOOL, KindNormalizer.normalize("execute_tool", Map.of()));
+    }
+
+    /**
+     * The export re-emits a span under the operation this names, so it must be one that ingest normalizes
+     * back to the same kind, or an exported and re-ingested trace changes the kind of its own steps. A kind
+     * with no operation of its own, or none at all, goes out as a chat call.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            nullValues = "null",
+            value = {
+                "agent, invoke_agent, agent",
+                "tool, execute_tool, tool",
+                "retrieval, retrieval, retrieval",
+                "workflow, invoke_workflow, workflow",
+                "llm, chat, llm",
+                "memory, chat, llm",
+                "null, chat, llm"
+            })
+    void operationNameIsTheOperationThatNormalizesBackToTheKind(
+            @Nullable String kind, String operation, String reingestedKind) {
+        assertEquals(operation, KindNormalizer.operationName(kind));
+        assertEquals(reingestedKind, KindNormalizer.normalize(KindNormalizer.operationName(kind)));
     }
 }

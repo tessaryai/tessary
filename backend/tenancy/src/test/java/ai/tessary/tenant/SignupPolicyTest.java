@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SignupPolicyTest {
 
@@ -70,5 +72,26 @@ class SignupPolicyTest {
         String reopened = SignupPolicy.OPEN.intoSettings(settings);
         assertEquals("dark", new ObjectMapper().readTree(reopened).path("theme").asText());
         assertEquals(SignupPolicy.OPEN, SignupPolicy.fromSettings(reopened));
+    }
+
+    /**
+     * The bug: a stored settings blob that is not a JSON object (hand-edited, or a scalar) makes a policy
+     * update throw, or keeps the junk, instead of starting a fresh blob that carries only the policy.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"not json", "42"})
+    void intoSettingsStartsAFreshBlobOverOneThatIsNotAnObject(String stored) {
+        assertEquals(
+                "{\"signupPolicy\":{\"mode\":\"domain\",\"domains\":[\"acme.io\"]}}",
+                SignupPolicy.of("domain", List.of("acme.io")).intoSettings(stored));
+    }
+
+    /**
+     * The bug: an unparseable blob counts as "omits the policy", so a settings PATCH carrying it is merged
+     * and written instead of being refused as a possible policy change.
+     */
+    @Test
+    void anUnreadableBlobIsNotTakenToOmitThePolicy() {
+        assertFalse(SignupPolicy.omitsPolicy("not json"));
     }
 }

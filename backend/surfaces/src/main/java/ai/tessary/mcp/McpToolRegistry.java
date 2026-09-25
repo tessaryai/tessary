@@ -1127,17 +1127,13 @@ public class McpToolRegistry {
                     "unknown state: " + state + ". list_cases pages one of " + CASE_STATES + ".");
         }
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
-        try {
-            return cases.page(
-                    projectId,
-                    state,
-                    strArg(args, "detector"),
-                    strArg(args, "call_site_id"),
-                    pageSize,
-                    strArg(args, "cursor"));
-        } catch (TessaryException e) {
-            throw toolError(e);
-        }
+        return cases.page(
+                projectId,
+                state,
+                strArg(args, "detector"),
+                strArg(args, "call_site_id"),
+                pageSize,
+                strArg(args, "cursor"));
     }
 
     private CaseDetailView getCase(TenantContext ctx, String id) {

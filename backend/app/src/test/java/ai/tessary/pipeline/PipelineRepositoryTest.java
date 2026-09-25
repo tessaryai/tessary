@@ -4,6 +4,8 @@ package ai.tessary.pipeline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.model.CallSite;
@@ -19,8 +21,12 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Round-trip every column on the pipeline tables. The bug this guards against:
@@ -35,6 +41,9 @@ class PipelineRepositoryTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    JdbcClient jdbc;
 
     @Test
     void replaceAndLoad_preservesEveryField() {
@@ -135,6 +144,96 @@ class PipelineRepositoryTest {
         // Project B still empty.
         Pipeline bPipeline = repo.load(b.project().id());
         assertTrue(bPipeline.callSites().isEmpty(), "import to project A must not leak into project B");
+    }
+
+    /** A bad entity rolls the whole import back: the project keeps its last good pipeline, not half of each. */
+    @ParameterizedTest
+    @ValueSource(strings = {"chain", "failure mode"})
+    void anEntityWithNoIdRollsTheWholeImportBack(String entity) {
+        var fix = TenantFixture.bootstrap(tenants, "pipe-no-id");
+        Pipeline good = buildSamplePipeline();
+        repo.replace(fix.project().id(), good);
+        Pipeline bad = entity.equals("chain")
+                ? with(
+                        good,
+                        List.of(new Chain(null, "unnamed", List.of(), "ensemble", "low", "r", List.of())),
+                        good.failureModes())
+                : with(
+                        good,
+                        good.chains(),
+                        List.of(new FailureMode(
+                                " ",
+                                "unnamed",
+                                "d",
+                                "low",
+                                "single_call",
+                                "cs_summarize",
+                                null,
+                                "B",
+                                List.of(),
+                                List.of(),
+                                null,
+                                true,
+                                null)));
+
+        assertThrows(
+                IllegalArgumentException.class, () -> repo.replace(fix.project().id(), bad));
+
+        Pipeline back = repo.load(fix.project().id());
+        assertEquals("chain_docs", back.chains().get(0).id());
+        assertEquals(
+                "cs_summarize::hallucinates_facts", back.failureModes().get(0).id());
+    }
+
+    /** One corrupt schema column must not take down every read of the pipeline; the call site loads with none. */
+    @Test
+    void aCorruptOutputSchemaLoadsAsNoSchema() {
+        var fix = TenantFixture.bootstrap(tenants, "pipe-bad-schema");
+        repo.replace(fix.project().id(), buildSamplePipeline());
+        jdbc.sql("UPDATE call_site SET output_schema = '{not json' WHERE project_id = :pid")
+                .param("pid", fix.project().id())
+                .update();
+
+        CallSite cs = repo.load(fix.project().id()).callSites().get(0);
+
+        assertEquals("cs_summarize", cs.id());
+        assertNull(cs.outputSchema());
+    }
+
+    /** A corrupt compound column fails the load naming the type, rather than loading as an empty value. */
+    @ParameterizedTest
+    @CsvSource({
+        "product_profile_json, PipelineRepository: malformed JSON for ProductProfile",
+        "packs_json, PipelineRepository: malformed JSON list for Pack"
+    })
+    void aCorruptCompoundColumnFailsTheLoadNamingItsType(String column, String message) {
+        var fix = TenantFixture.bootstrap(tenants, "pipe-bad-" + column.replace('_', '-'));
+        repo.replace(fix.project().id(), buildSamplePipeline());
+        jdbc.sql("UPDATE pipeline_meta SET " + column + " = '{not json' WHERE project_id = :pid")
+                .param("pid", fix.project().id())
+                .update();
+
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> repo.load(fix.project().id()));
+
+        assertEquals(message, e.getMessage());
+    }
+
+    private static Pipeline with(Pipeline p, List<Chain> chains, List<FailureMode> failureModes) {
+        return new Pipeline(
+                p.version(),
+                p.productHint(),
+                p.packs(),
+                p.productProfile(),
+                p.implicitInvariants(),
+                p.invariantCoverage(),
+                p.runtime(),
+                p.callSites(),
+                chains,
+                failureModes,
+                p.taxonomy(),
+                p.progress(),
+                p.capabilities());
     }
 
     private static Pipeline buildSamplePipeline() {

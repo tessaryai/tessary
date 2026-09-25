@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +16,7 @@ import ai.tessary.tenant.ProjectRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -95,6 +97,29 @@ class EncoderDependencyReporterTest {
 
         assertEquals(new EncoderDependencyReporter.Dependency(0, 0, Set.of()), d);
         assertTrue(d.decommissionable());
+    }
+
+    /**
+     * A count that fails on boot is logged and the context still starts: a diagnostic that could stop the
+     * platform booting is worse than the question it answers. The daily run counts again.
+     */
+    @Test
+    void aFailedCountNeverFailsBootAndTheDailyRunCountsAgain() {
+        AtomicInteger scans = new AtomicInteger();
+        ProjectRepository failsOnce = new ProjectRepository(mock(JdbcClient.class)) {
+            @Override
+            public List<Project> findActive() {
+                if (scans.getAndIncrement() == 0) throw new IllegalStateException("database unavailable");
+                return List.of();
+            }
+        };
+        EncoderDependencyReporter reporter =
+                new EncoderDependencyReporter(failsOnce, enabledRows(Map.of()), capabilities);
+
+        assertDoesNotThrow(reporter::reportOnBoot);
+        reporter.reportDaily();
+
+        assertEquals(2, scans.get(), "the daily run scanned the projects again");
     }
 
     private static Project project(String id, String orgId) {

@@ -162,10 +162,7 @@ public class RedactionService {
      * join cost more than the regex saves.
      */
     private List<RawEntry> redactAll(List<RawEntry> entries, List<CompiledRule> rules, long bytes, boolean[] forked) {
-        // isShutdown, because @PreDestroy can close the pool while a drainer still holds a claimed batch
-        // (SubstrateWriter.shutdown does not join them) and submit would then throw
-        // RejectedExecutionException out of a method documented as never throwing.
-        if (pool == null || pool.isShutdown() || bytes < PARALLEL_THRESHOLD_BYTES) {
+        if (pool == null || bytes < PARALLEL_THRESHOLD_BYTES) {
             return serially(entries, rules);
         }
         forked[0] = true;
@@ -174,7 +171,10 @@ public class RedactionService {
             task = pool.submit(() ->
                     entries.parallelStream().map(e -> redactEntry(e, rules)).toList());
         } catch (RejectedExecutionException e) {
-            // The isShutdown check above is advisory: @PreDestroy can land between it and this submit.
+            // @PreDestroy can close the pool while a drainer still holds a claimed batch
+            // (SubstrateWriter.shutdown does not join them), and submit then throws out of a method
+            // documented as never throwing. Catching the rejection covers that whenever it lands; an
+            // isShutdown check ahead of the submit could only ever be advisory.
             forked[0] = false;
             return serially(entries, rules);
         }
@@ -209,11 +209,8 @@ public class RedactionService {
             forked[0] = false;
             StructuredLog.warn(log, Markers.OPS, "redaction.parallel.failed")
                     .field("entries", entries.size())
-                    .field(
-                            "cause",
-                            e.getCause() == null
-                                    ? "unknown"
-                                    : e.getCause().getClass().getSimpleName())
+                    // ForkJoinTask.get always carries the task's own throwable as the cause.
+                    .field("cause", e.getCause().getClass().getSimpleName())
                     .log();
             log.debug("parallel redaction failure detail", e.getCause());
             return serially(entries, rules);
@@ -271,11 +268,7 @@ public class RedactionService {
                 }
                 StructuredLog.warn(log, Markers.OPS, "redaction.parallel.failed")
                         .field("entries", entries.size())
-                        .field(
-                                "cause",
-                                ee.getCause() == null
-                                        ? "unknown"
-                                        : ee.getCause().getClass().getSimpleName())
+                        .field("cause", ee.getCause().getClass().getSimpleName())
                         .log();
                 return serially(entries, rules);
             }
@@ -542,7 +535,7 @@ public class RedactionService {
      * result plus match count. Rejects an invalid regex with {@link RedactionError#INVALID_PATTERN}.
      */
     public PreviewResult preview(String pattern, String replacement, String sampleText) {
-        requireValidRegex(pattern);
+        // compile() is null exactly when the regex does not compile, so this is the validation.
         CompiledRule rule = RedactionEngine.compile("preview", pattern, replacement);
         if (rule == null) throw new TessaryException(RedactionError.INVALID_PATTERN, pattern);
         String redacted = RedactionEngine.applyToTextParts(sampleText, List.of(rule));

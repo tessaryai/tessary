@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -48,6 +49,8 @@ public class GithubTokenService implements GitTokenService {
     private final SecretBox secretBox;
     private final ObjectMapper mapper;
     private final HttpClient http;
+    private final String webOrigin;
+    private final String apiOrigin;
     // Keyed by integration id (NOT installation id): a cache hit must not require decrypting the
     // sealed credentials to compute the key — that AES-GCM open ran on every API call before.
     private final ConcurrentMap<String, CachedToken> cache = new ConcurrentHashMap<>();
@@ -57,12 +60,34 @@ public class GithubTokenService implements GitTokenService {
 
     private record CachedToken(String token, Instant expiresAt) {}
 
+    @Autowired
     public GithubTokenService(GithubAppProperties props, SecretBox secretBox, ObjectMapper mapper) {
+        this(
+                props,
+                secretBox,
+                mapper,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                "https://github.com",
+                "https://" + GithubAppProperties.DEFAULT_API_HOST);
+    }
+
+    /**
+     * The transport and the two fixed github.com origins as seams, so a test can answer the OAuth
+     * exchange and {@code /user/installations} without DNS or a network.
+     */
+    GithubTokenService(
+            GithubAppProperties props,
+            SecretBox secretBox,
+            ObjectMapper mapper,
+            HttpClient http,
+            String webOrigin,
+            String apiOrigin) {
         this.props = props;
         this.secretBox = secretBox;
         this.mapper = mapper;
-        this.http =
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        this.http = http;
+        this.webOrigin = webOrigin;
+        this.apiOrigin = apiOrigin;
     }
 
     @Override
@@ -123,15 +148,17 @@ public class GithubTokenService implements GitTokenService {
         } catch (RuntimeException e) {
             throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, e, "(sealed)");
         }
+        JsonNode idNode = parseCredentials(json).get("installationId");
+        if (idNode == null || !idNode.canConvertToLong()) {
+            throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, "(missing)");
+        }
+        return idNode.asLong();
+    }
+
+    /** The opened credentials blob as JSON; a blob that does not parse is the same missing installation. */
+    private JsonNode parseCredentials(String json) {
         try {
-            JsonNode node = mapper.readTree(json);
-            JsonNode idNode = node.get("installationId");
-            if (idNode == null || !idNode.canConvertToLong()) {
-                throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, "(missing)");
-            }
-            return idNode.asLong();
-        } catch (TessaryException e) {
-            throw e;
+            return mapper.readTree(json);
         } catch (Exception e) {
             throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, e, "(unparseable)");
         }
@@ -155,18 +182,13 @@ public class GithubTokenService implements GitTokenService {
             // surfaces below, just reached from the PAT-first path — not "no PAT", so it still throws.
             throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, e, "(sealed)");
         }
-        try {
-            JsonNode node = mapper.readTree(json);
-            JsonNode tokenNode = node.get("token");
-            if (tokenNode == null
-                    || tokenNode.asText(null) == null
-                    || tokenNode.asText().isBlank()) {
-                return Optional.empty();
-            }
-            return Optional.of(tokenNode.asText());
-        } catch (Exception e) {
-            throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, e, "(unparseable)");
+        JsonNode tokenNode = parseCredentials(json).get("token");
+        if (tokenNode == null
+                || tokenNode.asText(null) == null
+                || tokenNode.asText().isBlank()) {
+            return Optional.empty();
         }
+        return Optional.of(tokenNode.asText());
     }
 
     /** One installed repo the App grants access to (used by the post-install callback). */
@@ -214,7 +236,7 @@ public class GithubTokenService implements GitTokenService {
         String form = "client_id=" + enc(props.getClientId())
                 + "&client_secret=" + enc(props.getClientSecret())
                 + "&code=" + enc(code);
-        URI uri = UrlGuard.requirePublicHttp("https://github.com/login/oauth/access_token");
+        URI uri = UrlGuard.requirePublicHttp(webOrigin + "/login/oauth/access_token");
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .POST(HttpRequest.BodyPublishers.ofString(form))
                 .header("Accept", "application/json")
@@ -242,8 +264,7 @@ public class GithubTokenService implements GitTokenService {
     /** The installation ids the holder of {@code userToken} can administer ({@code GET /user/installations}). */
     public Set<Long> listUserInstallations(String userToken) {
         Set<Long> ids = new HashSet<>();
-        for (JsonNode n :
-                fetchAllPages("https://api.github.com/user/installations?per_page=100", userToken, "installations")) {
+        for (JsonNode n : fetchAllPages(apiOrigin + "/user/installations?per_page=100", userToken, "installations")) {
             JsonNode id = n.path("id");
             if (id.canConvertToLong()) ids.add(id.asLong());
         }

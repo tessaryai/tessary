@@ -393,6 +393,24 @@ class GroundednessRateIntegrationTest {
         return Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
     }
 
+    /**
+     * A page past the last cited answer still carries how many the finding cites: the count rides on the rows,
+     * and a page with no rows reporting zero would tell the reader the finding cites nothing.
+     */
+    @Test
+    void aPagePastTheLastAnswerStillCarriesTheTotal() {
+        String pid = project("gr-past-end");
+        ClassifierRow signal = groundedness(pid);
+        FindingRow finding = rise(pid, signal);
+        long cited =
+                rateRows.answerPage(pid, signal.id(), finding.id(), null, 1, 0).total();
+        assertTrue(cited > 0, "setup: the finding cites answers");
+
+        assertEquals(
+                new GroundednessRateRepository.AnswerPage(List.of(), cited),
+                rateRows.answerPage(pid, signal.id(), finding.id(), null, 10, (int) cited + 5));
+    }
+
     /** A call site at 5% for 210 traces, then 40% for 180: one spell, one finding. */
     private FindingRow rise(String pid, ClassifierRow signal) {
         Instant start = start();

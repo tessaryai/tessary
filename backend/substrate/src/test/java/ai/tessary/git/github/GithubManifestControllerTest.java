@@ -167,4 +167,20 @@ class GithubManifestControllerTest {
         org.junit.jupiter.api.Assertions.assertThrows(
                 ai.tessary.open.errors.TessaryException.class, () -> controller.callback("garbage", "code"));
     }
+
+    /** The wizard mints a deployment-wide App, so a plain org member may not start it. */
+    @Test
+    void manifestUrl_refusesANonOwner() {
+        TenantContext member = new TenantContext("u2", "m@x.io", "o", "p1", "member", null);
+        when(resolver.requireProject(member, "acme", "web"))
+                .thenReturn(new Resolved(
+                        new Organization("o", "wo", "acme", "Acme", "t", null, null),
+                        new Project("p1", "o", "web", "Web", "d", "t", null, null, true, null),
+                        "member"));
+
+        org.springframework.web.server.ResponseStatusException e = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.manifestUrl(member, "acme", "web"));
+        assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+    }
 }

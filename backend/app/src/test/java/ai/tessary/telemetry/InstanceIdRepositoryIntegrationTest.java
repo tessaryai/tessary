@@ -81,6 +81,23 @@ class InstanceIdRepositoryIntegrationTest {
                         .single());
     }
 
+    /**
+     * The bug: every boot mints a new instance id, so one install is counted as a new install on every
+     * restart. The second call must return the id the first one stored.
+     */
+    @Test
+    @DisplayName("the instance id is minted once and returned on every later call")
+    void get_returnsTheStoredIdOnLaterCalls() {
+        String first = instanceIds.get();
+
+        assertEquals(first, instanceIds.get());
+        assertEquals(
+                List.of(first),
+                jdbc.sql("SELECT instance_id FROM telemetry_instance")
+                        .query(String.class)
+                        .list());
+    }
+
     private static long join(Future<Long> f) {
         try {
             return f.get();

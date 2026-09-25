@@ -2,10 +2,16 @@
 package ai.tessary.version;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
+import ai.tessary.open.errors.TessaryException;
+import ai.tessary.open.errors.VersionError;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
+import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,6 +27,9 @@ class ProjectVersionRepositoryTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    ProjectVersionController controller;
 
     @Test
     void findOrMaterialize_isIdempotentPerCommit() {
@@ -47,5 +56,34 @@ class ProjectVersionRepositoryTest {
         service.reasonPipelineSync(pid, "sha-b");
         assertEquals(2, service.timeline(pid).size());
         assertTrue(service.timeline(pid).stream().anyMatch(v -> v.commitSha().equals("sha-a")));
+    }
+
+    /**
+     * The bug: the version endpoints read across projects, listing or returning a commit another project
+     * synced, instead of answering only for the project in the URL.
+     */
+    @Test
+    void controller_readsOnlyThisProjectsVersions() {
+        var fix = TenantFixture.bootstrap(tenants, "pv-controller");
+        var other = TenantFixture.bootstrap(tenants, "pv-controller-other");
+        service.reasonPipelineSync(fix.project().id(), "sha-own");
+        service.reasonPipelineSync(other.project().id(), "sha-other");
+        TenantContext owner = new TenantContext(fix.user().id(), null, null, null, null, null);
+        String org = fix.org().slug();
+        String project = fix.project().slug();
+
+        assertEquals(
+                List.of("sha-own"),
+                Objects.requireNonNull(controller.timeline(owner, org, project).data()).stream()
+                        .map(ProjectVersionDtos.ProjectVersionView::commitSha)
+                        .toList());
+        assertEquals(
+                "sha-own",
+                Objects.requireNonNull(
+                                controller.get(owner, org, project, "sha-own").data())
+                        .commitSha());
+        TessaryException foreign =
+                assertThrows(TessaryException.class, () -> controller.get(owner, org, project, "sha-other"));
+        assertEquals(VersionError.NOT_FOUND, foreign.error());
     }
 }

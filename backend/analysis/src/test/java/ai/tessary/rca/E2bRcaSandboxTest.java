@@ -19,6 +19,7 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.usage.LlmUsageAccountant;
@@ -37,6 +38,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The launcher-envelope handling in {@link E2bRcaSandbox}, exercised by overriding the
@@ -483,6 +486,134 @@ class E2bRcaSandboxTest {
             }
         }
         return head.toString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Catches a launcher that is not running being reported as an LLM failure: a refused connection is
+     * {@code LAUNCHER_UNREACHABLE} and names the host and the exception class, so the UI and the log point at
+     * the infrastructure rather than the model.
+     */
+    @Test
+    void aLauncherThatIsNotListeningIsReportedUnreachable() throws Exception {
+        int port;
+        try (ServerSocket closed = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            port = closed.getLocalPort();
+        }
+        RcaProperties p = props();
+        p.getAgentic().setLauncherUrl("http://127.0.0.1:" + port);
+
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> sandbox(p).run(request()));
+
+        assertEquals(RcaError.LAUNCHER_UNREACHABLE, ex.error());
+        assertTrue(ex.getMessage().contains("http://127.0.0.1:" + port + " (ConnectException)"), ex.getMessage());
+    }
+
+    /**
+     * Catches a rejected run whose launcher diagnosis is dropped (only the status code survives), a diagnosis
+     * that joins its parts wrongly when the leading ones are absent, and a body that is not JSON (a proxy's own
+     * 502 page) failing the diagnosis instead of leaving the bare status.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "'{\"kind\":\"agent_failed\",\"detail\":\"exit 1\",\"sandbox_id\":\"sb-9\",\"elapsed_ms\":1200}'"
+                        + " | agentic RCA launcher HTTP 502 (kind=agent_failed detail=exit 1 sandbox=sb-9 elapsed_ms=1200)",
+                "'{\"detail\":\"exit 1\"}' | agentic RCA launcher HTTP 502 (detail=exit 1)",
+                "'{\"sandbox_id\":\"sb-9\"}' | agentic RCA launcher HTTP 502 (sandbox=sb-9)",
+                "'{\"elapsed_ms\":5}' | agentic RCA launcher HTTP 502 (elapsed_ms=5)",
+                "'<html>bad gateway</html>' | agentic RCA launcher HTTP 502"
+            })
+    void aRejectedRunCarriesTheLaunchersDiagnosis(String body, String expected) throws Exception {
+        try (ServerSocket launcher = launcherAnswering(502, body)) {
+            RcaProperties p = props();
+            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+
+            TessaryException ex =
+                    assertThrows(TessaryException.class, () -> sandbox(p).run(request()));
+
+            assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+            assertTrue(ex.getMessage().endsWith(expected), ex.getMessage());
+        }
+    }
+
+    /** Catches a 2xx launcher answer not being what the run reads its result from. */
+    @Test
+    void anAcceptedRunReadsItsResultFromTheLaunchersBody() throws Exception {
+        try (ServerSocket launcher = launcherAnswering(200, envelope("{\"summary\":\"from the launcher\"}"))) {
+            RcaProperties p = props();
+            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+
+            assertEquals(
+                    "{\"summary\":\"from the launcher\"}",
+                    sandbox(p).run(request()).resultText());
+        }
+    }
+
+    /**
+     * Catches an interrupted wait on the launcher swallowing the interrupt: the worker thread must come back
+     * still marked interrupted so its executor can shut down, and the run fails as INTERRUPTED rather than as
+     * an upstream fault.
+     */
+    @Test
+    void anInterruptedWaitFailsTheRunAndKeepsTheInterrupt() throws Exception {
+        // Accepts connections into its backlog and never answers them.
+        try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            RcaProperties p = props();
+            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + silent.getLocalPort());
+            E2bRcaSandbox sandbox = sandbox(p);
+
+            Thread.currentThread().interrupt();
+            TessaryException ex;
+            boolean stillInterrupted;
+            try {
+                ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
+            } finally {
+                stillInterrupted = Thread.interrupted();
+            }
+
+            assertEquals(CommonError.INTERRUPTED, ex.error());
+            assertTrue(stillInterrupted);
+        }
+    }
+
+    /**
+     * Catches a launcher envelope that is not JSON escaping as a raw parse exception: it must fail the run as
+     * UPSTREAM_FAILED with the parse failure as its cause, so the report stamps failed.
+     */
+    @Test
+    void anUnreadableEnvelopeFailsClosedWithItsCause() {
+        E2bRcaSandbox sandbox =
+                new E2bRcaSandbox(
+                        props(),
+                        new ObserverProperties(),
+                        noLaneSetting(),
+                        credentials(),
+                        mock(LlmUsageAccountant.class),
+                        OpenTelemetry.noop(),
+                        MAPPER) {
+                    @Override
+                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
+                        return "<html>not an envelope</html>";
+                    }
+                };
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
+
+        assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+        assertTrue(ex.getCause() instanceof IOException, String.valueOf(ex.getCause()));
+    }
+
+    private static E2bRcaSandbox sandbox(RcaProperties p) {
+        return new E2bRcaSandbox(
+                p,
+                new ObserverProperties(),
+                noLaneSetting(),
+                credentials(),
+                mock(LlmUsageAccountant.class),
+                OpenTelemetry.noop(),
+                MAPPER);
     }
 
     @Test

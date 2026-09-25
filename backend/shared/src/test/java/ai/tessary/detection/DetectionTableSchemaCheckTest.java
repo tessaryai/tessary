@@ -2,6 +2,8 @@
 package ai.tessary.detection;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +12,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.stream.Stream;
 import javax.sql.DataSource;
@@ -160,5 +163,29 @@ class DetectionTableSchemaCheckTest {
         assertTrue(ex.getMessage().contains("secret_leak"));
         assertTrue(ex.getMessage().contains("secret_leak_detection"));
         assertTrue(ex.getMessage().contains("subject_started_at"));
+    }
+
+    /**
+     * The bug: a database that refuses the connection at boot surfaces as a bare SQLException that says
+     * nothing about which registered table was being checked. The failure names the table and kind and
+     * keeps the driver's exception as its cause.
+     */
+    @Test
+    void unreachableDatabaseFailsBootNamingTheTableWithTheDriverCause() {
+        SQLException refused = new SQLException("connection refused");
+        DataSource down = (DataSource) Proxy.newProxyInstance(
+                DetectionTableSchemaCheckTest.class.getClassLoader(), new Class<?>[] {DataSource.class}, (p, m, a) -> {
+                    if (m.getName().equals("getConnection")) throw refused;
+                    throw new UnsupportedOperationException(m.getName());
+                });
+        DetectionTableRegistry registry = new DetectionTableRegistry(
+                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(down));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
+        assertEquals(
+                "failed to verify detection table 'secret_leak_detection' for kind 'secret_leak' exists",
+                ex.getMessage());
+        assertSame(refused, ex.getCause());
     }
 }

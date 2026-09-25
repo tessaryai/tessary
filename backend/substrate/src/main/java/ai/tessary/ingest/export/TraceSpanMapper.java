@@ -268,7 +268,8 @@ public final class TraceSpanMapper {
                 String u = b.url();
                 yield u != null && u.regionMatches(true, 0, "data:", 0, 5) ? u : null;
             }
-            case ContentBlock.TYPE_IMAGE_REF, ContentBlock.TYPE_DOCUMENT_REF -> {
+            // The only media types left: image_ref and document_ref (only media blocks reach this method).
+            default -> {
                 if (mediaStore == null || projectId == null || b.data() == null) yield null;
                 Optional<StoredMedia> stored = mediaStore.get(projectId, new MediaRef(b.data()));
                 if (stored.isEmpty()) yield null;
@@ -276,7 +277,6 @@ public final class TraceSpanMapper {
                 String mime = m.mediaType() == null || m.mediaType().isBlank() ? defaultedMediaType(b) : m.mediaType();
                 yield "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(m.bytes());
             }
-            default -> null;
         };
     }
 

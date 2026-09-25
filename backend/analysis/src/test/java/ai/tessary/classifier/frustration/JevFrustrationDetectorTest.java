@@ -4,6 +4,8 @@ package ai.tessary.classifier.frustration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -37,6 +39,10 @@ import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -54,11 +60,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
@@ -279,6 +290,109 @@ class JevFrustrationDetectorTest {
         assertEquals(1, page.unavailable());
     }
 
+    /** A call that fails in a way the client did not classify fails that turn only; the page is still scored. */
+    @Test
+    void anUnexpectedClientFailureFailsOnlyItsTurn() {
+        SubstrateObservation broken = eligibleTurn("t-1", "conv-a", 20);
+        SubstrateObservation next = eligibleTurn("t-2", "conv-a", 10);
+        client.answer("t-2", 0.1, 0.0); // t-1 has no answer, so the stub throws a NullPointerException
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(broken, next));
+
+        assertEquals(Status.SCORED, page.status());
+        assertEquals(Set.of("t-1", "t-2"), client.requests.keySet(), "the conversation carried on past it");
+        assertEquals(1, page.failed());
+        assertEquals(0, page.unavailable(), "not an outage, so it does not count toward holding the page");
+    }
+
+    /**
+     * A sweep interrupted mid-page, as at shutdown, stops sending: the turn queued behind the permit is never
+     * sent to the provider, and the sweep's thread keeps its interrupt.
+     */
+    @Test
+    void anInterruptedSweepStopsSendingAndKeepsItsInterrupt() throws InterruptedException {
+        props.setConcurrency(1);
+        SubstrateObservation first = eligibleTurn("t-1", "conv-a");
+        SubstrateObservation second = eligibleTurn("t-2", "conv-b");
+        AtomicInteger sends = new AtomicInteger();
+        CountDownLatch inCall = new CountDownLatch(1);
+        DecisionClient hangs = (projectId, lane, t, request) -> {
+            sends.incrementAndGet();
+            inCall.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IllegalStateException("the provider call was interrupted");
+        };
+        JevFrustrationDetector d = new JevFrustrationDetector(
+                new FrustrationTurnBuilder(assembler),
+                hangs,
+                providers,
+                assessments,
+                detections,
+                classifiers,
+                TransactionOperations.withoutTransaction(),
+                props,
+                mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        AtomicReference<JevFrustrationDetector.Page> page = new AtomicReference<>();
+        AtomicBoolean keptInterrupt = new AtomicBoolean();
+        Thread sweep = new Thread(() -> {
+            page.set(d.score(signal("{}"), List.of(first, second)));
+            keptInterrupt.set(Thread.currentThread().isInterrupted());
+        });
+
+        sweep.start();
+        assertTrue(inCall.await(10, TimeUnit.SECONDS), "one turn reached the provider");
+        sweep.interrupt();
+        sweep.join(10_000);
+
+        assertEquals(1, sends.get(), "the turn waiting for a permit was not sent");
+        assertTrue(keptInterrupt.get());
+        assertEquals(1, Objects.requireNonNull(page.get()).sent());
+    }
+
+    /**
+     * The bug: a task that dies of something its own catch does not hold (an {@link Error} from the client)
+     * vanishes, and the page is scored as if that conversation had simply not been sent. It must fail the page.
+     */
+    @Test
+    void aTaskThatDiesOutsideItsCatchFailsThePage() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        AssertionError boom = new AssertionError("boom");
+        DecisionClient dies = (projectId, lane, t, request) -> {
+            throw boom;
+        };
+        JevFrustrationDetector d = new JevFrustrationDetector(
+                new FrustrationTurnBuilder(assembler),
+                dies,
+                providers,
+                assessments,
+                detections,
+                classifiers,
+                TransactionOperations.withoutTransaction(),
+                props,
+                mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> d.score(signal("{}"), List.of(turn)));
+
+        assertSame(boom, e.getCause());
+    }
+
+    /**
+     * The bug: the worker hands a paged detector one observation at a time and gets back a detection with no
+     * assessment row behind it. Paged detectors score whole pages; the one-at-a-time path refuses.
+     */
+    @Test
+    void aPagedDetectorRefusesToScoreOneObservation() {
+        JevFrustrationDetector d = detector();
+
+        assertThrows(IllegalStateException.class, () -> d.detect(observation("t-1"), null));
+    }
+
     @Test
     void theRequestCarriesTheBuiltStateAndTheOneQuestion() {
         SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
@@ -367,6 +481,42 @@ class JevFrustrationDetectorTest {
         assertEquals(Status.ABORTED, page.status());
         assertEquals(ClassifierPause.PROVIDER_REJECTED, page.pauseReason());
         verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PROVIDER_REJECTED, NOW);
+    }
+
+    /**
+     * An aborted page records nothing and is logged as a pause with its reason, a refused key or no key at
+     * all: the pause is the one thing an operator has to act on, and a silent one reads as a quiet week.
+     */
+    @Test
+    void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+            JevFrustrationDetector d = detector();
+            JevFrustrationDetector.Page rejected = d.score(signal("{}"), List.of(refused));
+            assertEquals(List.of(), d.complete(signal("{}"), rejected, PageAction.ABORT, 5));
+
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
+            JevFrustrationDetector.Page noKey = d.score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+            assertEquals(List.of(), d.complete(signal("{}"), noKey, PageAction.ABORT, 5));
+
+            List<Object> pauses = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.WARN)
+                    .map(e -> e.getKeyValuePairs().stream()
+                            .filter(kv -> "reason".equals(kv.key))
+                            .findFirst()
+                            .map(kv -> kv.value)
+                            .orElse("none"))
+                    .toList();
+            assertEquals(List.of(ClassifierPause.PROVIDER_REJECTED, ClassifierPause.NO_PROVIDER), pauses);
+            verify(assessments, never()).insert(any());
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test

@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Random;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Unit coverage for {@link MetricHistogram} — the accumulator side of the sketch, with
@@ -282,5 +285,40 @@ class MetricHistogramTest {
     /** {@link MetricSketch#quantile} answers null only on an empty sketch; every caller here has samples. */
     private static double requireQuantile(MetricSketch sketch, double q) {
         return java.util.Objects.requireNonNull(sketch.quantile(q), "a non-empty sketch has a quantile");
+    }
+
+    /**
+     * A grid that cannot place a sample is refused at construction. NaN fails every comparison, so a
+     * {@code lo <= 0} check alone would let a NaN grid through, and every sample would land in no bin.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "0, 1.05, 320",
+        "-1, 1.05, 320",
+        "NaN, 1.05, 320",
+        "Infinity, 1.05, 320",
+        "1, 1.0, 320",
+        "1, NaN, 320",
+        "1, 1.05, 0"
+    })
+    void aGridThatCannotPlaceASampleIsRefused(double lo, double ratio, int bins) {
+        assertThrows(IllegalArgumentException.class, () -> new MetricHistogram.Grid(lo, ratio, bins));
+    }
+
+    /**
+     * A stored blob that parses as JSON but not as a histogram, or names a bin the grid does not have, is
+     * refused rather than rehydrated: a bin written past the array would corrupt the counts the distance
+     * reads, or throw an unchecked index error the sweep's corrupt-blob handling does not expect.
+     */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{\"kind\":\"hist\",\"lo\":\"one\",\"r\":1.05,\"bins\":4}",
+                "{\"kind\":\"hist\",\"lo\":1.0,\"r\":1.05,\"bins\":4,\"b\":{\"4\":1}}",
+                "{\"kind\":\"hist\",\"lo\":1.0,\"r\":1.05,\"bins\":4,\"b\":{\"-1\":1}}",
+                "{\"kind\":\"hist\",\"lo\":1.0,\"r\":1.0,\"bins\":4}"
+            })
+    void aCorruptHistogramBlobIsRefused(String blob) {
+        assertThrows(IllegalArgumentException.class, () -> MetricSketch.fromJson(blob));
     }
 }

@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.auth.TenantContext;
@@ -20,7 +21,10 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -70,6 +74,12 @@ class RcaControllerTest {
 
     @Autowired
     RcaTriggerService trigger;
+
+    @Autowired
+    RcaJobRepository jobs;
+
+    @Autowired
+    RcaReportRepository reports;
 
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
@@ -178,6 +188,78 @@ class RcaControllerTest {
                 () -> trigger.trigger(
                         projectId, "fnd_does_not_exist", fix.user().id(), null));
         assertEquals(RcaError.SUBJECT_NOT_FOUND, unknownFinding.error());
+    }
+
+    /**
+     * Re-running a report. Catches a re-run while the first analysis is still queued starting a duplicate, a
+     * re-run of a finished (here failed) report coalescing back onto it instead of snapshotting the finding
+     * afresh, and a report whose finding link is gone being re-run against nothing.
+     */
+    @Test
+    void aRerunWaitsOnARunningReportAndSnapshotsAFinishedOneAfresh() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-rerun");
+        var ctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String projectId = fix.project().id();
+        String findingId = seedFinding(projectId, "cause-rerun");
+        RcaReportView first = cases.runRca(
+                projectId, seedCase(projectId, findingId), fix.user().id());
+
+        RcaReportView whilePending = Objects.requireNonNull(controller
+                .rerun(ctx, fix.org().slug(), fix.project().slug(), first.id())
+                .data());
+        assertEquals(first.id(), whilePending.id(), "a queued analysis is handed back, not duplicated");
+
+        jobs.markFailed(first.jobId(), "launcher down", 3);
+        RcaReportView fresh = Objects.requireNonNull(controller
+                .rerun(ctx, fix.org().slug(), fix.project().slug(), first.id())
+                .data());
+        assertNotEquals(first.id(), fresh.id());
+        assertNotEquals(first.jobId(), fresh.jobId());
+        assertEquals("pending", fresh.status());
+        assertEquals(Optional.of(findingId), reports.findingIdOf(projectId, fresh.jobId()));
+
+        jobs.markFailed(fresh.jobId(), "launcher down", 3);
+        jdbc.sql("UPDATE rca_report SET finding_id = NULL WHERE project_id = :pid AND job_id = :jobId")
+                .param("pid", projectId)
+                .param("jobId", fresh.jobId())
+                .update();
+        TessaryException orphan = assertThrows(
+                TessaryException.class,
+                () -> controller.rerun(ctx, fix.org().slug(), fix.project().slug(), fresh.id()));
+        assertEquals(RcaError.SUBJECT_NOT_FOUND, orphan.error());
+    }
+
+    /**
+     * What the Triage queue captions a case with. Catches a running analysis being read as a conclusion, a
+     * finished one whose verdict or leading hypothesis is not carried back to its case, and an empty page
+     * reaching Postgres as {@code IN ()}, a syntax error that fails the whole queue read.
+     */
+    @Test
+    void aCasesLeadIsItsFinishedAnalysis() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-leads");
+        String projectId = fix.project().id();
+        String caseId = seedCase(projectId, seedFinding(projectId, "cause-leads"));
+        RcaReportView report = cases.runRca(projectId, caseId, fix.user().id());
+
+        assertEquals(Map.of(), reports.leadsByCase(projectId, List.of(caseId)), "a queued analysis concluded nothing");
+
+        reports.complete(
+                report.jobId(),
+                "done",
+                RcaReportRow.Verdict.MODEL_CHANGE,
+                "summary",
+                "[]",
+                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"rationale\":\"r\","
+                        + "\"evidence_trace_ids\":[]}]",
+                null,
+                "## r",
+                true);
+        jobs.markDone(report.jobId());
+
+        assertEquals(
+                Map.of(caseId, new RcaReportRepository.CaseLead(RcaReportRow.Verdict.MODEL_CHANGE, "A canary model")),
+                reports.leadsByCase(projectId, List.of(caseId)));
+        assertEquals(Map.of(), reports.leadsByCase(projectId, List.of()));
     }
 
     @Test

@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.toolerror.ToolErrorConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GroundednessConfigTest {
 
@@ -107,5 +109,16 @@ class GroundednessConfigTest {
         // judged hour meant.
         GroundednessConfig otherFreeze = GroundednessConfig.of(MAPPER, "{\"freeze_baseline_traces\":2000}");
         assertNotEquals(d.stateEpoch(), otherFreeze.stateEpoch());
+    }
+
+    /**
+     * A dial that is zero, negative or not finite takes its default rather than the clamp: {@code Math.max} and
+     * {@code Math.min} pass a NaN straight through, and a NaN floor or multiple would leave the rate test
+     * unable to arm. A threshold outside (0, 1) and a non-positive count take theirs too.
+     */
+    @ParameterizedTest
+    @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
+    void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
+        assertEquals(GroundednessConfig.defaults(), new GroundednessConfig(bad, 0L, bad, bad, bad, 0, 0));
     }
 }

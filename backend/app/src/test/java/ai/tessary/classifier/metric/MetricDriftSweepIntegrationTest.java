@@ -37,6 +37,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -572,6 +573,113 @@ class MetricDriftSweepIntegrationTest {
 
     // -----------------------------------------------------------------------------------------------
     // Fixture
+    @Test
+    @DisplayName("a signal naming no measure this build knows finishes its job without moving the cursor")
+    void aSignalWithNoKnownMeasureDoesNotStepOverTraffic() {
+        String pid = project("metric-sweep-no-measures");
+        ClassifierRow signal = signal(pid, "{\"measures\": [\"latency_p99\"], \"window_target_count\": 50}");
+        seedTurns(pid, 10);
+
+        MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
+
+        // Advancing here would lose those turns for good once a config edit names a measure again.
+        assertEquals(0, outcome.scanned());
+        assertNull(job(pid, signal).cursorId(), "nothing measured, so nothing stepped over");
+        assertTrue(baselines.listByClassifier(pid, signal.id()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a page whose every turn is still waiting for its root finishes without moving the cursor")
+    void aPageStillArrivingIsReOfferedWhole() {
+        String pid = project("metric-sweep-all-pending");
+        ClassifierRow signal = signal(pid);
+        String pending = seedRootlessTurn(pid, Instant.now());
+
+        MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
+
+        assertEquals(0, outcome.scanned());
+        assertNull(job(pid, signal).cursorId(), "the pending turn is offered again next tick");
+
+        landRoot(pid, pending, Instant.now().minusMillis(2_000), 2_000);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).scanned());
+    }
+
+    @Test
+    @DisplayName("an edited bin count restarts the open window rather than mixing two grids in it")
+    void anEditedBinCountRestartsTheOpenWindow() {
+        String pid = project("metric-sweep-regrid");
+        ClassifierRow signal = signal(pid);
+        seedTurns(pid, 0, 40, 2_000, null);
+        sweep.sweepMetrics(claim(pid, signal), signal);
+        assertEquals(40, baseline(pid, signal).currentCount());
+
+        ClassifierRow regridded = signal(
+                pid,
+                "{\"measures\": [\"turn_duration\"], \"window_target_count\": 50, \"min_sample\": 30, "
+                        + "\"hist_bins\": 128}");
+        seedTurns(pid, 40, 10, 2_000, null);
+        sweep.sweepMetrics(claim(pid, regridded), regridded);
+
+        // The 40 samples on the old layout cannot join the new one, so the window, its count and its
+        // population start over together: a count of 50 would close a window holding 10 samples.
+        MetricBaselineRow row = baseline(pid, regridded);
+        assertEquals(10, row.currentCount());
+        MetricSketch current = sketch(row.currentSketchJson());
+        assertEquals(10, current.count());
+        assertEquals(new MetricHistogram.Grid(1.0, MetricHistogram.DEFAULT_RATIO, 128).id(), current.gridId());
+        assertEquals(10, MetricEvidenceRefs.fromJson(row.currentRefsJson()).size(), "the refs restart with it");
+    }
+
+    @Test
+    @DisplayName("a cost window filled across two pages keeps both pages' token decomposition")
+    void aWindowAcrossTwoPagesKeepsBothPagesTokens() throws Exception {
+        String pid = project("metric-sweep-tokens-two-pages");
+        ClassifierRow signal = signal(pid, BuiltInDetector.Kind.COST_DRIFT, CONFIG_COST);
+        seedCostTurns(pid, 0, 30, ANTHROPIC_MODEL, usage(2_000, 18_000, 200, 500L), true);
+        sweep.sweepMetrics(claim(pid, signal), signal);
+        seedCostTurns(pid, 30, 30, ANTHROPIC_MODEL, usage(2_000, 18_000, 200, 500L), true);
+
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed());
+
+        // The window closed at 50 and became the reference: 30 turns from the first page, 20 from the second.
+        MetricBaselineRow row = baselineFor(pid, signal, Measure.COST, BucketKind.CALL_SITE, CALL_SITE);
+        assertEquals(
+                50,
+                MAPPER.readTree(Objects.requireNonNull(row.pinnedTokensJson()))
+                        .path(MetricTokens.INPUT)
+                        .path("n")
+                        .asLong(),
+                "the first page's tokens were carried into the window, not dropped at the page boundary");
+    }
+
+    @Test
+    @DisplayName("unreadable stored blobs are read as absent, and the sweep carries on")
+    void unreadableStoredBlobsAreReadAsAbsent() {
+        String pid = project("metric-sweep-corrupt-blobs");
+        ClassifierRow signal = signal(pid);
+        seedTurns(pid, 0, 40, 2_000, null);
+        sweep.sweepMetrics(claim(pid, signal), signal);
+        String baselineId = baseline(pid, signal).id();
+        // Blobs a newer or broken build could leave behind. Each one throwing would fail the sweep on this
+        // bucket every tick until the job dead-lettered, and the bucket would stop being watched.
+        jdbc.sql("""
+                        UPDATE metric_baseline
+                        SET current_workload_json = '{not json', current_tokens_json = '{not json',
+                            pinned_sketch_json = '{not json', pinned_workload_json = '{not json',
+                            pinned_tokens_json = '{not json'
+                        WHERE id = :id
+                        """).param("id", baselineId).update();
+
+        seedTurns(pid, 40, 20, 2_000, null);
+        MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
+
+        assertEquals(1, outcome.windowsClosed(), "the window's readable sketch still closed at 50");
+        assertEquals(0, outcome.fired(), "an unreadable reference is no reference, not a shift");
+        MetricBaselineRow row = baseline(pid, signal);
+        assertEquals(10, row.currentCount());
+        assertEquals(50, sketch(row.pinnedSketchJson()).count(), "the close re-established a readable reference");
+    }
+
     // -----------------------------------------------------------------------------------------------
 
     private String project(String slug) {

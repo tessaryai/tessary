@@ -2,10 +2,14 @@
 package ai.tessary.telemetry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -70,5 +74,38 @@ class HomeTessaryClientTest {
                 15L,
                 sent.getValue().bodyPublisher().orElseThrow().contentLength(),
                 "the hashed bytes are the posted bytes: 14 chars, 15 bytes in UTF-8");
+    }
+
+    @Mock
+    HttpResponse<InputStream> streamed;
+
+    /**
+     * The bug: a body past the limit is truncated and handed back, so a caller that hashes it mistakes a
+     * cut-off file for a different version. Past the limit must throw.
+     */
+    @Test
+    void getBytesThrowsPastTheLimitRatherThanTruncating() throws Exception {
+        when(http.send(any(HttpRequest.class), ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+                .thenReturn(streamed);
+        when(streamed.statusCode()).thenReturn(200);
+        when(streamed.body()).thenReturn(new ByteArrayInputStream(new byte[5]));
+
+        IOException ex = assertThrows(
+                IOException.class, () -> new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", 4));
+        assertEquals("/v1/pricing/manifest.json is over the 4-byte limit", ex.getMessage());
+    }
+
+    /** The bug: an error page's body is returned as if it were the file, and gets hashed and stored. */
+    @Test
+    void getBytesReturnsNoBodyForANon200() throws Exception {
+        when(http.send(any(HttpRequest.class), ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+                .thenReturn(streamed);
+        when(streamed.statusCode()).thenReturn(404);
+        when(streamed.body()).thenReturn(new ByteArrayInputStream("not found".getBytes(StandardCharsets.UTF_8)));
+
+        HomeTessaryClient.Fetched fetched = new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", 1024);
+
+        assertEquals(404, fetched.status());
+        assertEquals(0, fetched.body().length);
     }
 }

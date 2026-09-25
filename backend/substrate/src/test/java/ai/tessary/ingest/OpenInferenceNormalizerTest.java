@@ -12,7 +12,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Proves the normalizer round-trip: an OpenInference ({@code llm.*}) span and a native
@@ -78,6 +81,13 @@ class OpenInferenceNormalizerTest {
         // No gen_ai analogue → unknown kind.
         assertNull(GenAiAttributes.operationNameForSpanKind("GUARDRAIL"));
         assertNull(GenAiAttributes.operationNameForSpanKind(null));
+    }
+
+    @Test
+    void embeddingSpanKind_isItsOwnKindNotARetrieval() {
+        assertEquals(
+                KindNormalizer.EMBEDDING,
+                KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("embedding")));
     }
 
     @Test
@@ -288,5 +298,27 @@ class OpenInferenceNormalizerTest {
         assertEquals(
                 GenAiAttributes.OP_INVOKE_AGENT,
                 span.get("attributes").get(GenAiAttributes.OPERATION_NAME).asText());
+    }
+
+    /**
+     * The first tool call that names itself is the one carried structurally, even past a call (or a whole
+     * message) that names nothing; output messages that are not an array, or a string that is not JSON,
+     * carry no tool call rather than failing the span.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            nullValues = "null",
+            value = {
+                "[{\"message.tool_calls\":[{}]},{\"message.tool_calls\":[{\"tool_call.function.name\":\"lookup\"}]}] | lookup",
+                "[{\"message.tool_calls\":[{}]}] | null",
+                "\"not json\" | null",
+                "5 | null"
+            })
+    void firstNamedToolCall_isCarriedStructurally(String outputMessages, @Nullable String toolName) throws Exception {
+        var canonical = OpenInferenceNormalizer.normalize(
+                attrs("{\"openinference.span.kind\":\"LLM\",\"llm.output_messages\":" + outputMessages + "}"));
+
+        assertEquals(toolName, canonical.usage().get(GenAiAttributes.TOOL_NAME));
     }
 }

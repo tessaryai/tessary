@@ -190,6 +190,44 @@ class ClassifierWorkerLoggingTest {
     }
 
     /**
+     * A streak that runs past the summary interval must say it is still failing, with its count: after the
+     * first stacktrace the job is otherwise silent, and a sweep failing every tick for an hour would look
+     * exactly like one that recovered.
+     */
+    @Test
+    void aStreakThatOutlastsTheSummaryIntervalSaysItIsStillFailingWithItsCount() {
+        ClassifierWorker worker = new ClassifierWorker(
+                signalService,
+                signals,
+                jobs,
+                detections,
+                arming,
+                substrate,
+                catalog,
+                preDeployChecks,
+                sweeps,
+                TestObjectProvider.of(),
+                new ClassifierProperties(),
+                new TraceMdcBridge(tracer),
+                new SyncTaskExecutor());
+        ClassifierJobRow job = new ClassifierJobRow(
+                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
+        when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
+        when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(false);
+
+        for (int i = 0; i < 30; i++) worker.sweepForTest(job);
+
+        List<Map<String, Object>> warns = appender.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(e -> e.getKeyValuePairs().stream()
+                        .collect(java.util.stream.Collectors.toMap(kv -> kv.key, kv -> (Object) kv.value)))
+                .toList();
+        assertEquals(2, warns.size(), "the streak's first failure, then one summary at the thirtieth");
+        assertEquals("signal.sweep.still-failing", warns.get(1).get("event"));
+        assertEquals(30L, warns.get(1).get("occurrences"));
+    }
+
+    /**
      * {@code tick()} must bind the scheduler thread's current span into MDC before dispatching any
      * sweep, so a background log line has a trace_id to pivot from in Grafana.
      */

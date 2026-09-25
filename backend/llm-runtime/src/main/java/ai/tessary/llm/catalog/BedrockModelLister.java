@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm.catalog;
 
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,6 +10,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrock.BedrockClient;
@@ -64,12 +66,15 @@ public final class BedrockModelLister implements ProviderModelLister {
         this.clientFactory = clientFactory;
     }
 
+    @ExcludeFromJacocoGeneratedReport("builds the real AWS Bedrock client; only a live AWS call runs it")
     private static BedrockClient defaultClient(
             Region region, AwsCredentialsProvider credentialsProvider, Duration timeout) {
         return BedrockClient.builder()
                 .region(region)
                 .credentialsProvider(credentialsProvider)
-                .overrideConfiguration(b -> b.apiCallTimeout(timeout))
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(timeout)
+                        .build())
                 .build();
     }
 

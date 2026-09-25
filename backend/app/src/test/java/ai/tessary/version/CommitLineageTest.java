@@ -2,8 +2,12 @@
 package ai.tessary.version;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
+import ai.tessary.open.errors.TessaryException;
+import ai.tessary.open.errors.VersionError;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -14,6 +18,7 @@ import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.version.CommitLineageService.NodeKind;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +58,9 @@ class CommitLineageTest {
 
     @Autowired
     SpanPayloadRepository payloads;
+
+    @Autowired
+    ProjectVersionController controller;
 
     private SubstrateV2Fixtures fx;
 
@@ -95,6 +103,47 @@ class CommitLineageTest {
         assertTrue(
                 lineage.resolve(pid, NodeKind.SPAN, span.spanId()).isEmpty(),
                 "a bare span id resolves to nothing rather than to whichever trace reused it");
+    }
+
+    /**
+     * The bugs: the lineage endpoint answers a resolvable node with the wrong commit, or answers an unknown
+     * node kind or an unresolvable node with a 500 instead of its own error.
+     */
+    @Test
+    void lineageEndpointResolvesANodeAndNamesWhyItCannot() {
+        var fix = TenantFixture.bootstrap(tenants, "lineage-endpoint");
+        String pid = fix.project().id();
+        ProjectVersionRow ver = versions.findOrMaterialize(pid, "sha-endpoint", ProjectVersionRow.REASON_PIPELINE_SYNC);
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(SubstrateV2Fixtures.sessionId())
+                .projectVersionId(ver.id())
+                .kind("llm")
+                .name("step")
+                .at(Instant.now())
+                .payload("in", "out")
+                .writeRef();
+        TenantContext owner = new TenantContext(fix.user().id(), null, null, null, null, null);
+        String org = fix.org().slug();
+        String project = fix.project().slug();
+
+        assertEquals(
+                "sha-endpoint",
+                Objects.requireNonNull(controller
+                                .lineage(owner, org, project, "trace", traceId)
+                                .data())
+                        .commitSha());
+        assertEquals(
+                VersionError.UNKNOWN_NODE_KIND,
+                assertThrows(TessaryException.class, () -> controller.lineage(owner, org, project, "verdict", traceId))
+                        .error());
+        assertEquals(
+                VersionError.LINEAGE_UNRESOLVED,
+                assertThrows(
+                                TessaryException.class,
+                                () -> controller.lineage(owner, org, project, "trace", "no-such-trace"))
+                        .error());
     }
 
     private static void assertSha(ProjectVersionRow expected, Optional<ProjectVersionRow> actual, String message) {

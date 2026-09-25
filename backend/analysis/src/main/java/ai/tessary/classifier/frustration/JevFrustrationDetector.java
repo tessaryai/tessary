@@ -41,7 +41,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -308,16 +307,21 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 }));
             }
         }
+        joinAll(futures);
+        return outcomes;
+    }
+
+    /**
+     * Surface a task's failure. The executor's close has already waited for every task, so each future is
+     * done. A task catches its own call's runtime failures, so only an {@link Error} or a failure outside the
+     * call (scoring an answer) lands here, and it fails the page rather than dropping that conversation.
+     */
+    private static void joinAll(List<Future<?>> futures) {
         for (Future<?> f : futures) {
-            try {
-                f.get();
-            } catch (ExecutionException e) {
-                throw new IllegalStateException("frustration send task failed", e);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            if (f.state() == Future.State.FAILED) {
+                throw new IllegalStateException("frustration send task failed", f.exceptionNow());
             }
         }
-        return outcomes;
     }
 
     private Outcome call(String projectId, DecisionTarget target, EligibleTurn turn) {

@@ -2,12 +2,11 @@
 package ai.tessary.classifier.frustration;
 
 import ai.tessary.llm.decisions.DecisionRequest;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
+import ai.tessary.open.hash.Sha256;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -85,12 +84,15 @@ public final class JevFrustrationQuestion {
      * every call site.
      */
     public static String scorerVersion(double threshold) {
+        String material = questionsJson() + "|" + String.format(Locale.ROOT, "%.4f", threshold);
+        return "jev-choice3-" + HexFormat.of().formatHex(Sha256.digest(material), 0, 6);
+    }
+
+    @ExcludeFromJacocoGeneratedReport("serializes a fixed list of strings, so the checked catch cannot fire")
+    private static String questionsJson() {
         try {
-            String question = MAPPER.writeValueAsString(questions());
-            String material = question + "|" + String.format(Locale.ROOT, "%.4f", threshold);
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8));
-            return "jev-choice3-" + HexFormat.of().formatHex(digest, 0, 6);
-        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
+            return MAPPER.writeValueAsString(questions());
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("cannot hash the frustration question", e);
         }
     }

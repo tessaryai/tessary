@@ -146,11 +146,9 @@ class ConversationThreadAssembler {
             return textMessage(fallbackRole, raw.strip());
         }
         if (!ContentExtractor.isMessageEnvelope(node)) {
-            return roles.contains(fallbackRole)
-                    ? textMessage(
-                            fallbackRole,
-                            ContentExtractor.flattenContentText(node).strip())
-                    : List.of();
+            // Every caller's fallback role is one of the roles it reads, so the bare payload is that turn.
+            return textMessage(
+                    fallbackRole, ContentExtractor.flattenContentText(node).strip());
         }
         List<StructuredThread.Message> out = new ArrayList<>();
         for (JsonNode msg : node) {

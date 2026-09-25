@@ -7,6 +7,7 @@ import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -474,12 +475,17 @@ public class BehaviorTriageEngine {
     /**
      * Serialize citations for {@code finding.triage_citations}. One shape whatever the citation is: a
      * dotted pointer into the evidence, an id the agent fetched, or a check script with the stdout it
-     * printed.
+     * printed. Null when there are none, so the column reads as uncited rather than as an empty list.
      */
     public @Nullable String citationsJson(BehaviorTriageVerdict verdict) {
         if (verdict.citations().isEmpty()) return null;
+        return writeCitations(verdict.citations());
+    }
+
+    @ExcludeFromJacocoGeneratedReport("defensive: the mapper is the app's own and writes these string-only records")
+    private @Nullable String writeCitations(List<BehaviorTriageVerdict.Citation> citations) {
         try {
-            return mapper.writeValueAsString(verdict.citations());
+            return mapper.writeValueAsString(citations);
         } catch (Exception e) {
             return null;
         }

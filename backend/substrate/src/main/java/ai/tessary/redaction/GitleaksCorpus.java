@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.redaction;
 
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -368,6 +369,8 @@ public final class GitleaksCorpus {
         };
     }
 
+    @ExcludeFromJacocoGeneratedReport(
+            "the corpus is a resource packaged in this jar, so the IOException the compiler requires cannot fire")
     private static GitleaksCorpus loadResource() {
         try (InputStream in = new ClassPathResource(RESOURCE).getInputStream()) {
             return load(new ObjectMapper().readTree(in));

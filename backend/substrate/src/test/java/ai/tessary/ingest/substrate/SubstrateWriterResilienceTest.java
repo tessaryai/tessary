@@ -8,11 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.spool.InProcessSpool;
+import ai.tessary.ingest.spool.IngestSpool;
 import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
 import ai.tessary.redaction.RedactionService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -268,5 +270,161 @@ class SubstrateWriterResilienceTest {
         assertTrue(writer.enqueue("p1", List.of(sized("after", 100))), "admitted");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the replacement drainer must be draining");
         assertEquals(1, writes.get(), "work enqueued after the restart still reaches the write");
+    }
+
+    // ---- a spool that fails ----
+
+    /** An in-process spool that can be told to throw where a broker-backed one can: on append, or on settle. */
+    private static final class FaultySpool implements IngestSpool {
+        private final InProcessSpool delegate;
+        private final boolean failAppend;
+        private final boolean failSettle;
+
+        FaultySpool(SubstrateProperties props, boolean failAppend, boolean failSettle) {
+            this.delegate = new InProcessSpool(props);
+            this.failAppend = failAppend;
+            this.failSettle = failSettle;
+        }
+
+        @Override
+        public Admission append(String projectId, List<RawEntry> entries) {
+            if (failAppend) throw new IllegalStateException("broker unreachable");
+            return delegate.append(projectId, entries);
+        }
+
+        @Override
+        public Optional<Claimed> claim(Duration wait) throws InterruptedException {
+            return delegate.claim(wait);
+        }
+
+        @Override
+        public void ack(Claimed claimed) {
+            if (failSettle) throw new IllegalStateException("commit failed");
+            delegate.ack(claimed);
+        }
+
+        @Override
+        public void nack(Claimed claimed) {
+            if (failSettle) throw new IllegalStateException("commit failed");
+            delegate.nack(claimed);
+        }
+
+        @Override
+        public Stats stats() {
+            return delegate.stats();
+        }
+
+        @Override
+        public double pressure() {
+            return delegate.pressure();
+        }
+    }
+
+    private static RedactionService passthrough() {
+        return new RedactionService(null, null) {
+            @Override
+            public List<RawEntry> redactBatch(String projectId, List<RawEntry> entries) {
+                return entries;
+            }
+        };
+    }
+
+    /** A spool that throws did not take the batch: the producer is told to retry, and nothing stays pending. */
+    @Test
+    void aSpoolThatThrowsOnAppend_isAnsweredAsAShed() throws Exception {
+        SubstrateProperties props = new SubstrateProperties();
+        SubstrateWriter writer = new SubstrateWriter(
+                Mockito.mock(SpanBatchWriter.class), props, passthrough(), new FaultySpool(props, true, false));
+
+        assertFalse(writer.enqueue("p1", List.of(entry("a"))), "a batch the spool refused is not accepted");
+        assertEquals(1L, writer.shedBatches());
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(1)), "the refused batch is not left counted as pending");
+    }
+
+    /** A settlement that throws still releases the batch, and the drainer takes the next one. */
+    @Test
+    void aSpoolThatThrowsOnSettlement_stillReleasesTheBatch() throws Exception {
+        AtomicInteger writes = new AtomicInteger();
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> writes.incrementAndGet());
+        SubstrateProperties props = new SubstrateProperties();
+        SubstrateWriter writer = new SubstrateWriter(spans, props, passthrough(), new FaultySpool(props, false, true));
+
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "a failed ack must not leave the batch pending forever");
+        writer.enqueue("p1", List.of(entry("b")));
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the drainer survived the failed settlement");
+        assertEquals(2, writes.get());
+    }
+
+    /** Stopping the drainer mid-backoff ends the batch as failed and released, instead of sleeping it out. */
+    @Test
+    void aStopDuringRetryBackoff_countsTheBatchFailedAndReleasesIt() throws Exception {
+        CountDownLatch attempted = new CountDownLatch(1);
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
+            attempted.countDown();
+            throw new IllegalStateException("span write failed");
+        });
+        SubstrateProperties props = new SubstrateProperties();
+        props.setMaxAttempts(2);
+        props.setRetryBackoffMs(60_000);
+        SubstrateWriter writer = writerWith(props, spans);
+
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(attempted.await(10, TimeUnit.SECONDS), "the first attempt ran");
+        writer.killDrainerForTest();
+
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "released well before the minute-long backoff ends");
+        assertEquals(1L, writer.failedBatches());
+    }
+
+    /** The wait hooks report a writer that is still busy as busy, rather than timing out into a yes. */
+    @Test
+    void theWaitHooksReportABusyWriterAsBusy() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        SubstrateWriter writer = writerWith(new SubstrateProperties(), blockingWriter(entered, release));
+        try {
+            writer.enqueue("p1", List.of(entry("a")));
+            assertTrue(entered.await(10, TimeUnit.SECONDS));
+
+            assertFalse(writer.awaitIdle(Duration.ofMillis(50)), "a batch is still in flight");
+            assertFalse(writer.awaitDrainerDeath(Duration.ofMillis(50)), "the drainer is alive");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    /** Shutdown lets the batch in hand finish and settle, then the drainer stops rather than lingering. */
+    @Test
+    void shutdownFinishesTheBatchInHandThenStopsTheDrainer() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger writes = new AtomicInteger();
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
+            entered.countDown();
+            // A write in flight does not stop for the shutdown interrupt; it finishes.
+            while (true) {
+                try {
+                    release.await();
+                    break;
+                } catch (InterruptedException ignored) {
+                    // keep waiting for the write to complete
+                }
+            }
+            return writes.incrementAndGet();
+        });
+        SubstrateWriter writer = writerWith(new SubstrateProperties(), spans);
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+
+        writer.shutdown();
+        release.countDown();
+
+        assertTrue(writer.awaitDrainerDeath(Duration.ofSeconds(10)), "the drainer stops after shutdown");
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(1)), "the batch in hand was settled on the way out");
+        assertEquals(1, writes.get());
     }
 }

@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The threshold floor became a per-classifier value for frustration. tool_error's must not move: its
@@ -100,5 +104,27 @@ class ToolErrorConfigTest {
                         Double.toString(d.shiftFloor()),
                         Double.toString(d.downArmMinRate())),
                 CarriedState.epochOf(d, schema));
+    }
+
+    /**
+     * A blob that is absent or will not parse runs at the shipped operating point: a blob written by a newer
+     * build must not dead-letter an older build's sweep.
+     */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  ", "{not json"})
+    void anAbsentOrUnreadableBlobIsTheDefaults(@Nullable String blob) {
+        assertEquals(ToolErrorConfig.defaults(), ToolErrorConfig.of(MAPPER, blob));
+    }
+
+    /**
+     * A dial that is zero, negative or not a number falls back to its default instead of being clamped: a NaN
+     * slips through {@code Math.max}/{@code Math.min} unchanged and would leave the test unable to arm.
+     */
+    @ParameterizedTest
+    @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
+    void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
+        ToolErrorConfig c = new ToolErrorConfig(0L, bad, bad, 0, bad, 0);
+        assertEquals(ToolErrorConfig.defaults(), c);
     }
 }

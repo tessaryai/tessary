@@ -2,6 +2,7 @@
 package ai.tessary.git.github;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,10 +29,17 @@ import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class GithubInstallControllerTest {
 
@@ -42,6 +50,7 @@ class GithubInstallControllerTest {
     private GithubTokenService tokenService;
     private GitIntegrationService integrations;
     private TenantPathResolver resolver;
+    private AuthProperties workos;
     private GithubInstallController controller;
 
     private final TenantContext ctx = new TenantContext("u", "e@x.io", "o", "p1", "owner", null);
@@ -66,7 +75,7 @@ class GithubInstallControllerTest {
         tokenService = mock(GithubTokenService.class);
         integrations = mock(GitIntegrationService.class);
         resolver = mock(TenantPathResolver.class);
-        AuthProperties workos = new AuthProperties();
+        workos = new AuthProperties();
         workos.setFrontendUrl("https://app.example.com/");
         controller = new GithubInstallController(props, state, tokenService, integrations, resolver, workos);
         Resolved resolved = new Resolved(
@@ -172,5 +181,69 @@ class GithubInstallControllerTest {
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> controller.installationOptions(ctx, "acme", "web", foreign));
         assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
+    }
+
+    // ---- install-url --------------------------------------------------------
+
+    @Test
+    void installUrl_pointsAtTheAppsInstallPageWithStateBoundToThisProject() {
+        String url = controller.installUrl(ctx, "acme", "web").data().url();
+
+        String prefix = "https://github.com/apps/tessary-evals/installations/new?state=";
+        assertTrue(url.startsWith(prefix), url);
+        String s = URLDecoder.decode(url.substring(prefix.length()), StandardCharsets.UTF_8);
+        assertEquals("p1", state.verify(s).projectId(), "the callback binds the install to the project that asked");
+    }
+
+    /** Without the App key or its slug there is no install page to send anyone to. */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  ", "no-app-id"})
+    void installUrl_refusesWithoutAConfiguredAppAndSlug(String slug) {
+        if ("no-app-id".equals(slug)) {
+            props.setAppId("");
+        } else {
+            props.setAppSlug(slug);
+        }
+        TessaryException ex = assertThrows(TessaryException.class, () -> controller.installUrl(ctx, "acme", "web"));
+        assertEquals(GitError.MISSING_APP_CONFIG, ex.error());
+    }
+
+    @Test
+    void authorizeUrl_withoutAFrontendBaseLeavesTheRedirectToTheAppsDefault() {
+        workos.setFrontendUrl(" ");
+        String url = controller.authorizeUrl(ctx, "acme", "web").data().url();
+        assertTrue(url.startsWith("https://github.com/login/oauth/authorize?client_id=cid&state="), url);
+        assertFalse(url.contains("redirect_uri"), "a blank base would pin the redirect to a relative path: " + url);
+    }
+
+    @Test
+    void authorizeUrl_withoutTheAppKeyThrowsMissingConfig() {
+        props.setPrivateKeyPem("");
+        TessaryException ex = assertThrows(TessaryException.class, () -> controller.authorizeUrl(ctx, "acme", "web"));
+        assertEquals(GitError.MISSING_APP_CONFIG, ex.error());
+    }
+
+    /**
+     * Only an owner, or a project-bound MCP token, may connect the App: a plain member of the org would
+     * otherwise bind a repository to a project they do not run.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void nonOwners_areRefusedUnlessTheCallerIsAnMcpToken(boolean mcpToken) {
+        TenantContext member = new TenantContext("u2", "m@x.io", "o", "p1", "member", mcpToken ? "tok" : null);
+        when(resolver.requireProject(member, "acme", "web"))
+                .thenReturn(new Resolved(
+                        new Organization("o", "wo", "acme", "Acme", "t", null, null),
+                        new Project("p1", "o", "web", "Web", "d", "t", null, null, true, null),
+                        "member"));
+
+        if (mcpToken) {
+            assertTrue(controller.installUrl(member, "acme", "web").data().url().contains("state="));
+        } else {
+            ResponseStatusException ex =
+                    assertThrows(ResponseStatusException.class, () -> controller.installUrl(member, "acme", "web"));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        }
     }
 }

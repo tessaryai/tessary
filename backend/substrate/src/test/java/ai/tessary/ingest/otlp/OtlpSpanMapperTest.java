@@ -262,4 +262,77 @@ class OtlpSpanMapperTest {
         assertEquals("0b", out.get(1).sourceExternalId());
         assertTrue(out.get(0).metadata() != null && out.get(0).metadata().containsKey(GenAiAttributes.OPERATION_NAME));
     }
+
+    /**
+     * Every OTLP value type survives into the span's metadata as the plain value it encodes, nested lists and
+     * maps as JSON, and a value this mapper cannot read (unset, or an index into a string table it does not
+     * hold) is left out rather than stored as a misleading number.
+     */
+    @Test
+    void everyAttributeValueTypeFlattensToItsPlainValue() {
+        AnyValue nested = AnyValue.newBuilder()
+                .setKvlistValue(io.opentelemetry.proto.common.v1.KeyValueList.newBuilder()
+                        .addValues(KeyValue.newBuilder()
+                                .setKey("k")
+                                .setValue(AnyValue.newBuilder().setBoolValue(false))))
+                .build();
+        Span span = Span.newBuilder()
+                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
+                .addAttributes(value("b", AnyValue.newBuilder().setBoolValue(true)))
+                .addAttributes(value("i", AnyValue.newBuilder().setIntValue(42)))
+                .addAttributes(value("d", AnyValue.newBuilder().setDoubleValue(1.5)))
+                .addAttributes(value("bytes", AnyValue.newBuilder().setBytesValue(ByteString.copyFrom(new byte[] {
+                    0x0a, (byte) 0xff
+                }))))
+                .addAttributes(value(
+                        "arr",
+                        AnyValue.newBuilder()
+                                .setArrayValue(io.opentelemetry.proto.common.v1.ArrayValue.newBuilder()
+                                        .addValues(AnyValue.newBuilder().setStringValue("x"))
+                                        .addValues(AnyValue.newBuilder().setIntValue(1))
+                                        .addValues(nested))))
+                .addAttributes(value("kv", nested.toBuilder()))
+                .addAttributes(value("unset", AnyValue.newBuilder()))
+                .addAttributes(value("strindex", AnyValue.newBuilder().setStringValueStrindex(3)))
+                .build();
+
+        RawEntry e = mapper.toRawEntries(request(span)).get(0);
+
+        assertEquals(
+                java.util.Map.of(
+                        "b",
+                        true,
+                        "i",
+                        42L,
+                        "d",
+                        1.5,
+                        "bytes",
+                        "0aff",
+                        "arr",
+                        "[\"x\",1,\"{\\\"k\\\":false}\"]",
+                        "kv",
+                        "{\"k\":false}"),
+                e.metadata());
+    }
+
+    /** A flattened message whose index segment is not a non-negative integer is skipped, not fatal. */
+    @Test
+    void indexedFlattenedMessages_skipMalformedIndexes() {
+        Span span = Span.newBuilder()
+                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
+                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
+                .addAttributes(kv("gen_ai.prompt.0.role", "user"))
+                .addAttributes(kv("gen_ai.prompt.0.content", "hi"))
+                .addAttributes(kv("gen_ai.prompt.x.role", "system"))
+                .addAttributes(kv("gen_ai.prompt.-1.role", "system"))
+                .build();
+
+        assertEquals(
+                "[{\"role\":\"user\",\"content\":\"hi\"}]",
+                mapper.toRawEntries(request(span)).get(0).inputMessagesJson());
+    }
+
+    private static KeyValue value(String key, AnyValue.Builder value) {
+        return KeyValue.newBuilder().setKey(key).setValue(value).build();
+    }
 }

@@ -4,21 +4,35 @@ package ai.tessary.metering;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
+import ai.tessary.billing.BillingController;
+import ai.tessary.billing.BillingController.UsageLine;
 import ai.tessary.classifier.detector.Detection;
+import ai.tessary.metering.MeteringDtos.LlmUsageCellView;
+import ai.tessary.metering.MeteringDtos.LlmUsageSeriesView;
+import ai.tessary.metering.MeteringDtos.LlmUsageSliceView;
+import ai.tessary.metering.MeteringDtos.LlmUsageView;
+import ai.tessary.metering.MeteringDtos.TriageSpendRowView;
+import ai.tessary.metering.MeteringDtos.TriageSpendView;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
+import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
+import ai.tessary.usage.LlmCallRow;
+import ai.tessary.usage.LlmCallWriteRepository;
 import ai.tessary.usage.MetricRollupJobRepository;
 import ai.tessary.usage.MetricRollupRepository;
 import ai.tessary.usage.MetricRollupRepository.UsageBucket;
 import ai.tessary.usage.MetricRollupRepository.UsageTotal;
+import ai.tessary.usage.MetricRollupRow;
 import ai.tessary.usage.UsageUnit;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -47,10 +61,17 @@ import org.springframework.test.context.DynamicPropertySource;
  *
  * <p>{@code metric_rollup} carries one row per (project, unit, bucket), and the only two units with
  * a live producer are {@code ingested_spans} and {@code l1_evals}, which is what this test covers.
- * Live LLM spend is read from the {@code llm_call} ledger, never covered here.
+ *
+ * <p>Live LLM spend is read from the {@code llm_call} ledger rather than the rollup. The ledger tests
+ * below seed a fixed window of calls across two projects of one org (plus one call outside the window
+ * and one in another org) and read it through {@code BillingController}, so the SQL, the org scoping and
+ * the wire mapping are exercised together.
  */
 @SpringBootTest
 class MeteringIntegrationTest {
+
+    // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
+    private static final String SUBJECT_KIND = "behavior_finding";
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
@@ -86,6 +107,12 @@ class MeteringIntegrationTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    LlmCallWriteRepository llmCalls;
+
+    @Autowired
+    BillingController billing;
 
     private SubstrateV2Fixtures fx;
 
@@ -365,5 +392,270 @@ class MeteringIntegrationTest {
                 .param("conf", Detection.Confidence.HIGH)
                 .param("at", at)
                 .update();
+    }
+
+    // ---- the llm_call ledger, read through the billing endpoints --------------------------------------
+
+    /** The ledger window every ledger test reads: two whole UTC days. */
+    private static final String DAY_1 = "2026-03-10T00:00:00Z";
+
+    private static final String DAY_2 = "2026-03-11T00:00:00Z";
+
+    private static final String WINDOW_END = "2026-03-12T00:00:00Z";
+
+    /** The seeded org: an owner, and the two projects its calls are split across. */
+    private record Ledger(TenantContext owner, String orgSlug, Project p1, Project p2) {}
+
+    /**
+     * Four calls in the window, split so every axis has two keys:
+     *
+     * <ul>
+     *   <li>day 1, p1, lane triage, model m-1, platform-funded: 100 in + 50 out, $0.10, ruling on finding F1
+     *   <li>day 1, p1, lane triage, model m-1, BYO: 200 in + 100 out + 10 cache read + 5 cache write, $0.20, F1
+     *       again (a re-triage)
+     *   <li>day 2, p2, lane observer (no {@code ModelLane}), no model, BYO: 1000 in, unpriced
+     *   <li>day 2, p1, lane triage, model m-1, BYO: 10 in + 10 out, $0.05, ruling on finding F2
+     * </ul>
+     *
+     * plus one p1 call after the window and one call in another org inside it, which no read may count.
+     */
+    private Ledger seedLedger() {
+        var fix = TenantFixture.bootstrap(tenants, "ledger");
+        Project p1 = fix.project();
+        Project p2 = tenants.createProject(fix.org().id(), "ledger-second", null);
+        call(p1.id(), "triage", "m-1", "platform", 100, 50, 0, 0, "0.10", "F1", "2026-03-10T01:00:00Z");
+        call(p1.id(), "triage", "m-1", "byo", 200, 100, 10, 5, "0.20", "F1", "2026-03-10T02:00:00Z");
+        call(p2.id(), "observer", null, "byo", 1000, 0, 0, 0, null, null, "2026-03-11T03:00:00Z");
+        call(p1.id(), "triage", "m-1", "byo", 10, 10, 0, 0, "0.05", "F2", "2026-03-11T04:00:00Z");
+        call(p1.id(), "triage", "m-1", "byo", 7, 7, 0, 0, "9.00", "F3", "2026-03-15T00:00:00Z");
+        String otherOrgProject =
+                TenantFixture.bootstrap(tenants, "ledger-other").project().id();
+        call(otherOrgProject, "triage", "m-1", "byo", 5, 5, 0, 0, "7.00", "F4", "2026-03-10T05:00:00Z");
+        TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        return new Ledger(owner, fix.org().slug(), p1, p2);
+    }
+
+    private void call(
+            String projectId,
+            String lane,
+            @Nullable String model,
+            String funding,
+            int in,
+            int out,
+            int cacheRead,
+            int cacheWrite,
+            @Nullable String cost,
+            @Nullable String findingId,
+            String at) {
+        llmCalls.insert(new LlmCallRow(
+                Ids.ulid(),
+                projectId,
+                lane,
+                model,
+                null,
+                funding,
+                in,
+                out,
+                cacheRead,
+                cacheWrite,
+                cost == null ? null : new BigDecimal(cost),
+                null,
+                null,
+                findingId == null ? null : SUBJECT_KIND,
+                findingId,
+                at));
+    }
+
+    private static LlmUsageSliceView slice(
+            String key,
+            @Nullable String label,
+            long calls,
+            long in,
+            long out,
+            long cacheRead,
+            long cacheWrite,
+            String cost,
+            String platform,
+            String byo,
+            long unpriced) {
+        return new LlmUsageSliceView(
+                key,
+                label,
+                calls,
+                in,
+                out,
+                cacheRead,
+                cacheWrite,
+                in + out + cacheRead + cacheWrite,
+                new BigDecimal(cost),
+                new BigDecimal(platform),
+                new BigDecimal(byo),
+                unpriced);
+    }
+
+    private static LlmUsageCellView cell(
+            String bucket,
+            String key,
+            @Nullable String label,
+            long calls,
+            long in,
+            long out,
+            long cr,
+            long cw,
+            String cost) {
+        return new LlmUsageCellView(
+                bucket, key, label, calls, in, out, cr, cw, in + out + cr + cw, new BigDecimal(cost));
+    }
+
+    /** The whole window: four calls, $0.35 priced (0.10 platform, 0.25 BYO), one call unpriced. */
+    private static LlmUsageSliceView windowTotal() {
+        return slice("", null, 4, 1310, 160, 10, 5, "0.3500000000", "0.1000000000", "0.2500000000", 1);
+    }
+
+    /** The p1 / triage / m-1 calls: three calls, $0.35, all priced. */
+    private static LlmUsageSliceView triageSide(String key, @Nullable String label) {
+        return slice(key, label, 3, 310, 160, 10, 5, "0.3500000000", "0.1000000000", "0.2500000000", 0);
+    }
+
+    /** The one p2 / observer / no-model call: unpriced, so it adds tokens and a blind spot, never cost. */
+    private static LlmUsageSliceView observerSide(String key, @Nullable String label) {
+        return slice(key, label, 1, 1000, 0, 0, 0, "0", "0", "0", 1);
+    }
+
+    /**
+     * The breakdown behind the {@code llm_tokens} bill: one org total and the same calls cut by lane, project
+     * and model, busiest first, with the four token buckets and the two funding sides kept apart. Only this
+     * org's calls inside {@code [from, to)} count; the unpriced call adds to {@code unpriced_calls} rather than
+     * reading as free; a call that reported no model groups under the empty key; an unknown lane keeps its row.
+     */
+    @Test
+    void theLedgerBreakdownCutsTheOrgsWindowByLaneProjectAndModel() {
+        Ledger l = seedLedger();
+
+        LlmUsageView view =
+                billing.getLlmUsage(l.owner(), l.orgSlug(), DAY_1, WINDOW_END).data();
+
+        assertEquals(
+                new LlmUsageView(
+                        DAY_1,
+                        WINDOW_END,
+                        view.asOf(),
+                        windowTotal(),
+                        List.of(observerSide("observer", null), triageSide("triage", "Triage")),
+                        List.of(observerSide(l.p2().id(), l.p2().name()), triageSide(l.p1().id(), l.p1().name())),
+                        List.of(observerSide("", null), triageSide("m-1", null))),
+                view);
+    }
+
+    /**
+     * The usage chart: the full bucket axis over the window and one cell per non-empty (bucket, series), cut by
+     * each grouping and narrowed by each filter. The week grain buckets on the ISO Monday (2026-03-10 is a
+     * Tuesday, so its week starts 2026-03-09); a filter on the empty model key matches the call that reported
+     * no model; the headline total always covers the same filtered window as the bars.
+     */
+    @Test
+    void theLedgerSeriesBucketsTheWindowByEveryGrainAndGrouping() {
+        Ledger l = seedLedger();
+
+        LlmUsageSeriesView byProject = billing.getLlmUsageSeries(
+                        l.owner(), l.orgSlug(), DAY_1, WINDOW_END, "day", "project", null, null, null)
+                .data();
+        assertEquals(
+                new LlmUsageSeriesView(
+                        DAY_1,
+                        WINDOW_END,
+                        "day",
+                        "project",
+                        byProject.asOf(),
+                        windowTotal(),
+                        List.of(DAY_1, DAY_2),
+                        List.of(
+                                cell(DAY_1, l.p1().id(), l.p1().name(), 2, 300, 150, 10, 5, "0.3000000000"),
+                                cell(DAY_2, l.p2().id(), l.p2().name(), 1, 1000, 0, 0, 0, "0"),
+                                cell(DAY_2, l.p1().id(), l.p1().name(), 1, 10, 10, 0, 0, "0.0500000000"))),
+                byProject);
+
+        LlmUsageSeriesView triageByModelWeekly = billing.getLlmUsageSeries(
+                        l.owner(), l.orgSlug(), DAY_1, WINDOW_END, "week", "model", "triage", null, null)
+                .data();
+        assertEquals(List.of("2026-03-09T00:00:00Z"), triageByModelWeekly.buckets());
+        assertEquals(
+                List.of(cell("2026-03-09T00:00:00Z", "m-1", null, 3, 310, 160, 10, 5, "0.3500000000")),
+                triageByModelWeekly.cells());
+        assertEquals(triageSide("", null), triageByModelWeekly.total());
+
+        LlmUsageSeriesView noModelByLaneHourly = billing.getLlmUsageSeries(
+                        l.owner(), l.orgSlug(), DAY_1, WINDOW_END, "hour", "lane", null, null, "")
+                .data();
+        assertEquals(48, noModelByLaneHourly.buckets().size(), "two days of hours, empty ones included");
+        assertEquals(DAY_1, noModelByLaneHourly.buckets().get(0));
+        assertEquals("2026-03-11T23:00:00Z", noModelByLaneHourly.buckets().get(47));
+        assertEquals(
+                List.of(cell("2026-03-11T03:00:00Z", "observer", null, 1, 1000, 0, 0, 0, "0")),
+                noModelByLaneHourly.cells());
+        assertEquals(observerSide("", null), noModelByLaneHourly.total());
+
+        LlmUsageSeriesView p2Default = billing.getLlmUsageSeries(
+                        l.owner(), l.orgSlug(), DAY_1, WINDOW_END, null, null, null, l.p2().id(), null)
+                .data();
+        assertEquals("day", p2Default.grain());
+        assertEquals("none", p2Default.grouping());
+        assertEquals(List.of(cell(DAY_2, "", null, 1, 1000, 0, 0, 0, "0")), p2Default.cells());
+    }
+
+    /**
+     * The per-ruling triage spend: the triage lane's cost over its run count ($0.35 over three runs is
+     * $0.116667, half-up), and the rulings listed costliest first with a re-triaged finding's two runs summed.
+     * {@code limit} is clamped to at least one, so {@code limit=0} lists the costliest ruling instead of
+     * nothing, while the aggregate still covers the whole window.
+     */
+    @Test
+    void theTriageSpendPricesOneRulingAndListsTheCostliestFirst() {
+        Ledger l = seedLedger();
+
+        TriageSpendView all = billing.getTriageSpend(l.owner(), l.orgSlug(), DAY_1, WINDOW_END, 50)
+                .data();
+        TriageSpendView clamped = billing.getTriageSpend(l.owner(), l.orgSlug(), DAY_1, WINDOW_END, 0)
+                .data();
+
+        TriageSpendRowView f1 =
+                new TriageSpendRowView("F1", 2, 465, new BigDecimal("0.3000000000"), 0, "2026-03-10T02:00:00Z");
+        TriageSpendRowView f2 =
+                new TriageSpendRowView("F2", 1, 20, new BigDecimal("0.0500000000"), 0, "2026-03-11T04:00:00Z");
+        assertEquals(
+                new TriageSpendView(
+                        DAY_1,
+                        WINDOW_END,
+                        all.asOf(),
+                        3,
+                        new BigDecimal("0.3500000000"),
+                        new BigDecimal("0.116667"),
+                        0,
+                        List.of(f1, f2)),
+                all);
+        assertEquals(List.of(f1), clamped.byRuling());
+        assertEquals(3, clamped.rulings(), "a truncated list must not truncate the aggregate");
+    }
+
+    /**
+     * The billing summary totals the org's rollups at the HOUR grain only. The day rows re-aggregate the same
+     * producer rows as the hours beside them, so a grain-agnostic total would bill the same spans twice.
+     */
+    @Test
+    void theBillingSummaryTotalsTheHourGrainOnly() {
+        var fix = TenantFixture.bootstrap(tenants, "billing-summary");
+        String orgId = fix.org().id();
+        String pid = fix.project().id();
+        String now = Instant.now().toString();
+        rollups.upsert(MetricRollupRow.of(
+                Ids.ulid(), orgId, pid, UsageUnit.INGESTED_SPANS.wire(), 5, "2026-03-10T01:00:00Z", "hour", now));
+        rollups.upsert(MetricRollupRow.of(
+                Ids.ulid(), orgId, pid, UsageUnit.INGESTED_SPANS.wire(), 7, "2026-03-10T00:00:00Z", "day", now));
+        TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+
+        var summary =
+                billing.getBilling(owner, fix.org().slug(), DAY_1, WINDOW_END).data();
+
+        assertEquals(List.of(new UsageLine(UsageUnit.INGESTED_SPANS.wire(), 5)), summary.usage());
     }
 }

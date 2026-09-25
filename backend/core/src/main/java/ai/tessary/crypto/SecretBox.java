@@ -7,8 +7,9 @@ import static ai.tessary.crypto.CryptoConstants.TAG_BITS;
 import static ai.tessary.crypto.CryptoConstants.XFORM;
 
 import ai.tessary.config.TessaryProperties;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
+import ai.tessary.open.hash.Sha256;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -61,25 +62,27 @@ public final class SecretBox {
 
     public String fingerprint() {
         if (key == null) return "(unset)";
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(key);
-            return HexFormat.of().formatHex(hash, 0, 4);
-        } catch (Exception e) {
-            return "(error)";
-        }
+        return HexFormat.of().formatHex(Sha256.digest(key), 0, 4);
     }
 
     public String seal(String plaintext) {
         byte[] k = requireKey();
+        byte[] iv = new byte[IV_LEN];
+        rng.nextBytes(iv);
+        byte[] ct = encrypt(k, iv, plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ByteBuffer buf = ByteBuffer.allocate(iv.length + ct.length);
+        buf.put(iv).put(ct);
+        return Base64.getEncoder().encodeToString(buf.array());
+    }
+
+    @ExcludeFromJacocoGeneratedReport(
+            "AES/GCM is required of every Java platform and the key is checked to be 32 bytes at construction,"
+                    + " so the catch cannot fire")
+    private static byte[] encrypt(byte[] k, byte[] iv, byte[] plaintext) {
         try {
-            byte[] iv = new byte[IV_LEN];
-            rng.nextBytes(iv);
             Cipher c = Cipher.getInstance(XFORM);
             c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(k, ALG), new GCMParameterSpec(TAG_BITS, iv));
-            byte[] ct = c.doFinal(plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            ByteBuffer buf = ByteBuffer.allocate(iv.length + ct.length);
-            buf.put(iv).put(ct);
-            return Base64.getEncoder().encodeToString(buf.array());
+            return c.doFinal(plaintext);
         } catch (Exception e) {
             throw new IllegalStateException("SecretBox.seal failed", e);
         }
