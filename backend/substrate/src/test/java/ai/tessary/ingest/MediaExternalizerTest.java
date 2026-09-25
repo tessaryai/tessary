@@ -19,6 +19,8 @@ import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -156,5 +158,47 @@ class MediaExternalizerTest {
         MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
         assertSame(json, result.payload(), "a payload with no inline base64 is returned byte-identical");
         verify(media, never()).put(anyString(), any(), anyString());
+    }
+
+    /**
+     * A media part that points at a URL, or whose inline bytes do not decode, has nothing to store: the
+     * payload is kept byte for byte and names no media, rather than failing the span or storing garbage.
+     */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "[{\"type\":\"image\",\"source\":{\"type\":\"url\",\"url\":\"https://x.test/a.png\"}}]",
+                "[{\"type\":\"document\",\"source\":{\"type\":\"url\",\"url\":\"https://x.test/a.pdf\"}}]",
+                "[{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"data\":\"!!not base64!!\"}}]",
+                "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,@@@\"}}]",
+                "[{\"type\":\"input_image\",\"url\":\"https://x.test/b.png\"}]"
+            })
+    void mediaWithNothingToStore_isLeftInline(String json) {
+        assertEquals(MediaExternalizer.Externalized.unchanged(json), externalizer.externalizeJson("p1", json));
+    }
+
+    /** OpenAI also sends {@code image_url} as a bare string; its data URI is externalized all the same. */
+    @Test
+    void openAiBareStringImageUrl_becomesImageRef() throws Exception {
+        String dataUri = "data:image/gif;base64," + Base64.getEncoder().encodeToString(new byte[] {5, 6});
+        String json = "[{\"type\":\"image_url\",\"image_url\":\"" + dataUri + "\"}]";
+
+        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
+
+        var node =
+                M.readTree(java.util.Objects.requireNonNull(result.payload())).get(0);
+        assertEquals("image_ref", node.path("type").asText());
+        assertEquals("image/gif", node.path("mediaType").asText());
+        assertEquals(List.of("media-1"), result.mediaIds());
+    }
+
+    /** A media store that is down costs the span its externalization, not the span itself. */
+    @Test
+    void aFailingStore_leavesTheMediaInlineAndNamesNoMedia() {
+        when(media.put(anyString(), any(), anyString())).thenThrow(new IllegalStateException("bucket unreachable"));
+        String json = "[{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"data\":\""
+                + Base64.getEncoder().encodeToString(new byte[] {1, 2}) + "\"}}]";
+
+        assertEquals(MediaExternalizer.Externalized.unchanged(json), externalizer.externalizeJson("p1", json));
     }
 }

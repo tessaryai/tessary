@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
@@ -25,6 +26,8 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
@@ -355,6 +358,53 @@ class TracesControllerTest {
     }
 
     /** Roll one trace up synchronously — the scheduler is off in this context, so nothing races it. */
+    @Test
+    @DisplayName("a trace opens with each tool call and retrieved document on the span that made it")
+    void detailHangsEachToolCallAndDocumentOffItsOwnSpan() {
+        Tenant t = tenant("traces-api-side-tables");
+        var seeds = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        Instant t0 = Instant.parse("2026-06-20T12:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow root = fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(3));
+        SpanRow tool =
+                fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "tool", t0.plusSeconds(1), null);
+        SpanRow retrieval = fx.span(
+                t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "retriever", t0.plusSeconds(2), null);
+        seeds.toolCall(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, tool.id()), "search", "Timeout", t0);
+        seeds.retrievedDoc(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, retrieval.id()), "passage", 1, null, t0);
+        rollUp(t.pid(), traceId, t0);
+
+        var detail = ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId));
+
+        assertEquals(
+                List.of(root.id(), tool.id(), retrieval.id()),
+                detail.spans().stream().map(TracesController.SpanView::id).toList());
+        assertEquals(List.of(), detail.spans().get(0).toolCalls());
+        assertEquals(List.of(), detail.spans().get(0).retrievalDocuments());
+        assertEquals(
+                List.of(new TracesController.ToolCallView("search", null, null, "Timeout", null, null)),
+                detail.spans().get(1).toolCalls());
+        assertEquals(
+                List.of(new TracesController.RetrievalDocumentView(null, null, "passage", null)),
+                detail.spans().get(2).retrievalDocuments());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{not json", "[1, 2]"})
+    @DisplayName("a payload whose attribute bag is not a JSON object renders the span without attributes")
+    void aSpanWhosePayloadAttributesAreNotAnObjectStillRenders(String attributes) {
+        SpanRow span = SubstrateV2Fixtures.spanRow(
+                "p", "t", "s", null, "llm", "2026-06-20T12:00:00Z", null, "2026-06-20T12:00:00Z");
+        var view = TracesController.toSpan(
+                span,
+                new SpanPayloadRow("p", "t", "s", "in", "out", attributes, null, "2026-06-20T12:00:00Z", null),
+                List.of(),
+                List.of());
+        assertNull(view.attributes(), "the attribute bag is not an object to show");
+        assertEquals("in", view.input(), "the rest of the payload still renders");
+        assertTrue(view.payloadAvailable());
+    }
+
     private void rollUp(String pid, String traceId, Instant startedAt) {
         traces.applyBatchTimers(
                 pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));

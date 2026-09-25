@@ -128,17 +128,13 @@ public final class InProcessSpool implements IngestSpool {
     }
 
     /**
-     * Take {@code bytes} out of the budget, or refuse. A CAS loop rather than a read-then-add: two
+     * Take {@code bytes} out of the budget, or refuse. One atomic update rather than a read-then-add: two
      * producers reading the same headroom and both adding would both be admitted, and the queue would
      * settle above its ceiling by however much the losing thread reserved.
      */
     private boolean reserve(long bytes) {
-        while (true) {
-            long current = queuedBytes.get();
-            long next = current + bytes;
-            if (next > maxQueueBytes) return false;
-            if (queuedBytes.compareAndSet(current, next)) return true;
-        }
+        long before = queuedBytes.getAndUpdate(current -> current + bytes > maxQueueBytes ? current : current + bytes);
+        return before + bytes <= maxQueueBytes;
     }
 
     /**

@@ -73,6 +73,9 @@ class VitalsServiceIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    VitalsController controller;
+
     private SubstrateV2Fixtures fx;
 
     /** Comfortably inside the default 7-day window, and far from any boundary. */
@@ -225,6 +228,40 @@ class VitalsServiceIntegrationTest {
                 groupFor(v, "cs-hanging").duration().unterminated(),
                 "the hanging call site owns both, on its own row");
         assertEquals(0, groupFor(v, "cs-healthy").duration().unterminated(), "the healthy one owns none");
+    }
+
+    /**
+     * The dashboard read groups by the dimension asked for, in any case, falls back to call sites for one
+     * it does not know rather than failing, and keeps its window between one day and the maximum.
+     */
+    @Test
+    void theVitalsReadGroupsByTheAskedDimensionAndClampsItsWindow() {
+        var fix = TenantFixture.bootstrap(tenants, "vitals-api");
+        var ctx = new ai.tessary.auth.TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String org = fix.org().slug();
+        String proj = fix.project().slug();
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.spanSeed(fix.project().id())
+                .traceId(traceId)
+                .kind("llm")
+                .at(RAN)
+                .endedAt(RAN.plusSeconds(1))
+                .model("gpt-4o")
+                .usage(10L, 5L)
+                .write();
+        settle(fix.project().id(), traceId, RAN, RAN.plusSeconds(1));
+
+        Vitals byModel = java.util.Objects.requireNonNull(
+                controller.vitals(ctx, org, proj, 0, " Model ").data());
+        assertEquals("model", byModel.dimension());
+        assertEquals(
+                List.of("gpt-4o"), byModel.groups().stream().map(Group::key).toList());
+        assertEquals(1, byModel.window().days(), "a window under a day is a day");
+
+        Vitals fallback = java.util.Objects.requireNonNull(
+                controller.vitals(ctx, org, proj, 10_000, "intent").data());
+        assertEquals("call_site", fallback.dimension());
+        assertEquals(VitalsService.MAX_WINDOW_DAYS, fallback.window().days());
     }
 
     // ---- fixtures -----------------------------------------------------------------------------

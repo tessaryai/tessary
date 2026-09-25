@@ -2,6 +2,7 @@
 package ai.tessary.pricing;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -61,11 +63,20 @@ public class ModelResolver {
 
     private final PriceBookRepository books;
 
+    private final Clock clock;
+
     private volatile CacheCreationMemo memo =
             new CacheCreationMemo(List.of(), Instant.EPOCH, new ConcurrentHashMap<>());
 
+    @Autowired
     public ModelResolver(PriceBookRepository books) {
+        this(books, Clock.systemUTC());
+    }
+
+    /** The clock as a seam, so a test can step past the books recheck without waiting it out. */
+    ModelResolver(PriceBookRepository books, Clock clock) {
         this.books = books;
+        this.clock = clock;
     }
 
     /**
@@ -148,7 +159,7 @@ public class ModelResolver {
 
     private CacheCreationMemo currentMemo() {
         CacheCreationMemo current = memo;
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         if (now.isBefore(current.checkedAt().plus(BOOKS_RECHECK))) return current;
         List<String> inForce =
                 books.currentBooks().stream().map(PriceBook::version).toList();

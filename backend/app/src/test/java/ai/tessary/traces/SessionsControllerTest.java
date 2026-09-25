@@ -8,16 +8,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.storage.RetrievedDocRepository;
+import ai.tessary.storage.RetrievedDocRow;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.SpanRow;
+import ai.tessary.storage.ToolCallRepository;
+import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.storage.TraceV2Row;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +79,12 @@ class SessionsControllerTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    ToolCallRepository toolCalls;
+
+    @Autowired
+    RetrievedDocRepository retrievedDocs;
 
     private SubstrateV2Fixtures fx;
     private TenantContext ctx;
@@ -264,6 +277,200 @@ class SessionsControllerTest {
                 params.stream().noneMatch(p -> p.contains("sort") || p.contains("cost") || p.contains("token")),
                 "sessions carry no rollup; ordering them by a summed quantity needs a materialization with "
                         + "its own staleness contract, not a request parameter. Parameters were: " + params);
+    }
+
+    @Test
+    @DisplayName(
+            "a session's spans come back across all its traces, each carrying only its own tool calls and documents")
+    void spansAssembleEverySpanOfTheSessionWithItsOwnSideTableRows() {
+        Instant t0 = Instant.parse("2026-08-12T11:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String first = SubstrateV2Fixtures.traceId();
+        String second = SubstrateV2Fixtures.traceId();
+        String outside = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, first, sessionId, t0);
+        fx.trace(pid, second, sessionId, t0.plusSeconds(60));
+        SpanRow llm = fx.span(pid, first, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        SpanRow tool = fx.span(pid, first, SubstrateV2Fixtures.spanId(), llm.id(), "tool", t0.plusSeconds(2), null);
+        SpanRow retrieval =
+                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "retriever", t0.plusSeconds(60), null);
+        SpanRow stranger = fx.span(pid, outside, SubstrateV2Fixtures.spanId(), null, "tool", t0, null);
+        fx.payload(llm, "hi", "hello", null);
+
+        String at = t0.plusSeconds(2).toString();
+        toolCalls.insertAll(List.of(
+                new ToolCallRow(
+                        "tc-s1-" + tool.id(),
+                        pid,
+                        "search",
+                        null,
+                        null,
+                        null,
+                        "{\"q\": \"x\"}",
+                        "raw-ignored",
+                        "{\"ok\": true}",
+                        "Timeout",
+                        null,
+                        true,
+                        2,
+                        40L,
+                        null,
+                        at,
+                        false,
+                        null,
+                        at,
+                        at,
+                        first,
+                        tool.id()),
+                new ToolCallRow(
+                        "tc-s2-" + tool.id(),
+                        pid,
+                        "fetch",
+                        null,
+                        null,
+                        null,
+                        null,
+                        "url=a",
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null,
+                        at,
+                        false,
+                        null,
+                        t0.plusSeconds(3).toString(),
+                        at,
+                        first,
+                        tool.id()),
+                new ToolCallRow(
+                        "tc-s3-" + stranger.id(),
+                        pid,
+                        "elsewhere",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null,
+                        at,
+                        false,
+                        null,
+                        at,
+                        at,
+                        outside,
+                        stranger.id())));
+        retrievedDocs.insertAll(List.of(new RetrievedDocRow(
+                "rd-s1-" + retrieval.id(),
+                pid,
+                0,
+                "result",
+                1,
+                "doc-7",
+                null,
+                "passage",
+                0.5,
+                null,
+                null,
+                null,
+                null,
+                at,
+                false,
+                at,
+                second,
+                retrieval.id())));
+
+        var got = ok(controller.spans(ctx, org, proj, sessionId));
+
+        assertEquals(
+                List.of(llm.id(), tool.id(), retrieval.id()),
+                got.spans().stream().map(TracesController.SpanView::id).toList(),
+                "every span of both session traces, oldest first, and none of a trace outside the session");
+        assertEquals(false, got.spansTruncated());
+        var llmView = got.spans().get(0);
+        assertEquals("hi", llmView.input(), "the payload is joined onto its own span");
+        assertEquals(List.of(), llmView.toolCalls());
+        assertEquals(
+                List.of(
+                        new TracesController.ToolCallView(
+                                "search", "{\"q\": \"x\"}", "{\"ok\": true}", "Timeout", 2, 40L),
+                        new TracesController.ToolCallView("fetch", "url=a", null, null, null, null)),
+                got.spans().get(1).toolCalls(),
+                "structured args win over the raw string, and the raw string stands in when there are none");
+        assertEquals(List.of(), got.spans().get(1).retrievalDocuments());
+        assertEquals(
+                List.of(new TracesController.RetrievalDocumentView(0, "doc-7", "passage", 0.5)),
+                got.spans().get(2).retrievalDocuments());
+
+        String empty = SubstrateV2Fixtures.sessionId();
+        fx.session(pid, empty, t0);
+        assertEquals(
+                new SessionDtos.SessionSpans(List.of(), false),
+                ok(controller.spans(ctx, org, proj, empty)),
+                "a session whose traces are gone is an empty read, not a missing session");
+        assertEquals(
+                HttpStatus.NOT_FOUND,
+                assertThrows(ResponseStatusException.class, () -> controller.spans(ctx, org, proj, "no-such-session"))
+                        .getStatusCode());
+    }
+
+    @Test
+    @DisplayName("a session over the trace and span caps returns the first slice of each and says it was cut")
+    void sessionReadsCapTracesAndSpansAndSayTheyDid() {
+        // Recent, so the retention sweep ticking in this shared context has nothing here to age out.
+        Instant t0 =
+                Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(7200);
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        fx.session(pid, sessionId, t0);
+        int cap = SessionReadService.SESSION_TRACE_CAP;
+        List<TraceV2Row> traceRows = new ArrayList<>();
+        List<SpanRow> spanRows = new ArrayList<>();
+        // Ids minted here rather than by the fixture: its counter-derived ids repeat within a few thousand
+        // draws, and a repeated id would quietly merge two of these rows into one.
+        for (int i = 0; i <= cap; i++) {
+            String traceId = java.util.UUID.randomUUID().toString().replace("-", "");
+            String startedAt = t0.plusSeconds(i).toString();
+            traceRows.add(TraceV2Row.of(pid, traceId, sessionId, null, null, null, null, startedAt, startedAt));
+            // Five spans for each of the first thousand traces is exactly the span cap; one more on the
+            // oldest pushes the capped traces over it. The trimmed newest trace's one span starts before
+            // all of them, so a span read that was not narrowed to the capped traces would put it first.
+            int spansHere = i == cap ? 1 : i == 0 ? 6 : 5;
+            for (int k = 0; k < spansHere; k++) {
+                String spanAt =
+                        (i == cap ? t0.minusSeconds(1) : t0.plusSeconds(i).plusMillis(k)).toString();
+                spanRows.add(SubstrateV2Fixtures.spanRow(
+                        pid,
+                        traceId,
+                        String.format(java.util.Locale.ROOT, "%016x", k),
+                        null,
+                        "llm",
+                        spanAt,
+                        null,
+                        spanAt));
+            }
+        }
+        traces.getOrCreateAll(traceRows);
+        spans.upsertAll(spanRows);
+        String trimmedTrace = traceRows.get(cap).id();
+
+        var detail = ok(controller.detail(ctx, org, proj, sessionId));
+        assertEquals(cap, detail.traces().size());
+        assertTrue(detail.tracesTruncated(), "one trace past the cap is a truncated session, not a full one");
+
+        var got = ok(controller.spans(ctx, org, proj, sessionId));
+        assertEquals(SessionReadService.SESSION_SPAN_CAP, got.spans().size());
+        assertTrue(got.spansTruncated(), "one span past the cap is a truncated read, not a full one");
+        assertTrue(
+                got.spans().stream().noneMatch(s -> trimmedTrace.equals(s.traceId())),
+                "the spans describe the same capped traces the detail read lists");
     }
 
     private void rollUp(String traceId, Instant startedAt) {

@@ -170,9 +170,11 @@ public class VitalsRepository {
      * bucket here and the two must agree regardless.
      */
     public List<UnterminatedRow> unterminatedTurnsIn(String projectId, Instant from, Instant to, Dimension by) {
+        // The model view buckets every turn as unattributed (see turnDurationsIn). Cast, not a bare literal:
+        // Postgres refuses a non-integer constant in GROUP BY, and it reads the cast as an expression.
         String dim = by == Dimension.CALL_SITE
                 ? "COALESCE(t.call_site_id, '" + UNATTRIBUTED + "')"
-                : "'" + UNATTRIBUTED + "'";
+                : "CAST('" + UNATTRIBUTED + "' AS text)";
         return jdbc.sql("SELECT " + dim + " AS dim, GROUPING(" + dim + ") AS is_total,"
                         + " COUNT(*) AS turns"
                         + " FROM trace t"

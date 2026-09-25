@@ -16,6 +16,8 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Properties of the checked-in rate files themselves, asserted against the whole artifact rather than one
@@ -126,6 +128,21 @@ class PriceSnapshotTest {
     void load_missingResourceIsEmpty() {
         Optional<PriceSnapshot> missing = PriceSnapshot.load(mapper, PriceBook.SOURCE_LITELLM, "pricing/absent.json");
         assertTrue(missing.isEmpty(), "a missing book leaves models unpriced; it must not throw");
+    }
+
+    /**
+     * Rate bytes that are not a JSON object (a fetched error page, a truncated download, a bare list) are
+     * an empty book, not a boot failure and not a book of zero-priced models.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"claude-x\": {", "[1, 2]", "null", ""})
+    void parse_bytesThatAreNotAJsonObjectAreEmpty(String body) {
+        assertTrue(PriceSnapshot.parse(
+                        mapper,
+                        PriceBook.SOURCE_LITELLM,
+                        body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        "https://example.test/prices.json")
+                .isEmpty());
     }
 
     private static BigDecimal requireRate(@Nullable BigDecimal rate) {
