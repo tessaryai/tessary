@@ -43,7 +43,8 @@ class FrustrationTurnBuilderTest {
 
     private static Optional<TurnState> build(Caps caps, SubstrateObservation... chronological) {
         List<SubstrateObservation> earlier = List.of(chronological).subList(0, chronological.length - 1);
-        int turns = (int) earlier.stream().map(SubstrateObservation::traceId).distinct().count();
+        int turns = (int)
+                earlier.stream().map(SubstrateObservation::traceId).distinct().count();
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
         when(substrate.priorTurns(anyString(), anyString(), anyInt()))
                 .thenReturn(new SubstrateReadRepository.PriorTurns(earlier, turns));

@@ -165,7 +165,8 @@ class ConversationThreadAssemblerIntegrationTest {
 
     @Test
     void aTurnThatRanManyToolsStillLeavesItsMessages() {
-        String pid = TenantFixture.bootstrap(tenants, "thread-busy-turn").project().id();
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-busy-turn").project().id();
         Instant base = Instant.now();
         String sessionId = SubstrateV2Fixtures.sessionId();
 
@@ -183,7 +184,8 @@ class ConversationThreadAssemblerIntegrationTest {
         }
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
 
-        StructuredThread thread = assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
+        StructuredThread thread =
+                assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
 
         assertEquals(List.of("deploy the app", "On it.", "still failing", "Fixed it."), texts(thread));
     }
@@ -199,15 +201,17 @@ class ConversationThreadAssemblerIntegrationTest {
         }
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(51_000), user("nevermind"), null);
 
-        FrustrationTurnBuilder.EligibleTurn turn =
-                new FrustrationTurnBuilder(assembler).buildTurn(scored(pid, scoredRef)).orElseThrow();
+        FrustrationTurnBuilder.EligibleTurn turn = new FrustrationTurnBuilder(assembler)
+                .buildTurn(scored(pid, scoredRef))
+                .orElseThrow();
 
         assertEquals(51, turn.userTurn());
     }
 
     @Test
     void aSubAgentTraceIsNotPartOfTheReply() {
-        String pid = TenantFixture.bootstrap(tenants, "thread-sub-agent").project().id();
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-sub-agent").project().id();
         Instant base = Instant.now();
         String sessionId = SubstrateV2Fixtures.sessionId();
 
@@ -223,14 +227,16 @@ class ConversationThreadAssemblerIntegrationTest {
                 .update();
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
 
-        StructuredThread thread = assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
+        StructuredThread thread =
+                assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
 
         assertEquals(List.of("deploy the app", "On it.", "still failing", "Let me retry."), texts(thread));
     }
 
     @Test
     void aReplyWithNoUserMessageBeforeItMakesTheTurnIneligible() {
-        String pid = TenantFixture.bootstrap(tenants, "thread-no-user").project().id();
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-no-user").project().id();
         Instant base = Instant.now();
         String sessionId = SubstrateV2Fixtures.sessionId();
 

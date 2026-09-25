@@ -590,7 +590,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                    AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
                    AND (t.started_at, t.id) < (f.started_at, f.id)
                 WHERE f.project_id = :pid AND f.id = :scoredTraceId""";
-        List<SubstrateObservation> spans = jdbc.sql("WITH turns AS MATERIALIZED (SELECT t.id " + earlier + """
+        List<SubstrateObservation> spans = jdbc.sql(
+                        "WITH turns AS MATERIALIZED (SELECT t.id " + earlier + """
 
                           ORDER BY t.started_at DESC, t.id DESC
                           LIMIT :turns)
