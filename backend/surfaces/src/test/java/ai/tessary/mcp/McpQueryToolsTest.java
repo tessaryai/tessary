@@ -40,6 +40,8 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Unit-level behaviour of the aggregation-first query MCP tools: the four tools delegate to
@@ -534,5 +536,68 @@ class McpQueryToolsTest {
     void nonObjectFiltersIsToolError() throws Exception {
         String text = errorText(callTool("query_count", "{\"dataset\":\"spans\",\"filters\":\"oops\"}"));
         assertTrue(text.contains("filters"), text);
+    }
+
+    /**
+     * Every argument-shape check names the argument and the shape it wanted. A wrongly-typed argument that
+     * slipped through would reach the service as a {@code ClassCastException} (a -32603 the agent cannot act on)
+     * or, worse, be silently dropped so the call answers a different question than the one asked.
+     */
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "query_count | {\"dataset\":5} | argument dataset must be a string",
+                "query_facets | {\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":\"10\"}"
+                        + " | argument top_n must be an integer",
+                "query_count | {\"dataset\":\"spans\",\"range\":\"yesterday\"}"
+                        + " | argument range must be an object with optional from/to",
+                "query_count | {\"dataset\":\"spans\",\"range\":{\"from\":5}} | range.from must be a string",
+                "query_count | {\"dataset\":\"spans\",\"filters\":{\"kind\":5}}"
+                        + " | filters entries must be string field->value pairs",
+                "get_finding_evidence | {\"finding_id\":\"f-1\",\"count_only\":\"yes\"}"
+                        + " | argument count_only must be a boolean",
+                "get_trace | {\"trace_id\":\"t-1\",\"fields\":\"payload\"}"
+                        + " | argument fields must be an array of strings, e.g. [\"payload\"]",
+            })
+    void aWronglyTypedArgumentIsAToolErrorNamingIt(String tool, String argsJson, String expected) throws Exception {
+        assertEquals(expected, errorText(callTool(tool, argsJson)));
+    }
+
+    /**
+     * A JSON number with a fraction ({@code 10.0}, which a model often emits) is accepted as the integer it
+     * denotes rather than refused or dropped: the facet read still asks for the top ten.
+     */
+    @Test
+    void aNonIntegerJsonNumberIsReadAsItsIntegerValue() throws Exception {
+        when(queryService.facets(PROJECT_ID, new FacetsRequest("spans", "kind", null, Map.of(), 10)))
+                .thenReturn(List.of(new QueryRepository.Facet("tool", 5L)));
+
+        JsonNode structured =
+                structured(callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":10.0}"));
+
+        assertEquals(1, structured.get("facets").size(), "top_n=10.0 must reach the service as 10");
+    }
+
+    /**
+     * {@code describe_dataset} names an unknown dataset as a tool error carrying the query API's own message,
+     * not a -32603, so the agent can correct the name.
+     */
+    @Test
+    void describeDatasetOfAnUnknownDatasetIsACleanToolError() throws Exception {
+        String expected = new TessaryException(QueryError.UNKNOWN_DATASET, "nope").getMessage();
+
+        assertEquals(expected, errorText(callTool("describe_dataset", "{\"dataset\":\"nope\"}")));
+    }
+
+    /** A facet over a field the dataset does not allow is the service's message as a tool error, not a -32603. */
+    @Test
+    void facetsOverAnUnknownFieldIsACleanToolError() throws Exception {
+        TessaryException refused = new TessaryException(QueryError.UNKNOWN_FIELD, "input", "spans");
+        when(queryService.facets(eq(PROJECT_ID), any(FacetsRequest.class))).thenThrow(refused);
+
+        String text = errorText(callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"input\"}"));
+
+        assertEquals(refused.getMessage(), text);
     }
 }

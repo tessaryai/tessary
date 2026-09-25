@@ -225,7 +225,6 @@ public class MeteringService {
      * client titleizes rather than dropping the row.
      */
     private static @Nullable String laneLabel(@Nullable String wire) {
-        if (wire == null) return null;
         try {
             return ModelLane.fromWire(wire).label();
         } catch (TessaryException unknownLane) {

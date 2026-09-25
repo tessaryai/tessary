@@ -3,21 +3,28 @@ package ai.tessary.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
 import ai.tessary.search.GlobalSearchDtos.SearchHit;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Acceptance for the global search palette read surface: a typed query returns ranked content
@@ -39,6 +46,9 @@ class GlobalSearchServiceIntegrationTest {
 
     @Autowired
     GlobalSearchRepository repository;
+
+    @Autowired
+    GlobalSearchController controller;
 
     @Autowired
     JdbcClient jdbc;
@@ -266,5 +276,88 @@ class GlobalSearchServiceIntegrationTest {
                 .param("now", now)
                 .update();
         return traceId;
+    }
+
+    /**
+     * The palette endpoint, for a member of the project's org: one hit per trace, however many of its spans
+     * matched. A trace whose payload match is weak but whose other span is NAMED the term keeps the stronger,
+     * named hit; an unnamed or blank-named span is titled by its trace rather than rendering a blank row; a long
+     * payload excerpt is clipped to the palette's width. A caller outside the org is refused, not served.
+     */
+    @Test
+    void theSearchEndpointNamesEachTraceOnceAndTitlesAnUnnamedSpanByItsTrace() {
+        var fix = TenantFixture.bootstrap(tenants, "search-endpoint");
+        String pid = fix.project().id();
+        String weakPayload = seedSpan(pid, null, "a note on reconciliation", "ok");
+        seedSpanIn(pid, weakPayload, "reconciliation", "unrelated words");
+        String longBody = "reconciliation " + "x".repeat(200);
+        String unnamed = seedSpan(pid, null, longBody, "ok");
+        String blankName = seedSpan(pid, "   ", "reconciliation", "ok");
+        TenantContext member = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+
+        List<SearchHit> hits = controller
+                .search(member, fix.org().slug(), fix.project().slug(), "reconciliation")
+                .data()
+                .hits();
+
+        Map<String, SearchHit> byTrace = hits.stream().collect(Collectors.toMap(SearchHit::id, Function.identity()));
+        assertEquals(3, hits.size(), "one hit per trace: " + hits);
+        assertEquals("reconciliation", byTrace.get(weakPayload).title(), "the stronger named-span hit wins");
+        assertEquals(null, byTrace.get(weakPayload).snippet());
+        assertEquals("Trace " + unnamed, byTrace.get(unnamed).title());
+        assertEquals(longBody.substring(0, 117) + "\u2026", byTrace.get(unnamed).snippet());
+        assertEquals("Trace " + blankName, byTrace.get(blankName).title());
+        assertEquals("reconciliation", byTrace.get(blankName).snippet());
+
+        var outsider =
+                TenantFixture.bootstrap(tenants, "search-endpoint-outsider").user();
+        TenantContext stranger = new TenantContext(outsider.id(), outsider.email(), null, null, null, null);
+        ResponseStatusException refused = assertThrows(
+                ResponseStatusException.class,
+                () -> controller.search(
+                        stranger, fix.org().slug(), fix.project().slug(), "reconciliation"));
+        assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
+    }
+
+    /**
+     * The trace leg merges its two legs and then caps the merged list at its own limit: with two payload-only
+     * and two name-only traces matching, a limit of two returns two hits, not the four the legs found.
+     */
+    @Test
+    void theTraceLegCapsTheMergedHitsAtItsLimit() {
+        String pid = TenantFixture.bootstrap(tenants, "search-cap").project().id();
+        seedSpan(pid, "chat", "escalation needed", "ok");
+        seedSpan(pid, "chat", "escalation again", "ok");
+        seedSpan(pid, "escalation", "nothing here", "ok");
+        seedSpan(pid, "escalation step", "nothing here", "ok");
+
+        assertEquals(4, repository.searchLexical(pid, "escalation", 10).size(), "precondition: four traces match");
+        assertEquals(2, repository.searchLexical(pid, "escalation", 2).size());
+    }
+
+    /** One more span, under an existing trace, for a trace that matches on more than one span. */
+    private void seedSpanIn(String projectId, String traceId, @Nullable String name, String input) {
+        String now = Instant.now().toString();
+        String spanId = Ids.ulid();
+        jdbc.sql("""
+                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+                        VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
+                        """)
+                .param("pid", projectId)
+                .param("trace", traceId)
+                .param("id", spanId)
+                .param("name", name)
+                .param("now", now)
+                .update();
+        jdbc.sql("""
+                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+                        VALUES (:pid, :trace, :id, :input, 'ok', :now::timestamptz)
+                        """)
+                .param("pid", projectId)
+                .param("trace", traceId)
+                .param("id", spanId)
+                .param("input", input)
+                .param("now", now)
+                .update();
     }
 }

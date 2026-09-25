@@ -37,6 +37,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
@@ -317,5 +319,65 @@ class TelemetryHeartbeatTest {
         List<String> out = new ArrayList<>();
         node.fieldNames().forEachRemaining(out::add);
         return out;
+    }
+
+    /**
+     * A send interrupted mid-flight (the scheduler shutting down) must leave the thread's interrupt flag set:
+     * swallowing it would let the shutdown hang on a thread that no longer knows it was asked to stop. The
+     * price-book check still runs, as for any other failed send.
+     */
+    @Test
+    void anInterruptedSendKeepsTheInterruptFlagAndStillChecksThePriceBook() throws Exception {
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenThrow(new InterruptedException("shutdown"));
+
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+
+        assertTrue(Thread.interrupted(), "the interrupt must survive the tick (and is cleared here)");
+        verify(fetcher).refresh();
+    }
+
+    /**
+     * A failed read of the held price book's digest drops only the digest: the ping still goes out, still says
+     * which manifest schema this install parses, and still validates against home's contract.
+     */
+    @Test
+    void anUnreadableHeldDigestIsOmittedAndThePingStillGoesOut() throws Exception {
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        when(priceBooks.currentDigest(PriceBook.SOURCE_LITELLM)).thenThrow(new IllegalStateException("db down"));
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenReturn(204);
+
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(client).postJson(eq("/v1/ping"), body.capture());
+        JsonNode sent = mapper.readTree(body.getValue());
+        assertFalse(sent.path("price_book").has("digest"));
+        assertEquals(
+                PriceBookFetcher.SUPPORTED_SCHEMA,
+                sent.path("price_book").path("schema_max").asInt());
+        assertTrue(homePingSchema().validate(sent).isEmpty());
+    }
+
+    /**
+     * The host OS goes out as its bare family, never the versioned {@code os.name} ("Windows 11" carries a
+     * version home has no field for). A host outside the three families is sent under its own lower-cased
+     * name, and an empty name as {@code unknown} rather than an empty string.
+     */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({
+        "Windows 11, windows",
+        "Mac OS X, macos",
+        "Darwin, macos",
+        "Linux, linux",
+        "FreeBSD, freebsd",
+        "'', unknown",
+    })
+    void theHostOsIsReportedAsItsFamily(String osName, String family) {
+        assertEquals(family, TelemetryHeartbeat.osFamily(osName));
     }
 }

@@ -17,6 +17,8 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Protocol-level behaviour of {@link McpDispatcher}. The contract here is
@@ -177,5 +179,79 @@ class McpDispatcherTest {
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "ping", null), ctx()));
         assertNull(r.error());
         assertEquals(Map.of(), r.result());
+    }
+
+    /**
+     * A tool result Jackson cannot pretty-print still comes back as a successful tool result, its text block
+     * falling back to the value's own string form. Letting the serialisation failure escape would turn a tool
+     * that answered into a -32603 the client reads as a server fault.
+     */
+    @Test
+    void toolsCall_aResultJacksonCannotRenderStillReturnsTheResult() throws Exception {
+        Object opaque = new Object() {
+            @Override
+            public String toString() {
+                return "opaque result";
+            }
+        };
+        McpTool opaqueTool = new McpTool("opaque", "returns a bean with no properties", Map.of(), (c, a) -> opaque);
+        McpDispatcher withOpaque = new McpDispatcher(new McpToolRegistry(List.of(opaqueTool)), mapper);
+        JsonNode params = mapper.readTree("{\"name\":\"opaque\",\"arguments\":{}}");
+
+        Map<String, Object> result = resultMap(withOpaque.dispatch(req(1, "tools/call", params), ctx()));
+
+        assertEquals(Boolean.FALSE, result.get("isError"));
+        assertEquals(List.of(Map.of("type", "text", "text", "opaque result")), result.get("content"));
+        assertEquals(opaque, result.get("structuredContent"));
+    }
+
+    /** A {@code tools/call} whose params are not an object, or name no tool, is the caller's error (-32602). */
+    @ParameterizedTest
+    @ValueSource(strings = {"\"echo\"", "{\"arguments\":{}}"})
+    void toolsCall_paramsThatNameNoToolAreInvalidParams(String paramsJson) throws Exception {
+        assertEquals(
+                JsonRpc.INVALID_PARAMS,
+                error(dispatcher.dispatch(req(1, "tools/call", mapper.readTree(paramsJson)), ctx()))
+                        .code());
+    }
+
+    /** Arguments left out entirely are the same request as an empty object, not a -32602. */
+    @Test
+    void toolsCall_argumentsAbsent_callsHandlerWithEmptyMap() throws Exception {
+        JsonNode params = mapper.readTree("{\"name\":\"echo\"}");
+
+        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
+
+        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
+    }
+
+    /**
+     * A batch element that decodes to nothing ({@code [null]}) reaches the dispatcher as a null request. It is an
+     * invalid request answered with a null id, not a NullPointerException that would fail the whole batch.
+     */
+    @Test
+    void aNullRequestIsAnInvalidRequestWithANullId() {
+        JsonRpc.Response r = require(dispatcher.dispatch(null, ctx()));
+
+        assertEquals(NullNode.getInstance(), r.id());
+        assertEquals(JsonRpc.INVALID_REQUEST, error(r).code());
+    }
+
+    /**
+     * A known method sent as a notification (no id at all, or a null id) is run but answered with nothing: a
+     * response to a notification is a protocol violation clients may choke on.
+     */
+    @Test
+    void aKnownMethodSentAsANotificationGetsNoResponse() {
+        assertNull(dispatcher.dispatch(new JsonRpc.Request("2.0", null, "ping", null), ctx()));
+        assertNull(dispatcher.dispatch(new JsonRpc.Request("2.0", NullNode.getInstance(), "ping", null), ctx()));
+    }
+
+    /** A client that names no protocol version is offered the revision this server implements. */
+    @Test
+    void initialize_withoutAClientVersionOffersTheServersOwn() {
+        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "initialize", null), ctx()));
+
+        assertEquals("2025-06-18", result.get("protocolVersion"));
     }
 }

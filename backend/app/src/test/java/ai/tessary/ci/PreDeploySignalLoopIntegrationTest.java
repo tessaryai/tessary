@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
@@ -15,14 +16,17 @@ import ai.tessary.gate.PreDeployCheckService;
 import ai.tessary.gate.PreDeployCheckService.ClassifierDiscovery;
 import ai.tessary.model.Severity;
 import ai.tessary.model.TouchedSurface;
+import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.PreDeployError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
@@ -69,6 +73,12 @@ class PreDeploySignalLoopIntegrationTest {
 
     @Autowired
     PreDeployCheckRepository checks;
+
+    @Autowired
+    PreDeployCheckController controller;
+
+    @Autowired
+    CapabilityFixture capabilities;
 
     @Autowired
     TenantService tenants;
@@ -308,5 +318,59 @@ class PreDeploySignalLoopIntegrationTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * The checks endpoints list, dismiss and reinstate a project's checks for its org's members, and only while
+     * the org holds the CI-integration entitlement: with it withheld, every endpoint is refused rather than
+     * reading or changing a check the org is not entitled to.
+     */
+    @Test
+    void theChecksEndpointsServeOnlyAnOrgHoldingTheCiIntegrationEntitlement() {
+        var fix = TenantFixture.bootstrap(tenants, "predeploy-http");
+        String pid = fix.project().id();
+        String now = Instant.now().toString();
+        String classifierId = Ids.ulid();
+        signals.insert(new ClassifierRow(
+                classifierId,
+                pid,
+                "http_probe",
+                "HTTP Probe",
+                null,
+                "regex",
+                null,
+                false,
+                1,
+                true,
+                ClassifierRow.Mode.DISCOVERY,
+                now,
+                now));
+        preDeployChecks.registerForSignal(ClassifierDiscovery.of(
+                pid, classifierId, "http_probe", "{\"surfaces\":[\"prompt\"]}", Severity.CRITICAL));
+        TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String org = fix.org().slug();
+        String project = fix.project().slug();
+
+        List<PreDeployCheckView> listed = controller.list(owner, org, project).data();
+        assertEquals(
+                List.of("prompt"),
+                listed.stream().map(PreDeployCheckView::surface).toList());
+        String id = listed.get(0).id();
+        controller.dismiss(owner, org, project, id);
+        assertEquals("dismissed", status(pid, id));
+        controller.reinstate(owner, org, project, id);
+        assertEquals("active", status(pid, id));
+
+        capabilities.withhold(fix.org().id(), Capability.CI_INTEGRATION);
+        TessaryException listing = assertThrows(TessaryException.class, () -> controller.list(owner, org, project));
+        TessaryException dismissing =
+                assertThrows(TessaryException.class, () -> controller.dismiss(owner, org, project, id));
+        TessaryException reinstating =
+                assertThrows(TessaryException.class, () -> controller.reinstate(owner, org, project, id));
+
+        assertEquals(CapabilityError.DISABLED, listing.error());
+        assertEquals(CapabilityError.DISABLED, dismissing.error());
+        assertEquals(CapabilityError.DISABLED, reinstating.error());
+        assertEquals("active", status(pid, id), "a refused dismiss must not have changed the check");
     }
 }

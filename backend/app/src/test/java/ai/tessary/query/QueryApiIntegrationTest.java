@@ -592,4 +592,52 @@ class QueryApiIntegrationTest {
                 () -> controller.count(token(pid), new CountRequest("observations", null, null)));
         assertEquals(QueryError.UNKNOWN_DATASET, e.error());
     }
+
+    /**
+     * Tool calls page on a bare-id handle. Page one's cursor resumes at the next row; a cursor whose handle is
+     * empty names no position, so it restarts at page one instead of paging past every row that shares its
+     * timestamp (an empty id sorts below them all).
+     */
+    @Test
+    void toolCallSearchPagesOnItsBareIdHandleAndAnEmptyHandleRestartsAtPageOne() {
+        String pid = seedProject("query-search-bare-handle");
+        var ctx = token(pid);
+
+        var page1 = controller
+                .search(ctx, new SearchRequest("tool_calls", null, null, null, null, 1, null))
+                .data();
+        assertEquals("db_lookup", page1.rows().get(0).fields().get("name"), "newest first");
+        String cursor = page1.nextCursor();
+        assertNotNull(cursor);
+        var page2 = controller
+                .search(ctx, new SearchRequest("tool_calls", null, null, null, null, 1, cursor))
+                .data();
+        String emptyHandle = cursor.substring(0, cursor.lastIndexOf('|') + 1);
+        var restarted = controller
+                .search(ctx, new SearchRequest("tool_calls", null, null, null, null, 1, emptyHandle))
+                .data();
+
+        assertEquals("web_search", page2.rows().get(0).fields().get("name"));
+        assertEquals(page1.rows().get(0).id(), restarted.rows().get(0).id(), "an empty handle restarts at page one");
+    }
+
+    /**
+     * A filter on a field the dataset does not allow-list, and an interval that is not a {@code date_trunc}
+     * unit, are refused by name before any SQL is built: neither string may reach the query as an identifier.
+     */
+    @Test
+    void anUnknownFilterFieldOrIntervalIsRefusedBeforeAnySql() {
+        var ctx = token("no-such-project");
+        TimeRange day = new TimeRange("2026-06-10T00:00:00Z", "2026-06-11T00:00:00Z");
+
+        TessaryException field = assertThrows(
+                TessaryException.class,
+                () -> controller.count(ctx, new CountRequest("spans", null, Map.of("input", "x"))));
+        TessaryException interval = assertThrows(
+                TessaryException.class,
+                () -> controller.timeseries(ctx, new TimeseriesRequest("spans", "fortnight", day, null)));
+
+        assertEquals(QueryError.UNKNOWN_FIELD, field.error());
+        assertEquals(QueryError.UNKNOWN_INTERVAL, interval.error());
+    }
 }
