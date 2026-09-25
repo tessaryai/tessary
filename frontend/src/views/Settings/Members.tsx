@@ -229,16 +229,9 @@ export function Members() {
       ) : roster.length === 0 ? (
         <div className="py-12 text-center">
           <p className="text-body text-fg">No members yet</p>
-          <p className="text-small text-muted mt-1">
-            {canManage
-              ? "Invite a teammate to share this organization."
-              : "Members did not load. Reload the page to try again."}
-          </p>
-          {canManage && (
-            <Button variant="primary" className="mt-4" onClick={() => setInviteOpen(true)}>
-              Invite
-            </Button>
-          )}
+          {/* Never "invite someone": whoever is reading this is a member, so an empty roster is a
+              failed read, and the permission to invite is itself read off the roster. */}
+          <p className="text-small text-muted mt-1">Members did not load. Reload the page to try again.</p>
         </div>
       ) : (
         <div className="rounded-card border border-border overflow-hidden">

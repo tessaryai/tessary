@@ -69,3 +69,12 @@ function inMemoryStorage(): Storage {
 
 Object.defineProperty(window, "localStorage", { value: inMemoryStorage(), configurable: true });
 Object.defineProperty(window, "sessionStorage", { value: inMemoryStorage(), configurable: true });
+
+// jsdom implements <dialog> but not its modal methods, and every Modal and the palette call them on open.
+// Defined only where missing, so a jsdom that gains them keeps its own.
+HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+  this.setAttribute("open", "");
+};
+HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+  this.removeAttribute("open");
+};

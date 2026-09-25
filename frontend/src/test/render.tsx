@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * The one render wrapper page tests share: a router at `route`, a fresh QueryClient with retries off
- * (a failed read is the failure, not the first of three attempts), and a probe that exposes the
- * current path and query string, so a test can assert what a control wrote to the URL.
+ * (a failed read is the failure, not the first of three attempts), the real toast viewport, and a
+ * probe that exposes the current path and query string, so a test can assert what a control wrote.
  */
 import type { ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ToastProvider } from "../ui";
 
 function LocationProbe() {
   const loc = useLocation();
@@ -21,6 +22,7 @@ export function renderRoute(ui: ReactElement, { route = "/", path = "*" }: { rou
   const utils = render(
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>
+        <ToastProvider>
         <Routes>
           <Route
             path={path}
@@ -32,6 +34,7 @@ export function renderRoute(ui: ReactElement, { route = "/", path = "*" }: { rou
             }
           />
         </Routes>
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
