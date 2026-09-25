@@ -23,7 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * in between. The loser must join the winner's case, never open a second one or drop the finding.
  */
 @ExtendWith(MockitoExtension.class)
-class CaseLedgerTest {
+class CaseLedgerOpenRaceTest {
 
     private static final String PROJECT = "proj-1";
     private static final Instant NOW = Instant.parse("2026-07-02T10:00:00Z");

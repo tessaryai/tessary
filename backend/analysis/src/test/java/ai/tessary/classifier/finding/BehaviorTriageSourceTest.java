@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -227,12 +226,21 @@ class BehaviorTriageSourceTest {
                 .payload("{\"cause_kind\":\"distribution_shift\"}")
                 .build();
         when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(shift));
-        when(baselines.findById(PROJECT, "mbl-1")).thenReturn(Optional.of(mock(MetricBaselineRow.class)));
+        when(baselines.findById(PROJECT, "mbl-1")).thenReturn(Optional.of(baselineWithNoClosedDay()));
 
         source().repin(PROJECT, "f2", "u1");
 
+        // No day of the rolling control has closed, so the window still filling is what becomes the reference.
         verify(baselines)
-                .repin(eq("mbl-1"), isNull(), isNull(), isNull(), isNull(), anyString(), isNull(), anyString());
+                .repin(
+                        eq("mbl-1"),
+                        eq("{\"sketch\":1}"),
+                        isNull(),
+                        isNull(),
+                        isNull(),
+                        anyString(),
+                        isNull(),
+                        anyString());
     }
 
     /**
@@ -324,6 +332,35 @@ class BehaviorTriageSourceTest {
                         + "\"bucket\":{\"key\":\"" + BUCKET + "\"},\"rate\":{\"ref\":0.02,\"cur\":0.1},\"n_cur\":"
                         + nCur + ",\"failures\":{\"cur\":" + failures + "},\"counts_basis\":\"onset\"}")
                 .build();
+    }
+
+    private static MetricBaselineRow baselineWithNoClosedDay() {
+        return new MetricBaselineRow(
+                "mbl-1",
+                PROJECT,
+                "sig-1",
+                MetricBaselineRow.Measure.TURN_DURATION,
+                MetricBaselineRow.BucketKind.CALL_SITE,
+                "summarize",
+                MetricBaselineRow.State.ARMED,
+                null,
+                null,
+                null,
+                "{\"sketch\":1}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                null,
+                null,
+                "2026-09-01T00:00:00Z",
+                "2026-09-01T00:00:00Z");
     }
 
     private static BehaviorTriageJobRow job(String findingId) {
