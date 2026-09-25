@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -316,5 +319,63 @@ class TenantServiceTest {
                 2,
                 projects.findByOrg(org.id()).size(),
                 "still exactly two projects -- default plus the one sample project");
+    }
+
+    /**
+     * The bug: a known email arriving under a new WorkOS user id (an environment switch) inserts a second
+     * principal and trips {@code UNIQUE(email)}, locking the person out, or rebinds without the new profile.
+     */
+    @Test
+    void upsertUser_rebindsAKnownEmailToItsNewWorkosId() {
+        Principal before = tenants.upsertUserFromWorkos("user_env_old", "rebind@example.com", "Old Name", null);
+        Principal after = tenants.upsertUserFromWorkos(
+                "user_env_new", "rebind@example.com", "New Name", "https://avatar/new.png");
+
+        assertEquals(before.id(), after.id(), "the same person keeps the same principal");
+        assertEquals(after, users.findByWorkosId("user_env_new").orElseThrow(), "every rebound column is stored");
+        assertTrue(users.findByWorkosId("user_env_old").isEmpty());
+    }
+
+    /**
+     * The bug: an org whose projects exist but none is flagged default gets a new starter project minted
+     * beside them, or has its sample project promoted to be the routing target, instead of its earliest
+     * real project.
+     */
+    @Test
+    void ensureDefaultProject_promotesTheEarliestRealProject() {
+        Organization org = new Organization(
+                Ids.ulid(), null, tenants.uniqueSlug("no-default"), "No Default", "2026-01-01T00:00:00Z", null, null);
+        orgs.insert(org);
+        projects.insert(new Project(
+                Ids.ulid(),
+                org.id(),
+                "sample",
+                "Sample",
+                null,
+                "2026-01-01T00:00:00Z",
+                null,
+                "{\"sample\":true}",
+                false,
+                null));
+        Project real =
+                new Project(Ids.ulid(), org.id(), "real", "Real", "d", "2026-01-02T00:00:00Z", null, null, false, null);
+        projects.insert(real);
+
+        Project promoted = tenants.ensureDefaultProject(org.id());
+
+        assertEquals(
+                new Project(real.id(), org.id(), "real", "Real", "d", "2026-01-02T00:00:00Z", null, null, true, null),
+                promoted);
+        assertEquals(promoted, projects.findDefaultForOrg(org.id()).orElseThrow());
+        assertEquals(2, projects.findByOrg(org.id()).size(), "nothing new is minted");
+    }
+
+    /** The bug: an account with no email, or one without an "@", gets a crash or an empty org name. */
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "handle-without-domain")
+    void ensureDefaultOrg_namesAPersonalOrgPersonalWhenTheEmailHasNoHandle(String email) {
+        Principal u = tenants.upsertUserFromWorkos("user_no_handle_" + System.nanoTime(), email, "No Handle", null);
+        assertEquals("Personal", tenants.ensureDefaultOrg(u, null).name());
     }
 }

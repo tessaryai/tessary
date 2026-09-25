@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The background purge, end to end: a marked project's data goes, its neighbour's does not, and the
@@ -372,5 +373,49 @@ class ProjectPurgeIntegrationTest {
                 .param("pid", p.id())
                 .query(Integer.class)
                 .single();
+    }
+
+    private record JobState(String status, int attempts, String lastError, String leaseOwner) {}
+
+    private JobState job(String id) {
+        return jdbc.sql("SELECT status, attempts, last_error, lease_owner FROM job WHERE id = :id")
+                .param("id", id)
+                .query((rs, n) -> new JobState(
+                        rs.getString("status"),
+                        rs.getInt("attempts"),
+                        rs.getString("last_error"),
+                        rs.getString("lease_owner")))
+                .single();
+    }
+
+    /**
+     * The bugs: a failed purge is dead-lettered before its attempt budget is spent, or retried forever past
+     * it; its error is stored unbounded; its lease is kept so no worker can pick it back up; or a purge that
+     * merely ran out of batches keeps its attempt count and dead-letters itself for being large.
+     *
+     * <p>Transactional so the scheduled purge heartbeat, which claims pending rows, never sees this job.
+     */
+    @Test
+    @Transactional
+    @DisplayName("a failed purge is retried until its budget is spent; a continued one starts its budget over")
+    void failedAndContinuedPurgesReturnToTheQueue() {
+        String projectId = "purge-requeue-" + System.nanoTime();
+        jobs.enqueue(projectId, Instant.now().toString());
+        String id = jdbc.sql("SELECT id FROM job WHERE kind = 'project_delete' AND dedupe_key = :pid")
+                .param("pid", projectId)
+                .query(String.class)
+                .single();
+        jdbc.sql("UPDATE job SET status = 'claimed', lease_owner = 'worker-1', attempts = 2 WHERE id = :id")
+                .param("id", id)
+                .update();
+
+        jobs.markRetryable(id, "x".repeat(2500), 2, 5);
+        assertEquals(new JobState("pending", 2, "x".repeat(2000), null), job(id));
+
+        jobs.releaseForContinuation(id);
+        assertEquals(new JobState("pending", 0, "x".repeat(2000), null), job(id));
+
+        jobs.markRetryable(id, "boom", 5, 5);
+        assertEquals(new JobState("failed", 0, "boom", null), job(id));
     }
 }
