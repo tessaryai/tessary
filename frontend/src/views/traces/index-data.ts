@@ -22,7 +22,6 @@ export type TraceFilters = {
   q?: string;
   status?: string;
   callSite?: string;
-  model?: string;
   kind?: string;
   /** Absolute ISO-8601 bounds. Resolved by the picker, never a relative token — see index-filters. */
   from?: string | null;
@@ -60,7 +59,6 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
         q: filters.q,
         status: filters.status,
         callSite: filters.callSite,
-        model: filters.model,
         kind: filters.kind,
         fromTimestamp: filters.from ?? undefined,
         toTimestamp: filters.to ?? undefined,

@@ -58,7 +58,7 @@ public class ApiKeyController {
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view API keys");
-        List<ApiKey> rows = keyRepo.findByProject(r.project().id(), true);
+        List<ApiKey> rows = keyRepo.findByProject(r.project().id());
         return ApiResponse.ok(rows.stream().map(ApiKeyController::toWire).toList());
     }
 

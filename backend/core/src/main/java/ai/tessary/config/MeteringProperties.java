@@ -33,18 +33,6 @@ public class MeteringProperties {
     /** Reclaim window (seconds) for a job a worker claimed but did not finish (e.g. crashed mid-aggregation). */
     private long leaseSeconds = 600;
 
-    /**
-     * Platform-funded spend, in USD, that one org may burn in a day before the daily operator report
-     * escalates its line from INFO to WARN.
-     *
-     * <p>This is a threshold, not a cap: crossing it changes a log level and nothing else, no request
-     * is refused and no lane is stopped. Zero or negative disables the escalation entirely.
-     */
-    private double spendWarnUsdPerOrgPerDay = 25.0;
-
-    /** How many orgs the daily report lists. Ordered by spend, so the tail is the cheap half. */
-    private int spendReportOrgLimit = 50;
-
     public boolean isStorageEnabled() {
         return storageEnabled;
     }
@@ -67,21 +55,5 @@ public class MeteringProperties {
 
     public void setLeaseSeconds(long v) {
         this.leaseSeconds = v;
-    }
-
-    public double getSpendWarnUsdPerOrgPerDay() {
-        return spendWarnUsdPerOrgPerDay;
-    }
-
-    public void setSpendWarnUsdPerOrgPerDay(double v) {
-        this.spendWarnUsdPerOrgPerDay = v;
-    }
-
-    public int getSpendReportOrgLimit() {
-        return spendReportOrgLimit;
-    }
-
-    public void setSpendReportOrgLimit(int v) {
-        this.spendReportOrgLimit = v;
     }
 }

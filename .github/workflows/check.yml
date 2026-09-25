@@ -1,13 +1,10 @@
 name: Check
 
-# Runs `bash scripts/check.sh --edition open`, the CI-callable entrypoint documented in that
-# script's own header. An overlay directory stays checked out during this run; the flag only
-# changes what the script builds and tests, so a green run doesn't prove the tree survives
-# with that directory actually removed. That boot check lives separately in
-# boot-checks.yml.
+# Runs `bash scripts/check.sh`, the CI-callable entrypoint documented in that script's own header.
+# The Docker-backed boot checks live separately in boot-checks.yml.
 #
 # Everything before the final step assembles the toolchains that script needs in one job:
-# Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm + node (frontend, classify-service, sandbox-runner and mcp-bridge),
+# Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm + node (frontend, sandbox-runner and mcp-bridge),
 # python (the gates that shell out to python3), uv (the groundedness gates), and caddy on PATH (the
 # caddy gate). Order matters once: pnpm/action-setup must run before
 # actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
@@ -24,33 +21,27 @@ on:
   # line; nothing else in this file depends on it.
   pull_request:
     # DOC-ONLY PRS DO NOT RUN THIS. Safe because scripts/check.sh's own header carries a standing
-    # rule that no gate in that pipeline is keyed on prose, and the four that were are EXCLUDED
-    # rows in its manifest. Prose is checked by Mintlify's own PR check over docs/, which is where
+    # rule that no gate in that pipeline is keyed on prose, and the four that were are deleted. Prose is checked by Mintlify's own PR check over docs/, which is where
     # that job belongs; nothing here duplicates it. The two named exceptions in that header read
     # machine text, not prose: check-blob-links.sh's link paths in docs/ and README.md are skipped
     # by a docs-only PR and read by the next PR that runs, since it scans the tree; the groundedness
     # setup MDs live under classifiers/, which this filter does not ignore.
     # secret-scan.yml deliberately keeps no filter: a credential can land in a README.
     #
-    # `.github/**` IS ON THE LIST TOO, and that one is not free. Two running gates read paths under
-    # it, both by exact path, neither through a glob:
-    #   check-open-boundary.sh rule 7 — Taskfile.yml, this file and drift-checks.yml may reference
-    #     the overlay only from inside a `[ -d tessary-paid ]`-shaped guard.
-    #   check-open-boundary.sh rule 8 — dependabot.yml may not point a `directory:` at tessary-paid/.
-    # A PR that only edits a workflow therefore no longer proves those. Broken YAML is still caught,
-    # by GitHub itself, which reports an unparseable workflow on the PR without running anything.
+    # `.github/**` IS ON THE LIST TOO. Broken YAML in a workflow-only PR is still caught, by GitHub
+    # itself, which reports an unparseable workflow on the PR without running anything.
     #
-    # TWO KNOWN GAPS THEN, BOTH ACCEPTED ON PURPOSE, so nobody re-derives them as bugs later. The
-    # other is check-version-consistency.sh: it does not read prose, but it does scan every path
-    # `git ls-files` returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>`
-    # literal, the shape an install block pastes.
+    # ONE KNOWN GAP THEN, ACCEPTED ON PURPOSE, so nobody re-derives it as a bug later:
+    # check-version-consistency.sh does not read prose, but it does scan every path `git ls-files`
+    # returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>` literal, the
+    # shape an install block pastes.
     #
-    # NEITHER GAP LOSES COVERAGE, AND THAT IS THE WHOLE REASON THEY ARE ACCEPTABLE. Both gates scan
-    # the tree, not the diff, so the next PR that touches code re-reads the file the skipped PR
-    # changed and fails there. What the trade actually costs is blame: the failure surfaces on a
-    # diff that does not contain the offending file. `git log -S` on the literal, or on
-    # `tessary-paid`, is the way back. If that bites more than once, the answer is a workflow
-    # triggered on these paths running those two gates, not deleting the filter below.
+    # THE GAP LOSES NO COVERAGE, AND THAT IS THE WHOLE REASON IT IS ACCEPTABLE. The gate scans the
+    # tree, not the diff, so the next PR that touches code re-reads the file the skipped PR changed
+    # and fails there. What the trade actually costs is blame: the failure surfaces on a diff that
+    # does not contain the offending file. `git log -S` on the literal is the way back. If that
+    # bites more than once, the answer is a workflow triggered on these paths running that gate,
+    # not deleting the filter below.
     #
     # A DENYLIST, NOT AN ALLOWLIST, on purpose. With `paths:` a new top-level code directory would
     # be silently ungated until someone remembered to add it; with `paths-ignore:` it is gated by
@@ -106,7 +97,7 @@ concurrency:
 
 jobs:
   open-edition:
-    name: check.sh (the full gate manifest, --edition open)
+    name: check.sh (the full gate manifest)
     runs-on: ubuntu-latest
 
     # DRAFT PRS DO NOT RUN THE GATE, and a close runs nothing at all.
@@ -122,53 +113,6 @@ jobs:
     if: >-
       github.event_name != 'pull_request'
       || (github.event.action != 'closed' && github.event.pull_request.draft == false)
-
-    # -----------------------------------------------------------------------------------------
-    # AUTHORED BUT NOT ARMED — the toolchain image, .github/toolchain/Dockerfile.
-    # -----------------------------------------------------------------------------------------
-    # Same precedent as codeql.yml at the top of that file: the change is written out in full and
-    # left commented, because a prerequisite that is not this repo's to satisfy today is missing.
-    # A silently absent file would look like nobody considered baking the toolchain; a comment
-    # claiming it would work without the workflow to point at is a claim nobody can check.
-    #
-    # WHAT IT WOULD DO: the six steps between `checkout` and `check.sh` exist only to assemble
-    # toolchains — setup-java, pnpm/action-setup, setup-node, `pnpm install`, setup-python, and
-    # "Install Caddy". .github/toolchain/Dockerfile bakes all of them (plus Maven, which
-    # ubuntu-latest gave us for free and a container does not). With the `container:` key below,
-    # every one of those steps except `pnpm install` deletes, and the job's setup cost becomes a
-    # `docker pull`. The later `pip install` and setup-uv steps are not baked into that Dockerfile
-    # yet; arming it means adding them there first.
-    #
-    # BLOCKER 1 — NOTHING BUILDS OR PUBLISHES THE IMAGE YET. `container:` takes a registry
-    # reference, not a Dockerfile path; GitHub will not build one for you. The image has to exist
-    # in a registry before this key can name it. release.yml is the natural home: it already
-    # authenticates to Docker Hub and publishes under `tessaryai/tessary` (its DOCKER_REPO env),
-    # so a `ci-toolchain` tag alongside the service tags needs no new registry, no new secret and
-    # no new account. That publishing step is not written yet, deliberately — it is a separate
-    # change with its own tagging and freshness questions (when does the image get rebuilt? what
-    # pins the workflow to a specific build rather than a moving tag?).
-    #
-    # BLOCKER 2 — TESTCONTAINERS NEEDS THE DOCKER SOCKET, AND CONTAINER JOBS DO NOT GET IT.
-    # check-backend.sh's `mvn verify` drives a real pgvector Postgres through Testcontainers.
-    # On `runs-on: ubuntu-latest` that works because the steps run on the host, which has Docker.
-    # Inside a job container there is no /var/run/docker.sock unless it is mounted in explicitly,
-    # and even then Ryuk and the container's view of the test's network need proving. This must be
-    # demonstrated green on a branch before arming — an image that pulls fast and then fails every
-    # backend test is strictly worse than the six setup steps it replaced.
-    #
-    # BLOCKER 3 — THE ACTIONS' CACHES GO WITH THEM. setup-java's `cache: maven` and setup-node's
-    # `cache: pnpm` are doing real work on every run. Deleting those steps deletes the caches too,
-    # so this trade is only a win once the equivalent actions/cache entries are written, or once
-    # it is measured and the pull-vs-cache arithmetic actually comes out ahead.
-    #
-    # ARMING IS UNCOMMENTING THE TWO LINES BELOW (with a real tag in place of `latest`) and then
-    # deleting the toolchain setup steps. Nothing else in this file depends on it.
-    #
-    # container:
-    #   image: docker.io/tessaryai/tessary:ci-toolchain-latest
-    #   # Testcontainers, per BLOCKER 2. Unverified — this is the shape the fix takes, not a
-    #   # configuration anyone has seen pass.
-    #   options: --volume /var/run/docker.sock:/var/run/docker.sock
 
     steps:
       - uses: actions/checkout@v7
@@ -190,11 +134,9 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      # classify-service pins the same pnpm version and installs its own deps inside
-      # check-classify-service.sh; no separate install step needed here.
 
-      # Gates shell out to python3 (version-consistency, open-boundary, license-headers, caddy,
-      # compose-artifact, export-denylist, vendored-plugin-rules). Pinned rather than relying on
+      # Gates shell out to python3 (version-consistency, license-headers, caddy, compose-artifact,
+      # vendored-plugin-rules). Pinned rather than relying on
       # whatever ubuntu-latest ships.
       - uses: actions/setup-python@v7
         with:
@@ -266,9 +208,9 @@ jobs:
           caddy version
 
       # CI never loads the Taskfile, so this calls the script directly.
-      - run: bash scripts/check.sh --edition open
+      - run: bash scripts/check.sh
 
-      # Coverage baseline, open modules only. The JaCoCo report is a build-time side effect of the
+      # Coverage baseline. The JaCoCo report is a build-time side effect of the
       # `mvn verify` inside check-backend.sh; this step only captures it. It lived in the old
       # drift-checks.yml `backend` job and moved here with that file's trim, so the artifact keeps being
       # produced, on every PR now rather than weekly. `if: always()` so a red run still leaves a

@@ -4,19 +4,10 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 public enum ModelConfigError implements ErrorCode {
-    NOT_FOUND(HttpStatus.NOT_FOUND, "No %s provider credential found"),
     UNKNOWN_PROVIDER(HttpStatus.BAD_REQUEST, "Unknown provider: %s"),
-    UNKNOWN_MODEL(HttpStatus.BAD_REQUEST, "Model %s is not in the catalog for provider %s"),
     BEDROCK_MISSING_REGION(HttpStatus.BAD_REQUEST, "Bedrock (%s) credential is missing aws_region"),
     UNKNOWN_LANE(HttpStatus.BAD_REQUEST, "Unknown model lane: %s"),
     UNKNOWN_PLATFORM_MODEL(HttpStatus.BAD_REQUEST, "Model %s is not one of the platform's Bedrock models"),
-    /** Batch has no online wire form — it exists for pricing only. See {@code ServiceTier}. */
-    TIER_NOT_ONLINE(HttpStatus.BAD_REQUEST, "Service tier %s cannot be used for live inference"),
-    /**
-     * The pair is the failure, not either half: Flex is a valid tier and Haiku 4.5 is a valid model,
-     * but Haiku 4.5 on Bedrock is Standard-only, so the combination would 400 at Bedrock mid-grade.
-     */
-    TIER_UNSUPPORTED_BY_MODEL(HttpStatus.BAD_REQUEST, "Model %s does not support the %s service tier"),
     /**
      * A pairing failure, not a bad model: sandbox lanes need a model that can sustain a long tool-use
      * loop from inside a microVM. GPT-5.6 Terra drives the sandbox; Nova 2 Lite does not.
@@ -27,20 +18,9 @@ public enum ModelConfigError implements ErrorCode {
     /**
      * The model could do the work and is simply not offered for it. Distinct from
      * {@link #MODEL_NOT_AGENTIC}: Claude Haiku 4.5 can drive a sandbox agent and still isn't put on a
-     * repository-wide run, and Claude Sonnet 5 grades well and still isn't run per trace.
+     * repository-wide run.
      */
     MODEL_NOT_OFFERED_FOR_LANE(HttpStatus.BAD_REQUEST, "Model %s is not offered for the %s lane"),
-    /**
-     * Also a pairing failure: only the GPT-5.6 line on bedrock-mantle takes a reasoning effort. Claude
-     * models can't — effort rides in the same request object as our structured output, and the endpoint
-     * rejects the pair — so offering it there would be a setting that could never take effect.
-     */
-    EFFORT_UNSUPPORTED_BY_MODEL(HttpStatus.BAD_REQUEST, "Model %2$s does not support the %1$s reasoning effort"),
-    /**
-     * A decision-model provider (TypeSafe) was asked to build a chat model. Its key answers typed
-     * questions through {@code llm/decisions/} and nothing else.
-     */
-    NOT_A_CHAT_PROVIDER(HttpStatus.BAD_REQUEST, "Provider %s serves decision models only, not chat models"),
     SECRET_KEY_NOT_CONFIGURED(HttpStatus.PRECONDITION_FAILED, "TESSARY_SECRET_KEY is required to store credentials"),
     MISSING_CREDENTIALS(
             HttpStatus.PRECONDITION_FAILED,

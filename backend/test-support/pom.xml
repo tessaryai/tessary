@@ -13,14 +13,14 @@
 
     <artifactId>test-support</artifactId>
     <description>
-        Test infrastructure shared by every module: the JVM-lifetime Testcontainers Postgres and the
-        context initializer that points a Spring test at it.
+        Test infrastructure for the app module's Spring tests: the JVM-lifetime Testcontainers Postgres
+        and the context initializer that points a Spring test at it.
 
         Only fixtures that depend on NOTHING in the platform live here. Anything that builds a tenant,
         a trace or a classifier belongs beside the module that owns those types - otherwise this module
         would sit above the features it exists to support, and nothing below them could use it.
 
-        Sources are in src/main so consumers depend on the jar with test scope; a test-jar would work
+        Sources are in src/main so app depends on the jar with test scope; a test-jar would work
         too but makes the dependency harder to read and to resolve in an IDE.
     </description>
 

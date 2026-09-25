@@ -147,9 +147,8 @@ echo "check-selfhost-images: checking version $VERSION (from ${1:-the newest v<s
 DOCKER_REPO="tessaryai/tessary"
 
 # Mirrors the exact defaults docker-compose.yml resolves — kept literal here rather than
-# shelling out to `docker compose config`, so this script has no dependency on a rendered .env; if
-# these two ever drift, check-open-boundary.sh's own docker-compose.yml assertions are a faster
-# place to catch it than a registry probe.
+# shelling out to `docker compose config`, so this script has no dependency on a rendered .env;
+# keep the two in step by hand.
 BACKEND_REF="${DOCKER_REPO}:backend-${VERSION}"
 FRONTEND_REF="${DOCKER_REPO}:frontend-${VERSION}"
 SANDBOX_RUNNER_REF="${DOCKER_REPO}:sandbox-runner-${VERSION}"

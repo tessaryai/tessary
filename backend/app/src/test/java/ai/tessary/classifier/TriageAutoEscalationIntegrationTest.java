@@ -26,6 +26,7 @@ import ai.tessary.featureflags.FlagContext;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
 import java.time.Instant;
@@ -235,27 +236,22 @@ class TriageAutoEscalationIntegrationTest {
      * The escalator serves two stores through one {@link ai.tessary.classifier.finding.TriageSource}
      * seam. What this class covers is every case about the escalator itself: the flag gate,
      * per-tick idempotence, the recurrence bar, human-verdict suppression, per-org scoping, and
-     * the behaviour arm below. The seam's two-store dispatch is covered without a database by
+     * first-tick escalation below. The seam's two-store dispatch is covered without a database by
      * {@code FindingServiceMergeTest} and {@code TriageSourceAbsenceTest}.
      */
 
-    /**
-     * Behaviour drift must be bit-identical through all of this. Its eligibility is asked
-     * through the same seam and bounded by the same budget, but the confirmation bar is
-     * conformance's own, so a behaviour finding that is escalatable still escalates on the
-     * first tick that sees it.
-     */
+    /** An escalatable finding escalates on the first tick that sees it: there is no confirmation bar. */
     @Test
-    @DisplayName("behaviour drift's escalation is untouched by the conformance confirmation bar")
-    void behaviourDriftEscalationIsUnchanged() {
+    @DisplayName("an escalatable finding escalates on the first tick")
+    void anEscalatableFindingEscalatesOnTheFirstTick() {
         flagsSilent();
-        Project p = project("auto-esc-behaviour-unchanged");
+        Project p = project("auto-esc-first-tick");
         automaticOn(p);
         String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
 
         escalator.tick();
 
-        assertEquals(1, triageJobs(p.projectId()), "a behaviour finding escalates on the first tick, as before");
+        assertEquals(1, triageJobs(p.projectId()), "the finding escalates on the first tick");
         assertNotNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
     }
 
@@ -278,26 +274,13 @@ class TriageAutoEscalationIntegrationTest {
 
     private Project project(String slug) {
         TenantFixture.Setup setup = TenantFixture.bootstrap(tenants, slug);
-        // Behaviour drift and SOP conformance are off by default, so the org has to state that
-        // it has them or there are no drift/conformance findings for the escalator to act on and
-        // every case here would pass or fail on the wrong flag. Frustration is irrelevant here: this
-        // escalator never schedules it. Groundedness is scheduled since 2026-09-21, but its fixture
-        // (an armed-window finding) is not built here — every case below is a metric-drift finding. `triage_automatic`
-        // is
-        // deliberately not granted here: it is this class's actual subject and stays at its
-        // default until `automaticOn` says otherwise. Stubbed after `flagsSilent()` by every
-        // caller, so these specific stubs win.
-        when(flags.override(
-                        Capability.BEHAVIOR_DRIFT.wire(),
-                        FlagContext.forOrg(setup.org().id())))
-                .thenReturn(Optional.of(true));
-        when(flags.override(
-                        Capability.SOP_CONFORMANCE.wire(),
-                        FlagContext.forOrg(setup.org().id())))
-                .thenReturn(Optional.of(true));
+        // Frustration is irrelevant here: this escalator never schedules it. Groundedness is scheduled
+        // since 2026-09-21, but its fixture (an armed-window finding) is not built here — every case
+        // below is a metric-drift finding. `triage_automatic` is deliberately not granted here: it is
+        // this class's actual subject and stays at its default until `automaticOn` says otherwise.
         String projectId = setup.project().id();
         classifiers.seedBuiltIns(projectId);
-        String classifierId = signals.findByKey(projectId, BuiltInDetector.Kind.DURATION_DRIFT)
+        String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
                 .orElseThrow()
                 .id();
         String now = Instant.now().toString();
@@ -310,7 +293,6 @@ class TriageAutoEscalationIntegrationTest {
                         BucketKind.CALL_SITE,
                         BUCKET,
                         State.ARMED,
-                        null,
                         null,
                         null,
                         null,

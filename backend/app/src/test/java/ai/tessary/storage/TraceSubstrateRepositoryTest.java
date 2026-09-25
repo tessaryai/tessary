@@ -33,6 +33,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
         })
 class TraceSubstrateRepositoryTest {
 
+    private static final TraceV2Repository.TraceQuery NO_FILTER =
+            new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null);
+
     @Autowired
     TenantService tenants;
 
@@ -87,7 +90,7 @@ class TraceSubstrateRepositoryTest {
         TraceV2Row stored = v2traces.findById(pid, traceId).orElseThrow();
         assertEquals(Integer.valueOf(2), stored.spanCount(), "precondition: the worker actually ran");
 
-        var listed = only(v2traces.list(pid, TraceV2Repository.TraceQuery.none(), null, 10, null, null, null));
+        var listed = only(v2traces.list(pid, NO_FILTER, null, 10, null, null, null));
         assertEquals(stored.spanCount(), listed.spanCount());
         assertEquals(stored.totalTokens(), listed.totalTokens());
         assertEquals(Long.valueOf(155L), listed.totalTokens(), "110 in + 45 out, as the worker summed them");
@@ -101,7 +104,7 @@ class TraceSubstrateRepositoryTest {
                 .param("id", traceId)
                 .update();
 
-        var again = only(v2traces.list(pid, TraceV2Repository.TraceQuery.none(), null, 10, null, null, null));
+        var again = only(v2traces.list(pid, NO_FILTER, null, 10, null, null, null));
         assertEquals(Integer.valueOf(99), again.spanCount(), "the list reads the column, it does not count spans");
         assertEquals(Long.valueOf(4242L), again.totalTokens(), "…and it does not sum usage either");
         assertEquals(0, new java.math.BigDecimal("7.5").compareTo(again.totalCost()), "…nor price anything");
@@ -135,7 +138,7 @@ class TraceSubstrateRepositoryTest {
         fx.withUsage(fx.llmSpan(pid, unpriced, t0.plusSeconds(10)), 500L, 100L, null, null, null);
         rollUp(pid, unpriced, t0);
 
-        var byId = v2traces.list(pid, TraceV2Repository.TraceQuery.none(), null, 10, null, null, null).stream()
+        var byId = v2traces.list(pid, NO_FILTER, null, 10, null, null, null).stream()
                 .collect(java.util.stream.Collectors.toMap(TraceV2Repository.Summary::id, r -> r));
 
         var p = byId.get(pending);
@@ -170,7 +173,7 @@ class TraceSubstrateRepositoryTest {
         fx.trace(pid, earliest, base);
         fx.trace(pid, latest, base.plusSeconds(120));
 
-        var noFilter = TraceV2Repository.TraceQuery.none();
+        var noFilter = NO_FILTER;
         assertEquals(List.of(latest, mid, earliest), ids(v2traces.list(pid, noFilter, null, 10, null, null, null)));
 
         var first = v2traces.list(pid, noFilter, null, 1, null, null, null);
@@ -202,9 +205,7 @@ class TraceSubstrateRepositoryTest {
         fx.trace(pid, traceId, t0);
 
         // The controller discards an unversioned cursor, so the repository is asked for page one.
-        assertEquals(
-                List.of(traceId),
-                ids(v2traces.list(pid, TraceV2Repository.TraceQuery.none(), null, 10, null, null, null)));
+        assertEquals(List.of(traceId), ids(v2traces.list(pid, NO_FILTER, null, 10, null, null, null)));
     }
 
     /**
@@ -240,8 +241,7 @@ class TraceSubstrateRepositoryTest {
 
         assertEquals(
                 2,
-                v2traces.list(pid, TraceV2Repository.TraceQuery.none(), null, 10, null, null, null)
-                        .size(),
+                v2traces.list(pid, NO_FILTER, null, 10, null, null, null).size(),
                 "an untagged trace still lists when the filter is absent");
     }
 
@@ -269,7 +269,7 @@ class TraceSubstrateRepositoryTest {
         String unknown = SubstrateV2Fixtures.traceId();
         fx.llmSpan(pid, unknown, t0.plusSeconds(2));
 
-        var noFilter = TraceV2Repository.TraceQuery.none();
+        var noFilter = NO_FILTER;
         var page = v2traces.list(pid, noFilter, TraceV2Repository.Sort.COST, 10, null, null, null);
         assertEquals(List.of(dear, cheap, unknown), ids(page), "priced descending, then the null tail");
 

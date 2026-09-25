@@ -45,12 +45,6 @@ public class OrganizationRepository {
                 .optional();
     }
 
-    /** Every organization on this install, regardless of owner. No archived-row exclusion: it counts
-     *  what exists, not what is currently in active use. */
-    public long countAll() {
-        return jdbc.sql("SELECT COUNT(*) FROM organization").query(Long.class).single();
-    }
-
     /**
      * Serialize org creation per owner for the rest of the CURRENT transaction. The
      * owned-org cap ({@code OrgCreationLimit}) is a check-then-insert; without this, two concurrent
@@ -128,22 +122,6 @@ public class OrganizationRepository {
                 .param("settings", settings)
                 .param("id", id)
                 .update();
-    }
-
-    /** Set or clear the soft-archive marker (null un-archives). */
-    public void setArchived(String id, String archivedAt) {
-        jdbc.sql("UPDATE organization SET archived_at = :archived WHERE id = :id")
-                .param("archived", archivedAt)
-                .param("id", id)
-                .update();
-    }
-
-    /** Hard delete — cascades to project/membership/api_key/... via ON DELETE CASCADE. */
-    public boolean deleteById(String id) {
-        return jdbc.sql("DELETE FROM organization WHERE id = :id")
-                        .param("id", id)
-                        .update()
-                > 0;
     }
 
     private static Organization map(ResultSet rs, int n) throws SQLException {

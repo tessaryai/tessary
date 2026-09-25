@@ -53,7 +53,7 @@ public class AlertChannelController {
      * unrecognized kind falls through to {@link AlertChannelService}, which owns that error.
      */
     private void requireChannelKind(Resolved r, String kind) {
-        if (AlertChannelKind.SLACK.wire().equalsIgnoreCase(kind == null ? "" : kind.trim())) {
+        if (AlertChannelKind.SLACK.wire().equalsIgnoreCase(kind.trim())) {
             capabilities.require(r.org().id(), Capability.SLACK);
         }
     }

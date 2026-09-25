@@ -92,7 +92,6 @@ class CachingMediaStoreTest {
         assertArrayEquals(
                 new byte[5000],
                 store.get("proj", new MediaRef("huge")).orElseThrow().bytes());
-        assertEquals(0, store.retainedBytesForTest());
         store.get("proj", new MediaRef("huge"));
         verify(delegate, times(2)).get(any(), any());
     }

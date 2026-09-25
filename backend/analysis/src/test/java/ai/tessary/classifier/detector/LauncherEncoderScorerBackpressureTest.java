@@ -40,10 +40,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * What the token-head client does when the encoder pushes back, against a loopback {@link
- * ServerSocket} HTTP responder (forbidden-apis bans {@code com.sun.net.httpserver}, the same reason
- * {@code HttpConformanceEncoderTest} rolls its own): a throttled request (429/503) is retried with
- * backoff and then succeeds, or fails past the retry budget; a refused one (400) is bisected down to the
- * single offending response, which comes back UNSCORED while the rest are scored; requests are sized by
+ * ServerSocket} HTTP responder (forbidden-apis bans {@code com.sun.net.httpserver}): a throttled
+ * request (429/503) is retried with backoff and then succeeds, or fails past the retry budget; a
+ * refused one (400) is bisected down to the single offending response, which comes back UNSCORED while the rest are scored; requests are sized by
  * count and estimated tokens, so a long response travels alone; a non-numeric score is a fault, never a
  * clean 0.0; no more than {@code encoder.max-inflight} requests are open at once; and a connection that
  * never opens is unreachable, while a 500 or a 401 is a fault. The responder serves each connection on its

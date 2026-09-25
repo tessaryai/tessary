@@ -110,16 +110,6 @@ class GroundednessDetectorTest {
     private static EncoderScorer head(List<Double> unsupportedScores, List<Response> seen) {
         return new EncoderScorer() {
             @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException("groundedness never calls score()");
-            }
-
-            @Override
-            public List<Double> scorePairs(String head, List<Pair> pairs) {
-                throw new AssertionError("groundedness is a token head since v5 — pairs must not be sent");
-            }
-
-            @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 assertEquals("groundedness", head);
                 seen.addAll(responses);
@@ -135,11 +125,6 @@ class GroundednessDetectorTest {
 
     private static EncoderScorer never(String why) {
         return new EncoderScorer() {
-            @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 throw new AssertionError(why);
@@ -175,7 +160,8 @@ class GroundednessDetectorTest {
                 storedInput,
                 storedOutput,
                 null,
-                "2026-01-01T00:00:00Z");
+                "2026-01-01T00:00:00Z",
+                null);
     }
 
     private static SubstrateObservation obs(
@@ -193,7 +179,8 @@ class GroundednessDetectorTest {
                 o.input(),
                 o.output(),
                 o.toolError(),
-                o.createdAt());
+                o.createdAt(),
+                null);
     }
 
     private static GroundingEvidenceReads docs(String... documents) {
@@ -204,7 +191,9 @@ class GroundednessDetectorTest {
     void highUnsupportedFiresOnAGroundedShape() throws Exception {
         String answer = "The candidate knows Java and GCP.";
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.99));
-        Detection detection = d.detect(obs("cs-1", "5 years of Python and AWS experience.", answer), null);
+        Detection detection = d.sweepBatch(
+                        SIGNAL, List.of(obs("cs-1", "5 years of Python and AWS experience.", answer)), null)
+                .get(0);
         assertTrue(detection.fired());
         assertEquals(Detection.Severity.WARN, detection.severity());
         assertEquals(Detection.Confidence.HIGH, detection.confidence(), "0.99 is past the 0.975 high bar");
@@ -221,8 +210,11 @@ class GroundednessDetectorTest {
     @Test
     void lowUnsupportedStaysQuiet() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.02));
-        Detection detection =
-                d.detect(obs("cs-1", "5 years of Python and AWS experience.", "The candidate knows Python."), null);
+        Detection detection = d.sweepBatch(
+                        SIGNAL,
+                        List.of(obs("cs-1", "5 years of Python and AWS experience.", "The candidate knows Python.")),
+                        null)
+                .get(0);
         assertFalse(detection.fired());
     }
 
@@ -231,15 +223,19 @@ class GroundednessDetectorTest {
     void theThresholdIsTheOnlyBar() {
         String input = "5 years of Python and AWS experience.";
         String answer = "The candidate knows Java.";
-        Detection at = detector(Map.of("cs-1", "extract"), List.of(0.975)).detect(obs("cs-1", input, answer), null);
+        Detection at = detector(Map.of("cs-1", "extract"), List.of(0.975))
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", input, answer)), null)
+                .get(0);
         assertTrue(at.fired(), "0.975 reaches the threshold");
         assertEquals(Detection.Confidence.HIGH, at.confidence(), "every detection is HIGH");
         assertFalse(detector(Map.of("cs-1", "extract"), List.of(0.97))
-                .detect(obs("cs-1", input, answer), null)
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", input, answer)), null)
+                .get(0)
                 .fired());
         assertFalse(
                 detector(Map.of("cs-1", "extract"), List.of(0.7))
-                        .detect(obs("cs-1", input, answer), null)
+                        .sweepBatch(SIGNAL, List.of(obs("cs-1", input, answer)), null)
+                        .get(0)
                         .fired(),
                 "0.7 was the old review band; it no longer fires");
     }
@@ -247,23 +243,32 @@ class GroundednessDetectorTest {
     @Test
     void ungatedShapeNeverScoresOrCallsTheEncoder() {
         GroundednessDetector d = detector(Map.of("cs-1", "draft"), List.of());
-        Detection detection = d.detect(obs("cs-1", "write me a poem about the sea", "Waves crash..."), null);
+        Detection detection = d.sweepBatch(
+                        SIGNAL, List.of(obs("cs-1", "write me a poem about the sea", "Waves crash...")), null)
+                .get(0);
         assertFalse(detection.fired(), "an open-generation shape has no source content to be ungrounded from");
     }
 
     @Test
     void noCallSiteOrNoShapeIsSkippedNotScoredClean() {
         GroundednessDetector d = detector(Map.of(), List.of());
-        assertFalse(d.detect(obs(null, "some input", "some output"), null).fired());
-        assertFalse(
-                d.detect(obs("cs-unknown", "some input", "some output"), null).fired());
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs(null, "some input", "some output")), null)
+                .get(0)
+                .fired());
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-unknown", "some input", "some output")), null)
+                .get(0)
+                .fired());
     }
 
     @Test
     void blankInputOrOutputIsSkipped() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of());
-        assertFalse(d.detect(obs("cs-1", null, "some output"), null).fired());
-        assertFalse(d.detect(obs("cs-1", "some input", null), null).fired());
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", null, "some output")), null)
+                .get(0)
+                .fired());
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", "some input", null)), null)
+                .get(0)
+                .fired());
     }
 
     /**
@@ -273,7 +278,8 @@ class GroundednessDetectorTest {
     @Test
     void batchStaysIndexAlignedAndOnlyGatedRowsAreScored() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "draft"), List.of(0.99, 0.05));
-        List<Detection> ds = d.detectBatch(
+        List<Detection> ds = d.sweepBatch(
+                SIGNAL,
                 List.of(
                         obs("cs-2", "write a poem", "roses are red"), // ungated -> skipped
                         obs("cs-1", "the doc says X", "the doc says Y"), // gated, unsupported -> fires
@@ -305,8 +311,9 @@ class GroundednessDetectorTest {
                 storedInput,
                 assistantOutput("Refunds take 5-7 business days."),
                 null,
-                "2026-01-01T00:00:00Z");
-        Detection got = d.detect(o, null);
+                "2026-01-01T00:00:00Z",
+                null);
+        Detection got = d.sweepBatch(SIGNAL, List.of(o), null).get(0);
         // One passage, the system and user text in message order a line apart; no separate question, since
         // the prompt already carries it.
         assertEquals(
@@ -328,10 +335,12 @@ class GroundednessDetectorTest {
     void configThresholdOverridesTheDefault() {
         String answer = "Refunds take 5-7 business days.";
         GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.9));
-        assertFalse(
-                d.detect(obs("cs-1", "how long do refunds take?", answer), null).fired());
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), null)
+                .get(0)
+                .fired());
         Detection lowered = detector(Map.of("cs-1", "extract"), List.of(0.9))
-                .detect(obs("cs-1", "how long do refunds take?", answer), "{\"threshold\":0.85}");
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), "{\"threshold\":0.85}")
+                .get(0);
         assertTrue(lowered.fired(), "0.9 clears a lowered 0.85 threshold");
         assertEquals(Detection.Confidence.HIGH, lowered.confidence());
     }
@@ -373,15 +382,6 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    void detectBatchScoresWithoutWritingAnything() {
-        GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.99));
-        assertTrue(d.detectBatch(List.of(obs("cs-1", "the doc says X", "the doc says Y")), null)
-                .get(0)
-                .fired());
-        assertTrue(assessments.rows.isEmpty(), "only the sweep records trials");
-    }
-
-    @Test
     @DisplayName("a skipped observation, or one the encoder refused, writes nothing: it is not a trial")
     void aSkippedObservationWritesNothing() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "draft"), List.of());
@@ -404,11 +404,6 @@ class GroundednessDetectorTest {
         assertTrue(assessments.rows.isEmpty(), "a turn with no readable evidence abstains");
 
         EncoderScorer refuses = new EncoderScorer() {
-            @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 return List.of(ResponseScore.UNSCORED);
@@ -441,11 +436,6 @@ class GroundednessDetectorTest {
         int b = a + s2.length();
         EncoderScorer threeSentences = new EncoderScorer() {
             @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 // Out of order on purpose: the evidence lists them by start.
                 return List.of(new ResponseScore(
@@ -459,7 +449,8 @@ class GroundednessDetectorTest {
         };
         GroundednessDetector d = new GroundednessDetector(
                 threeSentences, rag, docs("Refunds are issued within 5-7 business days."), assessments, mapper);
-        Detection got = d.detect(obs("cs-rag", "how long do refunds take?", answer), null);
+        Detection got = d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "how long do refunds take?", answer)), null)
+                .get(0);
         assertTrue(got.fired());
         JsonNode flagged = mapper.readTree(got.evidenceJson()).get("flagged_sentences");
         assertEquals(2, flagged.size(), "the supported first sentence is not listed: " + flagged);
@@ -487,11 +478,6 @@ class GroundednessDetectorTest {
         int totalCodePoints = answer.codePointCount(0, answer.length());
         EncoderScorer emoji = new EncoderScorer() {
             @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 return List.of(
                         new ResponseScore(0.99, 0.1, List.of(new Span(firstCodePoints, totalCodePoints, 0.99, 0.1))));
@@ -499,7 +485,8 @@ class GroundednessDetectorTest {
         };
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
         Detection got = new GroundednessDetector(emoji, extract, none, assessments, mapper)
-                .detect(obs("cs-1", "refund status for order 42", answer), null);
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", "refund status for order 42", answer)), null)
+                .get(0);
         JsonNode sentence =
                 mapper.readTree(got.evidenceJson()).get("flagged_sentences").get(0);
         assertEquals(
@@ -520,7 +507,11 @@ class GroundednessDetectorTest {
                 docs("Refunds take 5-7 business days."),
                 assessments,
                 mapper);
-        assertFalse(d.detect(obs("cs-rag", "thanks!", "You're welcome — anything else I can help with?"), null)
+        assertFalse(d.sweepBatch(
+                        SIGNAL,
+                        List.of(obs("cs-rag", "thanks!", "You're welcome — anything else I can help with?")),
+                        null)
+                .get(0)
                 .fired());
     }
 
@@ -536,8 +527,12 @@ class GroundednessDetectorTest {
                 toolOnly,
                 assessments,
                 mapper);
-        assertFalse(d.detect(
-                        obs("cs-rag", "where is my order?", "Your order shipped on 3 March and arrives Tuesday."), null)
+        assertFalse(d.sweepBatch(
+                        SIGNAL,
+                        List.of(obs(
+                                "cs-rag", "where is my order?", "Your order shipped on 3 March and arrives Tuesday.")),
+                        null)
+                .get(0)
                 .fired());
     }
 
@@ -550,8 +545,12 @@ class GroundednessDetectorTest {
         List<Response> seen = new ArrayList<>();
         GroundednessDetector d =
                 new GroundednessDetector(head(List.of(0.99), seen), extract, blind, assessments, mapper);
-        Detection got = d.detect(
-                obs("cs-x", "5 years of Python and AWS experience.", "The candidate knows Java and GCP."), null);
+        Detection got = d.sweepBatch(
+                        SIGNAL,
+                        List.of(obs(
+                                "cs-x", "5 years of Python and AWS experience.", "The candidate knows Java and GCP.")),
+                        null)
+                .get(0);
         assertEquals(1, seen.size(), "the prompt is still the premise for a document-in-prompt shape");
         assertTrue(got.fired());
     }
@@ -564,11 +563,6 @@ class GroundednessDetectorTest {
                 + "You are also covered by Extended Warranty KB-77 for 24 months.";
         List<Response> seen = new ArrayList<>();
         EncoderScorer perSentence = new EncoderScorer() {
-            @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 seen.addAll(responses);
@@ -583,7 +577,8 @@ class GroundednessDetectorTest {
         };
         GroundednessDetector d = new GroundednessDetector(
                 perSentence, rag, docs("Refunds are issued within 5-7 business days."), assessments, mapper);
-        Detection got = d.detect(obs("cs-rag", "how long do refunds take?", answer), null);
+        Detection got = d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "how long do refunds take?", answer)), null)
+                .get(0);
         assertEquals(1, seen.size(), "one response per answer, not one request per sentence");
         assertEquals(answer, seen.get(0).answer(), "the head sees the whole answer, sentences included");
         assertTrue(got.fired(), "the answer is only as grounded as its worst sentence");
@@ -609,23 +604,20 @@ class GroundednessDetectorTest {
                 docs("Refunds are issued within 5-7 business days.", "Store credit is instant."),
                 assessments,
                 mapper);
-        assertFalse(d.detect(
-                        obs(
+        assertFalse(d.sweepBatch(
+                        SIGNAL,
+                        List.of(obs(
                                 "cs-rag",
                                 "how long do refunds take?",
-                                "Refunds are issued within 5-7 business days. Store credit is instant."),
+                                "Refunds are issued within 5-7 business days. Store credit is instant.")),
                         null)
+                .get(0)
                 .fired());
     }
 
     /** A head that answers every request with {@code score}. */
     private static EncoderScorer answering(ResponseScore score) {
         return new EncoderScorer() {
-            @Override
-            public List<Double> score(String head, List<String> texts) {
-                throw new UnsupportedOperationException();
-            }
-
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
                 return List.of(score);
@@ -649,7 +641,8 @@ class GroundednessDetectorTest {
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
 
         Detection got = new GroundednessDetector(head, extract, none, assessments, mapper)
-                .detect(obs("cs-1", "how long do refunds take?", answer), null);
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), null)
+                .get(0);
 
         assertTrue(worst.length() > 300, "the sentence must be longer than the cap");
         assertEquals(
@@ -666,7 +659,8 @@ class GroundednessDetectorTest {
 
         Detection got = new GroundednessDetector(
                         answering(new ResponseScore(0.99, 0.2, List.of())), extract, none, assessments, mapper)
-                .detect(obs("cs-1", "what does the warranty cover?", answer), null);
+                .sweepBatch(SIGNAL, List.of(obs("cs-1", "what does the warranty cover?", answer)), null)
+                .get(0);
 
         JsonNode evidence = mapper.readTree(assertNotNull2(got.evidenceJson()));
         assertEquals(answer, evidence.get("claim").asText());
@@ -690,7 +684,8 @@ class GroundednessDetectorTest {
                 none,
                 assessments,
                 new ObjectMapper());
-        assertFalse(d.detect(obs("cs-rag", "what is the excess?", "The excess is Rs 5,000."), null)
+        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "what is the excess?", "The excess is Rs 5,000.")), null)
+                .get(0)
                 .fired());
     }
 
@@ -705,7 +700,9 @@ class GroundednessDetectorTest {
                 docs("The policy excess is Rs 5,000 per claim.", "Claims are settled within 30 days."),
                 assessments,
                 new ObjectMapper());
-        Detection got = d.detect(obs("cs-rag", "what is the excess?", "The excess is Rs 50,000."), null);
+        Detection got = d.sweepBatch(
+                        SIGNAL, List.of(obs("cs-rag", "what is the excess?", "The excess is Rs 50,000.")), null)
+                .get(0);
         assertTrue(got.fired());
         assertEquals(1, seen.size());
         Response sent = seen.get(0);

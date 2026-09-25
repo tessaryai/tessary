@@ -15,18 +15,14 @@ import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.KeyScope;
-import ai.tessary.tenant.OrgMembership;
-import ai.tessary.tenant.OrgMembershipRepository;
-import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -128,8 +124,6 @@ public class AgenticRcaEngine {
     private final GitIntegrationRepository integrations;
     private final GitProviderFactory providers;
     private final ApiKeyService apiKeys;
-    private final ProjectRepository projects;
-    private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
 
     public AgenticRcaEngine(
@@ -138,8 +132,6 @@ public class AgenticRcaEngine {
             GitIntegrationRepository integrations,
             GitProviderFactory providers,
             ApiKeyService apiKeys,
-            ProjectRepository projects,
-            OrgMembershipRepository memberships,
             ObjectMapper mapper) {
         this.props = props;
         Map<String, RcaSandbox> byKey = new HashMap<>();
@@ -148,8 +140,6 @@ public class AgenticRcaEngine {
         this.integrations = integrations;
         this.providers = providers;
         this.apiKeys = apiKeys;
-        this.projects = projects;
-        this.memberships = memberships;
         this.mapper = mapper;
     }
 
@@ -202,12 +192,8 @@ public class AgenticRcaEngine {
                     RcaError.NO_EVIDENCE_DOOR,
                     "tessary.rca.agentic.mcp-base-url is unset, so the agent has no way to read the evidence");
         }
-        // The principal is the triggering user; a system-triggered run (no created_by) borrows the org's
-        // owner, so the key can always be minted and attributed.
-        String keyPrincipal = job.createdBy() != null ? job.createdBy() : orgOwnerPrincipal(job.projectId());
-        if (keyPrincipal == null) {
-            throw new TessaryException(RcaError.NO_EVIDENCE_DOOR, "the project's org has no owner to issue a key to");
-        }
+        // The principal is the triggering user.
+        String keyPrincipal = job.createdBy();
 
         // The repo is optional and read at run time rather than at the press: an integration connected
         // (or disconnected) between the two is a fact about this run, not the previous one.
@@ -221,17 +207,12 @@ public class AgenticRcaEngine {
 
         // A short-lived project-scoped admin key, named after the job so the audit trail ties it to this
         // run. Revoked in the finally below — the key must not outlive the sandbox.
-        String keyName = "rca-" + job.id() + (job.createdBy() == null ? " (system)" : "");
+        String keyName = "rca-" + job.id();
         ApiKeyService.Issued issued = apiKeys.issue(job.projectId(), keyPrincipal, keyName, KeyScope.ADMIN);
         try {
-            String sandboxKey = props.getAgentic().getSandbox();
-            RcaSandbox sandbox = sandboxes.get(sandboxKey);
-            if (sandbox == null) {
-                // The boot-time validator already guarantees this is registered — this is the same
-                // belt-and-suspenders defensive guard AgenticDriftAnalyzer's callers use, not a path
-                // expected to trip in practice.
-                throw new TessaryException(RcaError.UPSTREAM_FAILED, "unknown RCA sandbox '" + sandboxKey + "'");
-            }
+            // validateSandboxConfig guarantees the configured key is registered.
+            RcaSandbox sandbox =
+                    Objects.requireNonNull(sandboxes.get(props.getAgentic().getSandbox()));
             RcaSandbox.SandboxRun run = sandbox.run(new RcaSandbox.SandboxRequest(
                     job.projectId(),
                     job.subjectId(),
@@ -340,23 +321,9 @@ public class AgenticRcaEngine {
                 url.get(), providers.client(integ.get().providerEnum()).resolveHeadSha(integ.get(), null)));
     }
 
-    /** The org owner who stands in as key principal for a system-triggered run — deterministic
-     *  (earliest membership wins) so repeated runs attribute the same way. Null when the org has no
-     *  owner at all, which should not happen for a project that can trigger an RCA. */
-    private @Nullable String orgOwnerPrincipal(String projectId) {
-        return projects.findById(projectId)
-                .flatMap(p -> memberships.findByOrg(p.orgId()).stream()
-                        .filter(OrgMembership::isOwner)
-                        .sorted(Comparator.comparing(OrgMembership::createdAt)
-                                .thenComparing(OrgMembership::principalId))
-                        .findFirst())
-                .map(OrgMembership::principalId)
-                .orElse(null);
-    }
-
     /** Revocation must never mask the run's own outcome — log and move on; the key also carries the
      *  audit trail either way. */
-    private void revokeQuietly(String tokenId, @Nullable String actor, RcaJobRow job) {
+    private void revokeQuietly(String tokenId, String actor, RcaJobRow job) {
         try {
             apiKeys.revoke(tokenId, actor);
         } catch (RuntimeException e) {

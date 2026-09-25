@@ -18,7 +18,6 @@ type PaletteApi = {
   isOpen: boolean;
   open: () => void;
   close: () => void;
-  toggle: () => void;
 };
 
 const PaletteCtx = createContext<PaletteApi | null>(null);
@@ -42,7 +41,6 @@ export function PaletteProvider({ children }: { children: ReactNode }) {
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
-  const toggle = useCallback(() => setIsOpen((v) => !v), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +61,7 @@ export function PaletteProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const api = useMemo<PaletteApi>(() => ({ isOpen, open, close, toggle }), [isOpen, open, close, toggle]);
+  const api = useMemo<PaletteApi>(() => ({ isOpen, open, close }), [isOpen, open, close]);
 
   return <PaletteCtx.Provider value={api}>{children}</PaletteCtx.Provider>;
 }

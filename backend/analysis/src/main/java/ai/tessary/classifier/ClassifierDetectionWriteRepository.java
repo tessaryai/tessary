@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -26,8 +27,8 @@ import org.springframework.stereotype.Repository;
  *
  * <p><b>The routing is by detector kind, not by table name guessing.</b> {@link #tableFor} is the one
  * place that maps a classifier onto its store; a kind with no table is a classifier that does not write
- * per-span detections (the drift/conformance families file findings directly), and the writer says so by
- * returning null rather than inventing a destination.
+ * per-span detections (the drift families file findings directly), and {@link #tableFor} says so by
+ * returning null rather than inventing a destination. Every other method takes a kind that has a table.
  *
  * <p>The name says WRITE because {@link ClassifierDetectionRepository} is the read side: that one
  * projects the stitched view for the events surface, this one owns the six tables the view is stitched
@@ -70,6 +71,12 @@ public class ClassifierDetectionWriteRepository {
         return tables.tableFor(detectorKind);
     }
 
+    /** The detection table for a kind the caller has already checked with {@link #writesDetections}. */
+    private String requireTable(String detectorKind) {
+        return Objects.requireNonNull(
+                tableFor(detectorKind), () -> "no detection table for detector kind " + detectorKind);
+    }
+
     /** True when {@code detectorKind} has a detection table — i.e. it is one of the per-span classifiers. */
     public boolean writesDetections(String detectorKind) {
         return tables.writesDetections(detectorKind);
@@ -78,9 +85,8 @@ public class ClassifierDetectionWriteRepository {
     /**
      * Insert one fired detection, or do nothing if this classifier has already spoken about this subject.
      *
-     * @return true when the row was written — a genuinely new detection
-     * @throws IllegalArgumentException when the classifier has no detection table (a routing bug, not a
-     *     runtime condition: the caller checks {@link #writesDetections} before it scores anything)
+     * @return true when the row was written — a genuinely new detection; the caller checks
+     *     {@link #writesDetections} before it scores anything
      */
     public boolean insert(
             String id,
@@ -95,10 +101,7 @@ public class ClassifierDetectionWriteRepository {
             @Nullable String severity,
             @Nullable String confidence,
             @Nullable String evidenceJson) {
-        String table = tableFor(detectorKind);
-        if (table == null) {
-            throw new IllegalArgumentException("no detection table for detector kind " + detectorKind);
-        }
+        String table = requireTable(detectorKind);
         // The table name is interpolated because it is not a bind-able position; every value that
         // reaches SQL from outside this class is a parameter, and the name itself comes from a
         // DetectionTable registration, whose constructor rejects anything but a bare identifier.
@@ -146,8 +149,8 @@ public class ClassifierDetectionWriteRepository {
             String since,
             String until,
             int limit) {
-        String table = tableFor(detectorKind);
-        if (table == null || limit <= 0) return List.of();
+        String table = requireTable(detectorKind);
+        if (limit <= 0) return List.of();
         return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, d.subject_session_id, d.severity,"
                         + " d.confidence, d.evidence::text AS evidence, d.subject_started_at FROM " + table + " d"
                         + " JOIN span s ON s.project_id = d.project_id AND s.trace_id = d.subject_trace_id"
@@ -187,34 +190,6 @@ public class ClassifierDetectionWriteRepository {
             String subjectStartedAt) {}
 
     /**
-     * Of {@code sessionIds}, the ones this classifier has ALREADY flagged at the HIGH band.
-     *
-     * <p>The turn-grain sweep reads this to stop re-scoring a conversation that is already flagged. A
-     * conversation is one event, not one per turn: interview-coach carried 8,012 frustration detections
-     * over 987 conversations (2026-08-20) — 8.12 rows per conversation, each a separate encoder call,
-     * all saying the same thing about the same conversation.
-     *
-     * <p>HIGH specifically, because HIGH is the CEILING: no later turn can move a conversation already
-     * flagged at the top band, so scoring one is work with no possible outcome. A conversation flagged
-     * only at LOW stays eligible so it can still escalate. NULL reads as high, the same convention every
-     * other detection read here uses.
-     */
-    public Set<String> sessionsAlreadyFlaggedHigh(
-            String detectorKind, String projectId, String classifierId, Collection<String> sessionIds) {
-        String table = tableFor(detectorKind);
-        if (table == null || sessionIds.isEmpty()) return Set.of();
-        return new HashSet<>(jdbc.sql("SELECT DISTINCT subject_session_id FROM " + table
-                        + " WHERE project_id = :pid AND classifier_id = :sid"
-                        + " AND subject_session_id IN (:sessions)"
-                        + " AND (confidence = 'high' OR confidence IS NULL)")
-                .param("pid", projectId)
-                .param("sid", classifierId)
-                .param("sessions", sessionIds)
-                .query(String.class)
-                .list());
-    }
-
-    /**
      * Of {@code traceIds}, the ones whose conversation this classifier has a detection for that nobody
      * has cleared. The conversation is {@code COALESCE(trace.thread_id, trace.session_id)}, the key such a
      * classifier writes into {@code subject_session_id}; a trace with neither is in no conversation and
@@ -222,8 +197,8 @@ public class ClassifierDetectionWriteRepository {
      */
     public Set<String> tracesInUnclearedFlaggedConversations(
             String detectorKind, String projectId, String classifierId, Collection<String> traceIds) {
-        String table = tableFor(detectorKind);
-        if (table == null || traceIds.isEmpty()) return Set.of();
+        String table = requireTable(detectorKind);
+        if (traceIds.isEmpty()) return Set.of();
         return new HashSet<>(jdbc.sql("SELECT t.id FROM trace t"
                         + " WHERE t.project_id = :pid AND t.id IN (:traces)"
                         + " AND EXISTS (SELECT 1 FROM " + table + " d"
@@ -240,12 +215,12 @@ public class ClassifierDetectionWriteRepository {
     /**
      * Clear this classifier's detections in each of {@code sessionIds}, the conversations a human ruled not
      * frustrated: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
-     * their first clear time. Returns how many rows it cleared; zero where no detection table is registered.
+     * their first clear time. Returns how many rows it cleared.
      */
     public int clearSessions(
             String detectorKind, String projectId, String classifierId, Collection<String> sessionIds, String now) {
-        String table = tableFor(detectorKind);
-        if (table == null || sessionIds.isEmpty()) return 0;
+        String table = requireTable(detectorKind);
+        if (sessionIds.isEmpty()) return 0;
         return jdbc.sql("UPDATE " + table + " SET cleared_at = :now"
                         + " WHERE project_id = :pid AND classifier_id = :sid"
                         + " AND subject_session_id IN (:sessions) AND cleared_at IS NULL")
@@ -259,12 +234,12 @@ public class ClassifierDetectionWriteRepository {
     /**
      * Clear this classifier's detections on each of {@code spans}, the flagged answers a human ruled a false
      * alarm: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
-     * their first clear time. Returns how many rows it cleared; zero where no detection table is registered.
+     * their first clear time. Returns how many rows it cleared.
      */
     public int clearSpans(
             String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans, String now) {
-        String table = tableFor(detectorKind);
-        if (table == null || spans.isEmpty()) return 0;
+        String table = requireTable(detectorKind);
+        if (spans.isEmpty()) return 0;
         List<Object[]> keys =
                 spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
         return jdbc.sql("UPDATE " + table + " SET cleared_at = :now"
@@ -318,8 +293,8 @@ public class ClassifierDetectionWriteRepository {
             String facetKey,
             long windowSeconds,
             boolean highOnly) {
-        String table = tableFor(detectorKind);
-        if (table == null || spans.isEmpty()) return List.of();
+        String table = requireTable(detectorKind);
+        if (spans.isEmpty()) return List.of();
         List<Object[]> keys =
                 spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
         return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, s.call_site_id,"
@@ -358,8 +333,8 @@ public class ClassifierDetectionWriteRepository {
             boolean highOnly,
             boolean distinctSessions,
             Collection<FiredFacet> touched) {
-        String table = tableFor(detectorKind);
-        if (table == null || touched.isEmpty()) return List.of();
+        String table = requireTable(detectorKind);
+        if (touched.isEmpty()) return List.of();
         Set<WindowKey> distinct = new LinkedHashSet<>();
         for (FiredFacet f : touched) {
             distinct.add(
@@ -417,8 +392,8 @@ public class ClassifierDetectionWriteRepository {
             Collection<SpanKey> spans,
             long windowSeconds,
             boolean highOnly) {
-        String table = tableFor(detectorKind);
-        if (table == null || spans.isEmpty()) return List.of();
+        String table = requireTable(detectorKind);
+        if (spans.isEmpty()) return List.of();
         List<Object[]> keys =
                 spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
         return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, " + EVENT_WINDOW + " AS window_start"
@@ -450,8 +425,8 @@ public class ClassifierDetectionWriteRepository {
             boolean highOnly,
             boolean distinctSessions,
             Collection<FiredWindow> touched) {
-        String table = tableFor(detectorKind);
-        if (table == null || touched.isEmpty()) return List.of();
+        String table = requireTable(detectorKind);
+        if (touched.isEmpty()) return List.of();
         Set<Long> windowStarts = new LinkedHashSet<>();
         for (FiredWindow w : touched) windowStarts.add(w.windowStartEpochSecond());
         return jdbc.sql("SELECT " + EVENT_WINDOW + " AS window_start, "
@@ -477,7 +452,7 @@ public class ClassifierDetectionWriteRepository {
     /**
      * A secret-leak facet's population since its finding's onset: how many detections, across how many
      * traces, first to last by the span's own clock, and whether any of them is HIGH band. Null when the
-     * facet has no detection table or its population has aged out from under the span join entirely.
+     * facet's population has aged out from under the span join entirely.
      *
      * <p>Scoped by call site AND facet together, the same pair {@code ClassifierArming} files one finding
      * per: a project-wide count here would mix a leak at one call site into another's numbers.
@@ -489,8 +464,7 @@ public class ClassifierDetectionWriteRepository {
             String pattern,
             @Nullable String callSiteId,
             Instant sinceOnset) {
-        String table = tableFor(detectorKind);
-        if (table == null) return null;
+        String table = requireTable(detectorKind);
         return jdbc.sql("SELECT count(*) AS n, count(DISTINCT d.subject_trace_id) AS traces,"
                         + " min(s.started_at) AS first_at, max(s.started_at) AS last_at"
                         + " FROM " + table + " d" + SPAN_JOIN
@@ -526,8 +500,7 @@ public class ClassifierDetectionWriteRepository {
             String pattern,
             @Nullable String callSiteId,
             Instant sinceOnset) {
-        String table = tableFor(detectorKind);
-        if (table == null) return List.of();
+        String table = requireTable(detectorKind);
         return jdbc.sql("SELECT COALESCE(d.evidence ->> 'masked', 'unknown') AS masked,"
                         + " count(*) AS n, count(DISTINCT d.subject_trace_id) AS traces,"
                         + " max(s.started_at) AS last_at,"
@@ -561,8 +534,8 @@ public class ClassifierDetectionWriteRepository {
      */
     public List<SecretLeakWitness> secretLeakWitnesses(
             String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans) {
-        String table = tableFor(detectorKind);
-        if (table == null || spans.isEmpty()) return List.of();
+        String table = requireTable(detectorKind);
+        if (spans.isEmpty()) return List.of();
         List<Object[]> keys =
                 spans.stream().map(k -> new Object[] {k.traceId(), k.spanId()}).toList();
         return jdbc.sql("SELECT d.subject_trace_id, d.subject_span_id, s.started_at,"

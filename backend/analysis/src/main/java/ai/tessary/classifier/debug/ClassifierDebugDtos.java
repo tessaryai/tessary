@@ -11,25 +11,24 @@ import org.jspecify.annotations.Nullable;
  * Snake_case on the wire, camelCase in Java, mirroring {@code ClassifierDtos}.
  *
  * <p>Deliberately read-only and additive: every field here is sourced from a table the production
- * classifier surface already reads from ({@code job}, {@code metric_baseline}, {@code
- * behavior_profile}) — nothing is computed fresh and nothing is written.
+ * classifier surface already reads from ({@code job}, {@code metric_baseline}) — nothing is computed
+ * fresh and nothing is written.
  */
 public final class ClassifierDebugDtos {
 
     private ClassifierDebugDtos() {}
 
     /**
-     * The debug bundle for one classifier. {@code family} selects which of {@code metricBaselines} /
-     * {@code behaviorProfiles} is populated — the other is {@code null}, not an empty list, so a
-     * reader can tell "not this family" apart from "this family, nothing fitted yet".
+     * The debug bundle for one classifier. {@code metricBaselines} is populated for the metric-drift
+     * family only, and {@code null} otherwise, not an empty list, so a reader can tell "not this
+     * family" apart from "this family, nothing fitted yet".
      */
     public record ClassifierDebugView(
             String id,
             String detector,
             String family,
             SweepView sweep,
-            @JsonProperty("metric_baselines") @Nullable List<MetricBaselineView> metricBaselines,
-            @JsonProperty("behavior_profiles") @Nullable List<BehaviorProfileDebugView> behaviorProfiles) {
+            @JsonProperty("metric_baselines") @Nullable List<MetricBaselineView> metricBaselines) {
 
         /** The families the backend actually dispatches on — {@code BuiltInClassifierCatalog}'s tiers. */
         public static final class Family {
@@ -38,7 +37,6 @@ public final class ClassifierDebugDtos {
             public static final String DETERMINISTIC = "deterministic";
             public static final String ENCODER = "encoder";
             public static final String DECISION = "decision";
-            public static final String BEHAVIOR_DRIFT = "behavior_drift";
             public static final String METRIC_DRIFT = "metric_drift";
         }
     }
@@ -85,25 +83,4 @@ public final class ClassifierDebugDtos {
     /** A sketch reduced to what a debug reader needs: how many samples, and whether it's comparable. */
     public record SketchSummary(
             long count, @JsonProperty("grid_id") String gridId) {}
-
-    /**
-     * One {@code behavior_profile} row's fitted internals — {@code alphabetSize}/{@code maxOrder}/
-     * {@code discoveryRate}/{@code thresholdD2} already reach the product via {@code
-     * BehaviorDtos.BehaviorProfileView}; the raw {@code reservoirJson}/{@code fitCarryJson}/{@code
-     * rareSymbolsJson} blobs do not, and are the only genuinely new fields here.
-     */
-    public record BehaviorProfileDebugView(
-            @JsonProperty("call_site_id") String callSiteId,
-            String state,
-            @JsonProperty("opened_at") String openedAt,
-            @JsonProperty("armed_at") @Nullable String armedAt,
-            @JsonProperty("trace_count") long traceCount,
-            @JsonProperty("alphabet_size") int alphabetSize,
-            @JsonProperty("max_order") int maxOrder,
-            @JsonProperty("discovery_rate") @Nullable Double discoveryRate,
-            @JsonProperty("threshold_d2") @Nullable Double thresholdD2,
-            @JsonProperty("last_trace_at") @Nullable String lastTraceAt,
-            @JsonProperty("reservoir_json") @Nullable String reservoirJson,
-            @JsonProperty("fit_carry_json") @Nullable String fitCarryJson,
-            @JsonProperty("rare_symbols_json") @Nullable String rareSymbolsJson) {}
 }

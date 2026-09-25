@@ -3,7 +3,6 @@ package ai.tessary.mcp;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
-import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -51,12 +50,4 @@ public final class JsonRpc {
     public static final int METHOD_NOT_FOUND = -32601;
     public static final int INVALID_PARAMS = -32602;
     public static final int INTERNAL_ERROR = -32603;
-
-    /**
-     * Helper for endpoints that need to read tool-call params as an untyped map
-     * without forcing every tool to declare a record.
-     */
-    public static Map<String, Object> emptyParams() {
-        return Map.of();
-    }
 }

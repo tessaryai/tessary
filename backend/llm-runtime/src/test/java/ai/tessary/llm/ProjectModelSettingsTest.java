@@ -151,9 +151,9 @@ class ProjectModelSettingsTest {
     void triageAcceptsTheSameFrontierModelRcaDoes() {
         // Sonnet 5 is RCA's own default on Bedrock. With the ceiling gone it is also TRIAGE's default,
         // and a raw PUT naming it explicitly on either lane now succeeds identically.
-        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5);
         verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
-        settings.set(PID, ORG, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, SONNET_5);
         verify(repo).upsert(PID, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
     }
 
@@ -166,7 +166,7 @@ class ProjectModelSettingsTest {
         assertEquals(SONNET_5, bedrockOnRca.defaultModelKey());
         assertEquals(List.of(SONNET_5, HAIKU), bedrockOnRca.modelKeys());
 
-        settings.set(PID, ORG, ModelLane.RCA, HAIKU, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, HAIKU);
         verify(repo).upsert(PID, ModelLane.RCA, HAIKU, ServiceTier.STANDARD, null);
     }
 
@@ -245,8 +245,7 @@ class ProjectModelSettingsTest {
     void aDecisionModelIsRefusedOnTheAgentLanes() {
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest")) {
-                TessaryException ex = assertThrows(
-                        TessaryException.class, () -> settings.set(PID, ORG, lane, jev, ServiceTier.STANDARD, null));
+                TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, jev));
                 assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), lane + " " + jev);
             }
         }
@@ -255,16 +254,15 @@ class ProjectModelSettingsTest {
     @Test
     void aChatModelIsRefusedOnTheFrustrationLane() {
         for (String chat : List.of(SONNET_5, "OPENROUTER:openai/gpt-6-sol", "GROK:grok-4.6")) {
-            TessaryException ex = assertThrows(
-                    TessaryException.class,
-                    () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat, ServiceTier.STANDARD, null));
+            TessaryException ex =
+                    assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat));
             assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), chat);
         }
     }
 
     @Test
     void aDecisionModelSavesOnTheFrustrationLaneWithNoTierOrEffort() {
-        settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.FLEX, "high");
+        settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest");
         verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD, null);
     }
 
@@ -298,18 +296,16 @@ class ProjectModelSettingsTest {
 
     @Test
     void rejectsAModelThatIsNotOnePlatformModel() {
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> settings.set(PID, ORG, ModelLane.RCA, "gpt-5.5", ServiceTier.STANDARD, null));
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "gpt-5.5"));
         assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
     @Test
     void refusesToSaveAModelWhoseProviderTheOrgHasNoKeyFor() {
         configured(ModelProvider.BEDROCK);
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> settings.set(PID, ORG, ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD, null));
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "GROK:grok-4.6"));
         assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, ex.error());
     }
 
@@ -324,8 +320,7 @@ class ProjectModelSettingsTest {
     @Test
     void aNovaShapedKeyFailsAsUnknownRatherThanNonAgentic() {
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
-            TessaryException ex = assertThrows(
-                    TessaryException.class, () -> settings.set(PID, ORG, lane, NOVA, ServiceTier.STANDARD, null));
+            TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, NOVA));
             assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error(), "lane " + lane);
         }
     }
@@ -337,9 +332,9 @@ class ProjectModelSettingsTest {
         // (ModelLane#group), and RCA and TRIAGE both share LaneGroup.AGENT_VM — there is no mechanism
         // to offer a model on one lane of a group but not its siblings.
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
-            settings.set(PID, ORG, lane, HAIKU, ServiceTier.STANDARD, null);
+            settings.set(PID, ORG, lane, HAIKU);
             verify(repo).upsert(PID, lane, HAIKU, ServiceTier.STANDARD, null);
-            settings.set(PID, ORG, lane, LUNA, ServiceTier.STANDARD, null);
+            settings.set(PID, ORG, lane, LUNA);
             verify(repo).upsert(PID, lane, LUNA, ServiceTier.STANDARD, null);
         }
     }
@@ -372,7 +367,7 @@ class ProjectModelSettingsTest {
         settings.resolve(PID, ModelLane.RCA);
         verify(repo, times(1)).findByProject(PID);
 
-        settings.set(PID, ORG, ModelLane.RCA, HAIKU, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, HAIKU);
         settings.resolve(PID, ModelLane.RCA);
         verify(repo, times(2)).findByProject(PID);
     }
@@ -393,15 +388,14 @@ class ProjectModelSettingsTest {
 
     @Test
     void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {
-        settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
         verify(repo).upsert(PID, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD, null);
     }
 
     @Test
     void aCatalogKeyForAnUnknownCatalogEntry_isRejectedAsUnknownPlatformModel() {
         TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> settings.set(PID, ORG, ModelLane.RCA, "GEMINI:no-such-model", ServiceTier.STANDARD, null));
+                TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "GEMINI:no-such-model"));
         assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
@@ -409,9 +403,8 @@ class ProjectModelSettingsTest {
     void aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane() {
         // OPENAI:gpt-5.5 is a real ModelCatalog entry (chat-completion only, agentic=false) — a valid
         // model, just not one offered for a lane that hands its id to a sandbox agent.
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENAI:gpt-5.5", ServiceTier.STANDARD, null));
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENAI:gpt-5.5"));
         assertEquals(ModelConfigError.MODEL_NOT_AGENTIC, ex.error());
     }
 
@@ -458,7 +451,7 @@ class ProjectModelSettingsTest {
     void aCustomProviderCatalogKey_acceptsAnyModelNameSuffix() {
         // CUSTOM has no real per-model catalog (ModelCatalog's own comment) — any non-blank suffix is
         // valid, and it round-trips through resolveAgenticModel as the free-text name the user chose.
-        settings.set(PID, ORG, ModelLane.RCA, "CUSTOM:my-self-hosted-model", ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, "CUSTOM:my-self-hosted-model");
         verify(repo).upsert(PID, ModelLane.RCA, "CUSTOM:my-self-hosted-model", ServiceTier.STANDARD, null);
 
         when(repo.findByProject(PID))

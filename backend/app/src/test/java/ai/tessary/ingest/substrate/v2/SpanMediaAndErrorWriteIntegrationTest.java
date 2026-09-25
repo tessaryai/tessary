@@ -31,8 +31,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * into {@code error_message}.
  *
  * <p>Shares {@link SpanBatchWriterIntegrationTest}'s property fingerprint (same context, same
- * database, no second Liquibase run). The writer also enqueues an embedding job per span, which
- * in the default context would race {@code JobRepositoryTest}'s globally-scoped claim assertion.
+ * database, no second Liquibase run).
  */
 @SpringBootTest(
         properties = {
@@ -115,7 +114,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
                 p.id(),
                 List.of(new RawEntry(
                         "span-dupe",
-                        null,
                         "span-dupe",
                         anthropicImagePayload(b64),
                         anthropicImagePayload(b64),
@@ -222,7 +220,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
     private static RawEntry withImage(String spanId, String traceId, String b64) {
         return new RawEntry(
                 spanId,
-                null,
                 spanId,
                 anthropicImagePayload(b64),
                 "looks like a pixel",
@@ -250,7 +247,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
                         statusMessage);
         return new RawEntry(
                 spanId,
-                null,
                 spanId,
                 "in-" + spanId,
                 "out-" + spanId,

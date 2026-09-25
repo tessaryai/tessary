@@ -75,12 +75,7 @@ public final class MetricSuppression {
      *     a real number of milliseconds and is already what the finding's evidence prints.
      */
     public record Shift(
-            String measure,
-            String bucketKey,
-            Set<String> callSites,
-            Decision decision,
-            double refMillis,
-            double curMillis) {
+            String bucketKey, Set<String> callSites, Decision decision, double refMillis, double curMillis) {
 
         /** How far the median moved, in milliseconds. Signed: positive is slower. */
         public double deltaMillis() {

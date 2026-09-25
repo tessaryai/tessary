@@ -159,7 +159,7 @@ function ActionControl({ action, primary }: { action: Action; primary?: boolean 
 
   // Built here rather than in `resolveState` because it is a property of the browser, not of the
   // project's state — the same reason ConnectGate builds it at render time.
-  const endpoint = `${typeof window !== "undefined" ? window.location.origin : ""}/v1/traces`;
+  const endpoint = `${window.location.origin}/v1/traces`;
   return (
     <CopyButton
       value={endpoint}

@@ -48,11 +48,6 @@ public final class ProfilingLabels {
         }
     }
 
-    /** Whether the Pyroscope agent's labels API is on the classpath. */
-    public static boolean available() {
-        return AVAILABLE;
-    }
-
     /**
      * Returns {@code body} wrapped so that CPU samples taken during its execution carry {@code
      * labels}; returns {@code body} unchanged when the agent is absent or no labels were supplied.

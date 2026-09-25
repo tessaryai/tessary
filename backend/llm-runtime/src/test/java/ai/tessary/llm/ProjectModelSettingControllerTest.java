@@ -26,7 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * First test coverage for {@link ProjectModelSettingController} — confirmed absent before this
  * file ({@code find backend -iname "*ProjectModelSettingController*Test*"} returned nothing).
  *
- * <p>The gap this closes: {@link ProjectModelSettings#validate}/{@code set} accept the
+ * <p>The gap this closes: {@link ProjectModelSettings#set} accepts the
  * {@code "<PROVIDER>:<model_name>"} catalog key for an {@link LaneGroup#AGENT_VM} lane (RCA,
  * TRIAGE) — proven by {@link ProjectModelSettingsTest} — but that write path was never checked
  * against the read path that actually feeds the settings page's only model picker
@@ -52,9 +52,6 @@ class ProjectModelSettingControllerTest {
     private ProjectModelSettings settings;
 
     @Mock
-    private ChatModelFactory factory;
-
-    @Mock
     private TenantPathResolver resolver;
 
     @Mock
@@ -71,8 +68,8 @@ class ProjectModelSettingControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new ProjectModelSettingController(
-                settings, factory, resolver, priceModels, priceBooks, providerCredentials);
+        controller =
+                new ProjectModelSettingController(settings, resolver, priceModels, priceBooks, providerCredentials);
         ctx = new TenantContext("user_1", "user@example.com", ORG_ID, null, "owner", null);
         Organization org = new Organization(ORG_ID, null, ORG_SLUG, "Acme", "2026-01-01T00:00:00Z", null, null);
         Project project = new Project(
@@ -176,8 +173,6 @@ class ProjectModelSettingControllerTest {
                 .filter(g -> g.id() == LaneGroup.DECISION_CALLS)
                 .findFirst()
                 .orElseThrow();
-        assertFalse(group.tiered());
-        assertFalse(group.effortTunable());
         assertFalse(group.modelSelectable(), "one model per provider, so the row is a provider select only");
         var lane = view.lanes().stream()
                 .filter(l -> l.id() == ModelLane.FRUSTRATION)
@@ -194,19 +189,5 @@ class ProjectModelSettingControllerTest {
                 lane.providerOptions().stream()
                         .flatMap(o -> o.modelKeys().stream())
                         .toList());
-    }
-
-    @Test
-    void getDoesNotOfferCatalogKeysOnALlmCallsLane() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-
-        var gradingLane = view.lanes().stream()
-                .filter(l -> l.group() == LaneGroup.LLM_CALLS)
-                .findFirst();
-        gradingLane.ifPresent(l -> assertTrue(
-                l.providerOptions().stream()
-                        .flatMap(o -> o.modelKeys().stream())
-                        .noneMatch(k -> k.contains(":")),
-                "an LLM_CALLS lane must offer only plain Bedrock keys, never a catalog key: " + l.providerOptions()));
     }
 }

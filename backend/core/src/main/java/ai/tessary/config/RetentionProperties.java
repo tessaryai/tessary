@@ -25,9 +25,6 @@ public class RetentionProperties {
     /** Master switch. Off means nothing is ever deleted — the pre-enforcement behaviour. */
     private boolean enabled = true;
 
-    /** How often a sweep runs, in milliseconds. Hourly: the TTLs are in days, so this is oversampled. */
-    private long intervalMs = 3_600_000;
-
     /** Rows deleted per statement. Bounds lock duration, not total work. */
     private int batchSize = 5_000;
 
@@ -61,14 +58,6 @@ public class RetentionProperties {
 
     public void setEnabled(boolean v) {
         this.enabled = v;
-    }
-
-    public long getIntervalMs() {
-        return intervalMs;
-    }
-
-    public void setIntervalMs(long v) {
-        this.intervalMs = v;
     }
 
     public int getBatchSize() {

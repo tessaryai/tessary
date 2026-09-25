@@ -2,7 +2,7 @@
 package ai.tessary.classifier.metric;
 
 /**
- * Signed Wasserstein-1 distance between two {@link MetricSketch}es — the entire statistic behind
+ * Signed Wasserstein-1 distance between two {@link MetricReading}s — the entire statistic behind
  * metric drift ({@code devdocs/concepts/metric-drift.md} §4). Given a bucket's reference window and
  * its current one, this is the single number the detector thresholds and the finding reports.
  *
@@ -69,7 +69,7 @@ public final class MetricDistance {
      *     resampled: a plausible number computed across a duration grid and a cost grid is worse than an
      *     exception, because nothing downstream would ever question it.
      */
-    public static double signedW1(MetricSketch ref, MetricSketch cur) {
+    public static double signedW1(MetricReading ref, MetricReading cur) {
         if (!ref.gridId().equals(cur.gridId())) {
             throw new IllegalArgumentException(
                     "cannot compare sketches on different grids: " + ref.gridId() + " vs " + cur.gridId());
@@ -78,12 +78,6 @@ public final class MetricDistance {
 
         double[] refCdf = ref.cdf();
         double[] curCdf = cur.cdf();
-        if (refCdf.length != curCdf.length) {
-            // Equal grid ids are supposed to guarantee equal slot counts; if an implementation ever
-            // breaks that, fail here rather than silently comparing the first min(a,b) slots.
-            throw new IllegalStateException("grid " + ref.gridId() + " produced CDFs of unequal length: "
-                    + refCdf.length + " vs " + curCdf.length);
-        }
 
         double absolute = 0.0;
         for (int i = 0; i < refCdf.length; i++) {

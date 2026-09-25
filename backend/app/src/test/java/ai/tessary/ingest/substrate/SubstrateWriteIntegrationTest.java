@@ -159,7 +159,6 @@ class SubstrateWriteIntegrationTest {
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
         spans.add(new RawEntry(
                 traceId + "-root",
-                null,
                 "agent",
                 "user question",
                 "agent answer",
@@ -172,7 +171,6 @@ class SubstrateWriteIntegrationTest {
         for (int i = 0; i < toolSpans; i++) {
             spans.add(new RawEntry(
                     traceId + "-tool-" + i,
-                    null,
                     "search",
                     "{\"q\":\"" + i + "\"}",
                     "{\"hits\":" + i + "}",
@@ -263,7 +261,6 @@ class SubstrateWriteIntegrationTest {
         for (int turn = 0; turn < 2; turn++) {
             batch.add(new RawEntry(
                     "sp-c1-" + turn,
-                    null,
                     "chat",
                     "q",
                     "a",
@@ -276,7 +273,6 @@ class SubstrateWriteIntegrationTest {
         }
         batch.add(new RawEntry(
                 "sp-solo",
-                null,
                 "chat",
                 "q",
                 "a",
@@ -330,7 +326,6 @@ class SubstrateWriteIntegrationTest {
         List<RawEntry> batch = List.of(
                 new RawEntry(
                         "tr-up",
-                        null,
                         "agent",
                         "user question",
                         "agent answer",
@@ -342,7 +337,6 @@ class SubstrateWriteIntegrationTest {
                         KindNormalizer.AGENT),
                 new RawEntry(
                         "tr-up",
-                        null,
                         "search",
                         "{\"q\":\"a\"}",
                         "{\"hits\":1}",
@@ -354,7 +348,6 @@ class SubstrateWriteIntegrationTest {
                         KindNormalizer.TOOL),
                 new RawEntry(
                         "tr-up",
-                        null,
                         "search",
                         "{\"q\":\"b\"}",
                         "{\"hits\":2}",
@@ -393,7 +386,6 @@ class SubstrateWriteIntegrationTest {
         meta.put("retrieval.documents.1.document.score", 0.42);
         RawEntry retriever = new RawEntry(
                 "sp-rag",
-                null,
                 "search docs",
                 "what is X?",
                 null,
@@ -459,7 +451,6 @@ class SubstrateWriteIntegrationTest {
                 "function");
         RawEntry tool = new RawEntry(
                 "sp-tool",
-                null,
                 "execute_tool Bash",
                 null,
                 null,
@@ -480,7 +471,7 @@ class SubstrateWriteIntegrationTest {
         usageMeta.put(GenAiAttributes.USAGE_CACHE_READ_INPUT_TOKENS, 15206);
         usageMeta.put(GenAiAttributes.USAGE_CACHE_CREATION_INPUT_TOKENS, 16829);
         RawEntry chat = new RawEntry(
-                "sp-chat-u", null, "chat gpt", "i", "o", "gpt-x", usageMeta, null, "tr-tool", t0, KindNormalizer.LLM);
+                "sp-chat-u", "chat gpt", "i", "o", "gpt-x", usageMeta, null, "tr-tool", t0, KindNormalizer.LLM);
 
         writer.enqueue(pid, List.of(chat, tool));
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "batch drained");
@@ -588,7 +579,6 @@ class SubstrateWriteIntegrationTest {
         for (int i = 0; i < 5; i++) {
             spans.add(new RawEntry(
                     traceId + "-root-" + i,
-                    null,
                     "agent",
                     body,
                     "agent answer " + i,

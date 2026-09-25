@@ -33,10 +33,6 @@
             <artifactId>shared</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-yaml</artifactId>
-        </dependency>
         <!-- HealthIndicator for the `ingest` health component: the health contributor API alone,
              not the actuator starter, so the module stays a library and the app decides what to expose. -->
         <dependency>
@@ -59,12 +55,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <dependency>
-            <groupId>ai.tessary</groupId>
-            <artifactId>test-support</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -136,10 +126,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-api</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

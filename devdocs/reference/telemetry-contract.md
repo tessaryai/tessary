@@ -32,7 +32,7 @@ it from the same bytes it sends.
 | `ping_seq` | int ≥ 0 | `41` | 0 on an instance's first ping, then one more on every ping, persisted in `telemetry_instance.ping_seq` so it keeps rising across restarts and replicas. Lets home tell a missed ping from a restart. |
 | `sent_at` | ISO-8601 UTC, `Z` | `"2026-09-13T07:20:00.123Z"` | When the ping was generated. |
 | `app_version` | string, ≤ 64 chars | `"2026.9.1"` | The running app's version; `"dev"` outside a packaged jar. |
-| `edition` | enum: `open` \| `paid` | `"open"` | Which build sent the ping. Both values are live: the backend derives it from the classpath (`ai.tessary.edition.Edition`; the paid overlay's presence reads `paid`), never from a property. |
+| `edition` | enum: `open` | `"open"` | Which build sent the ping. The backend derives it from the classpath (`ai.tessary.edition.Edition`), never from a property. |
 | `os` | string, ≤ 32 chars | `"linux"` | Host OS family. |
 | `arch` | string, ≤ 32 chars | `"arm64"` | Host CPU architecture. |
 | `counts.projects` | int ≥ 0 | `3` | Projects on the install, archived ones included. |

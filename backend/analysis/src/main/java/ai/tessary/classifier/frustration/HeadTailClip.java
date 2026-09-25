@@ -14,9 +14,6 @@ public final class HeadTailClip {
     private HeadTailClip() {}
 
     public static String clip(String text, int cap) {
-        if (cap < 2) {
-            throw new IllegalArgumentException("a head-and-tail cap needs at least one char per side: " + cap);
-        }
         if (text.length() <= cap) {
             return text;
         }

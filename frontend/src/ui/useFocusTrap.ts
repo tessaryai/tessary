@@ -23,8 +23,7 @@ export function useFocusTrap<T extends HTMLElement>(active: boolean) {
 
   useEffect(() => {
     if (!active) return;
-    const container = containerRef.current;
-    if (!container) return;
+    const container = containerRef.current!;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
@@ -35,10 +34,8 @@ export function useFocusTrap<T extends HTMLElement>(active: boolean) {
         ),
       ).filter((el) => el.offsetParent !== null || el === document.activeElement);
 
-    // Move focus into the overlay (prefer an explicitly [autofocus]-flagged
-    // element, else the first focusable, else the container itself).
-    const initial =
-      container.querySelector<HTMLElement>("[data-autofocus]") ?? focusables()[0] ?? container;
+    // Move focus into the overlay: the first focusable, else the container itself.
+    const initial = focusables()[0] ?? container;
     initial.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {

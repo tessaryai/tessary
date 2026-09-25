@@ -36,37 +36,6 @@ public final class AgentSpanTelemetry {
     // platform can segregate agent vs single-LLM vs tool by the standard, not by a vendor's lossy type.
     public static final String OP_CHAT = "chat"; // a single LLM call (one turn)
     public static final String OP_INVOKE_AGENT = "invoke_agent"; // a (multi-turn) agent invocation
-    public static final String OP_INVOKE_WORKFLOW = "invoke_workflow"; // a coordinator fanning out agents
-
-    /**
-     * Stamp the prompt + completion onto {@code span} as a Langfuse <em>generation</em>'s input/output —
-     * the same {@code gen_ai.input.messages} / {@code gen_ai.output.messages} shape {@link
-     * ai.tessary.llm.LlmCaller} uses, so the trace shows WHAT was asked and produced instead of a
-     * content-less, token-only generation. {@code operationName} is the OTel {@code gen_ai.operation.name}
-     * KIND ({@link #OP_CHAT}/{@link #OP_INVOKE_AGENT}/…) — the truthful discriminator the ingestion keys on.
-     * Best-effort; content is stamped in FULL, never truncated — telemetry must be a faithful record for
-     * debugging (we rely on the OTLP pipeline to carry large attributes rather than clipping here).
-     */
-    public static void recordIo(Span span, String operationName, String model, String inputText, String outputText) {
-        try {
-            span.setAttribute(
-                    "gen_ai.operation.name",
-                    operationName == null || operationName.isBlank() ? OP_CHAT : operationName);
-            if (model != null && !model.isBlank()) {
-                span.setAttribute("gen_ai.request.model", model);
-                // semconv v1.37.0 renamed gen_ai.system -> gen_ai.provider.name.
-                span.setAttribute("gen_ai.provider.name", TraceSpanMapper.inferSystem(model));
-            }
-            if (inputText != null && !inputText.isBlank()) {
-                span.setAttribute("gen_ai.input.messages", messagesJson("user", inputText));
-            }
-            if (outputText != null && !outputText.isBlank()) {
-                span.setAttribute("gen_ai.output.messages", messagesJson("assistant", outputText));
-            }
-        } catch (RuntimeException ignored) {
-            // telemetry is best-effort; never fail the sandbox call over it
-        }
-    }
 
     /**
      * Stamp plain input/output strings onto a non-generation {@code span} (e.g. the orchestration root that
@@ -187,8 +156,7 @@ public final class AgentSpanTelemetry {
 
     /**
      * Stamp cost + token usage from the runner's result envelope onto {@code span} so Langfuse prices it
-     * like any other generation (instead of a hollow model-only span). Mirrors the observer's
-     * {@code E2bAnalysisSandbox.recordUsage}.
+     * like any other generation (instead of a hollow model-only span).
      */
     public static void recordUsage(Span span, ObjectMapper mapper, String envelopeJson) {
         if (envelopeJson == null || envelopeJson.isBlank()) return;

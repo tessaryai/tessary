@@ -84,7 +84,7 @@ public class RcaController {
             @PathVariable String projectSlug,
             @RequestParam(defaultValue = "" + DEFAULT_LIMIT) int limit) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(reportReads.list(r.project().id(), limit, null, null, null, null));
+        return ApiResponse.ok(reportReads.list(r.project().id(), limit));
     }
 
     @GetMapping("/{id}")

@@ -19,13 +19,6 @@ public class SourceRepository {
         this.jdbc = jdbc;
     }
 
-    public int countForProject(String projectId) {
-        return jdbc.sql("SELECT COUNT(*) FROM ingestion_source WHERE project_id = :pid")
-                .param("pid", projectId)
-                .query(Integer.class)
-                .single();
-    }
-
     public List<SourceRow> findAllForProject(String projectId) {
         return jdbc.sql(String.format(Locale.ROOT, """
             SELECT %s FROM ingestion_source
@@ -44,15 +37,6 @@ public class SourceRepository {
                 .param("pid", projectId)
                 .param("id", id)
                 .query((rs, n) -> map(rs))
-                .optional();
-    }
-
-    /** The provider vendor of one source, ignoring project scope. Light projection used to stamp
-     *  run provenance on list rows without loading (and decrypting) the full source. */
-    public Optional<String> findProvider(String id) {
-        return jdbc.sql("SELECT provider FROM ingestion_source WHERE id = :id")
-                .param("id", id)
-                .query(String.class)
                 .optional();
     }
 

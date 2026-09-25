@@ -9,6 +9,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -197,12 +198,11 @@ public class GroundednessRateRepository {
     /**
      * Scored and flagged traces per call site per hour since {@code from}, oldest first, as the tallies {@code
      * ToolErrorTrend} replays: {@code calls} is traces, {@code failures} is flagged ones. An answer with no call
-     * site is keyed {@link #UNASSIGNED}. Empty while no groundedness detection table is registered.
+     * site is keyed {@link #UNASSIGNED}.
      */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, String scorerVersion, Instant from) {
-        String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
-        if (table == null) return List.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS));
         return jdbc.sql(HOURLY_TALLIES.replace("{detections}", table))
                 .param("pid", projectId)
                 .param("cid", classifierId)
@@ -229,8 +229,7 @@ public class GroundednessRateRepository {
             Instant windowFrom,
             Instant onset,
             Instant until) {
-        String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
-        if (table == null) return List.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS));
         return spell(SCORED_SINCE.replace("{detections}", table), projectId, classifierId, scorerVersion)
                 .param("callSite", callSiteId)
                 .param("from", Timestamp.from(windowFrom))
@@ -242,7 +241,7 @@ public class GroundednessRateRepository {
 
     /**
      * Every flagged answer of the flagged traces of one call site's stream in {@code [onset, until)}: the spell's
-     * witnesses. Empty while no groundedness detection table is registered.
+     * witnesses.
      */
     public List<FlaggedAnswer> flaggedSince(
             String projectId,
@@ -252,8 +251,7 @@ public class GroundednessRateRepository {
             Instant windowFrom,
             Instant onset,
             Instant until) {
-        String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
-        if (table == null) return List.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS));
         return spell(FLAGGED_SINCE.replace("{detections}", table), projectId, classifierId, scorerVersion)
                 .param("callSite", callSiteId)
                 .param("from", Timestamp.from(windowFrom))
@@ -266,12 +264,11 @@ public class GroundednessRateRepository {
     /**
      * One page of the flagged answers {@code findingId} cites, newest flag first, and how many it cites in all
      * under the same filter. With {@code cause} set, only the answers in the traces that cause names: its share.
-     * Empty while no groundedness detection table is registered.
      */
     public AnswerPage answerPage(
             String projectId, String classifierId, String findingId, @Nullable CauseRef cause, int limit, int offset) {
-        String table = detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS);
-        if (table == null || limit <= 0) return new AnswerPage(List.of(), 0);
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS));
+        if (limit <= 0) return new AnswerPage(List.of(), 0);
         long[] total = {0};
         JdbcClient.StatementSpec spec = jdbc.sql(ANSWER_PAGE
                         .replace("{detections}", table)

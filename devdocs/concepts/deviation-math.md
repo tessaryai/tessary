@@ -412,7 +412,6 @@ under 4.
 | Real-corpus null run | **Owed.** Real traffic split in half, unmodified, where every firing is by construction a false positive. Synthetic traffic is lognormal by assumption; real traffic is not. |
 | `arl_target` = 250,000 | A **choice**, and the only threshold dial. One false alarm per corpus-and-a-half at the project the launch is measured against. |
 | `h(p0) = 11.42 + 1.088·ln(p0) + ln(arl_target/250000)` | **Derived**, by an exact Brook–Evans solve, to hold `arl_target` at every base rate — but under an independence assumption real traffic violates. Failures are bursty, and autocorrelation inflates false alarms by an amount arithmetic cannot price. The gap between predicted and measured ARL₀ is what a null-case replay exists to produce. |
-| `min_effect_size` = 0.05 | A **landmark**, no longer a gate. Nothing branches on it; it is kept because it is the scale a reader judges a reported effect size against. |
 | `criticality = 10·ln(S)` | A **choice** of scale. Natural log so every 10 points is 2.72x more evidence; unnormalised by design. |
 
 **Silence always carries a reason.** Both detectors enumerate why they did not fire — no reference

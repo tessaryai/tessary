@@ -5,7 +5,7 @@
  * or on the host in local mode, exactly like rca.js. The launcher injects the agent auth and
  * invokes:  node triage.js <input.json>
  *
- *   input.json : { files, prompt, json_schema, model, mcp: {url, token}|null, timeout_ms,
+ *   input.json : { files, prompt, json_schema, model, mcp: {url, token}, timeout_ms,
  *                  system_prompt|null }
  *   stdout     : { raw: "<result envelope>", turns: [...], startMs }
  *
@@ -62,17 +62,6 @@ function writeDossier(root, files) {
   }
 }
 
-// The backend sends the schema as a JSON string; the agent SDK wants the object.
-function parseSchema(raw) {
-  if (!raw) return null;
-  if (typeof raw === 'object') return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
@@ -81,20 +70,20 @@ async function main() {
   // exist yet is a stumble the agent has no reason to expect from its prompt.
   fs.mkdirSync(path.join(WORK, CHECKS_DIR), { recursive: true });
 
-  // 'error': the run's VALUE is the schema-constrained ruling JSON — a half-finished run must
-  // reject so the backend leaves triage_verdict NULL and retries, rather than parsing a broken
-  // body into a ruling that closes a finding nobody looked at.
+  // The run's VALUE is the schema-constrained ruling JSON — a half-finished run must reject so
+  // the backend leaves triage_verdict NULL and retries, rather than parsing a broken body into a
+  // ruling that closes a finding nobody looked at.
   let run;
   try {
     run = await runAgent({
       model: input.model,
       prompt: input.prompt,
-      jsonSchema: parseSchema(input.json_schema),
+      // The backend sends the schema as a JSON string; the agent SDK wants the object.
+      jsonSchema: JSON.parse(input.json_schema),
       mcp: input.mcp,
       // Stated explicitly rather than left to agent-stream.js's own default (also deny-all): see
       // the header for why a rule scoped to one path never worked in the first place.
       permission: { edit: { '*': 'allow' } },
-      rejectOn: 'error',
       timeoutMs: input.timeout_ms,
       maxTurns: input.max_turns,
       systemPrompt: input.system_prompt,

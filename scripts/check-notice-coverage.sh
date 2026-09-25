@@ -11,8 +11,7 @@
 # can answer that, so this script builds it and looks.
 #
 # SCOPE: this script's own backend and frontend images only. It never reads or names any other
-# artifact's build directory, since doing so would trip check-open-boundary.sh rule 5 (a script
-# under scripts/ naming that path is a red `task check` in the public export).
+# artifact's build directory.
 #
 # WHAT THIS DOES.
 #   1. Builds the open backend and frontend images from docker-compose.yml, the same build

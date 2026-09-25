@@ -12,8 +12,6 @@ import { CapabilityGate } from "./capabilities/CapabilityGate";
 import { ConnectGate } from "./views/onboarding/ConnectGate";
 import { Spinner, ToastProvider } from "./ui";
 import { registerRouteChunk } from "./lib/routePreload";
-// Route arrays this build registers through the `@paid` alias; see src/paid/index.ts.
-import { paid } from "@paid";
 
 /*
  * Route-level code-splitting. Every view is lazy-loaded so the initial
@@ -79,18 +77,10 @@ export default function App() {
         <Suspense fallback={<FullScreen>Loading…</FullScreen>}>
         <Routes>
           {/*
-            Pricing is excluded from this build, not gated: it is the one public route (outside
-            ProtectedRoute and outside TenantProvider), and CapabilityGate calls useTenant(), which
-            throws with no provider above it, so gating it would be a render-time crash on a public
-            URL. paid.publicRoutes supplies a route here when one is registered.
-
-            The redirect below it is load-bearing: this top-level Routes has no catch-all, so an
-            unmatched /pricing would render a blank page rather than falling through anywhere. It
-            sits after the spread deliberately: react-router ranks by specificity and both are
-            static, so when paid.publicRoutes supplies /pricing, that route wins and this one never
-            matches.
+            There is no pricing page. The redirect is load-bearing: this top-level Routes has no
+            catch-all, so an unmatched /pricing would render a blank page rather than falling
+            through anywhere.
           */}
-          {paid.publicRoutes}
           <Route path="/pricing" element={<Navigate to="/" replace />} />
           {/*
             /login and /signup join /pricing in the same public, unauthenticated tier: outside
@@ -102,13 +92,6 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/link" element={<ProtectedRoute><Link /></ProtectedRoute>} />
-          {/*
-            /new-org: creating an additional org past this build's single-org cap needs a route
-            this build does not register on its own. Mounted inside ProtectedRoute (needs a
-            signed-in user) but outside TenantProvider (no org selected yet), same tier as the
-            redirects around it. paid.protectedRoutes supplies it when one is registered.
-          */}
-          {paid.protectedRoutes}
           <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
           <Route path="/orgs/:orgSlug" element={<ProtectedRoute><OrgRedirect /></ProtectedRoute>} />
           <Route path="/orgs/:orgSlug/new-project" element={<ProtectedRoute><NewProject /></ProtectedRoute>} />
@@ -134,11 +117,9 @@ function RootRedirect() {
   // which blocks on AuthProvider's own fetch, so there is no loading state left for this
   // component to own).
   //
-  // TenantService#ensureDefaultOrg runs on every signup and login, so an authenticated user
-  // always has >=1 org by the time this renders: `orgs` is empty only in a state that cannot
-  // happen post-auth, not a real fork to design a redirect for. `/login` is the safe,
-  // already-public landing for that theoretical case: a cosmetic choice, not a real branch,
-  // since this component only ever renders inside ProtectedRoute.
+  // TenantService#ensureDefaultOrg runs only at signup and login, so `orgs` can be empty: a user
+  // who leaves their only org (Members → Leave organization) keeps the session with no org.
+  // `/login` is the already-public landing for that case.
   const { user } = useAuth();
   const first = user?.orgs[0];
   if (!first) return <Navigate to="/login" replace />;
@@ -283,12 +264,6 @@ function ProjectShell() {
           <Route path="pii-redaction" element={<PiiRedaction />} />
           <Route path="retention" element={<Retention />} />
           <Route path="members" element={<Members />} />
-          {/* Usage (the metered-units and LLM-spend screen) is excluded from this build rather
-              than gated: no Capability names it, since it gates on the BILLING_MANAGE role
-              instead. The settings catch-all below folds `settings/usage` to Sources here, so no
-              blank page and no redirect of its own is needed; `shell/nav.tsx` drops the
-              rail/palette entry with it. */}
-          {paid.settingsRoutes}
           <Route path="organization" element={<Organization />} />
           {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />

@@ -17,10 +17,6 @@
 #          sandbox-runner=<ref> agent-sandbox=<ref>       diff already-built images (release.yml)
 #   bash scripts/check-open-artifacts.sh --negative       also prove the diff goes red: a derived
 #          image per role carrying one planted violation must fail
-#   bash scripts/check-open-artifacts.sh --derive         with OPEN_ARTIFACTS_PAID_SPEC naming a
-#          reference OpenAPI spec: red when that spec carries a path this tree's spec lacks whose
-#          last segment no `text` rule names; on its own it stops there, combined with --negative
-#          or --images it runs the diff too
 #
 # Needs Docker and minutes to build; excluded from `task check` (see scripts/check.sh's manifest).
 # Run via `task check:open:artifacts`, and by release.yml before any manifest is merged or tagged.
@@ -29,13 +25,12 @@ P=check-open-artifacts
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-NEGATIVE=0; DERIVE=0; declare -a REFS=()
+NEGATIVE=0; declare -a REFS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --negative) NEGATIVE=1 ;;
-        --derive) DERIVE=1 ;;
         --images) shift; while [ $# -gt 0 ] && [[ "$1" != --* ]]; do REFS+=("$1"); shift; done; continue ;;
-        *) echo "$P: unknown argument '$1' (accepts --images <role>=<ref>..., --negative, --derive)" >&2; exit 2 ;;
+        *) echo "$P: unknown argument '$1' (accepts --images <role>=<ref>..., --negative)" >&2; exit 2 ;;
     esac
     shift
 done
@@ -43,31 +38,6 @@ done
 DENYLIST="$ROOT/scripts/lib/open-artifact-denylist.txt"
 WALKER="$ROOT/scripts/lib/open-artifact-contents.py"
 OPEN_MODULES="$(sed -n 's|.*<module>\(.*\)</module>.*|\1|p' backend/pom.xml | grep -v '^test-support$' | tr '\n' ',' | sed 's/,$//')"
-
-if [ "$DERIVE" = 1 ]; then
-    # The reference spec's location is passed in by the Taskfile when one is configured; a
-    # checkout with none has nothing to derive.
-    PAID_SPEC="${OPEN_ARTIFACTS_PAID_SPEC:-}"
-    OPEN_SPEC="$ROOT/backend/contract/src/main/resources/openapi/tessary-api.json"
-    if [ -z "$PAID_SPEC" ] || [ ! -f "$PAID_SPEC" ]; then echo "$P: --derive needs OPEN_ARTIFACTS_PAID_SPEC to name the paid OpenAPI spec; none given, nothing to derive"; [ "$NEGATIVE" = 1 ] || [ "${#REFS[@]}" -gt 0 ] || exit 0; DERIVE=0; fi
-  if [ "$DERIVE" = 1 ]; then
-    fail=0
-    patterns="$(mktemp)"; grep -E '^text\|' "$DENYLIST" | sed -E 's/^text\|//; s/\|[^|]*$//' > "$patterns"
-    while read -r path; do
-        [ -n "$path" ] || continue
-        # A text rule is a regex, so coverage is judged on the path's last literal segment (trailing
-        # {variables} dropped): a route absent from this tree's spec whose final word appears in no
-        # rule is a route the bundle scan cannot see.
-        seg="$(sed -E 's#(/\{[^}]*\})+$##' <<<"$path")"; seg="${seg##*/}"
-        grep -qF "$seg" "$patterns" \
-            || { echo "$P: paid-only path $path: its last segment is named by no text rule in scripts/lib/open-artifact-denylist.txt" >&2; fail=1; }
-    done < <(comm -23 <(jq -r '.paths|keys[]' "$PAID_SPEC" | sort) <(jq -r '.paths|keys[]' "$OPEN_SPEC" | sort))
-    rm -f "$patterns"
-    [ "$fail" = 0 ] || exit 1
-    echo "$P: every paid-only route is covered by a text rule"
-    [ "$NEGATIVE" = 1 ] || [ "${#REFS[@]}" -gt 0 ] || exit 0
-  fi
-fi
 
 if [ -z "${PNPM_VERSION:-}" ]; then
     PNPM_VERSION="$(sed -n 's/^  PNPM_VERSION: "\(.*\)"$/\1/p' "$ROOT/Taskfile.yml" | head -1)"

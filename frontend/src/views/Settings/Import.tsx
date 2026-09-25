@@ -48,15 +48,10 @@ export function ImportYaml() {
   // the project slug back to confirm intent. Upsert never gates on this.
   const [confirmText, setConfirmText] = useState("");
 
-  // Import lands grader DEFINITIONS only — generation never fires automatically. The
-  // "generate prompts & code" action lives on the Pipeline page (and the setup wizard);
-  // after a successful import we point there.
-
   const runImport = useMutation({
     mutationFn: async (): Promise<ImportResult> => api.importEvalsDirectory(dirFiles, mode),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pipeline"] });
-      qc.invalidateQueries({ queryKey: ["curation"] });
       setDirFiles([]);
       setConfirmText("");
     },
@@ -224,7 +219,6 @@ type DirSummary = {
   label: string;
   hasPipelineMeta: boolean;
   callSiteCount: number;
-  failureModeShardCount: number;
   qualityDimensionShardCount: number;
   graderCount: number;
 };
@@ -370,19 +364,11 @@ function ImportSummary({ result }: { result: ImportResult }) {
                 "px-3.5 py-2 leading-relaxed",
                 i > 0 && "border-t border-border",
                 r.tone === "added" && "text-success",
-                r.tone === "orphaned" && "text-warning",
                 r.tone === "plain" && "text-fg",
               )}
-              style={
-                r.tone === "added"
-                  ? { backgroundColor: "var(--color-success-subtle)" }
-                  : r.tone === "orphaned"
-                    ? { backgroundColor: "var(--color-warning-subtle)" }
-                    : undefined
-              }
+              style={r.tone === "added" ? { backgroundColor: "var(--color-success-subtle)" } : undefined}
             >
               {r.glyph} {r.text}
-              {r.note && <span className="text-muted"> {r.note}</span>}
             </div>
           ))
         )}
@@ -392,10 +378,9 @@ function ImportSummary({ result }: { result: ImportResult }) {
 }
 
 type ChangeRow = {
-  tone: "added" | "plain" | "orphaned";
+  tone: "added" | "plain";
   glyph: string;
   text: string;
-  note?: string;
 };
 
 function changelogRows(result: ImportResult): ChangeRow[] {
@@ -404,26 +389,11 @@ function changelogRows(result: ImportResult): ChangeRow[] {
     { label: "call sites", d: result.callSites },
     { label: "chains", d: result.chains },
     { label: "failure modes", d: result.failureModes },
-    { label: "quality dimensions", d: result.qualityDimensions },
-    { label: "graders", d: result.graders },
   ];
   for (const { label, d } of entities) {
     if (d.added > 0) rows.push({ tone: "added", glyph: "+", text: `${d.added} ${label} added` });
-    if (d.updated > 0)
-      rows.push({
-        tone: "plain",
-        glyph: "~",
-        text: `${d.updated} ${label} updated`,
-        note: label === "graders" ? "(your edits kept)" : undefined,
-      });
+    if (d.updated > 0) rows.push({ tone: "plain", glyph: "~", text: `${d.updated} ${label} updated` });
     if (d.removed > 0) rows.push({ tone: "plain", glyph: "-", text: `${d.removed} ${label} removed` });
-  }
-  if (result.orphanedAfterImport > 0) {
-    rows.push({
-      tone: "orphaned",
-      glyph: "!",
-      text: `${result.orphanedAfterImport} curation ${result.orphanedAfterImport === 1 ? "entry" : "entries"} orphaned: their call site is gone`,
-    });
   }
   return rows;
 }
@@ -431,7 +401,6 @@ function changelogRows(result: ImportResult): ChangeRow[] {
 function summariseDirSelection(files: File[]): DirSummary {
   let hasPipelineMeta = false;
   let callSiteCount = 0;
-  let failureModeShardCount = 0;
   let qualityDimensionShardCount = 0;
   let graderCount = 0;
   for (const f of files) {
@@ -447,7 +416,7 @@ function summariseDirSelection(files: File[]): DirSummary {
     } else if (path.includes("/pipeline/call_sites/")) {
       callSiteCount++;
     } else if (path.includes("/pipeline/failure_modes/")) {
-      failureModeShardCount++;
+      // Not counted, but kept out of the /graders/ bucket below.
     } else if (path.includes("/pipeline/quality_dimensions/")) {
       qualityDimensionShardCount++;
     } else if (path.includes("/graders/")) {
@@ -465,7 +434,6 @@ function summariseDirSelection(files: File[]): DirSummary {
     label: parts.join(" · "),
     hasPipelineMeta,
     callSiteCount,
-    failureModeShardCount,
     qualityDimensionShardCount,
     graderCount,
   };

@@ -32,6 +32,5 @@ export function useCapabilities() {
     /** Fail-closed: on only when the resolved object explicitly says so. */
     isEnabled: (capability: CapabilityWire): boolean => capabilities?.[capability] === true,
     isLoading: query.isLoading,
-    error: query.error,
   };
 }

@@ -3,7 +3,6 @@ package ai.tessary.classifier.toolerror;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
@@ -57,6 +56,10 @@ class ToolErrorTrendTest {
     }
 
     /** The reference a sweep settled on. Non-null by the time anything is judged; asserted, not assumed. */
+    private static double rateOf(ToolErrorRate window) {
+        return (double) window.failures() / window.calls();
+    }
+
     private static ToolErrorRate requireBaseline(Sweep sweep) {
         ToolErrorRate baseline = sweep.advanced().get(0).baseline();
         assertNotNull(baseline, "a judged tool must carry the reference it was judged against");
@@ -176,15 +179,16 @@ class ToolErrorTrendTest {
                 null,
                 resetAt);
 
-        assertNull(
-                ToolErrorTrend.replay(TOOL, s, CONFIG, null, relearning),
+        Sweep before = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of(TOOL, relearning));
+        assertTrue(
+                before.spells().isEmpty() && before.advanced().isEmpty(),
                 "every hour so far is before the reset, so there is nothing to learn from");
 
         series(s, 40, 10, 200, 0.05); // the post-reset traffic runs at 5%, and that is the new normal
         Sweep after = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of(TOOL, relearning));
         ToolErrorRate learned = requireBaseline(after);
         assertEquals(600, learned.calls(), "the leading post-reset traffic, once");
-        assertTrue(learned.rate() > 0.04, "learned from after the reset, not from the healthy hours before it");
+        assertTrue(rateOf(learned) > 0.04, "learned from after the reset, not from the healthy hours before it");
         assertTrue(after.spells().isEmpty(), "and the rate it learned is not judged against itself");
     }
 
@@ -277,7 +281,7 @@ class ToolErrorTrendTest {
         series(s, 20, 30, 200, 0.05);
         Sweep first = ToolErrorTrend.sweep(s, CONFIG, Map.of(), Map.of());
 
-        ToolErrorConfig retuned = new ToolErrorConfig(250_000L, 3.0, 0.005, 0.05, 500, 0.01, 300, 8);
+        ToolErrorConfig retuned = new ToolErrorConfig(250_000L, 3.0, 0.005, 500, 0.01, 8);
         Sweep after = ToolErrorTrend.sweep(s, retuned, Map.of(), carriedFrom(first));
         Sweep fromScratch = ToolErrorTrend.sweep(s, retuned, Map.of(), Map.of());
         assertEquals(
@@ -297,10 +301,8 @@ class ToolErrorTrendTest {
         series(s, 20, 30, 200, 0.05);
 
         Spell spell = spells(s).get(0);
-        // The reference closes as soon as it is thick enough (600 calls, three 200-call buckets), and
-        // everything after it is the observation. 10,000 calls in total, counted once each.
+        // The reference closes as soon as it is thick enough (600 calls, three 200-call buckets).
         assertEquals(600, spell.baseline().calls(), "the reference is the leading traffic, once");
-        assertEquals(9400, spell.observed().calls(), "and the observation is the rest of it, once");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -331,7 +333,7 @@ class ToolErrorTrendTest {
         // minBaselineCalls is 500, and buckets are 200 calls, so the reference closes on the third bucket
         // rather than consuming the whole quiet stretch.
         assertEquals(600, spell.baseline().calls());
-        assertTrue(spell.baseline().rate() < 0.02, "and it is the healthy rate, not the degraded one");
+        assertTrue(rateOf(spell.baseline()) < 0.02, "and it is the healthy rate, not the degraded one");
     }
 
     /**
@@ -430,7 +432,6 @@ class ToolErrorTrendTest {
     @Test
     void aToolWithNoTrafficAtAllProducesNothingRatherThanDividingByZero() {
         assertTrue(spells(List.of()).isEmpty());
-        assertNull(ToolErrorTrend.replay(TOOL, List.of(), CONFIG, null, null));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -445,10 +446,8 @@ class ToolErrorTrendTest {
                 c.arlTarget(),
                 c.shiftMultiple(),
                 c.shiftFloor(),
-                c.minEffectSize(),
                 c.minBaselineCalls(),
                 c.downArmMinRate(),
-                c.settleSeconds(),
                 c.maxPatterns(),
                 c.minDecisionInterval(),
                 freeze);
@@ -525,10 +524,6 @@ class ToolErrorTrendTest {
                     .append(s.baseline().calls())
                     .append('/')
                     .append(s.baseline().failures())
-                    .append(" observed=")
-                    .append(s.observed().calls())
-                    .append('/')
-                    .append(s.observed().failures())
                     .append(' ')
                     .append(s.onsetBucket())
                     .append(' ')
@@ -564,7 +559,7 @@ class ToolErrorTrendTest {
         assertEquals(CONFIG.minBaselineCalls(), CONFIG.freezeBaselineCalls());
         assertEquals(scenarios(CONFIG), scenarios(explicit));
 
-        ToolErrorConfig frustrationShaped = new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0);
+        ToolErrorConfig frustrationShaped = new ToolErrorConfig(10_000L, 2.0, 0.02, 200, 0.01, 8, 4.0);
         assertEquals(scenarios(frustrationShaped), scenarios(withFreeze(frustrationShaped, 200)));
     }
 
@@ -590,7 +585,6 @@ class ToolErrorTrendTest {
         series(spiked, 3, 10, 200, 0.10);
         Sweep judged = ToolErrorTrend.sweep(spiked, LEARNING, Map.of(), Map.of());
         assertEquals(1, judged.spells().size(), "judged from the minimum, not from the freeze");
-        assertEquals(2000, judged.spells().get(0).observed().calls(), "every hour after the minimum, once");
 
         // A resumed sweep grows the reference by exactly the hours after its watermark.
         Sweep resumed = ToolErrorTrend.sweep(s, LEARNING, Map.of(), carriedFrom(early));
@@ -626,7 +620,7 @@ class ToolErrorTrendTest {
                 Map.of(TOOL, resumed.advanced().get(0).rebuilding());
         Sweep again = ToolErrorTrend.sweep(s.subList(20, s.size()), LEARNING, Map.of(), rebuilt);
         assertEquals(2000, requireBaseline(again).calls(), "nor on a rebuild, after the window slid");
-        assertTrue(requireBaseline(again).rate() < 0.02, "it is still the healthy traffic that taught it");
+        assertTrue(rateOf(requireBaseline(again)) < 0.02, "it is still the healthy traffic that taught it");
 
         // Buckets are learned whole, so the one that crosses the freeze is the last one learned.
         Sweep overshoot = ToolErrorTrend.sweep(s, withFreeze(CONFIG, 1900), Map.of(), Map.of());
@@ -661,8 +655,7 @@ class ToolErrorTrendTest {
      */
     @Test
     void aRebuildingCallerFreezesItsReferenceWhileTheWindowSlides() {
-        ToolErrorConfig config =
-                withFreeze(new ToolErrorConfig(10_000L, 2.0, 0.02, 0.05, 200, 0.01, 300, 8, 4.0), 1000);
+        ToolErrorConfig config = withFreeze(new ToolErrorConfig(10_000L, 2.0, 0.02, 200, 0.01, 8, 4.0), 1000);
         List<HourlyToolTally> days = new ArrayList<>();
         for (int d = 0; d < 120; d++) {
             double rate = d < 40 ? 0.03 : Math.min(0.30, 0.03 + (d - 40) * 0.005);
@@ -733,7 +726,7 @@ class ToolErrorTrendTest {
         series(s, 20, 5, 200, 0.05); // 1,000 calls after the reset, at the new normal
         Sweep partway = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, relearning));
         assertEquals(1000, requireBaseline(partway).calls(), "learning again from the fence, not before it");
-        assertTrue(requireBaseline(partway).rate() > 0.04);
+        assertTrue(rateOf(requireBaseline(partway)) > 0.04);
         assertTrue(partway.spells().isEmpty(), "and the new normal is not judged against the old one");
 
         series(s, 25, 20, 200, 0.05);
@@ -745,6 +738,6 @@ class ToolErrorTrendTest {
                 Map.of(TOOL, partway.advanced().get(0).rebuilding());
         Sweep rebuilt = ToolErrorTrend.sweep(s, LEARNING, Map.of(), rebuilding);
         assertEquals(2000, requireBaseline(rebuilt).calls(), "a rebuild relearns from the fence too");
-        assertTrue(requireBaseline(rebuilt).rate() > 0.04);
+        assertTrue(rateOf(requireBaseline(rebuilt)) > 0.04);
     }
 }

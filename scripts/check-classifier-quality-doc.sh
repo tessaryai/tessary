@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md by default, see
-# CQ_DOC below) to the config it describes.
+# Pins the measured-quality reference page (devdocs/reference/classifier-quality.md) to the config
+# it describes.
 #
 # WHY. That page states the measured precision/recall/F1 of the classifiers that fire on customer
 # traffic, and those numbers are only true for the heads and thresholds they were measured against.
@@ -10,9 +10,7 @@
 #
 # WHAT IS AND IS NOT CHECKED. The machine-readable half only: the groundedness model revision the
 # server pins (DEFAULT_REVISION in classifiers/groundedness/serve.py) and the thresholds
-# (BuiltInClassifierCatalog). All three files are in this tree. Frustration has no served
-# revision: its scorer is a hosted decision model, so only its flag threshold is pinned, and only on
-# a page that carries a frustration section. Whether a number is still right for a changed eval set
+# (BuiltInClassifierCatalog). All three files are in this tree. Whether a number is still right for a changed eval set
 # is a judgement no script can make, and stays a co-update rule in AGENTS.md.
 #
 # The page carries its expected values in HTML comments of the form
@@ -22,28 +20,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# WHY THE PAGE IS A VARIABLE. This tree's page measures groundedness; a page kept outside this tree
-# may carry more classifiers. This script may not name that other location (check-open-boundary.sh
-# enforces that), so the caller passes the path in, and the default is this tree's page. Same shape
-# as check-migrations-populated.sh's MIGPOP_OVERLAY_EXPECTS, for the same reason.
-CQ_DOC="${CQ_DOC:-devdocs/reference/classifier-quality.md}"
-export CQ_DOC
-
-# The page is always there: the export deletes only the paid overlay, and scripts/check.sh runs this
-# gate in both editions. A missing page means it was moved or deleted, which is a failure, not a
-# reason to skip: skipping would turn this gate green exactly when the page is gone.
-if [ ! -f "$CQ_DOC" ]; then
-  echo "check-classifier-quality-doc: $CQ_DOC is missing. Put the measured-quality page back, or" >&2
-  echo "  pass its new path as CQ_DOC in scripts/check.sh's manifest row and update the default here." >&2
+# A missing page means it was moved or deleted, which is a failure, not a reason to skip: skipping
+# would turn this gate green exactly when the page is gone.
+DOC=devdocs/reference/classifier-quality.md
+if [ ! -f "$DOC" ]; then
+  echo "check-classifier-quality-doc: $DOC is missing. Put the measured-quality page back, or" >&2
+  echo "  update the path in this script and in the heredoc below." >&2
   exit 1
 fi
 
 python3 - <<'PY'
 import json, re, sys
 
-import os
-
-DOC = os.environ['CQ_DOC']
+DOC = 'devdocs/reference/classifier-quality.md'
 doc = open(DOC, encoding='utf-8').read()
 
 pinned = {}
@@ -80,16 +69,12 @@ def module_config(classifier_id):
 
 revision = re.search(r'^DEFAULT_REVISION\s*=\s*"([0-9a-f]+)"', serve, re.M)
 groundedness_cfg = module_config('groundedness') or {}
-frustration_cfg = module_config('frustration') or {}
 
-# Groundedness is open and every edition serves it, so its pins are always checked. The detector
-# reads `threshold`, and an older config's `threshold_high` only when `threshold` is absent.
+# The detector reads `threshold`, and an older config's `threshold_high` only when `threshold` is absent.
 expected = {
     'groundedness_threshold': groundedness_cfg.get('threshold', groundedness_cfg.get('threshold_high')),
     'groundedness_revision': revision.group(1) if revision else None,
 }
-if 'frustration_threshold' in pinned:
-    expected['frustration_threshold'] = frustration_cfg.get('threshold')
 
 problems = []
 for key, actual in expected.items():

@@ -386,7 +386,7 @@ function KeyRow({
         <Badge tone={revoked ? "neutral" : SCOPE_TONE[apiKey.scope]}>{apiKey.scope}</Badge>
       </span>
       <span className="w-24 text-label text-muted">{relativeTime(apiKey.created_at)}</span>
-      <span className="w-20 text-label text-muted">{apiKey.last_used_at ? relativeTime(apiKey.last_used_at) : "Never"}</span>
+      <span className="w-20 text-label text-muted">{relativeTime(apiKey.last_used_at)}</span>
       <span className="w-32 flex justify-end gap-1">
         {revoked ? (
           <Badge tone="neutral">Revoked</Badge>

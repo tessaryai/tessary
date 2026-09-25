@@ -105,19 +105,12 @@ public final class GitleaksCorpus {
     private final List<Rule> rules;
     private final KeywordIndex keywords;
     private final @Nullable Allowlist global;
-    private final List<String> uncompiled;
 
-    private GitleaksCorpus(
-            String version,
-            List<Rule> rules,
-            KeywordIndex keywords,
-            @Nullable Allowlist global,
-            List<String> uncompiled) {
+    private GitleaksCorpus(String version, List<Rule> rules, KeywordIndex keywords, @Nullable Allowlist global) {
         this.version = version;
         this.rules = rules;
         this.keywords = keywords;
         this.global = global;
-        this.uncompiled = uncompiled;
     }
 
     /** The corpus on this classpath, loaded once. */
@@ -125,24 +118,9 @@ public final class GitleaksCorpus {
         return Holder.INSTANCE;
     }
 
-    /** The gitleaks release the corpus was synced from. */
-    public String version() {
-        return version;
-    }
-
     /** The pattern a built-in rule row carries to name this corpus. */
     public String patternValue() {
         return PATTERN_SCHEME + version;
-    }
-
-    /** Rules loaded and compiled. */
-    public int size() {
-        return rules.size();
-    }
-
-    /** Ids of rules whose regex would not compile in Java, and so never run. Empty on the pinned release. */
-    public List<String> uncompiled() {
-        return uncompiled;
     }
 
     /**
@@ -155,25 +133,13 @@ public final class GitleaksCorpus {
      * worth keeping, since it is what a reader acts on.
      */
     public List<Finding> find(String text) {
-        return find(text, true);
-    }
-
-    /**
-     * {@link #find} with every rule scanned over the whole text, keyword-context rules included. Slower by the
-     * margin {@link #findInContext} exists to save, and the reference that fast path is checked against.
-     */
-    List<Finding> findExhaustive(String text) {
-        return find(text, false);
-    }
-
-    private List<Finding> find(String text, boolean contextFastPath) {
         if (text.isEmpty()) return List.of();
         BitSet candidates = keywords.candidates(text);
         List<Finding> found = new ArrayList<>();
         for (int i = candidates.nextSetBit(0); i >= 0; i = candidates.nextSetBit(i + 1)) {
             Rule rule = rules.get(i);
             Pattern identifier = rule.identifier();
-            if (contextFastPath && identifier != null) {
+            if (identifier != null) {
                 findInContext(rule, identifier, text, found);
             } else {
                 Matcher m = rule.pattern().matcher(text);
@@ -198,7 +164,7 @@ public final class GitleaksCorpus {
     /**
      * A keyword-context rule, tried once per place its vendor name appears rather than at every position.
      *
-     * <p>This is a performance decision with a proof behind it, and it is the one that makes the corpus
+     * <p>This is a performance decision, and it is the one that makes the corpus
      * affordable on the ingest path. gitleaks' template opens {@code (?i)[\w.-]{0,50}?(?:vendor)}, and Java's
      * backtracking engine tries that lazy prefix against every alternative at every position of the text:
      * {@code generic-api-key} alone was most of the corpus's cost on a keyword-dense megabyte. But a match can
@@ -410,11 +376,10 @@ public final class GitleaksCorpus {
         }
     }
 
-    /** Compile a corpus document; a rule whose regex will not compile is recorded and left out. */
+    /** Compile a corpus document; a rule whose regex will not compile is left out. */
     static GitleaksCorpus load(JsonNode document) {
         List<Rule> rules = new ArrayList<>();
         List<List<String>> keywordsByRule = new ArrayList<>();
-        List<String> uncompiled = new ArrayList<>();
         for (JsonNode node : document.path("rules")) {
             String id = node.path("id").asText();
             String regex = node.path("regex").asText();
@@ -422,7 +387,6 @@ public final class GitleaksCorpus {
             try {
                 pattern = Pattern.compile(toJava(regex));
             } catch (PatternSyntaxException e) {
-                uncompiled.add(id);
                 continue;
             }
             List<Allowlist> allowlists = new ArrayList<>();
@@ -431,11 +395,12 @@ public final class GitleaksCorpus {
                 if (compiled != null) allowlists.add(compiled);
             }
             JsonNode entropy = node.path("entropy");
-            boolean anchored = !KEYWORD_CONTEXT.matcher(regex).lookingAt();
+            Matcher context = KEYWORD_CONTEXT.matcher(regex);
+            boolean anchored = !context.lookingAt();
             rules.add(new Rule(
                     id,
                     pattern,
-                    anchored ? null : identifierOf(regex),
+                    anchored ? null : identifierOf(regex, context.end()),
                     pattern.matcher("").groupCount(),
                     node.path("secret_group").asInt(0),
                     entropy.isNumber() ? entropy.asDouble() : null,
@@ -449,18 +414,14 @@ public final class GitleaksCorpus {
                 document.path("version").asText(),
                 List.copyOf(rules),
                 new KeywordIndex(keywordsByRule),
-                allowlist(document.path("allowlist")),
-                List.copyOf(uncompiled));
+                allowlist(document.path("allowlist")));
     }
 
     /**
      * The vendor-name alternation of a keyword-context rule, case-insensitive and on its own: the group the
-     * template opens after its name prefix, up to the paren that closes it.
+     * template opens after its name prefix (which ends at {@code open}), up to the paren that closes it.
      */
-    private static Pattern identifierOf(String regex) {
-        Matcher prefix = KEYWORD_CONTEXT.matcher(regex);
-        if (!prefix.lookingAt()) throw new IllegalArgumentException("not a keyword-context rule: " + regex);
-        int open = prefix.end();
+    private static Pattern identifierOf(String regex, int open) {
         int depth = 1;
         int i = open;
         while (i < regex.length() && depth > 0) {

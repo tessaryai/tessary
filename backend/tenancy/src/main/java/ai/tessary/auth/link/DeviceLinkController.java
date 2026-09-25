@@ -100,7 +100,7 @@ public class DeviceLinkController {
     @PostMapping("/auth/link/poll")
     public ResponseEntity<ApiResponse<PollResponse>> poll(@RequestBody PollRequest req, HttpServletRequest http) {
         rateLimit(http);
-        PollOutcome outcome = service.poll(req == null ? null : req.device_code());
+        PollOutcome outcome = service.poll(req.device_code());
         HttpStatus code =
                 switch (outcome.status()) {
                     case "expired" -> HttpStatus.GONE;
@@ -122,7 +122,7 @@ public class DeviceLinkController {
     @PostMapping("/api/link/{userCode}/confirm")
     public ApiResponse<Map<String, String>> confirm(
             TenantContext ctx, @PathVariable String userCode, @RequestBody ConfirmRequest req) {
-        if (req == null || req.org_slug() == null || req.project_slug() == null) {
+        if (req.org_slug() == null || req.project_slug() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "org_slug and project_slug required");
         }
         // Enforces the caller's membership in the org + that the project exists.

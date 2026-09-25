@@ -3,7 +3,6 @@ package ai.tessary.version;
 
 import java.util.Locale;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
@@ -12,8 +11,8 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>Provenance shapes.</b> Lineage is stored in two shapes, both bridged here:
  * <ul>
- *   <li><b>Direct FK</b> — {@code project_version_id} on {@code trace} and {@code span},
- *       denormalized at ingest. The canonical shape; resolved via
+ *   <li><b>Direct FK</b> — {@code project_version_id} on {@code trace} (and {@code span}, which a
+ *       bare node id cannot address), denormalized at ingest. The canonical shape; resolved via
  *       {@link ProjectVersionRepository#findById}.</li>
  *   <li><b>Derived</b> — a {@code session} carries no stamp of its own and resolves to the newest
  *       deploy any of its traces ran under.</li>
@@ -22,8 +21,7 @@ import org.springframework.stereotype.Service;
  * <p>A third shape, RAW SHA, existed while there was an observer: {@code observer_alert.project_version_sha}
  * stored the SHA string rather than the FK and resolved through
  * {@link ProjectVersionRepository#findByCommit}. It went with the observer, and a new column must
- * NOT bring it back — {@link ProjectVersionRepository#findByCommit} survives for the write-side
- * {@link #versionIdForSha} helper, which is the legitimate use of a raw SHA.
+ * NOT bring it back.
  *
  * <p><b>Forward contract for new node types.</b> A new lineage-bearing table MUST carry the
  * direct-FK shape from
@@ -84,38 +82,17 @@ public class CommitLineageService {
      * bound to a commit).
      */
     public Optional<ProjectVersionRow> resolve(String projectId, NodeKind kind, String nodeId) {
-        return resolve(projectId, kind, null, nodeId);
-    }
-
-    /**
-     * As {@link #resolve(String, NodeKind, String)}, with the trace a {@link NodeKind#SPAN} node
-     * belongs to.
-     *
-     * <p>A span is identified by {@code (project_id, trace_id, id)}, so a SPAN node genuinely cannot be
-     * resolved from one id — the three-argument overload passes null and correctly yields empty for that
-     * kind rather than resolving against whichever trace reused the span id. Every other kind ignores
-     * {@code traceId}.
-     */
-    public Optional<ProjectVersionRow> resolve(
-            String projectId, NodeKind kind, @Nullable String traceId, String nodeId) {
         return switch (kind) {
             case SESSION -> byId(projectId, lineage.sessionVersionId(projectId, nodeId));
             case TURN -> byId(projectId, lineage.turnVersionId(projectId, nodeId));
             case TRACE -> byId(projectId, lineage.traceVersionId(projectId, nodeId));
-            case SPAN ->
-                traceId == null ? Optional.empty() : byId(projectId, lineage.spanVersionId(projectId, traceId, nodeId));
+            // A span is identified by (project_id, trace_id, id), so a bare id cannot name one: empty,
+            // rather than resolving against whichever trace reused the span id.
+            case SPAN -> Optional.empty();
         };
     }
 
     private Optional<ProjectVersionRow> byId(String projectId, Optional<String> versionId) {
         return versionId.flatMap(id -> versions.findById(projectId, id));
-    }
-
-    /** Convenience for write paths: the version id a raw SHA maps to, if materialized. */
-    public @Nullable String versionIdForSha(String projectId, @Nullable String commitSha) {
-        if (commitSha == null || commitSha.isBlank()) return null;
-        return versions.findByCommit(projectId, commitSha)
-                .map(ProjectVersionRow::id)
-                .orElse(null);
     }
 }

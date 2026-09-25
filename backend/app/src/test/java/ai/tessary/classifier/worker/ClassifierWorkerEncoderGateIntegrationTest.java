@@ -13,6 +13,7 @@ import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.model.JobStatus;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -149,7 +150,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
 
         ClassifierJobRow after = job(s);
         assertEquals(before, after.attempts(), "handing it back returns the attempt");
-        assertEquals(ClassifierJobRow.DONE, after.status());
+        assertEquals(JobStatus.DONE, after.status());
         assertNull(after.leaseOwner(), "and releases the lease");
         assertNull(after.cursorAt(), "and scores nothing");
     }
@@ -186,7 +187,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
             worker.sweepForTest(claim(s));
             ClassifierJobRow after = job(s);
             assertEquals(attempt, after.attempts(), "a 500 spends attempt " + attempt);
-            assertEquals(attempt < 5 ? ClassifierJobRow.FAILED : ClassifierJobRow.DEAD, after.status());
+            assertEquals(attempt < 5 ? JobStatus.FAILED : ClassifierJobRow.DEAD, after.status());
         }
         assertTrue(encoder.available(), "a model that answers 500 is up and broken, not down");
     }
@@ -201,7 +202,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
         worker.sweepForTest(claim(s));
 
         ClassifierJobRow after = job(s);
-        assertEquals(ClassifierJobRow.DONE, after.status());
+        assertEquals(JobStatus.DONE, after.status());
         assertEquals(0, after.attempts());
         Instant caughtUp = jobs.caughtUpAt(s.pid(), s.classifierId()).orElseThrow();
         assertFalse(caughtUp.isBefore(before), "caught_up_at is this sweep's");
@@ -217,7 +218,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
 
         caughtUp(s, Instant.now().minus(Duration.ofMinutes(10)));
         classifiers.enqueueEnabled(s.pid());
-        assertEquals(ClassifierJobRow.DONE, job(s).status(), "10 minutes after catching up: still asleep");
+        assertEquals(JobStatus.DONE, job(s).status(), "10 minutes after catching up: still asleep");
 
         caughtUp(s, Instant.now().minus(Duration.ofMinutes(31)));
         classifiers.enqueueEnabled(s.pid());

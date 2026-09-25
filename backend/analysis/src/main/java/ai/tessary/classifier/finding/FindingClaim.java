@@ -53,11 +53,4 @@ public record FindingClaim(
         String native0 = FindingPayload.text(payloadJson, "native_cause_key");
         return native0 == null ? causeKey : native0;
     }
-
-    /** The classifier family's own name for the shape it saw, falling back to {@link #classifierKey}
-     *  for a family that has no such taxonomy — see {@link FindingRow#causeKind}. */
-    public String causeKind() {
-        String kind = FindingPayload.text(payloadJson, "cause_kind");
-        return kind == null ? classifierKey : kind;
-    }
 }

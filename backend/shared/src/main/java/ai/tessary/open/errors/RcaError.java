@@ -5,8 +5,6 @@ import org.springframework.http.HttpStatus;
 
 /** Errors raised by the signal RCA (root-cause analysis) surface. */
 public enum RcaError implements ErrorCode {
-    NOT_A_MOVER(
-            HttpStatus.CONFLICT, "No significant movement for %s right now — an RCA needs a live mover to snapshot"),
     SUBJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "RCA subject not found: %s"),
     // Deliberately layer-neutral: this fires for launcher HTTP errors and unparseable agent output
     // as well as genuine model failures, and the old "synthesis LLM call failed" wording sent an

@@ -2,9 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
@@ -43,24 +41,23 @@ class FindingServiceMergeTest {
     @DisplayName("the page is the sources concatenated in injected order, first source first")
     void merged_page_follows_source_order() {
         StubSource first = new StubSource("behavior", view("a1"), view("a2"));
-        StubSource second = new StubSource(BuiltInDetector.Kind.SOP_CONFORMANCE, view("b1"));
+        StubSource second = new StubSource("second", view("b1"));
 
         BehaviorFindingsView page = service(List.of(first, second)).findings(PROJECT, null, null, null, true);
 
         assertEquals(
                 List.of("a1", "a2", "b1"),
                 page.findings().stream().map(BehaviorFindingView::id).toList(),
-                "the shared table's rows come first and conformance's after them");
+                "the shared table's rows come first and the second source's after them");
     }
 
     /**
-     * <b>What this pins and what it deliberately does not.</b> It pins that the merge follows the
-     * INJECTED order and that the shared table's own adapter sits at {@code @Order(0)} so it answers
-     * first. It no longer names conformance's adapter and asserts {@code @Order(10)} on it: the
-     * boundary enforcer bans this module from depending on an external one, test scope included, so an
-     * assertion here that names a conformance class could not be re-pointed if that class ever moves,
-     * only deleted. Each adapter's own {@code @Order} value is pinned in its own package's test, where
-     * it travels with the class.
+     * <b>What this pins and what it deliberately does not.</b> It pins that the merge follows the INJECTED
+     * order and that the shared table's own adapter sits at {@code @Order(0)} so it answers first. It names
+     * no other adapter: the boundary enforcer bans this module from depending on an external one, test scope
+     * included, so an assertion here that named another adapter's class could not be re-pointed if that class
+     * ever moves, only deleted. Each adapter's own {@code @Order} value is pinned in its own package's test,
+     * where it travels with the class.
      */
     @Test
     @DisplayName("the ORDER that decides that is @Order, not declaration order or bean name")
@@ -71,7 +68,7 @@ class FindingServiceMergeTest {
                 "the shared table answers first; renumbering this changes the wire row order");
     }
 
-    // ---- (b) the three filters still exclude what they excluded ---------------------------------
+    // ---- (b) the filter still excludes what it excluded -----------------------------------------
 
     @Test
     @DisplayName("the flag layer's filter drops a withheld classifier's rows")
@@ -86,53 +83,6 @@ class FindingServiceMergeTest {
                 "a finding belongs to the classifier that wrote it, so a withheld classifier hides its leads");
     }
 
-    @Test
-    @DisplayName("the SOP de-dup filter drops shared-table conformance rows, which have their own projection")
-    void sop_dedup_filter_still_excludes() {
-        List<FindingRow> rows =
-                List.of(row("f1", BuiltInDetector.Kind.SOP_CONFORMANCE), row("f2", BuiltInDetector.Kind.TOOL_ERROR));
-
-        assertEquals(
-                List.of("f2"),
-                FindingFilters.visible(rows, Set.of()).stream()
-                        .map(FindingRow::id)
-                        .toList(),
-                "without this every SOP finding appears twice, once stripped of its `kind` field");
-    }
-
-    @Test
-    @DisplayName("the two filters run in that relative order, and both apply to one row")
-    void both_filters_apply_together() {
-        List<FindingRow> rows = List.of(
-                row("withheld", BuiltInDetector.Kind.TOOL_ERROR),
-                row("sop", BuiltInDetector.Kind.SOP_CONFORMANCE),
-                row("kept", "cost_drift"));
-
-        assertEquals(
-                List.of("kept"),
-                FindingFilters.visible(rows, Set.of(BuiltInDetector.Kind.TOOL_ERROR)).stream()
-                        .map(FindingRow::id)
-                        .toList());
-    }
-
-    @Test
-    @DisplayName("conformanceApplies: no call-site narrowing, own rail or unfiltered, and not withheld")
-    void conformance_predicate_still_excludes() {
-        assertTrue(FindingFilters.conformanceApplies(null, null, Set.of()), "the unfiltered page includes it");
-        assertTrue(
-                FindingFilters.conformanceApplies(null, BuiltInDetector.Kind.SOP_CONFORMANCE, Set.of()),
-                "so does its own detector rail");
-        assertFalse(
-                FindingFilters.conformanceApplies("cs_1", null, Set.of()),
-                "an SOP rule is conversation-scoped, so any call-site narrowing excludes it");
-        assertFalse(
-                FindingFilters.conformanceApplies(null, BuiltInDetector.Kind.TOOL_ERROR, Set.of()),
-                "another classifier's rail excludes it");
-        assertFalse(
-                FindingFilters.conformanceApplies(null, null, Set.of(BuiltInDetector.Kind.SOP_CONFORMANCE)),
-                "the flag layer withholds it exactly as it withholds any other classifier");
-    }
-
     // ---- (c) the page limit and the withheld count ----------------------------------------------
 
     @Test
@@ -143,7 +93,7 @@ class FindingServiceMergeTest {
         // produce a page of both, and no source is truncated by another's rows. Naming a second
         // concrete adapter here would tie this open test to whichever adapters happen to ship.
         StubSource first = new StubSource("behavior", views("a", 200));
-        StubSource second = new StubSource(BuiltInDetector.Kind.SOP_CONFORMANCE, views("b", 200));
+        StubSource second = new StubSource("second", views("b", 200));
         assertEquals(
                 400,
                 service(List.of(first, second))
@@ -178,15 +128,15 @@ class FindingServiceMergeTest {
     @DisplayName("resolve routes to the first source that claims the id, and 404s when none do")
     void resolve_routes_by_ownership() {
         StubSource first = new StubSource("behavior");
-        StubSource second = new StubSource(BuiltInDetector.Kind.SOP_CONFORMANCE);
-        second.resolved = view("claimed-by-conformance");
+        StubSource second = new StubSource("second");
+        second.resolved = view("claimed-by-second");
 
         assertEquals(
-                "claimed-by-conformance",
+                "claimed-by-second",
                 service(List.of(first, second))
                         .resolve(PROJECT, "f1", BehaviorDtos.BehaviorResolutionRequest.EXPECTED, "usr_1")
                         .id(),
-                "the shared source disclaims, so conformance is asked next");
+                "the shared source disclaims, so the second source is asked next");
     }
 
     // ---- fixtures --------------------------------------------------------------------------------
@@ -206,15 +156,14 @@ class FindingServiceMergeTest {
         return new BehaviorFindingView(
                 id,
                 null,
-                FindingRow.Cause.NOVELTY,
+                FindingRow.Cause.RATE_SHIFT,
                 "cause:" + id,
                 id,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
+                BuiltInDetector.Kind.TOOL_ERROR,
                 FindingRow.GLOBAL_WORKFLOW,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z",
                 3,
-                List.of(),
                 FindingRow.Status.OPEN,
                 null,
                 null,
@@ -222,7 +171,6 @@ class FindingServiceMergeTest {
                 List.of(),
                 null,
                 BehaviorFindingView.TriageStatus.PENDING,
-                null,
                 null,
                 null);
     }
@@ -233,7 +181,7 @@ class FindingServiceMergeTest {
                 PROJECT,
                 classifierKey,
                 "cause:" + id,
-                FindingRow.SubjectKind.BEHAVIOR_PROFILE,
+                FindingRow.SubjectKind.TOOL,
                 "sub_1",
                 null,
                 null,

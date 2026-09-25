@@ -82,11 +82,11 @@ secret, in two jobs either side of the commit point:
 | job | writes | undone by |
 |---|---|---|
 | `build-agent-template` | `<version>` and `recipe-<hash>` — and **only builds if the recipe changed** | `cleanup` |
-| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs seven checks through it | n/a |
+| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs four checks through it | n/a |
 | `finalize` | moves `latest` and `default` onto that build | nothing (this is the commit point) |
 
-`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the three agent scripts, the
-validator wrapper, the five `contract/` files, and the cpu/memory pair. A build already carrying
+`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the four agent scripts, and
+the cpu/memory pair. A build already carrying
 this release's hash gets the version tag assigned to it and no rebuild happens. Asking E2B which
 recipes it already holds is self-correcting where a `git diff` against the previous tag is not: after
 a release whose template build failed, the source is unchanged at the next attempt, so a diff would
@@ -169,7 +169,7 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   (`getent group docker`).
 - **Agent image:** `sandbox-runner/agent-sandbox/Dockerfile` — a plain OCI build mirroring
   `template.ts`'s E2B recipe 1:1 (same base install steps, same pinned `opencode-ai` version),
-  built from the **repo root** as context (it needs `contract/` alongside its own directory).
+  built from the **repo root** as context (its COPY paths carry the full `sandbox-runner/agent-sandbox/` prefix).
   Published (as `agent-sandbox-<version>`) by `.github/workflows/release.yml` to Docker Hub
   (primary) and GHCR (mirror), alongside backend/frontend/sandbox-runner, when a human dispatches
   it — every workflow trigger in this repo is currently `workflow_dispatch`-only.

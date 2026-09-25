@@ -10,6 +10,7 @@ import ai.tessary.cases.CaseKey;
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.open.errors.RcaError;
@@ -19,9 +20,11 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
 /**
@@ -60,7 +63,7 @@ class RcaControllerTest {
     TenantService tenants;
 
     @Autowired
-    RcaJobRepository jobs;
+    JdbcClient jdbc;
 
     @Autowired
     FindingRepository findings;
@@ -68,20 +71,25 @@ class RcaControllerTest {
     @Autowired
     RcaTriggerService trigger;
 
-    /** One open behaviour-drift finding — the subject an RCA is about. */
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    /** One open classifier finding — the subject an RCA is about. */
     private String seedFinding(String projectId, String causeKey) {
-        return findings.recordFiring(
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         projectId,
-                        "profile-1",
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.SECRET_LEAK,
+                        "clf-" + causeKey,
                         causeKey,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "cs_extract",
-                        Instant.now().toString())
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
     }
 
@@ -91,8 +99,8 @@ class RcaControllerTest {
                         projectId,
                         new CaseDetection(
                                 new CaseKey(
-                                        CaseRow.Detector.BEHAVIOR_DRIFT,
-                                        CaseRow.SubjectKind.BEHAVIOR_PROFILE,
+                                        CaseRow.Detector.CLASSIFIER,
+                                        CaseRow.SubjectKind.CLASSIFIER,
                                         "profile-1",
                                         "novelty"),
                                 "extraction",
@@ -124,9 +132,14 @@ class RcaControllerTest {
 
         // The press records who pressed — the principal the lane's ephemeral MCP key is issued to —
         // and the finding id, which is the whole of what crosses into it.
-        var job = jobs.findById(projectId, first.jobId()).orElseThrow();
-        assertEquals(fix.user().id(), job.createdBy());
-        assertEquals(findingId, job.findingId());
+        var job = jdbc.sql("SELECT payload->>'created_by' AS created_by, payload->>'finding_id' AS finding_id"
+                        + " FROM job WHERE project_id = :pid AND id = :id")
+                .param("pid", projectId)
+                .param("id", first.jobId())
+                .query()
+                .singleRow();
+        assertEquals(fix.user().id(), job.get("created_by"));
+        assertEquals(findingId, job.get("finding_id"));
 
         // Same case, second press — must resolve to the SAME report, not a duplicate analysis.
         RcaReportView second = cases.runRca(projectId, caseId, fix.user().id());

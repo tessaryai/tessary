@@ -3,7 +3,6 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
@@ -18,7 +17,6 @@ import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricControl;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
-import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorConfig;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -30,8 +28,6 @@ import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
-import ai.tessary.storage.AnnotationRepository;
-import ai.tessary.storage.AnnotationRow;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -43,15 +39,13 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The shared {@code finding} table's {@link TriageSource}: the list, the detail, the correction loop
- * and the Layer-2 escalation for the three classifiers that write it, behaviour drift, metric drift
- * (both measures) and tool error.
+ * and the Layer-2 escalation for the classifiers that write it.
  *
  * <p>{@code @Order(0)} is wire-observable: Spring sorts the injected {@code List<TriageSource>} by it,
  * and that order is the order rows appear on the findings page and the order sources are asked to
@@ -63,13 +57,6 @@ import org.springframework.transaction.annotation.Transactional;
  * press lands on the existing job instead of a second microVM. Enqueue first, mark second: marking
  * first would let a failed enqueue leave {@code escalated_at} set with no job behind it, and the
  * cause could never be escalated again.
- *
- * <p>{@link #detail} disclaims an SOP-keyed row (only conformance's own projection carries the
- * {@code kind} and baseline block that page renders), while {@link #resolve} claims any row present in
- * the shared table, SOP-keyed included, which makes conformance's resolve arm unreachable in practice:
- * conformance rows live in {@code finding}, so the shared read never comes back empty for one, and
- * control reaches the {@code profileId == null} guard and 404s. That asymmetry is preserved
- * deliberately rather than tidied, since fixing it would change wire behaviour.
  */
 @Component
 @Order(0)
@@ -84,14 +71,11 @@ public class BehaviorTriageSource implements TriageSource {
     private static final int DEFAULT_FINDING_LIMIT = 200;
 
     /**
-     * The classifiers this source escalates for. Naming them explicitly keeps a conformance finding,
-     * which has its own source and its own dossier, out of this lane's queue. Groundedness rides the
-     * lane: its rate finding is the shape Malformed Output's already is (one call site, a rate, its
-     * flagged traces as evidence), filed unruled for this lane to rule on. Frustration is not here:
-     * its findings are ruled when they are filed.
+     * The classifiers this source escalates for. Groundedness rides the lane: its rate finding is the shape
+     * Malformed Output's already is (one call site, a rate, its flagged traces as evidence), filed unruled
+     * for this lane to rule on. Frustration is not here: its findings are ruled when they are filed.
      */
     private static final List<String> BEHAVIOR_CLASSIFIERS = List.of(
-            BuiltInDetector.Kind.BEHAVIOR_DRIFT,
             BuiltInDetector.Kind.DURATION_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT,
             BuiltInDetector.Kind.TOOL_ERROR,
@@ -125,14 +109,6 @@ public class BehaviorTriageSource implements TriageSource {
     private final ToolErrorService toolErrors;
 
     private final BehaviorBaselineEventRepository events;
-    private final AnnotationRepository annotations;
-    private final BehaviorSubstrateRepository substrate;
-    /**
-     * The classifier-specific half of a correction, for the causes that have fitted state to move. May
-     * be empty, in which case the resolution still records the human's judgement; see
-     * {@link CauseResolver}.
-     */
-    private final List<CauseResolver> causeResolvers;
 
     private final ObjectMapper mapper;
 
@@ -167,9 +143,6 @@ public class BehaviorTriageSource implements TriageSource {
             ToolErrorStateRepository toolErrorStates,
             ToolErrorService toolErrors,
             BehaviorBaselineEventRepository events,
-            AnnotationRepository annotations,
-            BehaviorSubstrateRepository substrate,
-            ObjectProvider<CauseResolver> causeResolvers,
             ObjectMapper mapper,
             MalformedOutputDetailService malformedOutputs,
             SecretLeakDetailService secretLeaks,
@@ -188,13 +161,6 @@ public class BehaviorTriageSource implements TriageSource {
         this.toolErrorStates = toolErrorStates;
         this.toolErrors = toolErrors;
         this.events = events;
-        this.annotations = annotations;
-        this.substrate = substrate;
-        // ObjectProvider, not List<T>: a required constructor List<T> parameter with no candidate bean
-        // is an unsatisfied dependency in Spring, not an empty list, and would fail startup instead of
-        // degrading to what a classifier with no data shows, which is what this field's javadoc
-        // promises. Held by AbsentAdapterContextTest.
-        this.causeResolvers = causeResolvers.orderedStream().toList();
         this.mapper = mapper;
         this.malformedOutputs = malformedOutputs;
         this.secretLeaks = secretLeaks;
@@ -232,18 +198,10 @@ public class BehaviorTriageSource implements TriageSource {
                 .toList();
     }
 
-    /**
-     * The shared projection, for any row in this table that is not SOP-keyed. Routed on
-     * {@code classifier_key} rather than on "the shared read came back empty", since conformance rows
-     * live in this table too.
-     */
+    /** The shared projection, for any row in this table. */
     @Override
     public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
-        Optional<FindingRow> shared = findings.findById(projectId, findingId);
-        if (shared.isEmpty()
-                || BuiltInDetector.Kind.SOP_CONFORMANCE.equals(shared.get().classifierKey())) {
-            return Optional.empty();
-        }
+        if (findings.findById(projectId, findingId).isEmpty()) return Optional.empty();
         // Reachability is re-asserted rather than assumed: a withheld classifier's finding must 404,
         // and this source has now claimed the id, so throwing is the contract.
         FindingRow finding = requireReachableFinding(projectId, findingId);
@@ -269,7 +227,7 @@ public class BehaviorTriageSource implements TriageSource {
         for (FindingRow f : rows) {
             // No per-row re-read: eligibility is listAutoEscalatable's own predicate, and the population
             // is behind MCP, so nothing downstream needs a trace looked up per row.
-            out.add(new Escalatable(f.id(), classifierKeyOf(projectId, f)));
+            out.add(new Escalatable(f.id()));
         }
         return List.copyOf(out);
     }
@@ -283,9 +241,6 @@ public class BehaviorTriageSource implements TriageSource {
         Optional<FindingRow> found = findings.findById(projectId, findingId);
         if (found.isEmpty()) return Optional.empty();
         FindingRow finding = found.get();
-        // Conformance shares the table and not this lane: its dossier is the SOP premise, its
-        // escalation carries a different payload kind, and it has its own source ordered after this
-        // one, so the classifier has to say explicitly whether it belongs here.
         if (!BEHAVIOR_CLASSIFIERS.contains(finding.classifierKey())) return Optional.empty();
         if (classifiers.unavailableDetectorKinds(projectId).contains(finding.classifierKey())) {
             return Optional.empty();
@@ -297,12 +252,7 @@ public class BehaviorTriageSource implements TriageSource {
         if (!citesEvidence(projectId, findingId, finding)) {
             throw new TessaryException(ClassifierError.FINDING_HAS_NO_EVIDENCE, findingId);
         }
-        var outcome = jobs.enqueue(
-                projectId,
-                findingId,
-                finding.exemplarVerdictId(),
-                classifierKeyOf(projectId, finding),
-                Instant.now().toString());
+        var outcome = jobs.enqueue(projectId, findingId, Instant.now().toString());
         boolean alreadyEscalated = finding.escalatedAt() != null;
         if (!alreadyEscalated) {
             findings.markEscalated(projectId, findingId, Instant.now().toString());
@@ -322,13 +272,8 @@ public class BehaviorTriageSource implements TriageSource {
 
     // ---- the Layer-2 run ------------------------------------------------------------------------
 
-    /**
-     * Routed on the job's own kind, not on which store holds the id, since conformance rows live in
-     * this table too and "the id is in {@code finding}" would claim a conformance job.
-     */
     @Override
     public Optional<TriageBrief> brief(BehaviorTriageJobRow job) {
-        if (job.isConformance()) return Optional.empty();
         // Empty also when the finding was resolved, closed, or already ruled while the job waited:
         // nothing to rule on, nowhere to write the answer, so the worker marks it done rather than
         // failed, before any sandbox spends a run on a question already settled.
@@ -378,8 +323,8 @@ public class BehaviorTriageSource implements TriageSource {
      * and belongs in the rate the detector compares against, and only a negative ruling asserts that.
      *
      * <p>Only tool error folds, because it is the only classifier here holding an accumulator that a
-     * ruling can leave standing. Metric drift closes its own window every pass and behaviour drift
-     * refits, so neither has a value that survives a close the way tool error's does.
+     * ruling can leave standing. Metric drift closes its own window every pass, so it has no value
+     * that survives a close the way tool error's does.
      */
     private void foldIfRuledNegative(FindingRow finding, BehaviorTriageVerdict verdict) {
         if (!BuiltInDetector.Kind.TOOL_ERROR.equals(finding.classifierKey())) return;
@@ -418,8 +363,7 @@ public class BehaviorTriageSource implements TriageSource {
      * the classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
      * tool error corrects a rate (see {@link #resolveRateShift}); a groundedness rate re-learns its
      * call site's reference on absorb (see {@link #relearnGroundedness}); malformed-output and armed-window
-     * causes have no fitted state to move; everything else hangs off a fitted profile and goes through
-     * {@link CauseResolver}. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
+     * causes have no fitted state to move. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
      * which is what actually opens or closes the finding.
      *
      * <p><b>A ruling freezes the finding by construction.</b> This is the same {@code status = 'open' AND
@@ -434,8 +378,6 @@ public class BehaviorTriageSource implements TriageSource {
     @Override
     public Optional<BehaviorFindingView> resolve(
             String projectId, String findingId, String action, @Nullable String userId) {
-        // Presence in the shared table is what claims the id, SOP-keyed rows included: see the class
-        // javadoc for why that is preserved rather than tidied.
         if (findings.findById(projectId, findingId).isEmpty()) return Optional.empty();
         boolean expected = BehaviorResolutionRequest.EXPECTED.equals(action);
         FindingRow finding = requireReachableFinding(projectId, findingId);
@@ -465,19 +407,9 @@ public class BehaviorTriageSource implements TriageSource {
             logResolved(projectId, findingId, finding.causeKind(), action);
             return Optional.of(reread(projectId, findingId));
         }
-        // Every cause that reaches here hangs off a fitted profile. This is no longer guaranteed by a
-        // schema check: a finding can have neither a profile nor a baseline when its cause is
-        // recomputed, so the branches above must claim every scope-less cause kind before control gets
-        // this far. A new cause kind that hangs off nothing needs its own branch; this throw is what it
-        // looks like when one is forgotten.
-        if (finding.profileId() == null) {
-            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
-        }
-        String annotationKey = repinProfile(projectId, finding, expected, userId, now);
-        writeHumanRuling(projectId, findingId, expected, userId, now);
-        recordAnnotation(projectId, finding, annotationKey, expected, userId);
-        logResolved(projectId, findingId, finding.causeKind(), action);
-        return Optional.of(reread(projectId, findingId));
+        // The branches above must claim every cause kind. A new cause kind needs its own branch; this
+        // throw is what it looks like when one is forgotten.
+        throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
     }
 
     /**
@@ -500,13 +432,8 @@ public class BehaviorTriageSource implements TriageSource {
         }
         if (FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
             relearnGroundedness(projectId, finding, userId, now);
-            return;
         }
-        if (FindingRow.Cause.MALFORMED_RATE.equals(finding.causeKind())
-                || FindingRow.Cause.ARMED_WINDOW.equals(finding.causeKind())) {
-            return; // no fitted state to move
-        }
-        if (finding.profileId() != null) repinProfile(projectId, finding, true, userId, now);
+        // MALFORMED_RATE and ARMED_WINDOW findings have no fitted state to move.
     }
 
     /**
@@ -556,29 +483,6 @@ public class BehaviorTriageSource implements TriageSource {
                 userId,
                 Instant.now().toString(),
                 "Absorbed.");
-    }
-
-    private @Nullable String repinProfile(
-            String projectId, FindingRow finding, boolean expected, @Nullable String userId, String now) {
-        String profileId = finding.profileId();
-        if (profileId == null) return null;
-        String annotationKey = causeResolvers.stream()
-                .filter(r -> r.owns(finding.causeKind()))
-                .findFirst()
-                .map(r -> r.apply(projectId, finding, expected, userId, now))
-                .orElse(null);
-        events.insert(BehaviorBaselineEventRow.forProfile(
-                Ids.ulid(),
-                profileId,
-                projectId,
-                expected
-                        ? BehaviorBaselineEventRow.Event.GRAM_ALLOWLISTED
-                        : BehaviorBaselineEventRow.Event.GRAM_BLOCKED,
-                finding.workflowKey(),
-                finding.nativeCauseKey(),
-                now,
-                null));
-        return annotationKey;
     }
 
     /** The finding's own ruling write: negative (absorbed) closes it, positive (real deviation) opens
@@ -852,47 +756,6 @@ public class BehaviorTriageSource implements TriageSource {
     }
 
     /**
-     * The correction as an {@code annotation} over the exemplar trace. {@code agrees} is a judgement
-     * about the detection, not about the behaviour: marking a finding "Expected" says the detection was
-     * not a real problem ({@code agrees=false}); "Not expected" confirms it ({@code agrees=true}).
-     * Skipped only when the finding has no exemplar trace, since there is then no subject to annotate.
-     */
-    private void recordAnnotation(
-            String projectId,
-            FindingRow finding,
-            @Nullable String classifierKey,
-            boolean expected,
-            @Nullable String userId) {
-        String traceId = evidence.exemplarTraceId(projectId, finding.id()).orElse(null);
-        if (traceId == null) return;
-        // The trace's producer session, or the trace itself when the producer sent none.
-        String contextId = substrate.traceSessionId(projectId, traceId).orElse(traceId);
-        annotations.upsert(new AnnotationRow(
-                Ids.ulid(),
-                projectId,
-                AnnotationRow.SubjectKind.TRACE,
-                contextId,
-                traceId,
-                null,
-                // The resolver names the classifier row whose fitted state was just corrected; the
-                // fallback is the detector kind.
-                classifierKey == null ? BuiltInDetector.Kind.BEHAVIOR_DRIFT : classifierKey,
-                userId,
-                AnnotationRow.AnnotatorKind.HUMAN,
-                "boolean",
-                /* passed */ null,
-                /* score */ null,
-                /* label */ null,
-                /* textValue */ null,
-                // The anchor: outlives the detection the correction was about.
-                finding.id(),
-                !expected,
-                /* comment */ null,
-                Instant.now().toString(),
-                /* attributes */ null));
-    }
-
-    /**
      * Whether this finding cites a population at all. The finding's own {@code evidence_counts} is the
      * cheap answer and the honest one: it is what the classifier wrote at finding-open, so it says what
      * the claim rests on rather than what has survived retention since. It is only re-read from the
@@ -904,20 +767,5 @@ public class BehaviorTriageSource implements TriageSource {
         }
         // Values, not emptiness: countsByRole seeds EVERY role to zero and so is never empty.
         return evidence.countsByRole(projectId, findingId).values().stream().anyMatch(n -> n > 0);
-    }
-
-    /**
-     * The classifier this finding belongs to, for the job payload's attribution. Falls back to the
-     * cause kind when the project has no row for that detector, since the payload field is
-     * informational and refusing an analysis over a missing definition row would be the wrong trade.
-     */
-    private String classifierKeyOf(String projectId, FindingRow finding) {
-        String detector = finding.classifierKey();
-        if (detector == null) return finding.causeKind();
-        return signals.listByProject(projectId).stream()
-                .filter(s -> detector.equals(s.detector()))
-                .map(ClassifierRow::classifierKey)
-                .findFirst()
-                .orElse(detector);
     }
 }

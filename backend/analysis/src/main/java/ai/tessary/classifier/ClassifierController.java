@@ -72,8 +72,9 @@ public class ClassifierController {
     /**
      * Per-signal sweep-job health for the project — status/attempts/last error/last-swept-at, so
      * a signal whose sweep has been failing for days is observable from the product instead of only
-     * from Loki. A healthy signal reports {@link ClassifierJobRow#PENDING}/{@link ClassifierJobRow#DONE} with no
-     * {@code lastError}; a signal fast-failing its sweep reports {@link ClassifierJobRow#FAILED} with the
+     * from Loki. A healthy signal reports {@link ClassifierJobRow#PENDING}/{@link ai.tessary.model.JobStatus#DONE}
+     * with no {@code lastError}; a signal fast-failing its sweep reports {@link
+     * ai.tessary.model.JobStatus#FAILED} with the
      * error text and attempt count.
      */
     @GetMapping("/health")

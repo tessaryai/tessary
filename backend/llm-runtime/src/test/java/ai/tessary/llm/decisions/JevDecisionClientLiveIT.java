@@ -4,8 +4,11 @@ package ai.tessary.llm.decisions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.Mockito.mock;
 
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.pricing.PlatformCallPricer;
+import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -63,8 +66,8 @@ class JevDecisionClientLiveIT {
                 HttpClient.newHttpClient(),
                 mapper,
                 OpenTelemetry.noop(),
-                null,
-                null,
+                mock(PlatformCallPricer.class),
+                mock(LlmUsageAccountant.class),
                 Thread::sleep,
                 Duration.ofSeconds(20),
                 3);

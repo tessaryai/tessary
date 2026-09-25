@@ -126,7 +126,6 @@ class MetricSuppressionTest {
     void aSharedToolMatchesOnAnyContributingCallSite() {
         Shift turn = turnShift(2_000, 4_000);
         Shift tool = new Shift(
-                Measure.TOOL_DURATION,
                 "tool:search_docs",
                 Set.of(OTHER_CALL_SITE, CALL_SITE),
                 fired(Measure.TOOL_DURATION, Direction.UP),
@@ -185,7 +184,6 @@ class MetricSuppressionTest {
 
     private static Shift turnShift(double refMillis, double curMillis) {
         return new Shift(
-                Measure.TURN_DURATION,
                 CALL_SITE,
                 Set.of(CALL_SITE),
                 fired(Measure.TURN_DURATION, curMillis >= refMillis ? Direction.UP : Direction.DOWN),
@@ -195,7 +193,6 @@ class MetricSuppressionTest {
 
     private static Shift toolShift(String bucketKey, double refMillis, double curMillis, String callSite) {
         return new Shift(
-                Measure.TOOL_DURATION,
                 bucketKey,
                 Set.of(callSite),
                 fired(Measure.TOOL_DURATION, curMillis >= refMillis ? Direction.UP : Direction.DOWN),

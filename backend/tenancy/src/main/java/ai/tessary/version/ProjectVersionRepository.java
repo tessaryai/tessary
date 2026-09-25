@@ -25,9 +25,9 @@ public class ProjectVersionRepository {
 
     /**
      * Lazily materialize the version for a commit. First-writer-wins via
-     * {@code ON CONFLICT DO NOTHING} so a concurrent observer poll and a
-     * benchmark run racing on the same SHA never duplicate or clobber the row;
-     * the materialized_reason is whichever caller won the insert.
+     * {@code ON CONFLICT DO NOTHING} so two callers racing on the same SHA
+     * never duplicate or clobber the row; the materialized_reason is whichever
+     * caller won the insert.
      */
     public ProjectVersionRow findOrMaterialize(String projectId, String commitSha, String reason) {
         String now = Instant.now().toString();
@@ -96,23 +96,9 @@ public class ProjectVersionRepository {
                 .update();
     }
 
-    public void updateSummary(String projectId, String commitSha, String summary) {
-        jdbc.sql("""
-            UPDATE project_version SET summary = :summary, updated_at = :now
-            WHERE project_id = :pid AND commit_sha = :sha
-            """)
-                .param("summary", summary)
-                .param("now", Instant.now().toString())
-                .param("pid", projectId)
-                .param("sha", commitSha)
-                .update();
-    }
-
-    /** The three per-version sync aspects; each maps to a fixed column name. */
+    /** The per-version sync aspects; each maps to a fixed column name. */
     public enum Aspect {
-        GRADERS("graders_status"),
-        DATASETS("datasets_status"),
-        BENCHMARK("benchmark_status");
+        GRADERS("graders_status");
 
         private final String column;
 

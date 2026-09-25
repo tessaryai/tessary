@@ -16,7 +16,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { BehaviorFindingDetail, EvidenceRef, TriageCitation } from "../../api/types";
+import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
 import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, triageState } from "./shared";
@@ -39,8 +39,6 @@ import { FrustratedConversations } from "./FrustratedConversations";
 import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
-// This build's baseline renderer returns null by default.
-import { paid } from "@paid";
 
 type Detail = BehaviorFindingDetail;
 
@@ -165,7 +163,7 @@ export function FindingPage() {
                 verbs stop being offered the moment there is one, rather than staying up as an
                 "override" that would just fail. */}
             {!triaged && (
-              <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+              <ResolveVerbs busy={busy} onResolve={(action) => resolveM.mutate(action)} />
             )}
             {finding.caseId && (
               <Link
@@ -348,11 +346,7 @@ export function FindingPage() {
         </>
       )}
 
-      {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
-          the two `!detail.baseline` siblings below decide what renders in its place when there
-          isn't one. */}
-      {detail.baseline && paid.findingEvidence(detail.baseline)}
-      {!story && !detail.baseline && (
+      {!story && (
         <p className="text-subtle mt-6 text-body" style={{ maxWidth: 560 }}>
           This cause carries no measured shift. It is a claim about the shape of what the agent did
           rather than about a number that moved, so there is nothing here to plot.
@@ -368,11 +362,7 @@ export function FindingPage() {
           <h2 className="font-mono text-label uppercase text-muted mb-1.5">
             Evidence
           </h2>
-          {finding.detector === "sop_conformance" ? (
-            !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
-          ) : (
-            <EvidenceTable findingId={findingId} basePath={basePath} />
-          )}
+          <EvidenceTable findingId={findingId} basePath={basePath} />
         </section>
       )}
     </div>
@@ -663,40 +653,3 @@ function ToolErrorEvidence({ rate }: { rate: NonNullable<Detail["toolError"]> })
     </>
   );
 }
-
-/**
- * What the detector wrote down, as links into the substrate it read.
- *
- * <p>This replaced a single "Exemplar trace →" link, and the difference is what the finding can now
- * say: a rate shift names the witnesses beside its exemplar, a conformance rule lists its violating
- * turns in the order it ranked them, and a distribution shift can point at members of the window it
- * measured. One nullable id could carry the first of those and silently drop the rest.
- *
- * Renders nothing when the set is empty: a finding whose traces have aged out keeps its claim and
- * loses its evidence, and an empty list under a heading reads as a bug rather than as history.
- */
-function EvidenceLinks({ evidence, basePath }: { evidence: EvidenceRef[]; basePath: string }) {
-  const traces = evidence.filter((e) => e.traceId !== null);
-  if (traces.length === 0) return null;
-  return (
-    <div className="mt-2 gap-1" style={{ display: "flex", flexDirection: "column" }}>
-      {traces.map((e) => (
-        <Link
-          key={`${e.role}-${e.traceId}-${e.spanId ?? ""}`}
-          to={`${basePath}/traces/${encodeURIComponent(e.traceId as string)}`}
-          className="text-link hover:text-link-hover transition-colors text-small">
-          {ROLE_LABEL[e.role] ?? e.role} trace
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-/** The detector's own vocabulary, spelled for a reader rather than passed through raw. */
-const ROLE_LABEL: Record<string, string> = {
-  exemplar: "Exemplar",
-  member: "Window member",
-  baseline: "Baseline",
-  witness: "Witness",
-  changepoint: "Changepoint",
-};

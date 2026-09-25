@@ -60,10 +60,8 @@
 #      passthrough-only reach nothing. docs/self-hosting/setup.mdx documents the override-file
 #      escape hatch under "Operating a stack you started from a registry".
 #   4. A PROFILE-GATED SERVICE MUST BE REMOTE-RESOLVABLE: image, volumes and env only, no host
-#      bind. The old `observability` profile broke this (alloy bound
-#      ./observability/alloy/config.alloy, which a registry reference cannot resolve) and moved to
-#      the paid overlay. `redpanda` under `--profile kafka` is the one profile-gated service now,
-#      and it keeps this rule: a named volume, flags, an image.
+#      bind. `redpanda` under `--profile kafka` is the one profile-gated service now, and it keeps
+#      this rule: a named volume, flags, an image.
 
 # Pin the Compose project name so the stack is identical from any directory
 # (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
@@ -202,8 +200,8 @@ services:
       # behavior. Every RCA/TRIAGE run resolves the org's own Bedrock/mantle (or other provider)
       # credential unconditionally now; there is no ambient-identity path left to opt into.
       # Where the backend reaches the agentic-analysis launcher (the sandbox-runner service on the
-      # internal network). Only used when tessary.observer.analyzer-type=agentic; harmless otherwise.
-      # Set explicitly (not silently blank) so an agentic analyzer can't no-op on a missing URL.
+      # internal network). Set explicitly (not silently blank) so an agentic run can't no-op on a
+      # missing URL.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL: http://sandbox-runner:8080
       # A SHIPPED PLACEHOLDER, not blank — the same treatment TESSARY_AUTH_COOKIE_PASSWORD and
       # TESSARY_SECRET_KEY get above, and for the same reason: this is a symmetric secret between two
@@ -303,8 +301,7 @@ services:
       dockerfile: frontend/Dockerfile
       # The Taskfile exports PNPM_VERSION (CI mirrors it with the PNPM_VERSION Actions variable);
       # the fallback here is the same literal so a bare `docker compose build` from a fresh clone
-      # works. scripts/check-required-inputs.sh holds every copy of the
-      # literal to the Taskfile's, so it cannot drift silently.
+      # works. Keep every copy of the literal equal to the Taskfile's by hand.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
         IMAGE_VERSION: ${IMAGE_VERSION:-dev}
@@ -443,8 +440,7 @@ services:
         condition: service_completed_successfully
     # Starts by default. It was gated behind the `observer-launcher` profile after the
     # 2026-07-12 OOM (four warm ONNX heads, ~1.5 GB, OOM-looping the shared host); that hazard
-    # is gone — encoder /classify now lives in the standalone classify-service on ECS Fargate,
-    # and this launcher is lightweight orchestration only, hard-capped below at 1536m so
+    # is gone — this launcher is lightweight orchestration only, hard-capped below at 1536m so
     # any relapse kills this container alone, never the host.
     #
     # Ungated once RCA deleted its inline-LLM fallback, so "Run RCA" now reaches

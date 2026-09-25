@@ -58,23 +58,15 @@ import org.springframework.transaction.annotation.Transactional;
  * the fan-out runs inside one transaction that issues {@code set_config(…, is_local => true)} once up
  * front, so the lowered threshold is scoped to exactly this query and reset at commit.
  *
- * <p>Relevance is the composite {@code ts_rank(...) + word_similarity(:q, name) * }{@value #TRIGRAM_WEIGHT}:
+ * <p>Relevance is the composite {@code ts_rank(...) + word_similarity(:q, name) * 0.3}:
  * an exact FTS hit always outranks a pure-trigram one, since the trigram term is capped at
- * {@value #TRIGRAM_WEIGHT} while a genuine full-text match contributes a positive {@code ts_rank} on top of
+ * 0.3 while a genuine full-text match contributes a positive {@code ts_rank} on top of
  * its own (typically high) word similarity.
  *
  * <p>This is a pure READ surface — it never writes to any store.
  */
 @Repository
 public class GlobalSearchRepository {
-
-    /**
-     * Weight applied to the {@code word_similarity(:q, name)} term (range 0..1) when blending it into the
-     * composite relevance score. Kept &lt; the floor of a real {@code ts_rank} match so an exact full-text hit
-     * always sorts above a pure-trigram (typo/prefix) hit, while still ordering trigram-only hits among
-     * themselves by how close the name is.
-     */
-    static final double TRIGRAM_WEIGHT = 0.3;
 
     /**
      * Minimum {@code word_similarity(:q, name)} for a row to qualify as a trigram (typo/prefix) match.

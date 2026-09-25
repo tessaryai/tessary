@@ -7,17 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,9 +44,6 @@ class FindingRulingIntegrationTest {
 
     @Autowired
     TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     private static final String GRAM = "gram-ruling";
 
@@ -190,25 +187,26 @@ class FindingRulingIntegrationTest {
     // ---- fixtures ---------------------------------------------------------------------------------
 
     private Project project(String slug) {
-        // The grant precedes the project: project creation is what seeds the built-in classifiers, and
-        // requireReachableFinding refuses a classifier the org's capability layer withholds.
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT))
-                .project();
+        return TenantFixture.bootstrap(tenants, slug).project();
     }
 
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
     private String firing(Project p, String gram) {
-        return findings.recordFiring(
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-" + p.id(),
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + gram,
                         gram,
-                        "workflow-1",
                         5,
-                        null,
-                        null,
                         "cs-1",
-                        now())
+                        ARMED_PAYLOAD,
+                        now(),
+                        now(),
+                        now(),
+                        now()))
                 .findingId();
     }
 

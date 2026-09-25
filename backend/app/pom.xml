@@ -76,10 +76,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-yaml</artifactId>
-        </dependency>
         <!-- JSpecify nullness annotations (@Nullable) — the contract NullAway checks. -->
         <dependency>
             <groupId>org.jspecify</groupId>
@@ -89,21 +85,6 @@
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-parameter-names</artifactId>
         </dependency>
-        <!-- Anthropic via AWS Bedrock. Pulls the AWS SDK v2 Bedrock-runtime
-             client transitively; auth defaults to the SDK's DefaultCredentialsProvider
-             (env vars, instance profile, etc.) and a per-model_config row can override
-             with sealed access-key fields. -->
-        <!-- AWS Lambda Invoke client for deterministic-grader execution
-             (LambdaSandboxRunner). Reuses the AWS SDK v2 core + apache sync
-             client + DefaultCredentialsProvider (instance profile) already
-             pulled by langchain4j-bedrock. Version comes from the awssdk BOM
-             above, so it stays aligned with the Bedrock-runtime client. -->
-        <!-- SigV4 signing for the bedrock-mantle endpoint (MantleHttpClient). Mantle speaks the
-             OpenAI wire, so its requests are made by langchain4j's HTTP client rather than an AWS
-             SDK client — which means we sign them ourselves with AwsV4HttpSigner instead of getting
-             it for free. Both of these arrive transitively today (http-auth-aws via the Bedrock
-             client, http-client-jdk via langchain4j-open-ai), but they are compile-time imports now,
-             so they are declared rather than relied on. Versions come from the BOMs above. -->
         <!-- Postgres + JdbcClient for all persistence. We use JdbcClient directly
              (not JPA) — fits the YAML-first ethos and keeps persistence simple.
              Liquibase manages schema migrations. -->
@@ -125,7 +106,7 @@
 
 
         <!-- Observability: export traces + metrics + logs via OTLP to the
-             on-host Grafana Alloy agent (see observability/alloy/config.alloy).
+             on-host Grafana Alloy agent.
              Spring Boot 4 split observability autoconfig into per-feature
              modules; spring-boot-starter-actuator no longer pulls tracing/OTel.
              spring-boot-starter-opentelemetry is the unified bundle — it brings
@@ -223,21 +204,6 @@
     <build>
         <plugins>
             <plugin>
-                <!-- The test tree as a jar: other @SpringBootTest suites reuse the
-                     same fixtures (TenantFixture, SubstrateV2Fixtures, the initializers) this suite runs on,
-                     without this module naming what depends on it and without moving tenant- or trace-shaped
-                     fixtures below the layer that owns their types (devdocs/modules.md). -->
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>test-jar</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <!-- The repackage goal is bound by the spring-boot-starter-parent default
@@ -250,12 +216,6 @@
                          the main artifact, so other modules can depend on `app` as an ordinary
                          classpath jar. backend/Dockerfile extracts the exec jar. -->
                     <classifier>exec</classifier>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
                 </configuration>
                 <executions>
                     <!-- META-INF/build-info.properties, and so a BuildProperties bean. Its build time dates the
@@ -276,7 +236,7 @@
                 <!-- `tessary.plan.default-key=enterprise` used to live here, so the suite ran with
                      every capability on. It is gone along with the plan tiers: this build has no
                      tiers, and the default is already every capability
-                     ON except behavior_drift, sop_conformance and triage_automatic. Removing it in
+                     ON except triage_automatic. Removing it in
                      the same commit is deliberate — left in place it would have kept a stale
                      property deciding nothing while looking like it decided everything, and any
                      test that had been passing behind the enterprise tier would have gone on

@@ -15,10 +15,9 @@ import org.springframework.context.annotation.Configuration;
  * {@code @ConditionalOnMissingBean}, because the choice has to track {@link
  * WorkOsProperties#isEnabled()} exactly, blank-vs-unset included, and {@code @ConditionalOnProperty}
  * only approximates that predicate (Spring's "property is present and non-'false'" semantics
- * aren't "both api-key and client-id are non-blank"). Branching on the same method every other
- * WorkOS-vs-not check in this package already calls guarantees bean selection and those checks, in
- * {@link AuthFilter}, {@link AuthRequiredInProdGuard} and {@link AuthPostureAnnouncer}, agree by
- * construction. {@link AuthProviderConfigTest} pins that parity directly.
+ * aren't "both api-key and client-id are non-blank"). Branching on the same method the other
+ * WorkOS-vs-not check in this package calls ({@link PublicOriginGuard}) keeps the two in agreement
+ * by construction. {@link AuthProviderConfigTest} pins the bean selection directly.
  */
 @Configuration(proxyBeanMethods = false)
 public class AuthProviderConfig {

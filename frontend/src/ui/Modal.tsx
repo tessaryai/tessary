@@ -21,7 +21,6 @@ export function Modal({
   children,
   footer,
   size = "md",
-  className,
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,7 +29,6 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   size?: Size;
-  className?: string;
 }) {
   const dlgRef = useRef<HTMLDialogElement>(null);
 
@@ -66,7 +64,6 @@ export function Modal({
         "p-0 m-auto rounded-modal bg-surface text-fg border border-border-strong",
         "backdrop:bg-scrim backdrop:backdrop-blur-sm",
         WIDTH[size],
-        className,
       )}
       style={{ boxShadow: "var(--shadow-md)" }}
     >

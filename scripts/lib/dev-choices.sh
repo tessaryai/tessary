@@ -9,25 +9,24 @@
 # launcher was wired (so triage and RCA refused to run). Each is now a question with the
 # self-host behaviour as its recommended answer, unless a dev checkout has a better one.
 #
-# Three decisions:
+# Two decisions:
 #   TESSARY_DEV_SANDBOX     docker | e2b | off   where triage and RCA agents run
-#   TESSARY_SKIP_CLASSIFY   1 | 0                whether the encoder classifier service runs
 #   TESSARY_AUTH_DISABLED   false | true         whether sign-in is enforced
 #
 # Each resolves in this order, and the first that answers wins:
-#   1. the environment: an explicit export, or a task preset (dev:slim)
+#   1. the environment: an explicit export
 #   2. .env at the repo root. Read here, not left to compose, because whatever this exports
 #      outranks .env at interpolation: without this step a .env saying TESSARY_AUTH_DISABLED=true
 #      would be silently overridden by the default below.
 #   3. .local/dev-choices.env, the answers saved from an earlier run
 #   4. a multiple-choice prompt, when stdin is a terminal
-#   5. the non-interactive default. For agents and the classifier service that is what the stack
+#   5. the non-interactive default. For agents that is what the stack
 #      did before these were questions, so CI and scripts/check-open-boot.sh see no change. For
 #      sign-in it is now enforced, like a self-hosted install; the one non-interactive caller that
 #      boots this stack already asked for exactly that explicitly.
 #
-# Only prompted answers are saved. A preset is not: `task dev:slim` once must not quietly turn
-# every later plain `task dev` into a slim stack.
+# Only prompted answers are saved. An export is not: exporting a value once must not quietly
+# change every later plain `task dev`.
 #
 # Bash 3.2 on purpose (macOS /bin/bash): no associative arrays, no case-modifying expansions.
 
@@ -155,11 +154,6 @@ dev_choices_resolve() {
         "e2b|e2b     In E2B microVMs, from the published tessary/tessary-agent-sandbox template. Needs E2B_API_KEY and a publicly reachable MCP URL." \
         "off|off     Nowhere. No launcher is wired, so triage and RCA will not run."
 
-    dev_resolve TESSARY_SKIP_CLASSIFY 0 1 \
-        "Run the encoder classifier service?" \
-        "1|No    Like a self-hosted install. Every classifier runs, frustration included (it uses your OpenRouter or TypeSafe key, not this service)." \
-        "0|Yes   Adds the classify service: an 8 GB container and a gated encoder-weight download on first run. Groundedness does not use it; its model runs on a GPU outside Docker."
-
     dev_resolve TESSARY_AUTH_DISABLED false 1 \
         "Enforce sign-in?" \
         "false|Yes   Like a self-hosted install: create an account, sign in, and every API call is authenticated." \
@@ -204,12 +198,10 @@ dev_origin_export() {
 # onto the tmux cheat-sheet by scripts/dev.sh, because tmux clears the screen the moment it
 # attaches: printed alone, the confirmation of what was just chosen is gone before it can be read.
 dev_choices_summary_text() {
-    local classify=on auth=enforced
-    [ "$TESSARY_SKIP_CLASSIFY" = "1" ] && classify=off
+    local auth=enforced
     [ "$TESSARY_AUTH_DISABLED" = "true" ] && auth=disabled
-    printf 'dev stack: agents=%s (%s)  encoder classifiers=%s (%s)  sign-in=%s (%s)\n' \
+    printf 'dev stack: agents=%s (%s)  sign-in=%s (%s)\n' \
         "$TESSARY_DEV_SANDBOX" "$TESSARY_DEV_SANDBOX_SOURCE" \
-        "$classify" "$TESSARY_SKIP_CLASSIFY_SOURCE" \
         "$auth" "$TESSARY_AUTH_DISABLED_SOURCE"
     printf '           change with: task dev:configure, then restart with task dev\n'
 }
@@ -306,7 +298,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
                 echo "error: task dev:configure asks questions, so it needs a terminal." >&2
                 exit 1
             fi
-            unset TESSARY_DEV_SANDBOX TESSARY_SKIP_CLASSIFY TESSARY_AUTH_DISABLED
+            unset TESSARY_DEV_SANDBOX TESSARY_AUTH_DISABLED
             TESSARY_DEV_RECONFIGURE=1
             dev_choices_resolve
             dev_choices_summary

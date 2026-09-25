@@ -94,8 +94,6 @@ public class VitalsRepository {
         String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "')";
         return jdbc.sql("SELECT " + dim + " AS dim,"
                         + " sum(s.total_tokens) AS tokens,"
-                        + " sum(s.input_tokens) AS input_tokens,"
-                        + " sum(s.output_tokens) AS output_tokens,"
                         + " sum(s.total_cost) AS usd,"
                         + " count(*) FILTER (WHERE s.total_tokens IS NOT NULL) AS calls,"
                         + " count(*) FILTER (WHERE s.cost_source = '" + UNPRICED + "'"
@@ -116,8 +114,6 @@ public class VitalsRepository {
                 .query((rs, n) -> new UsageRow(
                         rs.getString("dim"),
                         longOrZero(rs, "tokens"),
-                        longOrZero(rs, "input_tokens"),
-                        longOrZero(rs, "output_tokens"),
                         usd(rs),
                         rs.getLong("calls"),
                         rs.getLong("unpriced_calls"),
@@ -149,7 +145,7 @@ public class VitalsRepository {
                         + "   WHERE rs.project_id = t.project_id AND rs.trace_id = t.id"
                         + "     AND rs.parent_span_id IS NULL AND NOT rs.is_deleted"
                         + "   ORDER BY rs.started_at, rs.id LIMIT 1) r ON TRUE";
-        return jdbc.sql("SELECT " + dim + " AS dim, t.id AS trace_id, t.latency_ms AS ms"
+        return jdbc.sql("SELECT " + dim + " AS dim, t.latency_ms AS ms"
                         + " FROM trace t" + rootJoin
                         + " WHERE t.project_id = :pid"
                         + "   AND NOT t.is_deleted"
@@ -158,7 +154,7 @@ public class VitalsRepository {
                 .param("pid", projectId)
                 .param("from", at(from))
                 .param("to", at(to))
-                .query((rs, n) -> new DurationRow(rs.getString("dim"), rs.getString("trace_id"), rs.getDouble("ms")))
+                .query((rs, n) -> new DurationRow(rs.getString("dim"), rs.getDouble("ms")))
                 .list();
     }
 
@@ -210,8 +206,7 @@ public class VitalsRepository {
                 .query((rs, n) -> java.util.Map.entry(rs.getString("id"), rs.getString("use_case")))
                 .list()
                 .stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        java.util.Map.Entry::getKey, java.util.Map.Entry::getValue, (a, b) -> a));
+                .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
     }
 
     /** The bucket for traffic that resolved no dimension value — named, not dropped. */
@@ -241,17 +236,10 @@ public class VitalsRepository {
      * total — root spans carry no model.
      */
     public record UsageRow(
-            String dimension,
-            long tokens,
-            long inputTokens,
-            long outputTokens,
-            BigDecimal usd,
-            long calls,
-            long unpricedCalls,
-            long spendingTraces) {}
+            String dimension, long tokens, BigDecimal usd, long calls, long unpricedCalls, long spendingTraces) {}
 
     /** One completed turn's wall-clock duration, read off the trace's stored {@code latency_ms}. */
-    public record DurationRow(String dimension, String traceId, double millis) {}
+    public record DurationRow(String dimension, double millis) {}
 
     /**
      * Turns that never ended. {@code total} marks the grand-total row from the GROUPING SET.

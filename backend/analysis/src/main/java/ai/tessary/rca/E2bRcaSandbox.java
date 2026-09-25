@@ -31,16 +31,14 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Drives one agentic RCA run through the Node launcher sidecar ({@code POST /rca}) — the same
- * one-request-one-fresh-microVM shape as the observer's {@code E2bAnalysisSandbox}: the sidecar
- * clones the repo, materializes the evidence dossier as files, runs the agent (optionally wired
- * to the platform's MCP surface via a short-lived key), and tears the sandbox down.
+ * Drives one agentic RCA run through the Node launcher sidecar ({@code POST /rca}), one request
+ * to one fresh microVM: the sidecar clones the repo, materializes the evidence dossier as files, runs
+ * the agent (wired to the platform's MCP surface via a short-lived key), and tears the sandbox down.
  *
  * <p><b>Model credentials are resolved and decrypted HERE</b> (via {@link
  * AgenticCredentialResolver}), not in the launcher — the launcher reads no provider secret from
@@ -52,7 +50,7 @@ import org.springframework.stereotype.Service;
  *
  * <pre>
  * POST /rca { clone_url, head_sha, files, prompt, json_schema, model, provider, credential,
- *             mcp: {url, token}|null, timeout_ms }
+ *             mcp: {url, token}, timeout_ms }
  *   -&gt; { "raw": "&lt;result envelope&gt;", "turns": [...], "startMs": n }
  * </pre>
  *
@@ -122,10 +120,9 @@ public class E2bRcaSandbox implements RcaSandbox {
      * rca_report} row this run investigated (see that field's javadoc), so the ledger can now say what
      * an RCA run cost the same way {@code E2bTriageSandbox} already says it for a triage ruling.
      */
-    private void bookUsage(
-            @Nullable String projectId, @Nullable String reportId, String envelopeJson, boolean platformFunded) {
+    private void bookUsage(String projectId, String reportId, String envelopeJson, boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
-        if (projectId == null || u == null) return;
+        if (u == null) return;
         usage.recordSandboxRun(
                 projectId,
                 ModelLane.RCA.wire(),
@@ -138,7 +135,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                 u.cacheReadTokens(),
                 u.cacheWriteTokens(),
                 u.costUsd(),
-                reportId == null ? null : new LlmUsageAccountant.Subject(SUBJECT_KIND, reportId));
+                new LlmUsageAccountant.Subject(SUBJECT_KIND, reportId));
     }
 
     /**
@@ -190,8 +187,8 @@ public class E2bRcaSandbox implements RcaSandbox {
         return KEY;
     }
 
-    /** Boot-time guard, mirroring {@code E2bAnalysisSandbox}: the sandbox is now RCA's only analysis
-     *  path, so a blank launcher URL fails every RCA at run time; say so once at startup instead. */
+    /** Boot-time guard: the sandbox is RCA's only analysis path, so a blank launcher URL fails every
+     *  RCA at run time; say so once at startup instead. */
     @PostConstruct
     void warnIfUnconfigured() {
         Agentic cfg = props.getAgentic();
@@ -221,7 +218,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             span.setAttribute("tessary.rca.subject_id", req.subjectId());
             span.setAttribute("tessary.head_sha", req.headSha() == null ? "" : req.headSha());
             // One clone+analyze run == invoke_agent; without the discriminator Langfuse never types
-            // this as a generation and the Alloy langfuse branch drops it (see E2bAnalysisSandbox).
+            // this as a generation and the Alloy langfuse branch drops it.
             span.setAttribute("gen_ai.operation.name", AgentSpanTelemetry.OP_INVOKE_AGENT);
             span.setAttribute("gen_ai.request.model", model(req.projectId()));
 
@@ -253,11 +250,9 @@ public class E2bRcaSandbox implements RcaSandbox {
             body.put("provider", provider.name());
             AgenticCredentialResolver.Credential credential = credentials.resolve(req.projectId(), provider);
             body.set("credential", mapper.valueToTree(credential));
-            if (req.mcpUrl() != null && req.mcpToken() != null) {
-                ObjectNode mcp = body.putObject("mcp");
-                mcp.put("url", req.mcpUrl());
-                mcp.put("token", req.mcpToken());
-            }
+            ObjectNode mcp = body.putObject("mcp");
+            mcp.put("url", req.mcpUrl());
+            mcp.put("token", req.mcpToken());
             body.put("timeout_ms", cfg.getTimeoutMs());
             // A soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
             // (not yet live-verified) caveat.
@@ -271,8 +266,8 @@ public class E2bRcaSandbox implements RcaSandbox {
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
             bookUsage(req.projectId(), req.reportId(), raw, credential.platformFunded());
             // `structured_output` is the schema-constrained object the sandbox ALREADY extracted and
-            // validated: agent-stream.js's runAgent refuses to exit 0 under `rejectOn: 'error'` unless
-            // every key the response schema requires is present in it. `result` is the SAME answer in
+            // validated: agent-stream.js's runAgent refuses to exit 0 unless every key the response
+            // schema requires is present in it. `result` is the SAME answer in
             // the model's own raw reply text, which may arrive wrapped in a markdown fence or a
             // sentence of prose. Reading `result` first is what discarded a complete 4m48s / $0.80
             // investigation at its last step: RcaSynthesisOutput binds it strictly, so one fence or one
@@ -328,7 +323,7 @@ public class E2bRcaSandbox implements RcaSandbox {
         }
     }
 
-    String postLauncher(String bodyJson, Agentic cfg, @Nullable String projectId, @Nullable String reportId) {
+    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/rca"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
                 .header("Authorization", "Bearer " + cfg.getLauncherApiKey())

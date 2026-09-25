@@ -30,11 +30,16 @@ class ToolErrorDetectorTest {
         return r;
     }
 
+    /** Fold one call in, as a bucket of one. */
+    private static State step(State s, ToolErrorRate ref, ToolErrorConfig config, boolean failed, String at) {
+        return ToolErrorDetector.advanceBucket(s, ref, config, 1, failed ? 1 : 0, at);
+    }
+
     /** Feed {@code n} calls at rate {@code p} and return where the run alarmed, or -1 if it never did. */
     private static long callsToAlarm(ToolErrorRate ref, double p, long n, Random rng) {
         State s = State.EMPTY;
         for (long i = 1; i <= n; i++) {
-            s = ToolErrorDetector.advance(s, ref, CONFIG, rng.nextDouble() < p, "2026-08-08T00:00:00Z");
+            s = step(s, ref, CONFIG, rng.nextDouble() < p, "2026-08-08T00:00:00Z");
             if (ToolErrorDetector.decide(s, ref, CONFIG).fired()) return i;
         }
         return -1;
@@ -96,7 +101,7 @@ class ToolErrorDetectorTest {
      *
      * <p>A sustained 20.0% -> 21.1% is a real change in the process and is also nobody's problem. A
      * classifier that opens a case for it teaches a partner to stop reading it. This used to be handled
-     * downstream: the accumulator crossed after about 3,000 calls and {@code minEffectSize} declined to
+     * downstream: the accumulator crossed after about 3,000 calls and an effect-size gate declined to
      * make a case of it. That gate measured the shift over every call since the reference was pinned,
      * which on any tool with history is the baseline by construction, so it also silenced every real
      * outage. It is gone.
@@ -167,9 +172,9 @@ class ToolErrorDetectorTest {
     void aBurstThatWashesOutLeavesNoOnset() {
         ToolErrorRate ref = pinned(20_000, 200);
         State s = State.EMPTY;
-        for (int i = 0; i < 5; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-01T00:00:00Z");
+        for (int i = 0; i < 5; i++) s = step(s, ref, CONFIG, true, "2026-08-01T00:00:00Z");
         assertNotNull(s.onsetUpAt(), "evidence accumulating should record where it began");
-        for (int i = 0; i < 3000; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, false, "2026-08-02T00:00:00Z");
+        for (int i = 0; i < 3000; i++) s = step(s, ref, CONFIG, false, "2026-08-02T00:00:00Z");
         assertEquals(0.0, s.sUp(), "clean traffic should drain the accumulator");
         assertNull(s.onsetUpAt(), "and draining it should forget where the spell started");
     }
@@ -178,9 +183,9 @@ class ToolErrorDetectorTest {
     void onsetIsTheCallTheRunBeganOnNotTheOneThatAlarmed() {
         ToolErrorRate ref = pinned(20_000, 200);
         State s = State.EMPTY;
-        s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-01T09:00:00Z");
+        s = step(s, ref, CONFIG, true, "2026-08-01T09:00:00Z");
         for (int i = 0; i < 400; i++) {
-            s = ToolErrorDetector.advance(s, ref, CONFIG, i % 3 == 0, "2026-08-03T17:00:00Z");
+            s = step(s, ref, CONFIG, i % 3 == 0, "2026-08-03T17:00:00Z");
         }
         Decision d = ToolErrorDetector.decide(s, ref, CONFIG);
         assertTrue(d.fired());
@@ -195,7 +200,7 @@ class ToolErrorDetectorTest {
     void failuresCollapsingOnANoisyToolAlsoAlarms() {
         ToolErrorRate ref = pinned(40_000, 4000); // 10% in control, above downArmMinRate
         State s = State.EMPTY;
-        for (int i = 0; i < 5000; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, false, "2026-08-08T00:00:00Z");
+        for (int i = 0; i < 5000; i++) s = step(s, ref, CONFIG, false, "2026-08-08T00:00:00Z");
         Decision d = ToolErrorDetector.decide(s, ref, CONFIG);
         assertTrue(d.fired(), "a tool that stopped reporting errors is worth a sentence from someone");
         assertEquals(Direction.DOWN, d.direction());
@@ -206,7 +211,7 @@ class ToolErrorDetectorTest {
     void theImprovementArmDoesNotRunOnAToolThatBarelyFails() {
         ToolErrorRate ref = pinned(40_000, 40); // 0.1%, below downArmMinRate
         State s = State.EMPTY;
-        for (int i = 0; i < 20_000; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, false, "2026-08-08T00:00:00Z");
+        for (int i = 0; i < 20_000; i++) s = step(s, ref, CONFIG, false, "2026-08-08T00:00:00Z");
         assertEquals(0.0, s.sDown());
         assertFalse(ToolErrorDetector.decide(s, ref, CONFIG).fired());
     }
@@ -253,7 +258,7 @@ class ToolErrorDetectorTest {
         ToolErrorRate spotless = pinned(20_000, 0);
         double p0 = ToolErrorDetector.baselineRate(spotless);
         assertTrue(p0 > 0 && Double.isFinite(p0), "p0=" + p0);
-        State s = ToolErrorDetector.advance(State.EMPTY, spotless, CONFIG, true, "2026-08-08T00:00:00Z");
+        State s = step(State.EMPTY, spotless, CONFIG, true, "2026-08-08T00:00:00Z");
         assertTrue(Double.isFinite(s.sUp()) && s.sUp() > 0, "sUp=" + s.sUp());
     }
 
@@ -267,7 +272,7 @@ class ToolErrorDetectorTest {
     @Test
     void aMultipleOfOneCannotDisableTheDetector() {
         // ln(p1/p0) with p1 == p0 is zero on every call, which is a detector that can never fire.
-        ToolErrorConfig c = new ToolErrorConfig(250_000L, 1.0, 0.005, 0.05, 500, 0.01, 300, 8);
+        ToolErrorConfig c = new ToolErrorConfig(250_000L, 1.0, 0.005, 500, 0.01, 8);
         assertTrue(c.shiftMultiple() > 1.0, "clamped to " + c.shiftMultiple());
     }
 
@@ -284,14 +289,14 @@ class ToolErrorDetectorTest {
     void theRunDenominatorDiesWithTheRun() {
         ToolErrorRate ref = pinned(20_000, 200);
         State s = State.EMPTY;
-        for (int i = 0; i < 5; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-01T00:00:00Z");
+        for (int i = 0; i < 5; i++) s = step(s, ref, CONFIG, true, "2026-08-01T00:00:00Z");
         assertEquals(5, s.callsSinceOnsetUp(), "the run should count the calls it is holding evidence about");
 
-        for (int i = 0; i < 3000; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, false, "2026-08-02T00:00:00Z");
+        for (int i = 0; i < 3000; i++) s = step(s, ref, CONFIG, false, "2026-08-02T00:00:00Z");
         assertEquals(0.0, s.sUp());
         assertEquals(0, s.callsSinceOnsetUp(), "and forget them when the accumulator drains");
 
-        s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-03T00:00:00Z");
+        s = step(s, ref, CONFIG, true, "2026-08-03T00:00:00Z");
         assertEquals(1, s.callsSinceOnsetUp(), "a new run starts from one, not from where the old one left off");
     }
 
@@ -312,7 +317,7 @@ class ToolErrorDetectorTest {
         for (int i = 0; i < 300; i++) {
             boolean failed = rng.nextDouble() < 0.6;
             if (failed) failures++;
-            s = ToolErrorDetector.advance(s, ref, CONFIG, failed, "2026-08-08T00:00:00Z");
+            s = step(s, ref, CONFIG, failed, "2026-08-08T00:00:00Z");
         }
         assertTrue(s.sUp() > 0, "the run must still be live for the inversion to be exact");
         assertEquals(failures, ToolErrorDetector.failuresFromS(s.sUp(), s.callsSinceOnsetUp(), p0, p1));
@@ -323,7 +328,7 @@ class ToolErrorDetectorTest {
     void theDecisionReportsTheRunRateNotTheLifetimeAverage() {
         ToolErrorRate ref = pinned(1_000_000, 50_000); // 5%, with a million calls behind it
         State s = State.EMPTY;
-        for (int i = 0; i < 30; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-08T14:03:00Z");
+        for (int i = 0; i < 30; i++) s = step(s, ref, CONFIG, true, "2026-08-08T14:03:00Z");
 
         Decision d = ToolErrorDetector.decide(s, ref, CONFIG);
         assertTrue(d.fired());
@@ -359,7 +364,7 @@ class ToolErrorDetectorTest {
     void theAccumulatorIsNoLongerCapped() {
         ToolErrorRate ref = pinned(20_000, 200);
         State s = State.EMPTY;
-        for (int i = 0; i < 2000; i++) s = ToolErrorDetector.advance(s, ref, CONFIG, true, "2026-08-08T00:00:00Z");
+        for (int i = 0; i < 2000; i++) s = step(s, ref, CONFIG, true, "2026-08-08T00:00:00Z");
         assertTrue(s.sUp() > 100, "a sustained outage should keep accumulating, got " + s.sUp());
     }
 }

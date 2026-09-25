@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { auth } from "../../api/client";
-import { paid } from "@paid";
 import { ApiError } from "../../api/types";
 import type { OrgMember } from "../../api/types-auth";
 import { useAuth } from "../../auth/AuthContext";
@@ -28,10 +27,9 @@ import {
 import { AppearanceControls } from "./Appearance";
 
 /**
- * Owner-facing organization administration: rename / archive / transfer-ownership /
- * delete the organization, plus per-project lifecycle (rename, set-default, archive,
- * delete). Mirrors the owner-gating the backend enforces: non-owners see a
- * read-only view. The "default project" invariant is surfaced here: the default
+ * Owner-facing organization administration: rename the organization, plus
+ * per-project lifecycle (set-default, archive, delete). Mirrors the owner-gating the backend
+ * enforces: non-owners see a read-only view. The "default project" invariant is surfaced here: the default
  * project cannot be archived or deleted, and exactly one project carries the badge.
  */
 export function Organization() {
@@ -63,8 +61,7 @@ export function Organization() {
     qc.invalidateQueries({ queryKey: ["org", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-projects", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-members", orgSlug] });
-    // GET /auth/me carries the org list; AuthProvider owns its own refetch, invoked by
-    // paid.orgLifecycleSections itself after a rename-shaped org change, not by this key.
+    // GET /auth/me carries the org list; AuthProvider owns its own refetch, not this key.
   };
 
   const rename = useMutation({
@@ -75,10 +72,6 @@ export function Organization() {
     },
     onError: (err) => toast.error("Could not rename organization", (err as ApiError).message),
   });
-
-  // `paid.orgLifecycleSections` renders the archive/unarchive/delete-org and transfer-ownership
-  // sections' UI and mutations; this page just hands it what it needs and how to invalidate its
-  // own queries afterward.
 
   const setDefault = useMutation({
     mutationFn: (slug: string) => auth.makeProjectDefault(orgSlug, slug),
@@ -111,8 +104,6 @@ export function Organization() {
     onError: (err) => toast.error("Could not delete project", (err as ApiError).message),
   });
 
-  const otherMembers = (members.data ?? []).filter((m) => m.user_id !== user?.id);
-
   return (
     <PageBody size="narrow">
       <PageHeader
@@ -120,8 +111,7 @@ export function Organization() {
         title="Organization"
         subtitle={
           <>
-            Rename, archive, transfer, or delete <span className="font-mono text-fg">{orgSlug}</span> and manage its
-            projects. Owners only.
+            Rename <span className="font-mono text-fg">{orgSlug}</span> and manage its projects. Owners only.
           </>
         }
       />
@@ -129,15 +119,6 @@ export function Organization() {
       <Section title="Appearance" subtitle="How Tessary looks for your account.">
         <AppearanceControls />
       </Section>
-
-      {org.data?.archived_at && (
-        <Section title="Archived">
-          <p className="text-muted text-small">
-            This organization is archived. It stays accessible but is hidden from active lists. Unarchive it below to
-            restore it.
-          </p>
-        </Section>
-      )}
 
       <Section title="Name">
         <div className="flex gap-2 items-end">
@@ -239,14 +220,6 @@ export function Organization() {
           </Table>
         )}
       </Section>
-
-      {canManage &&
-        paid.orgLifecycleSections({
-          orgSlug,
-          archived: !!org.data?.archived_at,
-          otherMembers,
-          onChanged: invalidate,
-        })}
 
       <Section title="Organization ID" subtitle="Use this ID when contacting support or calling the API.">
         <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3.5 py-3 max-w-md">

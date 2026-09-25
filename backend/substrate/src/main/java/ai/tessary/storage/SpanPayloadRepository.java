@@ -71,23 +71,13 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * One JDBC batch for a whole batch of payloads, the same statement and guard as {@link #upsert} per row.
+     * Last-write-wins upsert of a whole batch of payloads, one JDBC batch, under the same {@code event_ts}
+     * guard as {@link SpanRepository#upsertAll}: ties go to the latest arrival.
      */
     public void upsertAll(List<SpanPayloadRow> rows) {
-        if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
                 UPSERT_SQL, rows.stream().map(SpanPayloadRepository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
-    }
-
-    /**
-     * Last-write-wins upsert under the same {@code event_ts} guard as {@link SpanRepository#upsert}, ties
-     * to the latest arrival.
-     *
-     * @return the number of rows written: 0 when the guard rejected an older version.
-     */
-    public int upsert(SpanPayloadRow row) {
-        return jdbc.sql(UPSERT_SQL).paramSource(params(row)).update();
     }
 
     public Optional<SpanPayloadRow> find(String projectId, String traceId, String spanId) {

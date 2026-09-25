@@ -17,6 +17,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -94,7 +95,9 @@ class ClassifierTurnGrainIntegrationTest {
                 .id();
         service.seedBuiltIns(pid);
         service.setEnabled(
-                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), true);
+                pid,
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
+                true);
         return pid;
     }
 
@@ -158,11 +161,12 @@ class ClassifierTurnGrainIntegrationTest {
         sweepOnce(pid);
 
         List<ClassifierEventView> afterSecond = service.eventsForClassifier(
-                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), 100);
+                pid,
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
+                null,
+                100);
         assertEquals(
-                1,
-                afterSecond.size(),
-                "the conversation is already flagged at high, so the second turn is not scored again");
+                1, afterSecond.size(), "the conversation is already flagged, so the second turn is not scored again");
         assertEquals(
                 firstTurn,
                 afterSecond.get(0).subjectId(),
@@ -190,7 +194,10 @@ class ClassifierTurnGrainIntegrationTest {
         sweepOnce(pid);
 
         List<ClassifierEventView> events = service.eventsForClassifier(
-                pid, signals.findByKey(pid, "frustration").orElseThrow().id(), 100);
+                pid,
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
+                null,
+                100);
         assertEquals(2, events.size(), "a DIFFERENT conversation still flags — suppression is per conversation");
         assertTrue(
                 events.stream().anyMatch(e -> otherTurn.equals(e.subjectId())),
@@ -245,7 +252,7 @@ class ClassifierTurnGrainIntegrationTest {
      */
     private void seedSubAgentTrace(String pid, String id, String parentTraceId, String sessionId, Instant at) {
         fx.session(pid, sessionId, at);
-        traces.getOrCreate(new TraceV2Row(
+        traces.getOrCreateAll(List.of(new TraceV2Row(
                 pid,
                 id,
                 sessionId,
@@ -279,7 +286,7 @@ class ClassifierTurnGrainIntegrationTest {
                 false,
                 false,
                 at.toString(),
-                false));
+                false)));
     }
 
     /** A few plain ticks: enough for a newly seeded turn to be swept, without asserting it fired. */
@@ -297,15 +304,16 @@ class ClassifierTurnGrainIntegrationTest {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
             worker.tick();
             if (frustration == null) {
-                frustration = signals.findByKey(pid, "frustration").orElse(null);
+                frustration = ClassifierRows.byKey(signals, pid, "frustration").orElse(null);
             }
             if (frustration != null
-                    && !service.eventsForClassifier(pid, frustration.id(), 100).isEmpty()) {
+                    && !service.eventsForClassifier(pid, frustration.id(), null, 100)
+                            .isEmpty()) {
                 // One more tick past the first detection so a leaked extra candidate (which would be
                 // swept right behind it) has a chance to land and fail the count assertion below.
                 worker.tick();
                 sleep(200);
-                return service.eventsForClassifier(pid, frustration.id(), 100);
+                return service.eventsForClassifier(pid, frustration.id(), null, 100);
             }
             sleep(100);
         }

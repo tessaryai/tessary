@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createContext, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { JsonView } from "@uiw/react-json-view";
@@ -13,30 +13,19 @@ export function PayloadViewer({
   payload,
   label,
   maxHeight = 320,
-  fill = false,
 }: {
-  payload: string | null;
-  label?: string;
+  payload: string;
+  label: string;
   maxHeight?: number;
-  fill?: boolean;
 }) {
   const [mode, setMode] = useState<"formatted" | "raw">("formatted");
   const { copied, copy } = useCopy();
   const parsed = useMemo(() => parsePayload(payload), [payload]);
 
-  if (payload == null || payload === "") {
-    return (
-      <div className={fill ? "flex h-full flex-col min-h-0" : undefined}>
-        {label && <PanelLabel>{label}</PanelLabel>}
-        <span className="italic text-subtle text-small">(none)</span>
-      </div>
-    );
-  }
-
   return (
-    <div className={fill ? "flex h-full flex-col min-h-0" : undefined}>
-      <div className={cn("flex items-center justify-between gap-2 mb-1", fill && "shrink-0")}>
-        {label ? <PanelLabel>{label}</PanelLabel> : <span />}
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <PanelLabel>{label}</PanelLabel>
         <div className="flex items-center gap-1">
           <Segmented
             value={mode}
@@ -56,72 +45,13 @@ export function PayloadViewer({
           </button>
         </div>
       </div>
-      <div
-        className={cn("overflow-auto", fill && "flex-1 min-h-0")}
-        style={fill ? undefined : { maxHeight }}
-      >
+      <div className="overflow-auto" style={{ maxHeight }}>
         {mode === "raw" ? (
           <pre className="font-mono whitespace-pre-wrap text-fg text-small">{payload}</pre>
         ) : (
           <RenderParsed parsed={parsed} />
         )}
       </div>
-    </div>
-  );
-}
-
-/**
- * Input / Output as a vertical split — two bordered panels, ~50/50 by default,
- * each scrolling internally, with a draggable divider to re-split. Fills its
- * parent's height (parent must be a min-h-0 flex child).
- */
-export function SpanIO({ input, output }: { input: string | null; output: string | null }) {
-  const [topPct, setTopPct] = useState(50);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => {
-      const root = rootRef.current;
-      if (!root) return;
-      const rect = root.getBoundingClientRect();
-      const pct = ((ev.clientY - rect.top) / rect.height) * 100;
-      setTopPct(Math.min(80, Math.max(20, pct)));
-    };
-    const up = () => {
-      handle.releasePointerCapture?.(e.pointerId);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  return (
-    <div ref={rootRef} className="flex h-full flex-col min-h-0">
-      <div className="min-h-0" style={{ height: `${topPct}%` }}>
-        <IOCard label="Input" payload={input} />
-      </div>
-      <div
-        onPointerDown={startDrag}
-        role="separator"
-        aria-orientation="horizontal"
-        className="shrink-0 h-1.5 my-1 cursor-row-resize rounded-control bg-border hover:bg-accent transition-colors"
-        style={{ transitionDuration: "var(--duration-micro)" }}
-      />
-      <div className="flex-1 min-h-0">
-        <IOCard label="Output" payload={output} />
-      </div>
-    </div>
-  );
-}
-
-function IOCard({ label, payload }: { label: string; payload: string | null }) {
-  return (
-    <div className="h-full flex flex-col min-h-0 rounded-card border border-border bg-surface overflow-hidden p-3">
-      <PayloadViewer fill label={label} payload={payload} />
     </div>
   );
 }
@@ -147,9 +77,9 @@ export function PayloadBody({ payload }: { payload: string | null }) {
   return <RenderParsed parsed={parsed} />;
 }
 
-/** Re-exported parsing + tree primitives so sibling trace components share one renderer. */
-export { JsonTree, Conversation, parsePayload };
-export type { ChatMessage, Parsed };
+/** Re-exported parsing so sibling trace components read payloads the same way. */
+export { parsePayload };
+export type { ChatMessage };
 
 export function Markdown({ children }: { children: string }) {
   return (
@@ -157,18 +87,6 @@ export function Markdown({ children }: { children: string }) {
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
     </div>
   );
-}
-
-export function formatMetaValue(v: unknown): { short: string; full: string } {
-  if (v == null) return { short: "—", full: "—" };
-  if (typeof v === "string") return { short: truncate(v), full: v };
-  if (typeof v === "number" || typeof v === "boolean") {
-    const s = String(v);
-    return { short: s, full: s };
-  }
-  const full = JSON.stringify(v, null, 2);
-  const oneLine = JSON.stringify(v);
-  return { short: truncate(oneLine), full };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -271,7 +189,7 @@ function Message({ message }: { message: ChatMessage }) {
  *  block we recognise as media but won't render (bad scheme, disallowed MIME). */
 type MediaView =
   | { kind: "img"; src: string }
-  | { kind: "doc"; src: string; label?: string }
+  | { kind: "doc"; src: string }
   | { kind: "chip"; label: string };
 
 function MediaPart({ media }: { media: MediaView }) {
@@ -293,7 +211,7 @@ function MediaPart({ media }: { media: MediaView }) {
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1.5 rounded-control border border-border bg-bg px-2 py-1 text-small text-fg hover:bg-bg-hover">
         <span aria-hidden>📄</span>
-        {media.label || "View PDF"}
+        View PDF
       </a>
     );
   }
@@ -410,10 +328,6 @@ function parsePayload(payload: string | null): Parsed {
 
 function messageFromObj(m: Obj): ChatMessage {
   return { role: typeof m.role === "string" ? m.role : "", raw: m };
-}
-
-function truncate(s: string, n = 32): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -635,9 +549,9 @@ function pushImageUrl(out: MediaView[], url: unknown) {
   out.push(src ? { kind: "img", src } : UNSUPPORTED_CHIP);
 }
 
-function pushDocumentUrl(out: MediaView[], url: unknown, label?: string) {
+function pushDocumentUrl(out: MediaView[], url: unknown) {
   const src = safeDocumentUrl(url);
-  out.push(src ? { kind: "doc", src, label } : UNSUPPORTED_DOCUMENT_CHIP);
+  out.push(src ? { kind: "doc", src } : UNSUPPORTED_DOCUMENT_CHIP);
 }
 
 /** A short stand-in for an elided inline media payload, with its size so the tree

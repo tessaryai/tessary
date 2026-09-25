@@ -68,7 +68,6 @@ public class ProviderCredentialController {
     private static final Logger log = LoggerFactory.getLogger(ProviderCredentialController.class);
 
     private final ProviderCredentialRepository repo;
-    private final ChatModelFactory factory;
     private final SecretBox secretBox;
     private final TenantPathResolver resolver;
     private final CapabilityService capabilities;
@@ -80,7 +79,6 @@ public class ProviderCredentialController {
 
     public ProviderCredentialController(
             ProviderCredentialRepository repo,
-            ChatModelFactory factory,
             SecretBox secretBox,
             TenantPathResolver resolver,
             CapabilityService capabilities,
@@ -88,7 +86,6 @@ public class ProviderCredentialController {
             ApplicationEventPublisher events) {
         this.repo = repo;
         this.events = events;
-        this.factory = factory;
         this.secretBox = secretBox;
         this.resolver = resolver;
         this.capabilities = capabilities;
@@ -242,8 +239,8 @@ public class ProviderCredentialController {
         var r = resolver.requireOrg(ctx, orgSlug);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
 
-        // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target in
-        // ChatModelFactory (its response flows back into the judge verdict), so reject
+        // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target (the
+        // model-catalog fetch, the decision call and the sandbox agent), so reject
         // loopback/link-local/RFC1918/CGNAT/IMDS hosts at the write boundary, exactly as the
         // ingestion-source URL is guarded. This is the only credentialed outbound caller that was
         // skipping the guard.
@@ -300,7 +297,6 @@ public class ProviderCredentialController {
         } else {
             repo.insert(row);
         }
-        factory.invalidate(r.org().id(), provider);
         events.publishEvent(new ProviderCredentialSavedEvent(r.org().id(), provider));
         return ApiResponse.ok(toView(row));
     }
@@ -311,12 +307,11 @@ public class ProviderCredentialController {
         var r = resolver.requireOrg(ctx, orgSlug);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
         boolean deleted = repo.deleteByOrgAndProvider(r.org().id(), provider);
-        factory.invalidate(r.org().id(), provider);
         return ApiResponse.ok(new DeleteResponse(deleted));
     }
 
     private static String blankToNull(String s) {
-        return (s == null || s.isBlank()) ? null : s;
+        return s.isBlank() ? null : s;
     }
 
     /**
@@ -326,8 +321,7 @@ public class ProviderCredentialController {
      *
      * <p>{@code auth_mode} is meaningful only for {@code AUTH_AWS} platforms (Bedrock/mantle): a
      * non-AWS platform saving {@code iam_role} would be a setting that can never take effect, since
-     * {@code ChatModelFactory} only ever reads {@link ProviderCredential#usesIamRole()} on that build
-     * path.
+     * {@link ProviderCredential#usesIamRole()} is only ever read on the AWS paths.
      */
     private static void validateAuth(ProviderCredential row) {
         boolean awsAuth = PlatformCatalog.AUTH_AWS.equals(PlatformCatalog.authOf(row.provider()));

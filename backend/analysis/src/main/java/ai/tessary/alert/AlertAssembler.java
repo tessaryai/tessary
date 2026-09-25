@@ -3,12 +3,11 @@ package ai.tessary.alert;
 
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -65,23 +64,16 @@ public class AlertAssembler {
         return Optional.of(row);
     }
 
-    private @Nullable String writeJson(String ruleType, List<AlertQueryRepository.ClassifierActivity> activity) {
-        Map<String, Object> body = new LinkedHashMap<>();
+    private String writeJson(String ruleType, List<AlertQueryRepository.ClassifierActivity> activity) {
+        ObjectNode body = mapper.createObjectNode();
         body.put("rule_type", ruleType);
-        List<Map<String, Object>> classifiers = activity.stream()
-                .map(a -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("classifier_key", a.classifierKey());
-                    m.put("name", a.classifierName());
-                    m.put("event_count", a.eventCount());
-                    return m;
-                })
-                .toList();
-        body.put("classifiers", classifiers);
-        try {
-            return mapper.writeValueAsString(body);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            return null; // the per-classifier counts are a convenience body; a slip never blocks the roll-up
+        ArrayNode classifiers = body.putArray("classifiers");
+        for (AlertQueryRepository.ClassifierActivity a : activity) {
+            ObjectNode m = classifiers.addObject();
+            m.put("classifier_key", a.classifierKey());
+            m.put("name", a.classifierName());
+            m.put("event_count", a.eventCount());
         }
+        return body.toString();
     }
 }

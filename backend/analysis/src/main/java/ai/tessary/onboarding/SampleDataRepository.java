@@ -21,9 +21,8 @@ import org.springframework.stereotype.Repository;
  *
  * <p>The showcase project's {@code trace}/{@code span}/{@code span_payload} volume is also
  * inserted from here, as multi-row batched SQL rather than through {@code TraceV2Repository}'s /
- * {@code SpanRepository}'s single-row upsert methods — those exist for live ingest's replay
- * semantics (last-write-wins on a natural key), which a one-shot fabricated seed does not need and
- * whose per-row round trip would not scale to this volume. The row shapes are the real substrate
+ * {@code SpanRepository}'s batch write methods — those exist for live ingest's replay semantics
+ * (last-write-wins on a natural key), which a one-shot fabricated seed does not need. The row shapes are the real substrate
  * records ({@link TraceV2Row}, {@link SpanRow}, {@link SpanPayloadRow}) so a batch here can never
  * drift from what those tables actually contain.
  */
@@ -357,7 +356,7 @@ public class SampleDataRepository {
         }
     }
 
-    /** Batched {@code span} rows — every producer-sourced column {@code SpanRepository.upsert}
+    /** Batched {@code span} rows — every producer-sourced column {@code SpanRepository.upsertAll}
      *  writes, minus the three GENERATED ones ({@code depth}, {@code total_tokens},
      *  {@code total_cost}) a batch insert may not name. */
     public void insertSpans(List<SpanRow> rows) {

@@ -34,12 +34,11 @@ final class MetricEvidenceRefs {
         if (refs.isEmpty()) return null;
         ArrayNode array = JSON.createArrayNode();
         for (Ref ref : refs) {
-            if (ref.traceId() == null) continue;
             ObjectNode node = array.addObject();
             node.put("t", ref.traceId());
             if (ref.spanId() != null) node.put("s", ref.spanId());
         }
-        return array.isEmpty() ? null : array.toString();
+        return array.toString();
     }
 
     /**

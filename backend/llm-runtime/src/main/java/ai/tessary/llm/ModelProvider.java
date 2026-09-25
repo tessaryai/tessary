@@ -9,8 +9,7 @@ package ai.tessary.llm;
  * {@code ANTHROPIC_BEDROCK} is now just {@code BEDROCK}).
  *
  * <p>Per-platform connection metadata (label, auth kind, default base URL)
- * lives in {@link PlatformCatalog}; build dispatch keys off this enum in
- * {@code ChatModelFactory}.
+ * lives in {@link PlatformCatalog}.
  */
 public enum ModelProvider {
     OPENAI,
@@ -18,9 +17,8 @@ public enum ModelProvider {
     OPENROUTER,
     // OLLAMA was removed: it was the platform's sole credential-free, AUTH_NONE
     // provider, and the maker filter (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) drops it —
-    // Meta is not a supported maker. Removing it also removed the LAST platform-funded path
-    // (ChatModelFactory#resolveApiKey now fails closed unconditionally): every provider requires an
-    // org credential.
+    // Meta is not a supported maker. Removing it also removed the LAST platform-funded path: every
+    // provider requires an org credential.
     MOONSHOT,
     BEDROCK,
     /** Google's Gemini line over its OpenAI-compatible endpoint. */
@@ -42,28 +40,15 @@ public enum ModelProvider {
      * AWS's second Bedrock endpoint. Deliberately its own value rather than a flag on {@link #BEDROCK}:
      * it has a different host, a different SigV4 service name and IAM namespace, a different wire
      * (OpenAI Responses rather than Converse), bare model ids with no cross-region inference profile,
-     * its own quota pool and its own region. Every one of those is something {@code ChatModelFactory}
-     * and {@link PlatformCatalog} already dispatch on, so the alternative was a boolean threaded
+     * its own quota pool and its own region. Every one of those is something {@link PlatformCatalog}
+     * and the sandbox launcher already dispatch on, so the alternative was a boolean threaded
      * through all of them.
      */
     BEDROCK_MANTLE,
 
     /**
      * TypeSafe's hosted decision models (Jev). Never a chat model: it answers typed questions about a
-     * state in one POST, so it has no {@code ChatModelFactory} build path and is reached only through
-     * {@code llm/decisions/}.
+     * state in one POST, so it is reached only through {@code llm/decisions/}.
      */
-    TYPESAFE;
-
-    /**
-     * Platforms built via {@code OpenAiChatModel} — i.e. the OpenAI <i>Chat Completions</i> path.
-     *
-     * <p>{@link #BEDROCK_MANTLE} is excluded even though it speaks the OpenAI wire: the GPT-5.6 models
-     * it hosts support only the Responses API, so it builds through {@code OpenAiResponsesChatModel}
-     * and a signing HTTP client instead. "Speaks the OpenAI wire" and "shares this build path" stopped
-     * being the same question when mantle arrived.
-     */
-    public boolean isOpenAiCompat() {
-        return this != BEDROCK && this != ANTHROPIC && this != BEDROCK_MANTLE && this != TYPESAFE;
-    }
+    TYPESAFE
 }

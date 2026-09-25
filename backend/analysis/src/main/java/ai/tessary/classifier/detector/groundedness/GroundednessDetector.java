@@ -10,7 +10,6 @@ import ai.tessary.classifier.substrate.CallSiteShapeReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.tenant.Ids;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -115,18 +114,14 @@ public final class GroundednessDetector implements BuiltInDetector {
         return Set.of(CallSiteFact.SHAPE);
     }
 
+    /** Groundedness scores only through {@link #sweepBatch}, which records each trial it scores. */
     @Override
     public Detection detect(SubstrateObservation obs, @Nullable String config) {
-        return detectBatch(List.of(obs), config).get(0);
-    }
-
-    @Override
-    public List<Detection> detectBatch(List<SubstrateObservation> batch, @Nullable String config) {
-        return score(null, batch, config);
+        throw new UnsupportedOperationException("groundedness scores only through sweepBatch");
     }
 
     /**
-     * {@link #detectBatch}, and one {@code groundedness_assessment} row per answer the model scored,
+     * The batch's detections, and one {@code groundedness_assessment} row per answer the model scored,
      * flagged or not: the trials the rate test counts. An answer the inputs skip, or the encoder
      * refused, writes nothing, because it is not a trial.
      */
@@ -158,8 +153,7 @@ public final class GroundednessDetector implements BuiltInDetector {
         return GroundednessConfig.of(mapper, config).threshold();
     }
 
-    private List<Detection> score(
-            @Nullable ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
+    private List<Detection> score(ClassifierRow signal, List<SubstrateObservation> batch, @Nullable String config) {
         List<Detection> out = new ArrayList<>(Collections.nCopies(batch.size(), Detection.none()));
         List<GroundednessInputs.@Nullable Inputs> read = inputs.read(batch);
 
@@ -184,20 +178,18 @@ public final class GroundednessDetector implements BuiltInDetector {
             int obsIndex = responseIndex.get(r);
             SubstrateObservation scored = batch.get(obsIndex);
             boolean flagged = rs.unsupported() >= threshold;
-            if (signal != null) {
-                assessments.insert(new GroundednessAssessmentRepository.Assessment(
-                        Ids.ulid(),
-                        scored.projectId(),
-                        signal.id(),
-                        scored.sessionId(),
-                        scored.traceId(),
-                        scored.observationId(),
-                        scored.callSiteId() == null ? "" : scored.callSiteId(),
-                        rs.unsupported(),
-                        flagged,
-                        scorerVersion,
-                        scored.createdAt()));
-            }
+            assessments.insert(new GroundednessAssessmentRepository.Assessment(
+                    Ids.ulid(),
+                    scored.projectId(),
+                    signal.id(),
+                    scored.sessionId(),
+                    scored.traceId(),
+                    scored.observationId(),
+                    scored.callSiteId() == null ? "" : scored.callSiteId(),
+                    rs.unsupported(),
+                    flagged,
+                    scorerVersion,
+                    scored.createdAt()));
             if (!flagged) continue;
             GroundednessInputs.Inputs in = sent.get(r);
             out.set(
@@ -248,11 +240,7 @@ public final class GroundednessDetector implements BuiltInDetector {
         ev.put("premise_had_evidence", premiseHadEvidence);
         ev.put("flagged_sentences", sentences);
         ev.put("claim", claim.length() > CLAIM_ECHO_CHARS ? claim.substring(0, CLAIM_ECHO_CHARS) : claim);
-        try {
-            return mapper.writeValueAsString(ev);
-        } catch (JsonProcessingException e) {
-            return "{\"head\":\"groundedness\"}";
-        }
+        return mapper.valueToTree(ev).toString();
     }
 
     /** The UTF-16 index of the {@code codePoints}-th code point of {@code s}, clamped to the string. */

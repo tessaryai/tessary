@@ -118,12 +118,7 @@ public class GithubManifestController {
         manifest.put("request_oauth_on_install", true);
         manifest.put("public", false);
 
-        String manifestJson;
-        try {
-            manifestJson = mapper.writeValueAsString(manifest);
-        } catch (Exception e) {
-            throw new TessaryException(GitError.MISSING_APP_CONFIG, e, "github");
-        }
+        String manifestJson = mapper.valueToTree(manifest).toString();
         String url = "https://github.com/settings/apps/new?state=" + URLEncoder.encode(s, StandardCharsets.UTF_8);
         return ApiResponse.ok(new ManifestStartView(url, manifestJson));
     }
@@ -148,7 +143,6 @@ public class GithubManifestController {
             appConfig.persist(
                     app.path("id").asText(),
                     app.path("pem").asText(),
-                    app.path("webhook_secret").asText(null),
                     app.path("slug").asText(),
                     app.path("client_id").asText(),
                     app.path("client_secret").asText());

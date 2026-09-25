@@ -62,7 +62,9 @@ class ProjectDeleteEndpointTest {
         controller.deleteProject(ctx, f.org().slug(), extra.slug());
 
         assertTrue(projects.findById(extra.id()).orElseThrow().isDeleting(), "project should be marked");
-        assertEquals(0, apiKeys.findByProject(extra.id(), false).size(), "every key should be revoked");
+        var keys = apiKeys.findByProject(extra.id());
+        assertEquals(2, keys.size(), "both issued keys should still be listed");
+        assertTrue(keys.stream().allMatch(ApiKey::isRevoked), "every key should be revoked");
         assertEquals(1, purgeJobs(extra.id()), "exactly one purge job");
     }
 
@@ -106,7 +108,6 @@ class ProjectDeleteEndpointTest {
                 ResponseStatusException.class,
                 () -> resolver.requireProject(ctx, f.org().slug(), extra.slug()));
         assertEquals(HttpStatus.NOT_FOUND, HttpStatus.valueOf(e.getStatusCode().value()));
-        assertThrows(ResponseStatusException.class, () -> resolver.requireMembershipForProject(ctx, extra.id()));
 
         // …but the org's project list still carries it, which is what lets settings render `deleting`.
         assertTrue(controller.listProjects(ctx, f.org().slug()).data().stream()

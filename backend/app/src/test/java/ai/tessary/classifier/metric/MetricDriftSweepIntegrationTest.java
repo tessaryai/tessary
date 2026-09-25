@@ -27,6 +27,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.vitals.TokenUsage;
@@ -34,6 +35,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -220,7 +222,7 @@ class MetricDriftSweepIntegrationTest {
 
     @Test
     @DisplayName("a backfill replay compares each window with its prior 21 event-days, not the sweep's own clock")
-    void aBackfillReplayJudgesEachWindowAgainstItsOwnEventDays() {
+    void aBackfillReplayJudgesEachWindowAgainstItsOwnEventDays() throws Exception {
         String pid = project("metric-sweep-backfill-replay");
         ClassifierRow signal = signal(pid);
 
@@ -258,9 +260,10 @@ class MetricDriftSweepIntegrationTest {
         // The ring itself: three slots keyed by the EVENT day of each closing sample, never by the day
         // the sweep actually ran on — which is over two months later than any of them.
         MetricBaselineRow row = baseline(pid, signal);
-        List<String> ringDays = MetricControl.fromJson(row.controlJson()).days().stream()
-                .map(MetricControl.Day::day)
-                .toList();
+        List<String> ringDays = new ArrayList<>();
+        for (JsonNode day : MAPPER.readTree(row.controlJson()).path("days")) {
+            ringDays.add(day.path("d").asText());
+        }
         assertEquals(List.of("2026-06-24", "2026-07-01", "2026-07-08"), ringDays);
 
         // And the control-arm finding names the reference it was actually judged against: both prior
@@ -493,9 +496,7 @@ class MetricDriftSweepIntegrationTest {
 
         // The tool baseline exists and is armed regardless — it was measured, it simply did not move.
         // Without this the test would pass just as well if tool_duration had never been folded at all.
-        MetricBaselineRow toolBaseline = baselines
-                .find(pid, signal.id(), Measure.TOOL_DURATION, BucketKind.TOOL, TOOL_BUCKET)
-                .orElseThrow();
+        MetricBaselineRow toolBaseline = baselineFor(pid, signal, Measure.TOOL_DURATION, BucketKind.TOOL, TOOL_BUCKET);
         assertEquals(State.ARMED, toolBaseline.state());
         // 100, not 50: this page closed TWO windows for the tool and both landed on the same UTC day,
         // which is one control slot. That is the difference from the retired prev slot, which held only
@@ -593,7 +594,8 @@ class MetricDriftSweepIntegrationTest {
     }
 
     private ClassifierRow signal(String projectId, String classifierKey, String config) {
-        ClassifierRow base = signals.findByKey(projectId, classifierKey).orElseThrow();
+        ClassifierRow base =
+                ClassifierRows.byKey(signals, projectId, classifierKey).orElseThrow();
         return new ClassifierRow(
                 base.id(),
                 base.projectId(),
@@ -802,7 +804,6 @@ class MetricDriftSweepIntegrationTest {
     private @Nullable String priceOf(String model, TokenUsage usage) {
         return prices.price(
                         model,
-                        null,
                         Math.toIntExact(usage.inputTokens()),
                         Math.toIntExact(usage.outputTokens()),
                         Math.toIntExact(usage.cacheReadTokens()),
@@ -835,8 +836,16 @@ class MetricDriftSweepIntegrationTest {
     }
 
     private MetricBaselineRow baseline(String projectId, ClassifierRow signal) {
-        return baselines
-                .find(projectId, signal.id(), Measure.TURN_DURATION, BucketKind.CALL_SITE, CALL_SITE)
+        return baselineFor(projectId, signal, Measure.TURN_DURATION, BucketKind.CALL_SITE, CALL_SITE);
+    }
+
+    private MetricBaselineRow baselineFor(
+            String projectId, ClassifierRow signal, String measure, String bucketKind, String bucketKey) {
+        return baselines.listByClassifier(projectId, signal.id()).stream()
+                .filter(r -> r.measure().equals(measure)
+                        && r.bucketKind().equals(bucketKind)
+                        && r.bucketKey().equals(bucketKey))
+                .findFirst()
                 .orElseThrow();
     }
 }

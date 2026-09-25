@@ -23,15 +23,14 @@ import org.springframework.stereotype.Service;
 /**
  * Reads a project's per-lane model choices, with a small write-through cache.
  *
- * <p>{@code ChatModelFactory.resolve(projectId, lane)} runs on the path of every platform-funded LLM
- * call, so the cache avoids hitting Postgres for a row that changes roughly never. It is invalidated
- * explicitly on write ({@link #invalidate}) rather than time-bounded, so a settings change takes
- * effect on the next call.
+ * <p>{@link #resolve} runs on the path of every sandbox run and decision call, so the cache avoids
+ * hitting Postgres for a row that changes roughly never. It is invalidated explicitly on write
+ * ({@link #invalidate}) rather than time-bounded, so a settings change takes effect on the next call.
  *
- * <p>Validation lives here, not only in the controller, because a bad pair can arrive two ways: a
- * fresh PUT, or a row written before a capability changed (a provider retiring a tier for a model, or
- * a model being removed from {@link BedrockModelProfile}). {@link #validate} is the gate for the
- * first; {@link #resolve} degrades safely for the second.
+ * <p>Validation lives here, not only in the controller, because a bad choice can arrive two ways: a
+ * fresh PUT, or a row written before a capability changed (a model being removed from
+ * {@link BedrockModelProfile}). {@link #validate} is the gate for the first; {@link #resolve}
+ * degrades safely for the second.
  *
  * <p>A row is an override, never a starting point: nothing writes one but an explicit choice on the
  * settings page. A lane with no row (or with one the org can no longer serve) resolves through
@@ -113,10 +112,6 @@ public class ProjectModelSettings {
      * lane at a model that cannot drive one. {@link #validate} refuses all four on write, but a row
      * written before a capability moved would otherwise fail every call in the lane. The row is left
      * in the table, so re-adding the credential brings the choice back.
-     *
-     * <p>An effort the model no longer accepts degrades to "no effort" instead, keeping the chosen
-     * model: unlike a tier, which changes what the call costs, effort is a quality dial, and running
-     * the chosen model at its own default is much closer to the intent than moving to another model.
      */
     public Optional<LaneSelection> resolve(String projectId, ModelLane lane) {
         String orgId = orgResolver.orgIdFor(projectId);
@@ -149,12 +144,11 @@ public class ProjectModelSettings {
         if (providerFor(row.modelKey()).filter(configured::contains).isEmpty()) {
             return Optional.empty();
         }
-        if (bedrock.isPresent() && !bedrock.get().supportedTiers().contains(row.serviceTier())) {
+        // Every platform Bedrock model runs at Standard only, so a row stored at another tier is stale.
+        if (bedrock.isPresent() && row.serviceTier() != ServiceTier.STANDARD) {
             return Optional.empty();
         }
-        // A catalog (non-Bedrock) row carries no tier concept at all: set() always clamps a
-        // non-tiered lane's tier to STANDARD, and every lane a catalog key can land on (AGENT_VM or
-        // DECISION_CALLS, see #validate) is non-tiered, so there is nothing further to check here.
+        // A catalog (non-Bedrock) row carries no tier concept at all: set() always stores STANDARD.
         // A decision row on a chat lane, or a chat row on a decision lane, fails isOfferedOn below.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
                 .orElseGet(() -> catalog.map(ModelCatalog.CatalogEntry::agentic).orElse(false));
@@ -164,11 +158,7 @@ public class ProjectModelSettings {
         if (!isOfferedOn(lane, row.modelKey())) {
             return Optional.empty();
         }
-        boolean supportsEffort = bedrock.map(
-                        d -> BedrockModelProfile.supportsEffort(row.modelKey(), row.reasoningEffort()))
-                .orElseGet(() -> catalogSupportsEffort(catalog.get(), row.reasoningEffort()));
-        return Optional.of(new LaneSelection(
-                row.modelKey(), row.serviceTier(), supportsEffort ? row.reasoningEffort() : null, false));
+        return Optional.of(new LaneSelection(row.modelKey(), row.serviceTier(), null, false));
     }
 
     /**
@@ -177,9 +167,7 @@ public class ProjectModelSettings {
      *
      * <p>Standard tier and no reasoning effort, always: every lane that exists is
      * {@link LaneGroup#AGENT_VM} or {@link LaneGroup#DECISION_CALLS}, neither of which has either
-     * control, and an automatic choice is not the place
-     * to invent a preference the project never expressed. A project that wants either sets the lane
-     * explicitly, which is exactly what {@link #set} writes.
+     * control.
      */
     private Optional<LaneSelection> autoSelect(Set<ModelProvider> configured, ModelLane lane) {
         return LanePriority.of(lane).stream()
@@ -190,8 +178,8 @@ public class ProjectModelSettings {
 
     /**
      * Whether {@code lane} offers {@code modelKey} at all, read off the lane's own list. Every lane
-     * names exactly the static models its group permits ({@link ModelCatalog} checks that at class
-     * load), so a model the settings page can show on a lane is a model a PUT can save there.
+     * names exactly the static models its group permits, so a model the settings page can show on a
+     * lane is a model a PUT can save there.
      *
      * <p>{@link ModelProvider#CUSTOM} is matched by provider rather than by model name: the catalog
      * holds one representative entry for an arbitrary OpenAI-compatible endpoint, and the real model
@@ -214,24 +202,6 @@ public class ProjectModelSettings {
             configured.add(c.provider());
         }
         return configured;
-    }
-
-    /**
-     * The full Bedrock inference-profile id this project has chosen for {@code lane}, or empty to
-     * inherit whatever default that lane's caller holds. Bedrock rows only: a project pointed at a
-     * non-Bedrock catalog entry resolves to empty here, exactly like an unset lane; use
-     * {@link #resolveAgenticModel} for the provider-aware form the sandbox launcher needs.
-     *
-     * <p>For the lanes that build their own Bedrock request, {@link ChatModelFactory} already does
-     * this internally. This exists for the sandbox lanes, whose model is handed to the agent inside a
-     * microVM rather than to a client we construct, so it needs the id as a string, and it must be the
-     * full profile id, since the launcher qualifies it with a provider and passes it straight
-     * through, and Bedrock rejects a short alias with a 400.
-     */
-    public Optional<String> inferenceProfileId(String projectId, ModelLane lane) {
-        return resolve(projectId, lane)
-                .flatMap(s -> BedrockModelProfile.find(s.modelKey()))
-                .map(BedrockModelProfile.ModelDescriptor::inferenceProfileId);
     }
 
     /**
@@ -277,9 +247,6 @@ public class ProjectModelSettings {
      * catalog's model name on that gateway, which is what the decision request carries.
      */
     public Optional<ResolvedDecisionModel> resolveDecisionModel(String projectId, ModelLane lane) {
-        if (!lane.decision()) {
-            throw new IllegalArgumentException("lane " + lane + " does not run a decision model");
-        }
         return resolve(projectId, lane)
                 .flatMap(selection -> parseCatalogKey(selection.modelKey()))
                 .map(key -> new ResolvedDecisionModel(key.provider(), key.modelName()));
@@ -339,13 +306,8 @@ public class ProjectModelSettings {
                 .findFirst();
     }
 
-    private static boolean catalogSupportsEffort(ModelCatalog.CatalogEntry entry, @Nullable String level) {
-        if (level == null || level.isBlank()) return true;
-        return entry.effortLevels().contains(level.trim());
-    }
-
     /**
-     * Point a lane at a model + tier, after checking the org can actually run it.
+     * Point a lane at a model, after checking the org can actually run it.
      *
      * <p>The provider gate comes first: a {@code (lane, modelKey)} whose provider the org holds no
      * credential for is refused with {@link ModelConfigError#PROVIDER_NOT_CONFIGURED}. The picker
@@ -353,30 +315,14 @@ public class ProjectModelSettings {
      * rather than a normal user path, but it is also the boundary a raw PUT crosses, and a row
      * written past it would be a stored choice the lane could never serve.
      *
-     * <p>A non-{@link ModelLane#tiered} lane is stored at Standard whatever the caller asked for: it
-     * has no Bedrock request for a tier to ride on, so persisting one would be a stored preference
-     * that never takes effect (and would then block the model on {@link #resolve}'s support check if
-     * the tier were later withdrawn). A lane whose group is not {@link LaneGroup#effortTunable} loses
-     * its reasoning effort for the same reason and it is not hypothetical: GPT-5.6 Terra is offered on
-     * the microVM lanes and accepts six effort levels, but those lanes hand the agent a model id and
-     * nothing else, so a stored effort there would read back on the settings page as a setting that
-     * had taken effect when in fact no request ever carried it.
+     * <p>The row is stored at Standard with no reasoning effort: no lane has a request of ours for
+     * either to ride on. The agent lanes hand the agent a model id and nothing else, and a decision
+     * lane asks one typed question.
      */
-    public void set(
-            String projectId,
-            String orgId,
-            ModelLane lane,
-            String modelKey,
-            ServiceTier tier,
-            @Nullable String reasoningEffort) {
+    public void set(String projectId, String orgId, ModelLane lane, String modelKey) {
         requireConfiguredProvider(orgId, modelKey);
-        ServiceTier effective = lane.tiered() ? tier : ServiceTier.STANDARD;
-        // Blank and null both mean "no reasoning parameter". Normalising here keeps the DB from
-        // carrying two spellings of the same absence, which the CHECK constraint would reject anyway.
-        String requested = lane.group().effortTunable() ? reasoningEffort : null;
-        String effort = requested == null || requested.isBlank() ? null : requested.trim();
-        validate(orgId, lane, modelKey, effective, effort);
-        repo.upsert(projectId, lane, modelKey, effective, effort);
+        validate(orgId, lane, modelKey);
+        repo.upsert(projectId, lane, modelKey, ServiceTier.STANDARD, null);
         invalidate(projectId);
     }
 
@@ -420,50 +366,27 @@ public class ProjectModelSettings {
     }
 
     /**
-     * Reject a (lane, model, tier) combination we cannot actually serve, in order of specificity so
-     * the message names the real problem:
+     * Reject a (lane, model) combination we cannot actually serve, in order of specificity so the
+     * message names the real problem:
      *
      * <ol>
      *   <li>the model isn't one of ours: nothing else is worth checking;
-     *   <li>the tier has no online wire form ({@link ServiceTier#BATCH}): invalid for every model,
-     *       so blaming the model would misdirect;
-     *   <li>the pair is unsupported, e.g. Flex on Haiku 4.5, where both halves are individually
-     *       fine. This is the check that stops a Bedrock 400 from surfacing mid-grade, hours after
-     *       the setting was saved.
      *   <li>the lane needs an agentic model and this one isn't. An {@link LaneGroup#AGENT_VM} lane
      *       hands its inference profile id to the agent inside a microVM, which asks the model to
-     *       sustain a long tool-use loop; Nova 2 Lite is a perfectly good grading model and a sandbox
-     *       that never starts.
+     *       sustain a long tool-use loop; a model that cannot is a sandbox that never starts.
      *   <li>the model is not offered for this lane's {@link LaneGroup}. Checked after the capability
      *       above, because "this model cannot do that work" is a more useful thing to be told than
      *       "this model is not on the list" whenever both are true, and the two are not the same
-     *       check: Claude Haiku 4.5 is agentic, so only the offer list keeps it off a microVM lane.
-     *   <li>the model does not accept this reasoning effort, either because it takes no effort at all
-     *       (every Converse model here) or because the level is not in its set. Checked last because it
-     *       is the narrowest condition, and because naming the model is only useful once the model
-     *       itself is known to be valid.
+     *       check: Claude Haiku 4.5 is agentic, so only the offer list could keep it off a lane.
      * </ol>
+     *
+     * <p>{@code orgId} lets a non-Bedrock {@code modelKey} that exists only in that org's live-fetched
+     * catalog pass rather than throw {@link ModelConfigError#UNKNOWN_PLATFORM_MODEL}.
      */
-    public void validate(ModelLane lane, String modelKey, ServiceTier tier, @Nullable String reasoningEffort) {
-        validate(null, lane, modelKey, tier, reasoningEffort);
-    }
-
-    /**
-     * {@link #validate(ModelLane, String, ServiceTier, String)}, with an orgId so a non-Bedrock
-     * {@code modelKey} that exists only in that org's live-fetched catalog still passes rather than
-     * throwing {@link ModelConfigError#UNKNOWN_PLATFORM_MODEL}. The org-gated {@link #set} is the one
-     * caller that has an orgId to give; the 4-arg overload above passes null and validates against the
-     * static table only.
-     */
-    public void validate(
-            @Nullable String orgId,
-            ModelLane lane,
-            String modelKey,
-            ServiceTier tier,
-            @Nullable String reasoningEffort) {
+    private void validate(String orgId, ModelLane lane, String modelKey) {
         Optional<BedrockModelProfile.ModelDescriptor> bedrock = BedrockModelProfile.find(modelKey);
         if (bedrock.isPresent()) {
-            validateBedrock(lane, modelKey, tier, reasoningEffort);
+            validateBedrock(lane, modelKey);
             return;
         }
         // The non-Bedrock half of the union (see the class javadoc). A miss on both halves is
@@ -472,25 +395,15 @@ public class ProjectModelSettings {
         if (catalog.isEmpty()) {
             throw new TessaryException(ModelConfigError.UNKNOWN_PLATFORM_MODEL, modelKey);
         }
-        validateCatalog(lane, modelKey, catalog.get(), tier, reasoningEffort);
+        validateCatalog(lane, modelKey, catalog.get());
     }
 
-    private static void validateBedrock(
-            ModelLane lane, String modelKey, ServiceTier tier, @Nullable String reasoningEffort) {
-        if (tier == null || !tier.isOnline()) {
-            throw new TessaryException(ModelConfigError.TIER_NOT_ONLINE, tier == null ? "null" : tier.wireName());
-        }
-        if (!BedrockModelProfile.supports(modelKey, tier)) {
-            throw new TessaryException(ModelConfigError.TIER_UNSUPPORTED_BY_MODEL, modelKey, tier.wireName());
-        }
-        if (lane != null && lane.agentic() && !BedrockModelProfile.isAgentic(modelKey)) {
+    private static void validateBedrock(ModelLane lane, String modelKey) {
+        if (lane.agentic() && !BedrockModelProfile.isAgentic(modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
-        if (lane != null && !isOfferedOn(lane, modelKey)) {
+        if (!isOfferedOn(lane, modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
-        }
-        if (!BedrockModelProfile.supportsEffort(modelKey, reasoningEffort)) {
-            throw new TessaryException(ModelConfigError.EFFORT_UNSUPPORTED_BY_MODEL, reasoningEffort, modelKey);
         }
     }
 
@@ -501,18 +414,9 @@ public class ProjectModelSettings {
      * catalog key on any other lane shape are rejected with {@code MODEL_NOT_OFFERED_FOR_LANE} rather
      * than accepted and silently unreachable.
      */
-    private static void validateCatalog(
-            ModelLane lane,
-            String modelKey,
-            ModelCatalog.CatalogEntry entry,
-            ServiceTier tier,
-            @Nullable String reasoningEffort) {
-        if (tier == null || !tier.isOnline()) {
-            throw new TessaryException(ModelConfigError.TIER_NOT_ONLINE, tier == null ? "null" : tier.wireName());
-        }
-        if (lane == null || lane.decision() != entry.decision() || (!lane.decision() && !lane.agentic())) {
-            throw new TessaryException(
-                    ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane == null ? "null" : lane.label());
+    private static void validateCatalog(ModelLane lane, String modelKey, ModelCatalog.CatalogEntry entry) {
+        if (lane.decision() != entry.decision() || (!lane.decision() && !lane.agentic())) {
+            throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }
         if (lane.agentic() && !entry.agentic()) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
@@ -520,15 +424,11 @@ public class ProjectModelSettings {
         if (!isOfferedOn(lane, modelKey)) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }
-        if (!catalogSupportsEffort(entry, reasoningEffort)) {
-            throw new TessaryException(ModelConfigError.EFFORT_UNSUPPORTED_BY_MODEL, reasoningEffort, modelKey);
-        }
     }
 
     /** Drop a project's cached settings so the next resolve re-reads. */
-    public void invalidate(@Nullable String projectId) {
-        if (projectId == null) cache.clear();
-        else cache.remove(projectId);
+    private void invalidate(String projectId) {
+        cache.remove(projectId);
     }
 
     private Map<ModelLane, ProjectModelSetting> forProject(String projectId) {

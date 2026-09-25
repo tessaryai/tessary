@@ -17,7 +17,6 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -32,14 +31,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *   <li><b>Bypassed</b> ({@code shouldNotFilter}): {@code /auth/login},
  *       {@code /auth/callback}, {@code /auth/logout}, {@code /auth/link/start},
  *       {@code /auth/link/poll}, {@code /actuator/health} and its two probes (not the rest
- *       of {@code /actuator/}, nor the bare {@code /actuator} index), any path a
- *       {@link SelfAuthenticatingPath} claims (empty by default; see that interface), and,
- *       only when {@code TESSARY_AUTH_DISABLED} is set, every path, regardless of which
- *       {@link AuthProvider} is active: with {@link PasswordAuthProvider} always enabled,
- *       "no provider configured" is not a reachable state. See {@link AuthProperties}.</li>
+ *       of {@code /actuator/}, nor the bare {@code /actuator} index), and, only when
+ *       {@code TESSARY_AUTH_DISABLED} is set, every path, regardless of which
+ *       {@link AuthProvider} is active: with {@link PasswordAuthProvider} as the always-available
+ *       default, "no provider configured" is not a reachable state. See {@link AuthProperties}.</li>
  *   <li><b>Everything else under {@code /actuator/}</b>: having a principal at all is not
- *       enough. These paths name no org, so the org-scoped {@link PlatformStaff#canAdminister}
- *       has nothing to resolve against; instead they're gated on the org-independent
+ *       enough. These paths name no org, so they're gated on the org-independent
  *       {@link PlatformStaff#isStaff}, which also already excludes bearer/MCP contexts by
  *       construction. Authenticated-but-not-staff is a 403, not a 200: proving you were someone
  *       does not mean you were allowed to see JVM heapdumps and env vars.</li>
@@ -67,7 +64,6 @@ public class AuthFilter extends OncePerRequestFilter {
     private final PrincipalRepository users;
     private final BearerTokenAuthenticator bearerAuth;
     private final ObjectMapper mapper;
-    private final ObjectProvider<SelfAuthenticatingPath> paidBypasses;
     private final PlatformStaff platformStaff;
 
     public AuthFilter(
@@ -77,7 +73,6 @@ public class AuthFilter extends OncePerRequestFilter {
             PrincipalRepository users,
             BearerTokenAuthenticator bearerAuth,
             ObjectMapper mapper,
-            ObjectProvider<SelfAuthenticatingPath> paidBypasses,
             PlatformStaff platformStaff) {
         this.authProps = authProps;
         this.provider = provider;
@@ -85,7 +80,6 @@ public class AuthFilter extends OncePerRequestFilter {
         this.users = users;
         this.bearerAuth = bearerAuth;
         this.mapper = mapper;
-        this.paidBypasses = paidBypasses;
         this.platformStaff = platformStaff;
     }
 
@@ -106,18 +100,6 @@ public class AuthFilter extends OncePerRequestFilter {
         // /api/link/** confirm endpoints stay under the cookie session + CSRF.
         if ("/auth/link/start".equals(path)) return true;
         if ("/auth/link/poll".equals(path)) return true;
-        // The /webhooks/git/ bypass was here. Its only endpoint, GitWebhookController, is gone,
-        // and an unauthenticated exemption for a path nothing serves is a strictly worse posture
-        // than no exemption: it says "the session filter stands aside" about a route that will
-        // 404 either way. Restore it together with a controller that verifies the provider HMAC.
-        // Self-authenticating paths, e.g. Slack's `/internal/slack/mention`. Each implementation
-        // is responsible for its own credential check before answering; this only says the
-        // session filter should stand aside.
-        // orderedStream().anyMatch on an empty stream is false by definition, so with zero
-        // implementations registered this bypasses nothing: this is exactly the spot a silent
-        // fail-open would hide, so it does not get one. No implementation means no bypass, not
-        // an open door.
-        if (paidBypasses.orderedStream().anyMatch(p -> p.bypasses(path))) return true;
         // GitHub App install callback: GitHub redirects the browser here with no
         // guaranteed cookie. The signed `state` param IS the credential (verified
         // in GithubCallbackController), so bypass the cookie/bearer session.
@@ -132,7 +114,7 @@ public class AuthFilter extends OncePerRequestFilter {
         // The generated OpenAPI contract (springdoc, Phase 3): the API spec is public — it is the
         // checked-in source of truth (backend/contract) and carries no secrets. No cookie/bearer session.
         if ("/v3/api-docs".equals(path) || path.startsWith("/v3/api-docs/")) return true;
-        // The operator's own explicit escape hatch. With PasswordAuthProvider always enabled as
+        // The operator's own explicit escape hatch. With PasswordAuthProvider always available as
         // the dependency-free default, "no provider configured" is not a reachable state, so the
         // flag is authoritative on its own: an operator (or the dev-only compose profile) who
         // sets TESSARY_AUTH_DISABLED gets exactly that, full stop, regardless of which provider
@@ -192,8 +174,7 @@ public class AuthFilter extends OncePerRequestFilter {
         // Actuator, second gate: having any principal was never the bar here, only closing the
         // "no credential at all" door. isPublicActuatorPath paths never reach this method
         // (shouldNotFilter already released them), so the guard below is redundant-but-cheap
-        // symmetry with the 401 arm above, not load-bearing. isStaff, not canAdminister: these
-        // paths name no org, so the org-scoped predicate has nothing to resolve against.
+        // symmetry with the 401 arm above, not load-bearing.
         if (isActuatorPath(path) && !isPublicActuatorPath(path)) {
             // ctx is guaranteed non-null here — the 401 arm above already returned for a null ctx
             // on every actuator path — but NullAway can't fold that proof across two separate `if`
@@ -332,19 +313,14 @@ public class AuthFilter extends OncePerRequestFilter {
             var r = provider.refresh(old.refreshToken(), old.organizationId());
             // A successful refresh always returns a fresh access_token; a null means a
             // malformed 2xx body — treat as a refresh failure rather than seal a broken session.
-            String accessToken = r.accessToken();
-            if (accessToken == null) {
+            if (r.accessToken() == null) {
                 log.warn("cookie refresh: WorkOS 2xx response carried no access_token");
                 return null;
             }
             SealedSession fresh = new SealedSession(
-                    accessToken,
                     r.refreshToken(),
                     r.accessTokenExpiresAt().toString(),
                     r.workosUserId() != null ? r.workosUserId() : old.workosUserId(),
-                    r.email() != null ? r.email() : old.email(),
-                    r.displayName() != null ? r.displayName() : old.displayName(),
-                    r.profilePictureUrl() != null ? r.profilePictureUrl() : old.avatarUrl(),
                     r.organizationId() != null ? r.organizationId() : old.organizationId());
             // Tomcat's Cookie.setAttribute("SameSite", ...) path is unreliable
             // combined with ResponseEntity; emit Set-Cookie via ResponseCookie.

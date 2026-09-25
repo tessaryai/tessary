@@ -17,9 +17,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.Capability;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
 import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanKey;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -35,7 +32,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -84,12 +80,6 @@ class McpTraceReadToolsTest {
         PipelineService pipeline = mock(PipelineService.class);
         QueryService query = mock(QueryService.class);
         FindingService behaviorDrift = mock(FindingService.class);
-        // Every capability on: these tests exercise the tools themselves, not the gate.
-        Map<Capability, Boolean> allOn = new EnumMap<>(Capability.class);
-        for (Capability c : Capability.values()) allOn.put(c, true);
-        CapabilityService capabilities = mock(CapabilityService.class);
-        when(capabilities.resolve(any())).thenReturn(new CapabilitySet(allOn));
-        when(capabilities.isEnabled(any(), any())).thenReturn(true);
         var registry = new McpToolRegistry(
                 pipeline,
                 projects,
@@ -98,7 +88,6 @@ class McpTraceReadToolsTest {
                 payloads,
                 traces,
                 mock(SessionReadService.class),
-                capabilities,
                 behaviorDrift,
                 mock(CaseService.class));
         this.dispatcher = new McpDispatcher(registry, mapper);

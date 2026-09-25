@@ -35,17 +35,11 @@ public class OrgMembershipRepository {
     }
 
     public record MemberRow(
-            String orgId,
-            String principalId,
-            String role,
-            String createdAt,
-            String email,
-            String displayName,
-            String avatarUrl) {}
+            String principalId, String role, String createdAt, String email, String displayName, String avatarUrl) {}
 
     public List<MemberRow> findByOrgWithUsers(String orgId) {
         return jdbc.sql("""
-            SELECT m.org_id, m.principal_id, m.role, m.created_at,
+            SELECT m.principal_id, m.role, m.created_at,
                    u.email, u.display_name, u.avatar_url
               FROM org_membership m
               JOIN principal u ON u.id = m.principal_id
@@ -54,7 +48,6 @@ public class OrgMembershipRepository {
             """)
                 .param("oid", orgId)
                 .query((rs, n) -> new MemberRow(
-                        rs.getString("org_id"),
                         rs.getString("principal_id"),
                         rs.getString("role"),
                         rs.getString("created_at"),
@@ -69,13 +62,6 @@ public class OrgMembershipRepository {
                 .param("oid", orgId)
                 .query(Long.class)
                 .single();
-    }
-
-    public List<OrgMembership> findByUser(String principalId) {
-        return jdbc.sql("SELECT * FROM org_membership WHERE principal_id = :pid")
-                .param("pid", principalId)
-                .query(OrgMembershipRepository::map)
-                .list();
     }
 
     public void insert(OrgMembership m) {

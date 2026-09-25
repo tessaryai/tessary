@@ -47,14 +47,13 @@ export type TraceTimeRange =
 export function resolveRange(range: TraceTimeRange, now: number): { from: string | null; to: string | null } {
   if (range.kind === "all") return { from: null, to: null };
   if (range.kind === "custom") return { from: range.from, to: range.to };
-  const preset = PRESET_BY_KEY.get(range.key);
-  if (!preset) return { from: null, to: null };
+  const preset = PRESET_BY_KEY.get(range.key)!;
   return { from: new Date(now - preset.ms).toISOString(), to: null };
 }
 
 export function rangeLabel(range: TraceTimeRange): string {
   if (range.kind === "all") return "All time";
-  if (range.kind === "preset") return PRESET_BY_KEY.get(range.key)?.label ?? range.key;
+  if (range.kind === "preset") return PRESET_BY_KEY.get(range.key)!.label;
   const from = range.from ? new Date(range.from).toLocaleString() : "the beginning";
   const to = range.to ? new Date(range.to).toLocaleString() : "now";
   return `${from} → ${to}`;
@@ -68,7 +67,7 @@ function rangeBadge(range: TraceTimeRange): string {
 
 // ---- URL state -------------------------------------------------------------
 
-export type FacetKey = "status" | "model" | "kind" | "call_site";
+export type FacetKey = "status" | "kind" | "call_site";
 
 /** Every filter the bar owns, read straight off the URL so a link carries the view. */
 export type TraceQueryState = {
@@ -76,7 +75,7 @@ export type TraceQueryState = {
   facets: Record<FacetKey, string | null>;
 };
 
-const FACET_KEYS: FacetKey[] = ["status", "model", "kind", "call_site"];
+const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site"];
 
 function parseRange(params: URLSearchParams): TraceTimeRange {
   const raw = params.get("range");

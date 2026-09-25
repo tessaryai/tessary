@@ -30,7 +30,6 @@ public record Detection(
     public static final class Severity {
         private Severity() {}
 
-        public static final String INFO = "info";
         public static final String WARN = "warn";
         public static final String CRITICAL = "critical";
     }

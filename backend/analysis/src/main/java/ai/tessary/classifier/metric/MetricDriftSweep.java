@@ -37,7 +37,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -86,14 +85,6 @@ import org.springframework.transaction.annotation.Transactional;
  * every window against its own trailing 21 event-days, and a historical regression can surface on
  * import — the ring's day keys are event-time, so absorb and the pinned-reference arm, which compare
  * against a specific window rather than a rolling average, are unaffected.
- *
- * <h2>Settle is not uniform</h2>
- *
- * <p>Cost and the token buckets sum over a trace's spans and must wait for every span to arrive;
- * duration is read off a single span carrying its own start and end, so that span's arrival is the
- * completion signal, and a settle horizon would delay every duration finding for nothing.
- * {@link MetricDriftConfig#settleSecondsFor} resolves the horizon per classifier as the maximum
- * over its own measures.
  *
  * <h2>Findings, not firings</h2>
  *
@@ -367,7 +358,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             Bucket bucket,
             MetricBaselineRow row,
             Decision decision,
-            MetricSketch refSketch,
+            MetricReading refSketch,
             @Nullable MetricWorkload refWorkload,
             @Nullable MetricTokens refTokens,
             Window closedWindow,
@@ -407,8 +398,8 @@ public class MetricDriftSweep implements ClassifierSweep {
      * Past it the trace is admitted and abstains, which is the honest reading.
      *
      * <p>The age is measured on the event clock, {@code COALESCE(started_at, created_at)}: for a
-     * rootless trace that is its earliest child's start, roughly when the turn began. A stamp that
-     * cannot be read, or one in the future, does not hold the page.
+     * rootless trace that is its earliest child's start, roughly when the turn began. A stamp in the
+     * future does not hold the page.
      *
      * @return the number of leading heads that may be folded; {@code heads.size()} when nothing is held
      */
@@ -428,12 +419,8 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /** Whether a rootless trace is young enough that its root may still be in flight. */
     private static boolean stillArriving(String eventAt, Instant now, long backstopSeconds) {
-        try {
-            Duration age = Duration.between(Instant.parse(eventAt), now);
-            return !age.isNegative() && age.getSeconds() < backstopSeconds;
-        } catch (DateTimeParseException e) {
-            return false;
-        }
+        Duration age = Duration.between(Instant.parse(eventAt), now);
+        return !age.isNegative() && age.getSeconds() < backstopSeconds;
     }
 
     /**
@@ -467,13 +454,6 @@ public class MetricDriftSweep implements ClassifierSweep {
              * at the same resolution the claim was computed at. Never read by the statistic.
              */
             @Nullable String spanId,
-            /**
-             * The conversation the trace belongs to, carried for exactly one reason: a Layer-2
-             * escalation is pointed at an exemplar, and the triage agent reads the whole thread rather
-             * than one turn in isolation. Never read by the statistic — a window is a population, and
-             * which conversation a sample came from says nothing about how long it took.
-             */
-            String contextId,
             String createdAt,
             String eventAt,
             @Nullable String projectVersionId,
@@ -521,7 +501,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                             // Turn grain: the reading is a property of the whole run, so the trace IS
                             // the row that was measured.
                             null,
-                            head.subjectSessionId(),
                             head.eventAt(),
                             head.eventAt(),
                             head.projectVersionId(),
@@ -579,7 +558,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                                 // not at all, which is what makes a replayed page idempotent here too.
                                 head.traceId(),
                                 tool.observationId(),
-                                head.subjectSessionId(),
                                 head.eventAt(),
                                 // EVENT time is the SPAN's own start, though — a window is a stretch of the
                                 // agent's timeline, and a tool called an hour into a long trace belongs in
@@ -743,7 +721,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             count = 0;
             openedAt = null;
             if (persisted != null) {
-                baselines.closeWindow(row.id(), row.controlJson(), null, null, null, null, null, 0, now);
+                baselines.closeWindow(row.id(), row.controlJson(), now);
                 countZeroed = true;
             }
         }
@@ -810,7 +788,7 @@ public class MetricDriftSweep implements ClassifierSweep {
                     grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
             // Refs rotate with the sketch: the window just closed took its population with it into
             // the finding (compareAndPin, above), and the window opening here has none yet.
-            baselines.closeWindow(row.id(), control.toJson(), null, null, null, null, null, 0, now);
+            baselines.closeWindow(row.id(), control.toJson(), now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
             callSites = new LinkedHashMap<>();
@@ -864,24 +842,13 @@ public class MetricDriftSweep implements ClassifierSweep {
      * <p>Every day the spell touched, not just the day it opened. A regression that ran for a week was
      * not normal on any of those days, and excluding only its first would let the rest of it become the
      * bar it is being measured against.
-     *
-     * <p>A span whose bounds will not parse excludes NOTHING rather than everything. The failure this
-     * guards is silent and total: an unreadable timestamp that excluded every day would leave the control
-     * empty, the comparison would fall silent with {@code NO_REFERENCE}, and a bucket would simply stop
-     * being watched with nothing in the logs saying so.
      */
     private static Set<String> excludedDays(@Nullable List<ConfirmedSpan> spans) {
         if (spans == null || spans.isEmpty()) return Set.of();
         Set<String> out = new LinkedHashSet<>();
         for (ConfirmedSpan span : spans) {
-            LocalDate from;
-            LocalDate to;
-            try {
-                from = LocalDate.ofInstant(Instant.parse(span.fromAt()), ZoneOffset.UTC);
-                to = LocalDate.ofInstant(Instant.parse(span.toAt()), ZoneOffset.UTC);
-            } catch (RuntimeException e) {
-                continue;
-            }
+            LocalDate from = LocalDate.ofInstant(Instant.parse(span.fromAt()), ZoneOffset.UTC);
+            LocalDate to = LocalDate.ofInstant(Instant.parse(span.toAt()), ZoneOffset.UTC);
             if (to.isBefore(from)) continue;
             // Bounded by the ring's own retention: a spell running for a year would otherwise walk a year
             // of dates to exclude days the control stopped holding weeks ago.
@@ -1123,7 +1090,6 @@ public class MetricDriftSweep implements ClassifierSweep {
     /** The rule's view of one earned finding: where it happened, and how far its median moved in ms. */
     private static Shift shiftOf(Pending pending) {
         return new Shift(
-                pending.spec().measure(),
                 pending.bucket().key(),
                 pending.callSites().keySet(),
                 pending.decision(),
@@ -1136,7 +1102,7 @@ public class MetricDriftSweep implements ClassifierSweep {
      * {@link MetricFindingEvidence} rather than computed here so the number the rule decides on and the
      * number the evidence prints cannot drift apart.
      */
-    private static double medianOf(MetricSketch sketch) {
+    private static double medianOf(MetricReading sketch) {
         return MetricFindingEvidence.rawQuantile(sketch, 0.5).orElse(Double.NaN);
     }
 
@@ -1324,7 +1290,7 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * Hours between two event stamps, or 0 when either cannot be read or they run backwards. Parsed as
+     * Hours between two event stamps, or 0 when they run backwards. Parsed as
      * INSTANTS, never compared as strings: {@code Instant.toString()} elides trailing zeros in the
      * fractional second, so the rendered forms are variable-length and lexical order diverges from
      * chronological ({@code ...:37Z} sorts after {@code ...:37.4Z} because {@code 'Z' > '.'}).
@@ -1333,12 +1299,8 @@ public class MetricDriftSweep implements ClassifierSweep {
      * simply means this sample cannot extend the window's span.
      */
     private static double elapsedHours(String openedAt, String eventAt) {
-        try {
-            Duration elapsed = Duration.between(Instant.parse(openedAt), Instant.parse(eventAt));
-            return elapsed.isNegative() ? 0 : elapsed.toMillis() / 3_600_000.0;
-        } catch (DateTimeParseException e) {
-            return 0;
-        }
+        Duration elapsed = Duration.between(Instant.parse(openedAt), Instant.parse(eventAt));
+        return elapsed.isNegative() ? 0 : elapsed.toMillis() / 3_600_000.0;
     }
 
     /**
@@ -1368,14 +1330,10 @@ public class MetricDriftSweep implements ClassifierSweep {
         String best = null;
         Instant bestAt = null;
         for (Sample sample : samples) {
-            try {
-                Instant at = Instant.parse(sample.eventAt());
-                if (bestAt == null || at.isAfter(bestAt)) {
-                    bestAt = at;
-                    best = sample.eventAt();
-                }
-            } catch (DateTimeParseException ignored) {
-                // Unreadable stamps take no part rather than winning a comparison they cannot join.
+            Instant at = Instant.parse(sample.eventAt());
+            if (bestAt == null || at.isAfter(bestAt)) {
+                bestAt = at;
+                best = sample.eventAt();
             }
         }
         return best;
@@ -1399,7 +1357,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                 // The pinned and current sketch, the workload, token and ref blobs beside both, then the
                 // control ring and the window's open time: a bucket seen for the first time has closed
                 // nothing and pinned nothing.
-                null,
                 null,
                 null,
                 null,

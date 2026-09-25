@@ -34,8 +34,7 @@ public record DetectionTable(String detectorKind, String table, Grain grain) {
      * parameter — the same reasoning that repository's own comment already gives for why the name is
      * interpolated in the first place. A bean registering a hostile or malformed table name is a
      * programming error in a module that ships with the platform, not user input, so failing loudly
-     * at bean construction (mirroring {@code LeasePolicy}'s throwing compact constructor, in this
-     * same module) is the right place to catch it — long before any query runs.
+     * at bean construction is the right place to catch it — long before any query runs.
      */
     public DetectionTable {
         if (!TABLE_NAME.matcher(table).matches()) {

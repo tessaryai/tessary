@@ -10,7 +10,6 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.pipeline.BundleAssembler.AssembledBundle;
 import ai.tessary.pipeline.BundleAssembler.NamedBody;
-import ai.tessary.sop.SopIntakeDispatch;
 import ai.tessary.web.ApiResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -57,17 +56,11 @@ public class ImportController {
     private final BundleAssembler assembler;
     private final PipelineService pipelineService;
     private final TenantPathResolver resolver;
-    private final SopIntakeDispatch sopIntake;
 
-    public ImportController(
-            BundleAssembler assembler,
-            PipelineService pipelineService,
-            TenantPathResolver resolver,
-            SopIntakeDispatch sopIntake) {
+    public ImportController(BundleAssembler assembler, PipelineService pipelineService, TenantPathResolver resolver) {
         this.assembler = assembler;
         this.pipelineService = pipelineService;
         this.resolver = resolver;
-        this.sopIntake = sopIntake;
     }
 
     public record EntityDiffView(int added, int updated, int removed) {
@@ -93,20 +86,14 @@ public class ImportController {
             @RequestPart("files") MultipartFile[] files) {
         Resolved r = resolveAndAuthorize(ctx, orgSlug, projectSlug);
         String normalisedMode = normaliseMode(mode);
-        if (files == null || files.length == 0) {
-            throw new TessaryException(PipelineError.EMPTY_UPLOAD);
-        }
-        List<NamedBody> bodies = toNamedBodies(files);
-        AssembledBundle bundle = assembler.assemble(bodies);
-        ImportResult result = commit(r, bundle, normalisedMode);
-        sopIntake.importSops(r.project().id(), bodies, bundle.commitSha());
-        return ApiResponse.ok(result);
+        AssembledBundle bundle = assembler.assemble(toNamedBodies(files));
+        return ApiResponse.ok(commit(r, bundle, normalisedMode));
     }
 
     private List<NamedBody> toNamedBodies(MultipartFile[] files) {
         List<NamedBody> out = new ArrayList<>(files.length);
         for (MultipartFile f : files) {
-            if (f == null || f.isEmpty()) continue;
+            if (f.isEmpty()) continue;
             String name = f.getOriginalFilename();
             if (name == null || name.isBlank()) continue;
             try {
@@ -130,7 +117,6 @@ public class ImportController {
     }
 
     private String normaliseMode(String raw) {
-        if (raw == null) return MODE_UPSERT;
         String lower = raw.trim().toLowerCase(Locale.ROOT);
         if (MODE_UPSERT.equals(lower) || MODE_REPLACE.equals(lower)) return lower;
         throw new TessaryException(PipelineError.INVALID_MODE, raw);
@@ -143,8 +129,7 @@ public class ImportController {
         if (MODE_REPLACE.equals(mode)) {
             diff = pipelineService.replace(projectId, pipeline);
         } else {
-            // Sharded layout always carries meta — pipeline/meta.yaml is required.
-            diff = pipelineService.upsert(projectId, pipeline, true);
+            diff = pipelineService.upsert(projectId, pipeline);
         }
 
         // Bind the pipeline to the commit it was synthesized against (when the
@@ -152,7 +137,6 @@ public class ImportController {
         // without a declared commit leaves the project unbound until a git
         // integration is connected.
         pipelineService.stampVersion(projectId, bundle.commitSha(), bundle.repoOwner(), bundle.repoName());
-        pipelineService.storeKnowledgeIndex(projectId, bundle.knowledgeIndexJson());
 
         log.info(
                 Markers.OPS,

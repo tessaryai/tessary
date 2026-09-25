@@ -6,7 +6,6 @@
 #   /api/*       → backend (REST API)
 #   /auth/*      → backend (WorkOS login/callback/logout/me)
 #   /mcp         → backend (MCP Streamable HTTP transport)
-#   /webhooks/*  → backend (git provider webhook ingress; HMAC-authenticated)
 #   /v1/traces   → backend (OTLP/HTTP trace receiver; bearer-authenticated)
 #   /v1/query/*  → backend (read API; bearer-authenticated)
 #   /v1/usage/*  → backend (metering read; bearer-authenticated)
@@ -24,7 +23,7 @@
 	}
 
 	@backend {
-		path /api/* /auth/* /mcp /mcp/* /webhooks/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
+		path /api/* /auth/* /mcp /mcp/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
 	}
 	handle @backend {
 		reverse_proxy {$BACKEND_URL:localhost:8080}

@@ -11,6 +11,7 @@ import ai.tessary.ingest.export.TraceSpanMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -27,10 +28,9 @@ class OpenInferenceNormalizerTest {
     }
 
     @Test
-    void detection_isDormantWithoutOpenInferenceKeys() throws Exception {
-        assertFalse(OpenInferenceNormalizer.isOpenInference(attrs("{\"foo\":\"bar\",\"model\":\"gpt-4o\"}")));
-        assertTrue(OpenInferenceNormalizer.isOpenInference(attrs("{\"llm.model_name\":\"gpt-4o\"}")));
-        assertNull(OpenInferenceNormalizer.normalize(attrs("{\"foo\":1}")));
+    void detection_isDormantWithoutOpenInferenceKeys() {
+        assertFalse(OpenInferenceNormalizer.isOpenInference(Map.of("foo", "bar", "model", "gpt-4o")));
+        assertTrue(OpenInferenceNormalizer.isOpenInference(Map.of("llm.model_name", "gpt-4o")));
     }
 
     @Test
@@ -151,7 +151,6 @@ class OpenInferenceNormalizerTest {
         // Native gen_ai.* RawEntry (the shape Langfuse/upload already produce).
         RawEntry native_ = new RawEntry(
                 "span-1",
-                "https://src/1",
                 "chat",
                 inputMessages,
                 outputText,
@@ -174,15 +173,15 @@ class OpenInferenceNormalizerTest {
                 }
                 """);
         RawEntry fromOi = OpenInferenceNormalizer.toRawEntry(
-                oi, "span-1", "https://src/1", "chat", "parent-1", "trace-1", "2026-05-22T10:00:00Z", null);
+                oi, "span-1", "chat", "parent-1", "trace-1", "2026-05-22T10:00:00Z", null);
         assertNotNull(fromOi);
 
         // Same canonical RawEntry fields.
         assertEquals(native_.operationKind(), fromOi.operationKind());
         assertEquals(native_.model(), fromOi.model());
 
-        ObjectNode nativeSpan = TraceSpanMapper.toSpan(native_, "svc");
-        ObjectNode oiSpan = TraceSpanMapper.toSpan(fromOi, "svc");
+        ObjectNode nativeSpan = TraceSpanMapper.toSpan(native_, "svc", null, null);
+        ObjectNode oiSpan = TraceSpanMapper.toSpan(fromOi, "svc", null, null);
 
         JsonNode na = nativeSpan.get("attributes");
         JsonNode oa = oiSpan.get("attributes");
@@ -223,14 +222,14 @@ class OpenInferenceNormalizerTest {
         // inferSystem alone would yield "other" for this model name.
         assertEquals("other", TraceSpanMapper.inferSystem("acme-frontier-7"));
 
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "chat", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "chat", null, "t", null, null);
         assertNotNull(e);
         java.util.Map<String, Object> md = e.metadata();
         assertNotNull(md);
         assertEquals("anthropic", md.get(GenAiAttributes.SYSTEM));
         assertEquals("anthropic", md.get(GenAiAttributes.PROVIDER_NAME));
 
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         assertEquals(
                 "anthropic",
                 span.get("attributes").get(GenAiAttributes.SYSTEM).asText(),
@@ -255,14 +254,14 @@ class OpenInferenceNormalizerTest {
                   ]
                 }
                 """);
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "chat", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "chat", null, "t", null, null);
         assertNotNull(e);
         java.util.Map<String, Object> md = e.metadata();
         assertNotNull(md);
         assertEquals("get_weather", md.get(GenAiAttributes.TOOL_NAME));
         assertEquals("call_42", md.get(GenAiAttributes.TOOL_CALL_ID));
 
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         JsonNode a = span.get("attributes");
         assertEquals("get_weather", a.get(GenAiAttributes.TOOL_NAME).asText());
         assertEquals("call_42", a.get(GenAiAttributes.TOOL_CALL_ID).asText());
@@ -282,10 +281,10 @@ class OpenInferenceNormalizerTest {
                   "llm.input_messages":[{"message.role":"user","message.content":"do the task"}]
                 }
                 """);
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "agent", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "agent", null, "t", null, null);
         assertNotNull(e);
         assertEquals(KindNormalizer.AGENT, e.operationKind());
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         assertEquals(
                 GenAiAttributes.OP_INVOKE_AGENT,
                 span.get("attributes").get(GenAiAttributes.OPERATION_NAME).asText());

@@ -12,7 +12,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.model.ContentBlock;
 import ai.tessary.open.media.MediaStore;
 import ai.tessary.open.media.MediaStore.MediaRef;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,8 +23,8 @@ import org.mockito.ArgumentCaptor;
 
 /**
  * Base64 image content is externalized to a {@code media_object} ref at ingest — the persisted
- * substrate never carries inline base64. Covers both the JSON-payload rewrite (observation/tool_call
- * content) and the {@link ContentBlock} rewrite (message parts_json).
+ * substrate never carries inline base64. Covers the JSON-payload rewrite (observation/tool_call
+ * content).
  */
 class MediaExternalizerTest {
 
@@ -111,30 +110,6 @@ class MediaExternalizerTest {
     }
 
     @Test
-    void externalizeBlocks_replacesBase64AndDataUri_keepsTextAndHttp() {
-        byte[] bytes = {5, 5, 5};
-        List<ContentBlock> in = List.of(
-                ContentBlock.text("hi"),
-                ContentBlock.imageB64(Base64.getEncoder().encodeToString(bytes), "image/gif"),
-                ContentBlock.imageUrl(
-                        "data:image/webp;base64," + Base64.getEncoder().encodeToString(bytes)),
-                ContentBlock.imageUrl("https://cdn/x.png"));
-
-        MediaExternalizer.ExternalizedBlocks result = externalizer.externalizeBlocks("p1", in);
-        List<ContentBlock> out = result.blocks();
-
-        // One id, not two: the same bytes dedupe to one media_object, so they are one reference.
-        assertEquals(List.of("media-1"), result.mediaIds());
-        assertEquals(ContentBlock.TYPE_TEXT, out.get(0).type());
-        assertEquals(ContentBlock.TYPE_IMAGE_REF, out.get(1).type());
-        assertEquals("media-1", out.get(1).data());
-        assertEquals("image/gif", out.get(1).mediaType());
-        assertEquals(ContentBlock.TYPE_IMAGE_REF, out.get(2).type());
-        assertEquals("image/webp", out.get(2).mediaType());
-        assertEquals(ContentBlock.TYPE_IMAGE_URL, out.get(3).type(), "a real http URL stays a URL");
-    }
-
-    @Test
     void anthropicBase64Document_becomesDocumentRef_textCarriesFailureMarker() throws Exception {
         // Garbage bytes, not a real PDF (PdfTextExtractorTest owns real extraction) — proves that when
         // extraction fails, the ref is still minted with a labeled failure marker, never a fatal batch.
@@ -180,39 +155,6 @@ class MediaExternalizerTest {
         String json = "[{\"type\":\"file\",\"file_url\":\"https://example.com/report.pdf\"}]";
         MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
         assertSame(json, result.payload(), "a payload with no inline base64 is returned byte-identical");
-        verify(media, never()).put(anyString(), any(), anyString());
-    }
-
-    @Test
-    void externalizeBlocks_documentB64AndDocumentUrl_dataUri_becomeDocumentRefs() {
-        byte[] bytes = {5, 5, 5};
-        List<ContentBlock> in = List.of(
-                ContentBlock.text("hi"),
-                ContentBlock.documentB64(Base64.getEncoder().encodeToString(bytes), "application/pdf"),
-                ContentBlock.documentUrl(
-                        "data:application/pdf;base64," + Base64.getEncoder().encodeToString(bytes)),
-                ContentBlock.documentUrl("https://cdn/report.pdf"));
-
-        MediaExternalizer.ExternalizedBlocks result = externalizer.externalizeBlocks("p1", in);
-        List<ContentBlock> out = result.blocks();
-
-        // Same bytes dedupe to one media_object, so this is one reference, not two.
-        assertEquals(List.of("media-1"), result.mediaIds());
-        assertEquals(ContentBlock.TYPE_DOCUMENT_REF, out.get(1).type());
-        assertEquals("media-1", out.get(1).data());
-        assertEquals(
-                MediaExternalizer.DOCUMENT_TEXT_UNAVAILABLE_MARKER, out.get(1).text());
-        assertEquals(ContentBlock.TYPE_DOCUMENT_REF, out.get(2).type());
-        assertEquals(ContentBlock.TYPE_DOCUMENT_URL, out.get(3).type(), "a real http URL stays a URL, never fetched");
-    }
-
-    @Test
-    void undecodableBase64_leftInline_neverFatal() {
-        // '!!!' is not valid base64 — the block is kept as-is rather than dropped or throwing.
-        MediaExternalizer.ExternalizedBlocks result =
-                externalizer.externalizeBlocks("p1", List.of(ContentBlock.imageB64("!!!not-base64!!!", "image/png")));
-        assertEquals(ContentBlock.TYPE_IMAGE_B64, result.blocks().get(0).type());
-        assertEquals(List.of(), result.mediaIds(), "nothing was stored, so nothing may be referenced");
         verify(media, never()).put(anyString(), any(), anyString());
     }
 }

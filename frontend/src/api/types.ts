@@ -8,98 +8,7 @@ import type { components } from "./generated/schema";
 
 type S = components["schemas"];
 
-export type Pipeline = S["Pipeline"];
-export type Progress = S["Progress"];
-export type InvariantCoverage = S["InvariantCoverage"];
-export type Pack = S["Pack"];
-export type Runtime = S["Runtime"];
-export type ProductProfile = S["ProductProfile"];
-export type EvidencedSignal = S["EvidencedSignal"];
-export type ImplicitInvariant = S["ImplicitInvariant"];
-
-/**
- * Shape enum (evals plugin v0.3). Inlined by the generator, kept hand-authored so
- * consumers can narrow for display + filtering.
- */
-export type CallSiteShape =
-  | "summarize"
-  | "extract"
-  | "rag_answer"
-  | "classify"
-  | "draft"
-  | "route"
-  | "tool_call"
-  | "agent_step"
-  | "conversational_turn"
-  | "embedding"
-  | "rerank"
-  | "guardrail"
-  | "moderation"
-  | "ensemble_vote"
-  | "other";
-
-/** How the model is reached (evals-synth v0.9). */
-export type CallSiteInvocation = "sdk" | "cli_agent" | "http" | "sandbox_agent";
-
-export type CallSite = S["CallSite"];
-export type SourceSpan = S["SourceSpan"];
-export type Observed = S["Observed"];
-
-export type ChainDetectionMethod =
-  | "trace_confirmed"
-  | "ensemble"
-  | "state_mediated"
-  | "sequential_composition";
-
-export type Chain = S["Chain"];
-export type FailureMode = S["FailureMode"];
-
-/**
- * Grader (grader-author contract v7). The generated schema drops a handful of
- * operational fields the backend still serializes (`owner`, `applies_when_check`,
- * `cost_budget_tokens`, `latency_budget_ms_p95`): see report (candidate backend
- * annotation fix). They are re-added here as optional so consumers keep compiling.
- */
-
-export type TaxonomyNode = S["TaxonomyNode"];
-
-// Curation overlay
-export type CurationStatus = "pending" | "accepted" | "rejected" | "edited" | "orphaned";
-
-/**
- * Kept hand-authored: the generated `CurationEntry`/`Curation` schemas mark every
- * field optional and use camelCase `updatedAt`/`failureModes` (inconsistent with the
- * snake_case wire), which would force spurious null-guards across many consumers.
- * See report (candidate backend annotation fix).
- */
-export interface CurationEntry {
-  id: string;
-  status: CurationStatus;
-  notes: string;
-  edits: Record<string, string>;
-  updated_at: string;
-}
-
-export interface Curation {
-  version: string;
-  graders: Record<string, CurationEntry>;
-  failure_modes: Record<string, CurationEntry>;
-  invariants: Record<string, CurationEntry>;
-  /** Per-call-site overlays. `edits.grade_mode` toggles grade-per-conversation. */
-  call_sites: Record<string, CurationEntry>;
-}
-
-/** Call-site curation edit key + values for the grading-mode toggle. */
-export const GRADE_MODE = "grade_mode";
-export type GradeMode = "per_conversation" | "per_turn";
-
 export type PipelineEnvelope = S["PipelineEnvelope"];
-
-export interface CurationUpdate {
-  status?: CurationStatus;
-  notes?: string;
-  edits?: Record<string, string>;
-}
 
 /** Generic response envelope the client unwraps; per-type generated shapes exist but the client is generic. */
 export interface ApiResponse<T> {
@@ -121,21 +30,15 @@ export class ApiError extends Error {
    * there prints the code twice: which is exactly what `ErrorNote` did until this existed.
    */
   readonly detail: string;
-  readonly details?: Record<string, string>;
   constructor(status: number, body: ErrorBody) {
     super(`${body.code}: ${body.message}`);
     this.status = status;
     this.code = body.code;
     this.detail = body.message ?? "";
-    this.details = body.details ?? undefined;
   }
 }
 
 // ---- Ingestion + bulk grading ----
-// Synthetic, non-network source providers: direct OTLP/SDK ingest (`sdk`) and the
-// uploaded-JSONL sink (`upload`). Vendor-pull providers were removed with the pull adapters.
-export type Provider = "sdk" | "upload";
-
 export type SubstrateStatus = S["SubstrateStatusView"];
 /**
  * Where a project sits on the ladder from "listening" to "first case": the single read the whole
@@ -164,13 +67,8 @@ export type SetClassifierTuningRequest = S["SetTuningRequest"];
 export type ClassifierDebugSweep = S["SweepView"];
 export type ClassifierDebugMetricBaseline = S["MetricBaselineView"];
 export type ClassifierDebugSketch = S["SketchSummary"];
-export type ClassifierDebugBehaviorProfile = S["BehaviorProfileDebugView"];
 export type TraceListItemView = S["TraceListItem"];
 export type TracesPageView = S["TracesPage"];
-export type TraceToolCallView = S["ToolCallView"];
-export type TraceRetrievalDocumentView = S["RetrievalDocumentView"];
-/** One step of a trace. The v2 substrate calls it a span; `ObservationView` is gone with the v1 wire. */
-export type SpanView = S["SpanView"];
 export type TraceDetailView = S["TraceDetail"];
 export type SessionListItemView = S["SessionListItem"];
 export type SessionsPageView = S["SessionsPage"];
@@ -180,10 +78,6 @@ export type SessionSpansView = S["SessionSpans"];
 export type IngestionSource = S["SourceResponse"];
 export type CreateSourceRequest = S["CreateSourceRequest"];
 
-export type DatasetKind = "kv" | "chat" | "span_sourced";
-export type DatasetCategory = "golden" | "sample";
-
-export type ProjectVersion = S["ProjectVersionView"];
 export type GitIntegration = S["GitIntegrationView"];
 
 export type ConnectGitRequest = S["ConnectRequest"];
@@ -191,8 +85,6 @@ export type InstallUrl = S["InstallUrlView"];
 export type ManifestStart = S["ManifestStartView"];
 export type InstallationOption = S["RepoOption"];
 export type InstallationOptions = S["InstallationOptionsView"];
-
-export type DeleteResponse = S["DeleteResponse"];
 
 // ---- Model configuration ----
 export type ModelProvider =
@@ -212,8 +104,6 @@ export type ModelProvider =
   // Decision models only (TypeSafe's Jev), never a chat or agent model.
   | "TYPESAFE";
 
-// Every provider authenticates with an org-supplied key.
-export type PlatformAuth = "api_key" | "aws";
 export type PlatformDescriptor = S["PlatformDescriptor"];
 export type CatalogEntry = S["CatalogEntry"];
 export type ProviderCatalogResponse = S["CatalogView"];
@@ -261,20 +151,13 @@ export type ModelLaneView = S["LaneView"];
 // automatic selection takes. The page asks for a provider first and a model second, because a key is
 // what an org has or does not have: so this is the shape the two dropdowns read.
 export type LaneProviderOption = S["ProviderOptionView"];
-// One section of the Models page. The lanes split by how the platform reaches the model: a request
-// we compose, a model id handed to an agent in a sandbox, or one typed question to a decision model.
-// That split decides the heading, the copy under it, whether a tier or an effort is a real choice and
-// whether there is a model to pick at all, so the server sends all of them.
+// One section of the Models page. The lanes split by how the platform reaches the model: a model id
+// handed to an agent in a sandbox, or one typed question to a decision model. That split decides the
+// heading, the copy under it and whether there is a model to pick at all, so the server sends them.
 export type ModelLaneGroupView = S["GroupView"];
-// The Bedrock capability matrix row: which tiers, cache TTLs and reasoning-effort levels a platform
-// model actually supports, and which endpoint serves it.
+// One platform Bedrock model: its display name, whether it can drive an agent, and which endpoint
+// serves it.
 export type BedrockModelDescriptor = S["ModelDescriptor"];
-export type ServiceTier = BedrockModelDescriptor["supported_tiers"][number];
-// Reasoning effort is per model, not a fixed vocabulary: the OpenAI line takes low/medium/high while
-// the GPT-5.6 models on bedrock-mantle also take none, xhigh and max. Always read the levels off the
-// selected model's `effort_levels` rather than hardcoding a union: an over-narrow list here silently
-// hides half the range on exactly the models that have the most of it.
-export type EffortLevel = string;
 export type ProjectModelSetting = S["ProjectModelSetting"];
 export type ModelSettingsResponse = S["ModelSettingsView"];
 export type SetLaneModelRequest = S["SetLaneModelRequest"];
@@ -317,62 +200,36 @@ export type RedactionPreviewRequest = S["PreviewRequest"];
 export type RedactionPreviewView = S["PreviewView"];
 
 // ---- Global search ----
-// The ⌘K contract (DESIGN-DIRECTION §7) indexes surfaces, cases, graders, and
-// trace ids only: datasets have no page and are not searchable.
-export type SearchHitType = "case" | "trace";
+// The backend search index covers trace ids only.
+export type SearchHitType = "trace";
 export type SearchHit = S["SearchHit"];
 export type SearchResults = S["GlobalSearchView"];
 
-// ---- Human annotations / verdict review (annotation node) ----
-
-// ---- Behaviour drift (Layer-1 trajectory classifier) ----
+// ---- Findings ----
 // The generated schema types these discriminators as bare `string` (springdoc has no enum to read
 // from: they are String constants on the Java rows), so each is narrowed to its closed set here.
 
 /**
- * The cause kinds the findings surface carries. Behaviour drift's three (`novelty`/`omission` are
- * high confidence, `surprisal` is low), metric drift's `distribution_shift`, tool error's
- * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate`, groundedness's
- * `groundedness_rate`, and `sop_conformance`: a conformance finding rendered in the same shape (its
- * causeKey is the SOP rule slug, its traceCount the tested window's activations).
+ * The cause kinds the findings surface carries: metric drift's `distribution_shift`, tool error's
+ * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate` and groundedness's
+ * `groundedness_rate`.
  */
 export type BehaviorCauseKind =
-  | "novelty"
-  | "surprisal"
-  | "omission"
   | "distribution_shift"
   | "rate_shift"
   | "armed_window"
   | "malformed_rate"
-  | "groundedness_rate"
-  | "sop_conformance";
+  | "groundedness_rate";
 
-/** `resolved` is conformance-only: its single human verb closes the row rather than marking it. */
 export type BehaviorFindingStatus = "open" | "closed";
 
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
 
-/** The findings page. `lane` is which Layer-2 lane this project's findings get ruled on. */
-export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings" | "lane"> & {
+/** The findings page. */
+export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings"> & {
   findings: BehaviorFinding[];
-  lane: TriageLane;
 };
-
-/**
- * Which instrument ruled on a finding, and the difference is one of authority, not of quality.
- *
- * - `evidence_only`: triage: an agent in a sandbox with the finding's claim, this platform's read
- *   surface for the evidence behind it, and a directory to write check scripts in. Its citations are
- *   evidence pointers, the ids it fetched, and the scripts it ran.
- * - `grader`: the call site's own graders run against the traces the finding cites. No agent, no
- *   sandbox: the rubrics the team already wrote, executed against the evidence. Its citations are the
- *   traces that failed. Chosen by hand, never automatically.
- *
- * A third, `repo_grounded`, is gone: no source file settles whether a claim about production traffic
- * is true, and the repository went to RCA, which asks the question it answers.
- */
-export type TriageLane = "evidence_only" | "grader";
 
 /**
  * What triage concluded about a finding's claim: never about its impact.
@@ -409,7 +266,7 @@ export type TriageStatus = "pending" | "in_flight" | "done" | "failed";
  * and whether the cause had already been handed to Layer 2 (a second press lands on the existing job
  * rather than buying a second one).
  */
-export type BehaviorAnalysis = Omit<S["BehaviorAnalysisView"], "lane"> & { lane: TriageLane };
+export type BehaviorAnalysis = S["BehaviorAnalysisView"];
 
 /**
  * One finding with its evidence parsed: what the finding's own page draws.
@@ -423,14 +280,6 @@ export type BehaviorFindingDetail = Omit<S["BehaviorFindingDetailView"], "findin
   finding: BehaviorFinding;
 };
 
-/**
- * One reference from a finding into the substrate it read: never a copy of it.
- *
- * `grain` is redundant with which id is set and is sent anyway, because a span reference carries both
- * ids (span identity is the composite `(project, trace, span)`) while a trace reference carries one,
- * and a client rendering a mixed list should not have to re-derive that.
- */
-export type EvidenceRef = S["EvidenceRefView"];
 export type EvidenceSpan = S["EvidenceSpanView"];
 export type EvidenceSpanPage = S["FindingEvidenceSpanPage"];
 
@@ -462,14 +311,6 @@ export type FlaggedAnswer = S["FlaggedAnswerView"];
 export type FlaggedAnswerPage = S["FlaggedAnswerPage"];
 
 /**
- * A `secret_leak` facet's "When it leaked": the rule and confidence, how big the leak is, and the
- * two breakdowns the page renders — one masked key at a time, and one leak at a time.
- */
-export type SecretLeakDetail = S["SecretLeakDetail"];
-export type SecretLeakKey = S["SecretLeakKeyView"];
-export type SecretLeakLeak = S["SecretLeakLeakView"];
-
-/**
  * One finding, with the triage fields narrowed to the vocabulary the server writes.
  *
  * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never
@@ -497,21 +338,6 @@ export type BehaviorFinding = Omit<
  */
 export type TriageCitation = S["Citation"];
 
-/**
- * The `detail` jsonb on a baseline event, which the read model passes through as a raw JSON string.
- * Readers normalise it rather than indexing it directly: the writer's key spelling is not stable.
- */
-export type BehaviorBaselineEventDetail = Record<string, unknown>;
-
-/** §4.3: one durable, readable row per baseline mutation. The product payoff surface. */
-export type BehaviorBaselineEvent = Omit<S["BehaviorBaselineEventView"], "detail"> & {
-  detail: BehaviorBaselineEventDetail | string | null;
-};
-
-// ---- Human review queues (annotation_queue + annotation_queue_item) ----
-/** A review queue's lifecycle status. */
-export type ReviewQueueStatus = "active" | "archived";
-
 // ---- Vitals (cost / turn latency, per call site) ----
 /**
  * The three deterministic statistical filters. Read-only aggregates over ingested substrate: no
@@ -519,8 +345,6 @@ export type ReviewQueueStatus = "active" | "archived";
  */
 export type Vitals = S["Vitals"];
 export type VitalsGroup = S["Group"];
-export type VitalsCost = S["Cost"];
-export type VitalsDuration = S["Duration"];
 
 // ---- Cases (eval_case): the one object a detection reaches a human through ----
 /**
@@ -537,29 +361,9 @@ export type CaseDetail = S["CaseDetailView"];
  */
 export type CaseDisposition = "fixed" | "false_alarm";
 export type TriageView = S["TriageView"];
-/**
- * Who ruled the detection real, and what they said. `ruled_by` is `Human` or `Triage` and
- * `by_human` is the same fact as a boolean; the lane chip is gone with the lanes, because a machine
- * ruling now reaches a case exactly one way: triage audited the claim and found it sound.
- *
- * A human ruling carries no summary and no citations. That is the strongest ruling available, so it
- * must never render as an empty version of the weaker one; `ruled_by_sentence` is what it says
- * instead.
- */
-export type CaseRuling = S["CaseRulingView"];
-/**
- * One trace a finding pinned as evidence, carrying the `role` it was pinned under. There is no
- * before/after wrapper any more: nothing is sampled at read time, so a case shows evidence rows and
- * the role is what tells a baseline from an exemplar.
- */
-export type CaseExemplar = S["CaseExemplarView"];
 
 // ---- Notifications (alert_rule / alert_channel): how a case reaches a human ----
 export type AlertRule = S["AlertRuleView"];
 export type UpsertAlertRule = S["UpsertAlertRuleRequest"];
-export type AlertPolicy = S["PolicyView"];
 export type AlertChannel = S["ChannelView"];
 export type CreateAlertChannel = S["UpsertChannelRequest"];
-export type AlertEvent = S["AlertEventView"];
-
-/** One grader's production numbers over the index window (`GET /trend/grader-stats`). */

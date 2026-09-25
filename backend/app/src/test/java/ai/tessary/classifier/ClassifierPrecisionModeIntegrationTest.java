@@ -14,6 +14,7 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierObservations;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -85,7 +86,8 @@ class ClassifierPrecisionModeIntegrationTest {
                 insertTurn(pid, sessionId, "This is frustrating, you're not listening to me", base.plusSeconds(1));
 
         service.seedBuiltIns(pid); // seed the catalog so the definition is addressable up front
-        ClassifierRow frustration = signals.findByKey(pid, "frustration").orElseThrow();
+        ClassifierRow frustration =
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow();
         detect(pid, frustration, sessionId, weakTurn, Detection.Confidence.LOW);
         detect(pid, frustration, sessionId, strongTurn, Detection.Confidence.HIGH);
 

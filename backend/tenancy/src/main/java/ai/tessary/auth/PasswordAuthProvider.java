@@ -15,9 +15,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * The dependency-free, zero-cloud-credential {@link AuthProvider}: this build's default.
- * {@link #isEnabled()} is unconditionally {@code true} — unlike {@link WorkOsClient}, there is no
- * external configuration that could be missing.
+ * The dependency-free, zero-cloud-credential {@link AuthProvider}: this build's default. Unlike
+ * {@link WorkOsClient}, there is no external configuration that could be missing.
  *
  * <p>Every WorkOS-shaped downstream call site ({@link AuthFilter#resolveCookie},
  * {@code TenantService.upsertUserFromWorkos}, the {@code auth.workos_failed}-style error handling
@@ -63,12 +62,6 @@ public class PasswordAuthProvider implements AuthProvider {
     }
 
     @Override
-    public boolean isEnabled() {
-        // No external config to be missing — this is the always-available default.
-        return true;
-    }
-
-    @Override
     public boolean supportsRedirectFlow() {
         return false;
     }
@@ -101,7 +94,7 @@ public class PasswordAuthProvider implements AuthProvider {
         // Invitation bookkeeping already happens locally via org_invitation/InvitationRepository
         // (TenantService.consumePendingInvitations); the WorkOS call only fired a notification
         // email, which this dependency-free provider has no mechanism to send.
-        return new Invitation(null, null);
+        return new Invitation(null);
     }
 
     @Override
@@ -187,7 +180,6 @@ public class PasswordAuthProvider implements AuthProvider {
                 displayName,
                 null,
                 avatarUrl,
-                null,
                 null);
     }
 }

@@ -20,10 +20,6 @@ overrides:
   # browser bundle at all -- and `generate:api` feeds it tessary-api.json, a checked-in JSON file.
   # The `!!omap` path this advisory is about parses no YAML in this repo, from any source, ever.
   # Revisit when redocly moves off 4.3.0.
-  # es-toolkit 1.46.0 pin: 1.47.0 (recharts' transitive dep) emits require_-prefixed CJS vars that
-  # collide with esbuild's module-wrapper naming, breaking Vite dep optimization
-  # (require_isUnsafeProperty is not a function). recharts declares ^1.39.3.
-  es-toolkit: 1.46.0
   # openapi-typescript@7.x declares peer typescript@^5.x; this project is on typescript 6. The codegen
   # only uses the TS compiler API to emit .d.ts and works fine on TS 6, so force its peer to ours —
   # otherwise pnpm's autoInstallPeers quietly resolves a second, TS 5 copy for it to run against.

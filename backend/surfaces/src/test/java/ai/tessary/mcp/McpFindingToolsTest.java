@@ -32,9 +32,6 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.Capability;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
 import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -45,7 +42,6 @@ import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.IntNode;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -83,12 +79,6 @@ class McpFindingToolsTest {
         SpanRepository spans = mock(SpanRepository.class);
         SpanPayloadRepository payloads = mock(SpanPayloadRepository.class);
         TraceV2Repository traces = mock(TraceV2Repository.class);
-        // Every capability on: these tests exercise the tool itself, not the gate.
-        Map<Capability, Boolean> allOn = new EnumMap<>(Capability.class);
-        for (Capability c : Capability.values()) allOn.put(c, true);
-        CapabilityService capabilities = mock(CapabilityService.class);
-        when(capabilities.resolve(any())).thenReturn(new CapabilitySet(allOn));
-        when(capabilities.isEnabled(any(), any())).thenReturn(true);
         var registry = new McpToolRegistry(
                 pipeline,
                 projects,
@@ -97,7 +87,6 @@ class McpFindingToolsTest {
                 payloads,
                 traces,
                 mock(SessionReadService.class),
-                capabilities,
                 behaviorDrift,
                 mock(CaseService.class));
         this.dispatcher = new McpDispatcher(registry, mapper);
@@ -137,10 +126,10 @@ class McpFindingToolsTest {
         FindingRow row = new FindingRow(
                 "find-1",
                 PROJECT_ID,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
-                "profile-1:" + FindingRow.Cause.NOVELTY + ":cause-key-1:workflow-1",
-                FindingRow.SubjectKind.BEHAVIOR_PROFILE,
-                "profile-1",
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "cause-key-1",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "clf-1",
                 "cause-key-1",
                 "cs-1",
                 FindingRow.Status.OPEN,
@@ -151,8 +140,8 @@ class McpFindingToolsTest {
                 /* severity */ null,
                 5L,
                 // The native vocabulary the scoped cause key folds in, exactly as the writer merges it.
-                "{\"cause_kind\":\"" + FindingRow.Cause.NOVELTY + "\",\"workflow_key\":\"workflow-1\","
-                        + "\"native_cause_key\":\"cause-key-1\",\"exemplar_verdict_id\":\"verdict-1\"}",
+                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\",\"workflow_key\":\"workflow-1\","
+                        + "\"native_cause_key\":\"cause-key-1\"}",
                 /* evidenceCountsJson */ null,
                 /* sinceVersionId */ null,
                 /* escalatedAt */ null,
@@ -167,7 +156,7 @@ class McpFindingToolsTest {
                 "2026-06-02T00:00:00Z");
         // No evidence set on the detail: get_finding returns the CLAIM, and get_finding_evidence pages
         // the population — which is the split this fixture used to blur by carrying one ref inline.
-        return BehaviorFindingDetailView.of(row);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
     /** The same finding after triage ruled on it, which is what must never reach an agent. */
@@ -186,7 +175,6 @@ class McpFindingToolsTest {
                         f.firstSeenAt(),
                         f.lastSeenAt(),
                         f.traceCount(),
-                        f.evidence(),
                         f.status(),
                         "positive",
                         "opened_case",
@@ -195,11 +183,9 @@ class McpFindingToolsTest {
                         "2026-06-03T00:00:00Z",
                         f.triageStatus(),
                         f.humanVerdictAt(),
-                        f.conformanceKind(),
                         f.caseId()),
                 base.metric(),
                 base.toolError(),
-                base.baseline(),
                 base.malformedOutput(),
                 base.secretLeak(),
                 base.armedWindow(),
@@ -285,7 +271,7 @@ class McpFindingToolsTest {
         assertEquals("find-1", structured.get("finding").get("id").asText());
         assertEquals("cs-1", structured.get("finding").get("callSiteId").asText());
         assertEquals(
-                FindingRow.Cause.NOVELTY,
+                FindingRow.Cause.MALFORMED_RATE,
                 structured.get("finding").get("causeKind").asText());
         verify(behaviorDrift).finding(PROJECT_ID, "find-1");
     }
@@ -342,7 +328,7 @@ class McpFindingToolsTest {
                 null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        return BehaviorFindingDetailView.of(row);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
     /**
@@ -418,7 +404,7 @@ class McpFindingToolsTest {
                 List.of(),
                 2L,
                 1L);
-        return BehaviorFindingDetailView.of(row, malformed, null);
+        return BehaviorFindingDetailView.of(row, malformed, null, null, null, null);
     }
 
     @Test
@@ -478,7 +464,7 @@ class McpFindingToolsTest {
                 86_400L,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        return BehaviorFindingDetailView.of(row, null, secretLeak);
+        return BehaviorFindingDetailView.of(row, null, secretLeak, null, null, null);
     }
 
     /**
@@ -536,7 +522,7 @@ class McpFindingToolsTest {
                 null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        return BehaviorFindingDetailView.of(row);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
     /**
@@ -594,10 +580,10 @@ class McpFindingToolsTest {
 
         structured(callTool(
                 "list_findings",
-                "{\"status\":\"open\",\"call_site_id\":\"cs-1\",\"detector\":\"behavior_drift\","
+                "{\"status\":\"open\",\"call_site_id\":\"cs-1\",\"detector\":\"duration_drift\","
                         + "\"include\":\"all\"}"));
 
-        verify(behaviorDrift).findings(PROJECT_ID, "open", "cs-1", "behavior_drift", false);
+        verify(behaviorDrift).findings(PROJECT_ID, "open", "cs-1", "duration_drift", false);
     }
 
     /** The lane is rendered on every page: which Layer-2 lane this project's findings are ruled on. */
@@ -778,7 +764,7 @@ class McpFindingToolsTest {
      */
     @Test
     void getFindingEvidence_countOnlyReturnsBothCountMapsAndNoRows() throws Exception {
-        when(behaviorDrift.findingEvidence(PROJECT_ID, "find-1", null, 100, null, true))
+        when(behaviorDrift.findingEvidence(PROJECT_ID, "find-1"))
                 .thenReturn(new FindingEvidencePage(List.of(), null, true, counts(118, 0), counts(120, 0)));
 
         JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"count_only\":true}"));
@@ -806,8 +792,7 @@ class McpFindingToolsTest {
         assertTrue(text.contains("members"), text);
         assertTrue(text.contains(FindingEvidenceRow.Role.BASELINE), text);
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
-        verify(behaviorDrift, org.mockito.Mockito.never())
-                .findingEvidence(any(), any(), any(), anyInt(), any(), anyBoolean());
+        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidence(any(), any());
     }
 
     @Test
@@ -816,8 +801,7 @@ class McpFindingToolsTest {
 
         assertTrue(text.contains("finding_id"), text);
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
-        verify(behaviorDrift, org.mockito.Mockito.never())
-                .findingEvidence(any(), any(), any(), anyInt(), any(), anyBoolean());
+        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidence(any(), any());
     }
 
     /**

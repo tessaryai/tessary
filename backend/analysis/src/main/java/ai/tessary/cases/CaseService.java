@@ -280,7 +280,7 @@ public class CaseService {
                         .map(CaseEventView::of)
                         .toList(),
                 finding == null ? null : finding.id(),
-                ruling(row, finding),
+                ruling(finding),
                 exemplars.forCase(
                         projectId,
                         finding == null ? List.of() : findingEvidence.listByFinding(projectId, finding.id())),
@@ -352,10 +352,7 @@ public class CaseService {
     }
 
     /**
-     * No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
-     * rather than a button: there is nothing here for "move the bar" to move.
-     *
-     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: neither
+     * No absorb for a secret leak or a malformed-output case: neither
      * cause has fitted detector state a re-pin could move — {@code BehaviorTriageSource#repin} is a
      * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
      * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
@@ -365,8 +362,7 @@ public class CaseService {
      * move the bar, so it keeps the button.
      */
     private static boolean absorbable(CaseRow row) {
-        return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
-                && !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
+        return !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
                 && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())
                 && !CaseRow.Detector.FRUSTRATION.equals(row.detector());
     }
@@ -384,7 +380,7 @@ public class CaseService {
      * every non-human ruling here says the same verdict. What varies is the summary and the citations,
      * which is what a reader deciding whether to page someone actually reads.
      */
-    private static @Nullable CaseRulingView ruling(CaseRow row, @Nullable FindingRow finding) {
+    private static @Nullable CaseRulingView ruling(@Nullable FindingRow finding) {
         if (finding == null) return null;
         if (finding.humanVerdictAt() != null) {
             return new CaseRulingView(
@@ -441,15 +437,6 @@ public class CaseService {
     }
 
     // ---- lifecycle ---------------------------------------------------------------------------
-
-    /**
-     * {@link #resolve(String, String, String, String, String)} with no disposition, as every case but frustration's
-     * and groundedness's.
-     */
-    @Transactional
-    public CaseView resolve(String projectId, String id, String reason, @Nullable String actor) {
-        return resolve(projectId, id, reason, actor, null);
-    }
 
     /**
      * Close a case with the human's one-line reason. The reason is required by the wire contract and
@@ -598,7 +585,7 @@ public class CaseService {
      * first finding link became mandatory can be in that state.
      */
     @Transactional
-    public RcaReportView runRca(String projectId, String id, @Nullable String actor) {
+    public RcaReportView runRca(String projectId, String id, String actor) {
         CaseRow row = require(projectId, id);
         List<FindingRow> caseFindings = findings.listByCase(projectId, row.id());
         if (caseFindings.isEmpty()) {

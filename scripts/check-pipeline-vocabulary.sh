@@ -47,7 +47,7 @@ FORBIDDEN=(
     # gated because each one was a column accessor, so a survivor is a rename that stopped halfway.
     "context_id|'session_id' — the v1 spine is gone"
     "observation_id|'span_id' — a span is the unit of work now"
-    "subjectContextId|'subjectSessionId'"
+    "subjectContextId|'sessionId'"
     "subjectObservationId|'subjectSpanId'"
     "sourceContextId|'sourceSessionId'"
     # The design-fit refactors: a table, two functions and two metered units were renamed, so a
@@ -63,9 +63,9 @@ FORBIDDEN=(
     # Grading, datasets, the git observer, sampling policy and the Environment concept were removed
     # outright, and the migration that removed them dropped the tables behind them. Same shape as
     # every gate above: a query naming one of these compiles, boots, and fails the first time it runs.
-    # The verdict tokens are keyword-qualified rather than bare because `verdict` survives in four
-    # other senses (ConformanceVerdict, AgentVerdict, BehaviorTriageVerdict, and the `triage_verdict`
-    # column), none of which is the dropped table.
+    # The verdict tokens are keyword-qualified rather than bare because `verdict` survives in other
+    # senses (BehaviorTriageVerdict and the `triage_verdict` column), neither of which is the dropped
+    # table.
     "FROM verdict|nothing — grading left the platform"
     "INTO verdict|nothing — grading left the platform"
     "UPDATE verdict|nothing — grading left the platform"
@@ -105,21 +105,12 @@ FORBIDDEN=(
 #   the table is the assertion. (This is also why there is no `*_v1` gate: the teardown dropped the
 #   v1 tables outright, so no `*_v1` name was ever written in Java.)
 #
-#   BehaviorTriageJobRepository: `context_id` here is a key inside the triage job's own JSONB payload,
-#   not a column. The repository is both the only writer and reader, so the key is self-consistent.
-#   This exemption is keyed on the file name, so it moves with a rename of that file.
-#
 #   SubstrateWriteIntegrationTest / SubstrateV2DependentPrepTest: assertions that a column of that
 #   name is gone, queried out of information_schema. Naming it is the assertion.
-#
-#   TrajectoryAssemblerParityTest: a key in the cross-language reduction-contract fixture the Python
-#   detector and the Java assembler are both checked against. The Python side owns the field names.
 ALLOWED='(SUBJECT_KIND = "behavior_finding"'
 ALLOWED="$ALLOWED"'|SubstrateV2DependentPrepTest\.java:[0-9]+:.*@ValueSource'
-ALLOWED="$ALLOWED"'|BehaviorTriageJobRepository\.java:[0-9]+:.*context_id'
 ALLOWED="$ALLOWED"'|SubstrateWriteIntegrationTest\.java:[0-9]+:.*column_name = .observation_id'
-ALLOWED="$ALLOWED"'|SubstrateV2DependentPrepTest\.java:[0-9]+:.*observation_id'
-ALLOWED="$ALLOWED"'|TrajectoryAssemblerParityTest\.java:[0-9]+:.*"observation_id")'
+ALLOWED="$ALLOWED"'|SubstrateV2DependentPrepTest\.java:[0-9]+:.*observation_id)'
 
 _scan() {
     # Java + TypeScript sources only, excluding build output and generated code.
@@ -159,10 +150,8 @@ done
 # launcher or a class that no longer exists.
 #
 # This scan is wider than the one above: it reaches `sandbox-runner/` (the launcher is JavaScript)
-# and reads markdown, since two of these four are vocabulary rather than SQL and a design doc naming
-# the old column is wrong in a way no build can see. `docs/reference/` is exempt because that is
-# where this cutover's history notes live; `scripts/` is exempt because check-migrations-populated.sh
-# asserts the delete ran.
+# and `classifiers/`. `scripts/` is exempt because check-migrations-populated.sh asserts the delete
+# ran.
 TRIAGE_FORBIDDEN=(
     "adjudication_verdict|'triage_verdict' — 0009 dropped the column and its five siblings"
     "behavior_adjudication|job.kind = 'triage'"
@@ -179,7 +168,6 @@ _scan_triage() {
         | grep -v '/node_modules/' \
         | grep -v '/generated-sources/' \
         | grep -v '/dist/' \
-        | grep -v '^docs/reference/' \
         || true
 }
 

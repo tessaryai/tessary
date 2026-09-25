@@ -2,8 +2,6 @@
 package ai.tessary.alert;
 
 import ai.tessary.alert.channel.AlertChannel;
-import ai.tessary.open.errors.AlertError;
-import ai.tessary.open.errors.TessaryException;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -24,10 +22,6 @@ public class ChannelFactory {
     }
 
     public AlertChannel forKind(AlertChannelKind kind) {
-        AlertChannel impl = impls.get(kind);
-        if (impl == null) {
-            throw new TessaryException(AlertError.UNSUPPORTED_CHANNEL, kind.wire());
-        }
-        return impl;
+        return impls.get(kind);
     }
 }

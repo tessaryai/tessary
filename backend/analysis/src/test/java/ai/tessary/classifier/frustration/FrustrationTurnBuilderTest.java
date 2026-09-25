@@ -49,7 +49,8 @@ class FrustrationTurnBuilderTest {
         when(substrate.priorTurns(anyString(), anyString(), anyInt()))
                 .thenReturn(new SubstrateReadRepository.PriorTurns(earlier, turns));
         return new FrustrationTurnBuilder(new ConversationThreadAssembler(substrate), caps)
-                .build(chronological[chronological.length - 1]);
+                .buildTurn(chronological[chronological.length - 1])
+                .map(FrustrationTurnBuilder.EligibleTurn::state);
     }
 
     private static SubstrateObservation turn(String id, @Nullable String input, @Nullable String output) {
@@ -59,7 +60,7 @@ class FrustrationTurnBuilderTest {
     private static SubstrateObservation span(
             String id, String traceId, String kind, @Nullable String input, @Nullable String output) {
         return new SubstrateObservation(
-                id, "p", traceId, "sess-1", null, "cs-1", kind, "chat", input, output, null, id);
+                id, "p", traceId, "sess-1", null, "cs-1", kind, "chat", input, output, null, id, null);
     }
 
     private static String say(String role, String text) {

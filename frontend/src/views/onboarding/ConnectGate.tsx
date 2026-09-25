@@ -88,8 +88,7 @@ export function ConnectGate() {
     if (hasTaggedSpan) nav(`/orgs/${orgSlug}/projects/${projectSlug}/traces`, { replace: true });
   }, [hasTaggedSpan, nav, orgSlug, projectSlug]);
 
-  const endpoint = `${typeof window !== "undefined" ? window.location.origin : ""}/v1/traces`;
-  const untagged = status.data ? status.data.untagged_spans > 0 && status.data.spans_received > 0 : false;
+  const endpoint = `${window.location.origin}/v1/traces`;
 
   // Same queryKey ProjectShell/OrgRedirect/Sidebar already use, so this is a cache read in the
   // common case rather than a third request. It decides which escape hatch this gate offers.
@@ -120,14 +119,14 @@ export function ConnectGate() {
   // rendering null for that one tick avoids a flash of the connect screen after the flip.
   if (hasTaggedSpan) return null;
 
-  if (untagged) {
+  if (status.data && status.data.untagged_spans > 0) {
     return (
       <UntaggedScreen
         email={user?.email}
-        spansReceived={status.data?.spans_received ?? 0}
-        taggedSpans={status.data?.tagged_spans ?? 0}
-        lastSpanAt={status.data?.last_span_at ?? null}
-        serviceName={status.data?.service_name ?? null}
+        spansReceived={status.data.spans_received}
+        taggedSpans={status.data.tagged_spans}
+        lastSpanAt={status.data.last_span_at}
+        serviceName={status.data.service_name}
       />
     );
   }
@@ -349,6 +348,5 @@ function MintTokenField({ pending, onMint }: { pending: boolean; onMint: () => v
 }
 
 function elide(token: string): string {
-  if (token.length <= 12) return token;
   return `${token.slice(0, 8)}…${token.slice(-4)}`;
 }

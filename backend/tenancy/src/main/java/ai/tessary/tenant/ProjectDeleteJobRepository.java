@@ -15,8 +15,8 @@ import org.springframework.stereotype.Repository;
 /**
  * The project-purge work queue on the unified {@code job} table: one {@code kind='project_delete'} row
  * per project the delete endpoint has accepted, {@code dedupe_key} = the project id. Claim / reclaim /
- * dead-letter is the shared kind-scoped {@link LeasedJobSql}, the same machinery {@code sop_compile} and
- * the classifier queues run on.
+ * dead-letter is the shared kind-scoped {@link LeasedJobSql}, the same machinery the classifier queues
+ * run on.
  *
  * <h2>Why these rows carry a NULL project_id</h2>
  *
@@ -31,13 +31,13 @@ import org.springframework.stereotype.Repository;
  *
  * <p>{@code ux_job_project_delete} covers {@code pending} and {@code claimed} only. Double-clicking Delete
  * is therefore a no-op, while a purge that dead-letters can still be re-enqueued by
- * {@link #enqueueMissing} — an all-status unique like {@code ux_job_sop_compile} would let one failed
- * attempt block every future one for a project that is already marked and can never be un-marked.
+ * {@link #enqueueMissing} — an all-status unique would let one failed attempt block every future one
+ * for a project that is already marked and can never be un-marked.
  */
 @Repository
 public class ProjectDeleteJobRepository {
 
-    private static final String COLS = "id, payload->>'project_id' AS project_id, status, attempts";
+    private static final String COLS = "id, payload->>'project_id' AS project_id, attempts";
 
     private final JdbcClient jdbc;
 
@@ -157,7 +157,7 @@ public class ProjectDeleteJobRepository {
                  WHERE id = :id
                 """)
                 .param("status", status)
-                .param("err", error != null && error.length() > 2000 ? error.substring(0, 2000) : error)
+                .param("err", error.length() > 2000 ? error.substring(0, 2000) : error)
                 .param("now", Instant.now().toString())
                 .param("id", id)
                 .update();
@@ -181,7 +181,6 @@ public class ProjectDeleteJobRepository {
     }
 
     private static ProjectDeleteJobRow map(ResultSet rs, int n) throws SQLException {
-        return new ProjectDeleteJobRow(
-                rs.getString("id"), rs.getString("project_id"), rs.getString("status"), rs.getInt("attempts"));
+        return new ProjectDeleteJobRow(rs.getString("id"), rs.getString("project_id"), rs.getInt("attempts"));
     }
 }

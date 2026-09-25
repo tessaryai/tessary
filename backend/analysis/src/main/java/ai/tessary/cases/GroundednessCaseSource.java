@@ -28,11 +28,6 @@ import org.springframework.stereotype.Component;
 public class GroundednessCaseSource implements CaseSource {
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.GROUNDEDNESS;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return BuiltInDetector.Kind.GROUNDEDNESS.equals(classifierKey);
     }

@@ -41,7 +41,6 @@ public class MediaRefRepository {
      * conflict. Must run after the payload row exists; the FK is the reason.
      */
     public void insertAll(String projectId, String traceId, String spanId, List<String> mediaIds) {
-        if (mediaIds.isEmpty()) return;
         for (String mediaId : mediaIds) {
             jdbc.sql("""
                             INSERT INTO media_ref (project_id, media_id, trace_id, span_id)

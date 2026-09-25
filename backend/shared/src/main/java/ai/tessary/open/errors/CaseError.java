@@ -11,9 +11,8 @@ public enum CaseError implements ErrorCode {
     REASON_REQUIRED(HttpStatus.BAD_REQUEST, "Resolving a case needs a one-line reason"),
     ALREADY_RESOLVED(HttpStatus.CONFLICT, "Case %s is already resolved"),
     NOT_MUTED(HttpStatus.CONFLICT, "Case %s is not muted"),
-    // Absorbing moves the DETECTOR's reference, so it needs one that can move. Two cases cannot: grader
-    // degradation, which has no finding behind it at all, and SOP conformance, whose reference is an
-    // authored rule — re-authoring it is a repo edit, not a button. Both can still be resolved and muted.
+    // Absorbing moves the DETECTOR's reference, so it needs one that can move. Some cases have none (see
+    // CaseService#absorbable); they can still be resolved and muted.
     NOT_ABSORBABLE(HttpStatus.CONFLICT, "Case %s has no detector reference that an absorb could move"),
     // A disposition says what a resolved frustration case turned out to be, and each one changes what the
     // classifier counts next. No other case has anything it would change, so it is refused rather than stored.

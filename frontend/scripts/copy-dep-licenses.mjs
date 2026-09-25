@@ -12,7 +12,7 @@
  * this script the built image carried the font binaries and none of their text.
  *
  * A STANDALONE SCRIPT, not a Vite plugin, on purpose: it is a compliance step, so it has to be
- * runnable and assertable on its own (`node scripts/copy-dep-licenses.mjs --out <dir>`) rather
+ * runnable and assertable on its own (`node scripts/copy-dep-licenses.mjs`) rather
  * than only observable as a side effect of a full build. It runs AFTER `vite build` — see
  * package.json's `build` — because vite empties outDir on start and would delete what we wrote.
  *
@@ -76,9 +76,7 @@ function outputName(name) {
 }
 
 function main() {
-  const argv = process.argv.slice(2);
-  const outFlag = argv.indexOf('--out');
-  const outDir = path.resolve(root, outFlag === -1 ? 'dist/licenses' : argv[outFlag + 1]);
+  const outDir = path.resolve(root, 'dist/licenses');
 
   const problems = [];
   const written = [];

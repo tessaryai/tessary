@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,9 +53,6 @@ class ProviderCredentialControllerTest {
     private ProviderCredentialRepository repo;
 
     @Mock
-    private ChatModelFactory factory;
-
-    @Mock
     private SecretBox secretBox;
 
     @Mock
@@ -80,8 +76,8 @@ class ProviderCredentialControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new ProviderCredentialController(
-                repo, factory, secretBox, resolver, capabilities, catalogFetchService, events);
+        controller =
+                new ProviderCredentialController(repo, secretBox, resolver, capabilities, catalogFetchService, events);
         ctx = new TenantContext("user_1", "user@example.com", ORG_ID, null, "owner", null);
         Organization org = new Organization(ORG_ID, null, ORG_SLUG, "Acme", "2026-01-01T00:00:00Z", null, null);
         resolved = new TenantPathResolver.OrgResolved(org, "owner");
@@ -237,48 +233,13 @@ class ProviderCredentialControllerTest {
         verify(repo, never()).update(any());
     }
 
-    /**
-     * A rotated key must drop the org's cached client for that provider, or calls keep running on the
-     * old key until a restart.
-     */
     @Test
-    void rotatingAKeyDropsTheOrgsCachedClientForThatProvider() {
-        ProviderCredential existing = new ProviderCredential(
-                "cred_1",
-                ORG_ID,
-                null,
-                ModelProvider.ANTHROPIC,
-                null,
-                "old-sealed-key",
-                null,
-                null,
-                null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z");
-        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.ANTHROPIC)).thenReturn(Optional.of(existing));
-        when(secretBox.isConfigured()).thenReturn(true);
-        when(secretBox.seal("sk-rotated")).thenReturn("rotated-sealed-key");
-        var req =
-                new ProviderCredentialController.UpsertRequest(null, "sk-rotated", null, null, null, null, null, null);
-
-        controller.upsert(ctx, ORG_SLUG, ModelProvider.ANTHROPIC, req);
-
-        verify(factory).invalidate(ORG_ID, ModelProvider.ANTHROPIC);
-    }
-
-    // ---- delete invalidates the factory's cached client (org-wide) so the next call rebuilds ----
-
-    @Test
-    void deleteInvokesFactoryInvalidate() {
+    void deleteReportsTheRowWasDeleted() {
         when(repo.deleteByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(true);
 
         var response = controller.delete(ctx, ORG_SLUG, ModelProvider.OPENAI);
 
         assertTrue(response.data().deleted());
-        verify(factory, times(1)).invalidate(ORG_ID, ModelProvider.OPENAI);
     }
 
     // ---- catalog() fans refreshingRead out across providers instead of blocking sequentially ----

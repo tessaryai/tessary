@@ -45,9 +45,10 @@ public class CapabilityController {
 
     /**
      * Optional on purpose. {@code DbFeatureFlags} caches an org's overrides for ten seconds, and a
-     * write should bite immediately rather than after that window, but a build may not carry a
-     * {@code DbFeatureFlags} bean to invalidate. An {@link ObjectProvider} lets this controller stay
-     * correct either way instead of failing to start when the bean is absent.
+     * write should bite immediately rather than after that window, but a context that replaces
+     * {@code FeatureFlags} with a mock (as some {@code @SpringBootTest}s do) has no {@code
+     * DbFeatureFlags} bean to invalidate. An {@link ObjectProvider} lets this controller start either
+     * way.
      */
     private final ObjectProvider<DbFeatureFlags> openFlags;
 
@@ -66,23 +67,15 @@ public class CapabilityController {
      * The resolved state of every capability for this org, keyed by flag key: the one object the
      * SPA assembles itself from. Every capability is present with an explicit boolean rather than
      * only the enabled ones listed, so the client never has to decide what an absent key means.
-     *
-     * <p>{@code unavailable} is the second question a client has to answer: a capability can be off
-     * because nobody turned it on, or absent because this build does not carry the code behind it.
-     * Those need different UI, a switch versus an explanation, and the difference is not derivable
-     * from the map.
      */
-    public record CapabilitiesView(
-            Map<String, Boolean> capabilities,
-            @JsonProperty("unavailable") List<String> unavailable) {}
+    public record CapabilitiesView(Map<String, Boolean> capabilities) {}
 
     /** One capability's override state: what it resolves to, what it would resolve to, and who decided. */
     public record OverrideView(
             String capability,
             boolean enabled,
             @JsonProperty("open_default") boolean openDefault,
-            @JsonProperty("has_override") boolean hasOverride,
-            boolean unavailable) {}
+            @JsonProperty("has_override") boolean hasOverride) {}
 
     /** Pin one capability on or off for this org. */
     public record SetOverrideRequest(boolean enabled) {}
@@ -98,13 +91,7 @@ public class CapabilityController {
         for (Capability capability : Capability.all()) {
             out.put(capability.wire(), resolved.isEnabled(capability));
         }
-        List<String> unavailable = new ArrayList<>();
-        for (Capability capability : Capability.all()) {
-            if (capabilities.unavailable().contains(capability)) {
-                unavailable.add(capability.wire());
-            }
-        }
-        return ApiResponse.ok(new CapabilitiesView(out, List.copyOf(unavailable)));
+        return ApiResponse.ok(new CapabilitiesView(out));
     }
 
     /**
@@ -126,8 +113,7 @@ public class CapabilityController {
                     capability.wire(),
                     resolved.isEnabled(capability),
                     capabilities.defaultFor(capability),
-                    stored.containsKey(capability.wire()),
-                    capabilities.unavailable().contains(capability)));
+                    stored.containsKey(capability.wire())));
         }
         return ApiResponse.ok(out);
     }
@@ -141,8 +127,7 @@ public class CapabilityController {
             @Valid @RequestBody SetOverrideRequest body) {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.CAPABILITIES_MANAGE, "change a capability");
-        Capability capability = requireAvailable(key);
-        requireDbOverrides(capability);
+        Capability capability = requireKnown(key);
         overrides.upsert(r.org().id(), capability.wire(), body.enabled());
         invalidate(r.org().id());
         log.info("org {} set capability {}={}", r.org().id(), capability.wire(), body.enabled());
@@ -155,44 +140,20 @@ public class CapabilityController {
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String key) {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.CAPABILITIES_MANAGE, "change a capability");
-        Capability capability = requireAvailable(key);
-        requireDbOverrides(capability);
+        Capability capability = requireKnown(key);
         overrides.delete(r.org().id(), capability.wire());
         invalidate(r.org().id());
         log.info("org {} cleared the capability override for {}", r.org().id(), capability.wire());
         return ApiResponse.ok(one(r.org().id(), capability));
     }
 
-    /**
-     * Resolve a wire key, refusing both an unknown one and one this build cannot honour. The second
-     * refusal is a 422 and not a silent no-op on purpose: an operator who "enables" a classifier
-     * whose code is absent would get an empty result set and go hunting for the bug in their traces.
-     */
-    private Capability requireAvailable(String key) {
-        Capability capability =
-                Capability.fromWire(key).orElseThrow(() -> new TessaryException(CapabilityError.UNKNOWN, key));
-        if (capabilities.unavailable().contains(capability)) {
-            throw new TessaryException(CapabilityError.UNAVAILABLE, capability.wire());
-        }
-        return capability;
-    }
-
-    /**
-     * Per-org overrides depend on a {@code DbFeatureFlags} bean being present. When it is not, a row
-     * written into {@code org_feature_flag} would be read by nothing; refusing the write is honest,
-     * a silent no-op would not be.
-     */
-    private void requireDbOverrides(Capability capability) {
-        if (openFlags.getIfAvailable() == null) {
-            throw new TessaryException(CapabilityError.OVERRIDES_MANAGED_EXTERNALLY, capability.wire());
-        }
+    /** Resolve a wire key, refusing an unknown one with a 422. */
+    private Capability requireKnown(String key) {
+        return Capability.fromWire(key).orElseThrow(() -> new TessaryException(CapabilityError.UNKNOWN, key));
     }
 
     private void invalidate(String orgId) {
-        DbFeatureFlags flags = openFlags.getIfAvailable();
-        if (flags != null) {
-            flags.invalidate(orgId);
-        }
+        openFlags.ifAvailable(flags -> flags.invalidate(orgId));
     }
 
     private OverrideView one(String orgId, Capability capability) {
@@ -201,7 +162,6 @@ public class CapabilityController {
                 capability.wire(),
                 capabilities.isEnabled(orgId, capability),
                 capabilities.defaultFor(capability),
-                stored.containsKey(capability.wire()),
-                capabilities.unavailable().contains(capability));
+                stored.containsKey(capability.wire()));
     }
 }

@@ -117,7 +117,7 @@ class MeteringIntegrationTest {
         seedDetection(pid, "secret_leak", obs2, inBucket);
 
         // ---- schedule + claim (the worker's coordination) ----
-        int scheduled = jobs.scheduleDueBuckets(bucketStartIso, MeteringWorker.BUCKET_UNIT);
+        int scheduled = jobs.scheduleDueBuckets(bucketStartIso, MeteringWorker.BUCKET_HOUR);
         assertTrue(scheduled >= 1, "a job is scheduled for the project's closed bucket");
 
         var claimed = jobs.claimBatch(50, 600);
@@ -134,7 +134,7 @@ class MeteringIntegrationTest {
                 rollups.countL1Evals(pid, bucketStartIso, to),
                 "three classifier detections, read off the stitched detection view");
 
-        worker.meterClaimedForTest(job);
+        worker.meterOne(job);
 
         // ---- claim is exhausted (no redundant re-scan of a metered bucket) ----
         var afterDone = jobs.claimBatch(50, 600).stream()
@@ -143,7 +143,7 @@ class MeteringIntegrationTest {
         assertTrue(afterDone.isEmpty(), "a done job is not re-claimed");
 
         // ---- idempotency: re-metering the same closed bucket is a no-op (overwrite, not add) ----
-        worker.meterClaimedForTest(job);
+        worker.meterOne(job);
 
         // ---- project-scoped timeseries read surface ----
         String from = bucketStart.minus(1, ChronoUnit.HOURS).toString();
@@ -236,8 +236,8 @@ class MeteringIntegrationTest {
                 .filter(j -> j.projectId().equals(pid) && j.bucketStart().equals(bucketStart.toString()))
                 .findFirst()
                 .orElseThrow();
-        worker.meterClaimedForTest(job);
-        worker.meterClaimedForTest(job); // re-run: idempotent overwrite, not accumulation
+        worker.meterOne(job);
+        worker.meterOne(job); // re-run: idempotent overwrite, not accumulation
 
         String from = bucketStart.minus(1, ChronoUnit.HOURS).toString();
         String until = bucketStart.plus(1, ChronoUnit.HOURS).toString();
@@ -256,7 +256,7 @@ class MeteringIntegrationTest {
                         && j.granularity().equals(granularity))
                 .findFirst()
                 .orElseThrow();
-        worker.meterClaimedForTest(job);
+        worker.meterOne(job);
     }
 
     private long rollupRowCount(String pid, String unit, String bucketStart) {

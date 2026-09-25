@@ -393,10 +393,6 @@ public class RcaAnalysisService {
     }
 
     private String writeJson(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (Exception e) {
-            throw new IllegalStateException("failed to serialize rca report field", e);
-        }
+        return mapper.valueToTree(value).toString();
     }
 }

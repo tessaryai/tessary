@@ -10,12 +10,11 @@ import org.jspecify.annotations.Nullable;
  * 500. What the classifier saw stays in its own tables and in {@link #payloadJson}; the
  * substrate it saw stays in {@code finding_evidence}, as references.
  *
- * <p>{@link #causeKey} is scoped: a single partial unique index ({@code ux_finding_live}) covers
- * every classifier, so the scope a cause is unique within lives inside the key itself, e.g.
- * {@code <profile>:<kind>:<key>:<workflow>} for behaviour drift or {@code <baseline>:<key>} for
- * metric drift (the baseline id carries environment scope; collapsing it would silently merge
- * findings across environments). {@link #nativeCauseKey()} gives back the classifier's own half,
- * which is what a case's identity is cut on.
+ * <p>{@link #causeKey} is scoped: a single partial unique index ({@code ux_finding_live}) covers every
+ * classifier, so the scope a cause is unique within lives inside the key itself, e.g.
+ * {@code <baseline>:<key>} for metric drift (the baseline id carries environment scope; collapsing it would
+ * silently merge findings across environments). {@link #nativeCauseKey()} gives back the classifier's own
+ * half, which is what a case's identity is cut on.
  */
 public record FindingRow(
         String id,
@@ -89,10 +88,9 @@ public record FindingRow(
     }
 
     /**
-     * The behaviour vocabulary's cause kind ({@code novelty} / {@code surprisal} / {@code omission} /
-     * {@code distribution_shift} / {@code rate_shift}). A persisted string carried in the payload
-     * rather than as a column: it is one classifier family's taxonomy, and {@link #classifierKey}
-     * is what every shared reader routes on.
+     * The behaviour vocabulary's cause kind ({@code distribution_shift} / {@code rate_shift} / ...). A
+     * persisted string carried in the payload rather than as a column: it is one classifier family's
+     * taxonomy, and {@link #classifierKey} is what every shared reader routes on.
      *
      * <p>Falls back to {@link #classifierKey} for a classifier with no such taxonomy. Non-null
      * rather than nullable: every caller here uses it as a switch selector or a log field, and a
@@ -101,21 +99,6 @@ public record FindingRow(
     public String causeKind() {
         String kind = payloadText("cause_kind");
         return kind == null ? classifierKey : kind;
-    }
-
-    /** The verdict the finding's exemplar trace was judged under, when its classifier recorded one. */
-    public @Nullable String exemplarVerdictId() {
-        return payloadText("exemplar_verdict_id");
-    }
-
-    /**
-     * The behaviour profile this finding is about, or null when another classifier filed it. Read
-     * off the typed subject rather than a column of its own: {@code subject_kind} says whose
-     * vocabulary {@link #subjectId} is written in, and reading the id without checking it could
-     * hand a behaviour caller a metric baseline.
-     */
-    public @Nullable String profileId() {
-        return SubjectKind.BEHAVIOR_PROFILE.equals(subjectKind) ? subjectId : null;
     }
 
     /** The metric baseline this finding is about, or null when another classifier filed it. */
@@ -189,15 +172,6 @@ public record FindingRow(
     public static final class Cause {
         private Cause() {}
 
-        /** A gram in the trace is unseen, or quarantined with a count still under the floor. */
-        public static final String NOVELTY = "novelty";
-
-        /** The max backoff surprisal over the trace's positions exceeds the budget quantile. */
-        public static final String SURPRISAL = "surprisal";
-
-        /** A near-universal symbol of the baseline is absent from the trace. */
-        public static final String OMISSION = "omission";
-
         /**
          * Metric drift: a bucket's recent window sits measurably away from its own earlier window.
          * Not a per-trace label, since slow is not bad and expensive is not bad in isolation; what
@@ -248,13 +222,11 @@ public record FindingRow(
     public static final class SubjectKind {
         private SubjectKind() {}
 
-        public static final String BEHAVIOR_PROFILE = "behavior_profile";
         public static final String METRIC_BASELINE = "metric_baseline";
         public static final String TOOL = "tool";
-        public static final String CONFORMANCE_RULE = "conformance_rule";
 
         /**
-         * A per-span classifier, {@code subject_id} being the signal row's id. The other four kinds
+         * A per-span classifier, {@code subject_id} being the signal row's id. The other two kinds
          * are fitted state a classifier compares traffic against; a per-span classifier has none, it
          * matches spans against its own definition, so a burst of matches is about the classifier
          * itself.

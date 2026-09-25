@@ -62,7 +62,6 @@ class RedactionGuardIntegrationTest {
     private static RawEntry span(String input, String output, Map<String, Object> meta) {
         return new RawEntry(
                 "span-1",
-                null,
                 "agent",
                 input,
                 output,

@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,7 +42,7 @@ class AnthropicModelListerTest {
     private final HttpClient http = mock(HttpClient.class);
 
     private AnthropicModelLister lister() {
-        return new AnthropicModelLister(http, new ObjectMapper());
+        return new AnthropicModelLister(http, new ObjectMapper(), Duration.ofSeconds(5));
     }
 
     private static ResolvedCredential cred(String apiKey) {

@@ -22,6 +22,7 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -161,7 +162,8 @@ class FrustrationRateReplayIntegrationTest {
         assertNotNull(state(pid, "cs-chat").baseline());
 
         classifiers.updateConfig(pid, signal.id(), "{\"arl_target\":20000}");
-        ClassifierRow retuned = classifiers.findByKey(pid, "frustration").orElseThrow();
+        ClassifierRow retuned =
+                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
         Instant at = Instant.now();
         service.refresh(pid, retuned, at);
 
@@ -211,7 +213,7 @@ class FrustrationRateReplayIntegrationTest {
 
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
-        return classifiers.findByKey(pid, "frustration").orElseThrow();
+        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
     /** {@code perHour} one-turn conversations an hour, the first {@code rate} of each hour flagged. */

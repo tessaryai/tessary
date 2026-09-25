@@ -22,15 +22,8 @@ import type { RcaCause, RcaHypothesis, RcaRuledOutCheck } from "../api/types";
  */
 
 const METRIC_LABEL: Record<string, string> = {
-  pass_rate: "Pass rate",
-  score: "Score",
   frustration: "Frustrated sessions",
   groundedness: "Flagged answers",
-};
-
-const SUBJECT_LABEL: Record<string, string> = {
-  grader: "Grader",
-  call_site: "Call site",
 };
 
 const CONFIDENCE_TONE: Record<string, BadgeTone> = {
@@ -48,8 +41,7 @@ function windowLabel(iso: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" });
 }
 
-/** How each checklist item renders. Reports written before the checks became subjective carry no
- *  `assessment`, so those fall back to the old pass/fail glyph. */
+/** How each checklist item renders, by the analysis's own assessment. */
 const ASSESSMENT: Record<string, { glyph: string; label: string; className: string }> = {
   ruled_out: { glyph: "✓", label: "Ruled out", className: "bg-success-subtle text-success" },
   contributing: { glyph: "!", label: "Contributing", className: "bg-warning-subtle text-warning" },
@@ -69,7 +61,7 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
       </div>
       <div className="flex flex-col gap-0.5 px-1.5 pb-2.5">
         {checks.map((c) => {
-          const state = ASSESSMENT[c.assessment ?? (c.passed ? "ruled_out" : "explains")] ?? ASSESSMENT.unknown;
+          const state = ASSESSMENT[c.assessment];
           return (
             <div key={c.check} className="flex items-start gap-3 px-2 py-2 rounded-card">
               <span
@@ -106,7 +98,7 @@ function HypothesisCard({ hypothesis, rank, exploreBase }: { hypothesis: RcaHypo
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-label text-subtle tabular-nums">#{rank}</span>
           <span className="text-body font-medium text-fg">{hypothesis.title}</span>
-          <Badge tone={CONFIDENCE_TONE[hypothesis.confidence] ?? "neutral"}>{hypothesis.confidence} confidence</Badge>
+          <Badge tone={CONFIDENCE_TONE[hypothesis.confidence]}>{hypothesis.confidence} confidence</Badge>
         </div>
         <p className="text-small text-muted mt-1.5">{hypothesis.rationale}</p>
         {hypothesis.evidence_trace_ids.length > 0 && (
@@ -171,7 +163,7 @@ function CausesTable({ causes, base, byTrace }: { causes: RcaCause[]; base: stri
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-label text-subtle tabular-nums">#{i + 1}</span>
                 <span className="text-body font-medium text-fg">{c.title}</span>
-                <Badge tone={CONFIDENCE_TONE[c.confidence] ?? "neutral"}>{c.confidence} confidence</Badge>
+                <Badge tone={CONFIDENCE_TONE[c.confidence]}>{c.confidence} confidence</Badge>
                 <span className="text-small text-muted tabular-nums">
                   {byTrace
                     ? `${c.traces_affected} ${c.traces_affected === 1 ? "trace" : "traces"}`
@@ -236,8 +228,7 @@ export function RcaReport() {
 
   const base = `/orgs/${orgSlug}/projects/${projectSlug}`;
 
-  // A report is immutable, so re-running produces a NEW one and we navigate to it. The common
-  // failure is RCA.NOT_A_MOVER — the subject has stopped moving, so there is nothing to snapshot;
+  // A report is immutable, so re-running produces a NEW one and we navigate to it. On failure,
   // surface the API's own message rather than a bare retry.
   const rerun = useMutation({
     mutationFn: () => api.rerunRca(reportId),
@@ -274,7 +265,7 @@ export function RcaReport() {
     ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
         groundedness ? "Flagged answers" : "Frustrated sessions"
       } rose to ${pct1(r.current_value)} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
-    : `${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
+    : `${r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
         worse ? "fell" : "moved"
       } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`;
 
@@ -289,7 +280,7 @@ export function RcaReport() {
         title={
           <span className="flex items-center gap-3">
             <span>RCA (root-cause analysis): {r.subject_label}</span>
-            <StatusPill status={RCA_JOB_STATUS[r.status] ?? "pending"} label={r.status} />
+            <StatusPill status={RCA_JOB_STATUS[r.status]} label={r.status} />
           </span>
         }
         subtitle={subtitle}
@@ -300,9 +291,7 @@ export function RcaReport() {
                 variant="secondary"
                 size="sm"
                 disabled={rerun.isPending}
-                onClick={() => {
-                  if (!rerun.isPending) rerun.mutate();
-                }}
+                onClick={() => rerun.mutate()}
                 title={rerunError ?? "Analyze this degradation again against the latest traces"}
               >
                 {rerun.isPending ? "Starting…" : "Re-run RCA"}
@@ -324,9 +313,8 @@ export function RcaReport() {
       {running && (
         <div className="py-6 flex items-center gap-2 text-small text-muted">
           <Spinner size="sm" />
-          {r.engine === "agentic"
-            ? "Analyzing. Tessary measures the structural causes, then an agent reads your repo and traces. This can take several minutes."
-            : "Analyzing. Ruling out the structural causes and diffing the failing cohort…"}
+          Analyzing. Tessary measures the structural causes, then an agent reads your repo and traces. This can
+          take several minutes.
         </div>
       )}
 
@@ -373,8 +361,8 @@ export function RcaReport() {
               <div className="px-3.5 py-3">
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-label uppercase text-subtle">Verdict</span>
-                  <Badge tone={RCA_VERDICT_TONE[r.verdict] ?? "neutral"}>
-                    {RCA_VERDICT_LABEL[r.verdict] ?? r.verdict}
+                  <Badge tone={RCA_VERDICT_TONE[r.verdict]}>
+                    {RCA_VERDICT_LABEL[r.verdict]}
                   </Badge>
                 </div>
                 {r.summary && <p className="text-small text-fg mt-2">{r.summary}</p>}

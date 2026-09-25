@@ -72,8 +72,7 @@ public class PublicOriginGuard {
         // BEFORE the no-domain early return: the value this catches is built precisely when
         // SITE_DOMAIN is blank, so a check that runs only under a domain never sees it.
         rejectHostlessMcpOrigin();
-        String raw =
-                tessary.getSiteDomain() == null ? "" : tessary.getSiteDomain().trim();
+        String raw = tessary.getSiteDomain().trim();
         if (raw.isEmpty() || NO_DOMAIN_SENTINEL.equals(raw)) {
             return;
         }
@@ -85,16 +84,13 @@ public class PublicOriginGuard {
         }
         tessary.setSiteDomain(domain);
 
-        String mode = tessary.getTlsMode() == null
-                ? "acme"
-                : tessary.getTlsMode().trim().toLowerCase(Locale.ROOT);
+        String mode = tessary.getTlsMode().trim().toLowerCase(Locale.ROOT);
         if (!TLS_MODES.contains(mode)) {
             throw new IllegalStateException(
                     "Refusing to start: TLS_MODE must be one of acme, owncert or upstream, not '" + tessary.getTlsMode()
                             + "'.");
         }
-        if ("acme".equals(mode)
-                && (tessary.getAcmeEmail() == null || tessary.getAcmeEmail().isBlank())) {
+        if ("acme".equals(mode) && tessary.getAcmeEmail().isBlank()) {
             throw new IllegalStateException("Refusing to start: ACME_EMAIL is required when SITE_DOMAIN is set and "
                     + "TLS_MODE is acme. Let's Encrypt registers the certificate account to that address, so it must "
                     + "be yours; set TLS_MODE=owncert or TLS_MODE=upstream to bring your own certificate or "
@@ -138,10 +134,7 @@ public class PublicOriginGuard {
     }
 
     /** The configured value when it already names the domain; the derived one when it is blank or local; otherwise a refusal naming both keys. */
-    private static String reconcile(String key, @Nullable String configured, String domain, String derived) {
-        if (configured == null) {
-            return derived;
-        }
+    private static String reconcile(String key, String configured, String domain, String derived) {
         String host = hostOf(configured);
         if (host == null || isLocal(host)) {
             return derived;

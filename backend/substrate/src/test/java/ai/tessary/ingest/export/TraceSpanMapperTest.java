@@ -28,16 +28,7 @@ class TraceSpanMapperTest {
 
     private static RawEntry raw(String input, String output, String model) {
         return new RawEntry(
-                "span-1",
-                "https://src/span-1",
-                "chat",
-                input,
-                output,
-                model,
-                Map.of(),
-                "parent-1",
-                "trace-1",
-                "2026-05-22T10:00:00Z");
+                "span-1", "chat", input, output, model, Map.of(), "parent-1", "trace-1", "2026-05-22T10:00:00Z", null);
     }
 
     private static JsonNode parseAttr(ObjectNode span, String attr) throws Exception {
@@ -52,7 +43,9 @@ class TraceSpanMapperTest {
                         "[{\"role\":\"system\",\"content\":\"You are a planner\"},{\"role\":\"user\",\"content\":\"plan X\"}]",
                         "the plan",
                         "claude-sonnet-4-6"),
-                "docs-qa");
+                "docs-qa",
+                null,
+                null);
 
         assertEquals("anthropic", span.get("attributes").get("gen_ai.system").asText());
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
@@ -73,7 +66,7 @@ class TraceSpanMapperTest {
     @Test
     void plainTextInput_wrapsAsSingleUserMessage() throws Exception {
         ObjectNode span = TraceSpanMapper.toSpan(
-                raw("How do I rotate the db password?", "use the runbook", "gpt-4o-mini"), "support");
+                raw("How do I rotate the db password?", "use the runbook", "gpt-4o-mini"), "support", null, null);
 
         assertEquals("openai", span.get("attributes").get("gen_ai.system").asText());
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
@@ -91,7 +84,9 @@ class TraceSpanMapperTest {
                         "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"},{\"type\":\"text\",\"text\":\"there\"}]}]",
                         "hello",
                         "claude-3-5-haiku"),
-                "svc");
+                "svc",
+                null,
+                null);
 
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals("user", in.get(0).get("role").asText());
@@ -100,7 +95,7 @@ class TraceSpanMapperTest {
 
     @Test
     void carriesIdentityAndRequiredKeys() {
-        ObjectNode span = TraceSpanMapper.toSpan(raw("q", "a", "claude-sonnet-4-6"), "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(raw("q", "a", "claude-sonnet-4-6"), "svc", null, null);
 
         assertEquals("SpanKind.CLIENT", span.get("kind").asText());
         assertEquals("trace-1", span.get("context").get("trace_id").asText());
@@ -128,7 +123,7 @@ class TraceSpanMapperTest {
 
     @Test
     void toSpanLine_isSingleLineJson() {
-        String line = TraceSpanMapper.toSpanLine(raw("q", "a", "gpt-4o"), "svc");
+        String line = TraceSpanMapper.toSpanLine(raw("q", "a", "gpt-4o"), "svc", null, null);
         assertFalse(line.contains("\n"), "a JSONL line must not contain newlines");
         assertTrue(line.startsWith("{") && line.endsWith("}"));
     }
@@ -144,7 +139,9 @@ class TraceSpanMapperTest {
                                 + "{\"type\":\"image_url\",\"image_url\":{\"url\":\"https://e/x.png\"}}]}]",
                         "a magenta pixel",
                         "gpt-4o"),
-                "svc");
+                "svc",
+                null,
+                null);
 
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals(1, in.size());
@@ -169,7 +166,9 @@ class TraceSpanMapperTest {
                                 + b64 + "\"}}]}]",
                         "ok",
                         "claude-sonnet-4-6"),
-                "svc");
+                "svc",
+                null,
+                null);
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         String content = in.get(0).get("parts").get(0).get("content").asText();
         assertEquals("data:image/jpeg;base64," + b64, content, "the real bytes are inlined, not labeled away");
@@ -223,7 +222,9 @@ class TraceSpanMapperTest {
                                 + "\"}}]}]",
                         "ok",
                         "gpt-4o"),
-                "svc");
+                "svc",
+                null,
+                null);
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals(
                 "data:application/pdf;base64," + b64,
@@ -315,7 +316,9 @@ class TraceSpanMapperTest {
                                 + "{\"type\":\"url\",\"url\":\"https://e/report.pdf\"}}]}]",
                         "ok",
                         "gpt-4o"),
-                "svc");
+                "svc",
+                null,
+                null);
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals(
                 "[document: https://e/report.pdf]",
@@ -325,7 +328,7 @@ class TraceSpanMapperTest {
     @Test
     void textOnlyMessage_unchanged_noHasMediaFlag() throws Exception {
         ObjectNode span = TraceSpanMapper.toSpan(
-                raw("[{\"role\":\"user\",\"content\":\"plain question\"}]", "answer", "gpt-4o"), "svc");
+                raw("[{\"role\":\"user\",\"content\":\"plain question\"}]", "answer", "gpt-4o"), "svc", null, null);
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
         assertEquals(
                 "plain question", in.get(0).get("parts").get(0).get("content").asText());

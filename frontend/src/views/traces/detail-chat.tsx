@@ -164,8 +164,6 @@ export type SpanPlan = {
   input: ChatMessage[];
   /** Output messages this span is the first to carry, or null when not a chat payload. */
   output: ChatMessage[] | null;
-  /** True when the span's payloads are not messages at all (a tool's args/result). */
-  opaque: boolean;
 };
 
 export type ConversationPlan = {
@@ -177,8 +175,8 @@ export type ConversationPlan = {
 /** Root before child, then by clock: the order the dialogue actually happened in. */
 function chronological(spans: Span[]): Span[] {
   return [...spans].sort((a, b) => {
-    const at = a.started_at ?? "";
-    const bt = b.started_at ?? "";
+    const at = a.started_at;
+    const bt = b.started_at;
     if (at !== bt) return at < bt ? -1 : 1;
     if (a.parent_span_id == null && b.parent_span_id != null) return -1;
     if (b.parent_span_id == null && a.parent_span_id != null) return 1;
@@ -231,7 +229,6 @@ export function planConversation(spans: Span[]): ConversationPlan {
     bySpan.set(o.id, {
       input: inMsgs ? take(inMsgs) : [],
       output: outMsgs ? take(outMsgs) : null,
-      opaque: inMsgs == null && outMsgs == null,
     });
   }
 
@@ -450,8 +447,6 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
           name: typeof block.name === "string" ? block.name : "tool",
           args: toolArgs(block) != null ? JSON.stringify(toolArgs(block)) : null,
           result: id != null ? (results.get(id) ?? null) : null,
-          latencyMs: null,
-          retries: null,
           failed: false,
         },
       });

@@ -1,14 +1,5 @@
-# License-header scanner exceptions. Read by
-# scripts/check-license-headers.sh and applied on top of the publishable-tree scope it already
-# derives from scripts/lib/export-denylist.txt's `delete` rows. That is one row today,
-# covering the tree that never reaches the published repo: nothing under it reaches the published
-# export, so an Apache-2.0 SPDX claim on it would misstate what license actually travels with the
-# code — it is out of scope by construction, not listed here. (That sentence used to name
-# classifiers/, product/, slack-service/, .dev-tools/, .claude/, scripts/attic and four ops scripts
-# one at a time; those paths are all under that excluded tree now, and the open half of
-# classifiers/ that stayed behind is in scope and carries the header.) This file is for files that
-# ARE in the publishable tree, carry an in-scope extension, and still should not (or cannot) carry
-# the header.
+# License-header scanner exceptions. Read by scripts/check-license-headers.sh. This file is for
+# files that carry an in-scope extension and still should not (or cannot) carry the header.
 #
 # Row shape:   path|reason      path is repo-root relative, exact, no glob. A path under a
 # directory is still named individually — a new file added under that directory later is NOT
@@ -16,8 +7,7 @@
 # enumeration instead of a directory pattern.
 #
 # Every row's path must resolve in the current tree; check-license-headers.sh fails loudly on a
-# dead row the same way scripts/lib/check-export-denylist.sh does for the export denylist, so a
-# moved or deleted exception cannot sit here looking like it still covers something.
+# dead row, so a moved or deleted exception cannot sit here looking like it still covers something.
 #
 # Categories considered and their disposition, logged here on the understanding that this call
 # is the issue-taker's to make and explain:
@@ -32,8 +22,8 @@
 #     and contract/tests/ are platform-owned per that same file's header and are NOT exempt — they
 #     get the header like any other source file.
 #   - Test fixtures: audited for anything binary-adjacent or otherwise unable to carry a header:
-#     none found among files carrying an in-scope extension. scrub-allowlist.txt's Java fixture
-#     files (SecretLeakDetectorTest.java, GithubTokenServicePatTest.java,
+#     none found among files carrying an in-scope extension. The secret-scan fixture files
+#     (SecretLeakDetectorTest.java, GithubTokenServicePatTest.java,
 #     GithubTokenServiceKeyTest.java) are ordinary compilable Java source with fixture STRING
 #     content inside — they take the header exactly like any other test file.
 #   - Generated files: audited for "DO NOT EDIT" / "@generated" / "auto-generated" markers across

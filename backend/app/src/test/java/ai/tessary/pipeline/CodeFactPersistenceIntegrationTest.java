@@ -99,12 +99,11 @@ class CodeFactPersistenceIntegrationTest {
     }
 
     @Test
-    void anAbsentSchemaKeepsThePlatformsCaptureAcrossAWipeAndWrite() {
+    void anAbsentSchemaKeepsTheStoredSchemaAcrossAWipeAndWrite() throws Exception {
         String pid = project("codefact-absent-keeps");
-        repo.replace(pid, pipeline(null, List.of(), List.of()));
-        repo.setCallSiteOutputSchema(pid, "cs", "{\"type\":\"object\"}");
+        repo.replace(pid, pipeline(MAPPER.readTree("{\"type\":\"object\"}"), List.of(), List.of()));
 
-        repo.replace(pid, pipeline(null, List.of(), List.of())); // still silent on the fact
+        repo.replace(pid, pipeline(null, List.of(), List.of())); // silent on the fact
 
         assertNotNull(rawColumn(pid, "output_schema"), "silence carried the capture across the wipe");
     }

@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -66,9 +67,9 @@ public class McpDispatcher {
         String method = reqMethod == null ? "" : reqMethod;
         try {
             return switch (method) {
-                case "initialize" -> ok(req, initialize(req.params(), ctx));
+                case "initialize" -> ok(req, initialize(req.params()));
                 case "ping" -> ok(req, Map.of());
-                case "tools/list" -> ok(req, listTools(ctx));
+                case "tools/list" -> ok(req, listTools());
                 case "tools/call" -> ok(req, callTool(req.params(), ctx));
                 default -> {
                     if (isNotification) yield null;
@@ -79,7 +80,7 @@ public class McpDispatcher {
         } catch (IllegalArgumentException e) {
             return JsonRpc.Response.err(idOrNull(req), JsonRpc.INVALID_PARAMS, e.getMessage(), null);
         } catch (McpTool.ToolException e) {
-            return ok(req, toolErrorResult(e.getMessage()));
+            return ok(req, toolErrorResult(Objects.requireNonNull(e.getMessage())));
         } catch (Exception e) {
             log.error("internal error handling method {}", req.method(), e);
             return JsonRpc.Response.err(
@@ -100,7 +101,7 @@ public class McpDispatcher {
 
     // --------------------------------------------------------------- initialize
 
-    private Map<String, Object> initialize(@Nullable JsonNode params, TenantContext ctx) {
+    private Map<String, Object> initialize(@Nullable JsonNode params) {
         String clientVersion = params != null && params.hasNonNull("protocolVersion")
                 ? params.get("protocolVersion").asText()
                 : PROTOCOL_VERSION;
@@ -113,26 +114,24 @@ public class McpDispatcher {
         out.put("protocolVersion", clientVersion);
         out.put("capabilities", capabilities);
         out.put("serverInfo", serverInfo);
-        out.put("instructions", instructions(ctx));
+        out.put("instructions", instructions());
         return out;
     }
 
     /**
-     * The server's own description of itself, written from the tools this token is actually offered.
+     * The server's own description of itself, written from the tools the registry actually holds.
      *
-     * <p>A fixed string here would tell a partner's agent to "use get_grader" on a token whose
-     * {@code tools/list} does not contain it — the instructions are read as authoritative and would be
-     * describing a different product. Built from {@code availableFor} instead, so the prose and the
-     * catalogue cannot disagree.
+     * <p>A fixed string here would tell an agent to use a tool its {@code tools/list} does not contain — the
+     * instructions are read as authoritative and would be describing a different product. Built from
+     * {@code tools()} instead, so the prose and the catalogue cannot disagree.
      *
-     * <p>The read-only sentence is the one thing here that is NOT conditional on the offer, because it is a
-     * property of the surface rather than of a tool: no capability, present or future, turns a tool in this
-     * catalogue into one that writes. Saying it once up front is cheaper than an agent discovering it by
+     * <p>The read-only sentence is the one thing here that is NOT conditional on the catalogue, because it is
+     * a property of the surface rather than of a tool: no tool in this catalogue writes. Saying it once up front is cheaper than an agent discovering it by
      * planning a write and failing to find the tool for it.
      */
-    private String instructions(TenantContext ctx) {
+    private String instructions() {
         Set<String> available = new LinkedHashSet<>();
-        for (McpTool t : registry.availableFor(ctx)) available.add(t.name());
+        for (McpTool t : registry.tools()) available.add(t.name());
         StringBuilder sb = new StringBuilder("MCP surface for the tessary backend. "
                 + "Every tool is read-only: nothing you call can write, spend, or start an agent run. ");
         if (available.contains("get_project")) {
@@ -156,10 +155,6 @@ public class McpDispatcher {
                     + "count_only=true first for the per-role sizes, then page the ids and open them with "
                     + "get_trace / get_span. It never samples for you — if you take a subset, say so and say "
                     + "what you took. ");
-        }
-        if (available.contains("list_graders")) {
-            sb.append("Use list_graders / get_grader to read the curated grader set, with the curation "
-                    + "overlay already applied. Editing one is a UI action. ");
         }
         if (available.contains("query_count")) {
             sb.append("Use the aggregation-first query tools query_count / query_timeseries / query_facets / "
@@ -187,9 +182,9 @@ public class McpDispatcher {
 
     // --------------------------------------------------------------- tools/list
 
-    private Map<String, Object> listTools(TenantContext ctx) {
+    private Map<String, Object> listTools() {
         List<Map<String, Object>> tools = new ArrayList<>();
-        for (McpTool t : registry.availableFor(ctx)) {
+        for (McpTool t : registry.tools()) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("name", t.name());
             entry.put("description", t.description());
@@ -206,10 +201,7 @@ public class McpDispatcher {
             throw new IllegalArgumentException("tools/call requires params.name");
         }
         String name = params.get("name").asText();
-        // availableTool, not get: a client holding a stale tool list must not be able to call a tool the
-        // org is no longer offered, and the answer for a withheld tool is the same as for one that never
-        // existed.
-        McpTool tool = registry.availableTool(name, ctx);
+        McpTool tool = registry.tool(name);
         if (tool == null) {
             throw new McpTool.ToolException("unknown tool: " + name);
         }
@@ -247,8 +239,8 @@ public class McpDispatcher {
         return result;
     }
 
-    private Map<String, Object> toolErrorResult(@Nullable String message) {
-        Map<String, Object> textBlock = Map.of("type", "text", "text", message == null ? "" : message);
+    private Map<String, Object> toolErrorResult(String message) {
+        Map<String, Object> textBlock = Map.of("type", "text", "text", message);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("content", List.of(textBlock));
         result.put("isError", true);

@@ -21,8 +21,7 @@ import org.jspecify.annotations.Nullable;
  * <p>Credential fields hold AES-GCM-sealed ciphertext (via {@link ai.tessary.crypto.SecretBox}).
  * Every provider requires user-provided credentials — there is no platform-funded, credential-free
  * platform any more (Ollama, the one exception, was removed by a maker filter) — and a run
- * fails with {@code MISSING_CREDENTIALS} when the org has none (see {@code
- * ChatModelFactory#resolveApiKey} / {@code buildBedrock}). The wire form never carries decrypted
+ * fails with {@code MISSING_CREDENTIALS} when the org has none. The wire form never carries decrypted
  * secrets — the controller projects to a "redacted" view that just exposes boolean {@code has_*}
  * flags. {@code bedrockModelArn} stays here because inference-profile ARNs are AWS-account-scoped, so
  * they live with the account credentials rather than the catalog.
@@ -42,19 +41,16 @@ public record ProviderCredential(
          * The free-text model id a {@link ModelProvider#CUSTOM} credential names. {@link ModelCatalog}
          * carries one representative CUSTOM entry (there is no fixed catalog for an arbitrary
          * OpenAI-compatible endpoint), so this is where the real model id a project wants actually
-         * lives; {@code ChatModelFactory#buildOpenAiCompat} prefers it over the catalog entry's own
-         * name whenever the provider is CUSTOM and this is set. Meaningless (and never read) for
-         * every other provider.
+         * lives. Meaningless (and never read) for every other provider.
          */
         @JsonProperty("custom_model_name") String customModelName,
         /**
          * {@link #AUTH_MODE_API_KEY} (the default, every row written before this field existed) or
          * {@link #AUTH_MODE_IAM_ROLE} — Bedrock/{@code BEDROCK_MANTLE} only. An explicit, user-set
-         * opt-in: {@code ChatModelFactory#buildBedrock}/{@code buildMantle} refuse to fall back to the
-         * ambient {@code DefaultCredentialsProvider} just because the sealed AWS keys are null (that
-         * refusal is what stops a customer's run from silently billing the platform), so IAM-role
-         * auth is reachable only when a project's own stored row says so — never inferred from absent
-         * keys.
+         * opt-in: nothing falls back to the ambient {@code DefaultCredentialsProvider} just because
+         * the sealed AWS keys are null (that refusal is what stops a customer's run from silently
+         * billing the platform), so IAM-role auth is reachable only when a project's own stored row
+         * says so — never inferred from absent keys.
          */
         @JsonProperty("auth_mode") String authMode,
         @JsonProperty("created_at") String createdAt,

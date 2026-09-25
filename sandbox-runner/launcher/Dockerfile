@@ -19,10 +19,6 @@
 # Nothing here is exposed to musl risk: the sole runtime dependency (e2b) is pure JS, there is no
 # native addon, no python and no compiler. This matches sandbox-runner/agent-sandbox/Dockerfile
 # and its template.ts twin, which moved to Alpine at the same time.
-# NOTE this is no longer classify-service's base (that one is node:24-slim — same Node major since
-# the 22->24 bump, still Debian). The remaining divergence is deliberate, not drift:
-# classify-service needs glibc for onnxruntime-node's and sharp's prebuilt binaries, which is
-# exactly the musl exposure this image has none of.
 FROM node:24-alpine3.24
 
 WORKDIR /app
@@ -35,7 +31,7 @@ WORKDIR /app
 RUN apk upgrade --no-cache
 # Global install rather than corepack — see frontend/Dockerfile. PNPM_VERSION comes from the build
 # orchestrator (Taskfile `PNPM_VERSION` locally; the `PNPM_VERSION` Actions variable in CI); the
-# default is the same pin, held equal by scripts/check-required-inputs.sh.
+# default is the same pin, kept equal to the Taskfile's by hand.
 ARG PNPM_VERSION=11.15.1
 # npm is a build-time bootstrap only — the line below installs with pnpm and CMD is
 # `node server.js`. THE npm@12.0.2 PIN THAT USED TO BE ON THIS LINE IS GONE AND SHOULD NOT COME

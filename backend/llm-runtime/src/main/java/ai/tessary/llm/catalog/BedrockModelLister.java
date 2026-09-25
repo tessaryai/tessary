@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.bedrock.model.FoundationModelSummary;
 /**
  * Lists what a Bedrock credential's OWN configured region actually serves, via Bedrock's control
  * plane ({@code ListFoundationModels} — a different client, and a different host, from the
- * runtime/Converse client {@code ChatModelFactory} builds requests through). Filtered to
+ * runtime/Converse endpoint). Filtered to
  * {@link SupportedMaker#fromBedrockProviderName}'s six-maker allowlist, per {@code
  * FoundationModelSummary.providerName()}.
  *
@@ -35,13 +35,10 @@ import software.amazon.awssdk.services.bedrock.model.FoundationModelSummary;
  *
  * <p><b>Credential shape:</b> a Bedrock/mantle credential is either {@code auth_mode=api_key}
  * (sealed static AWS keys on the row) or {@code auth_mode=iam_role} (the ambient
- * {@code DefaultCredentialsProvider} — the same identity {@code ChatModelFactory}'s own generation
- * calls use for such a row; see {@link ResolvedCredential}'s javadoc for why that is fine here and
- * is NOT fine for an agentic sandbox run).
+ * {@code DefaultCredentialsProvider}; see {@link ResolvedCredential}'s javadoc for why that is fine
+ * here and is NOT fine for an agentic sandbox run).
  */
 public final class BedrockModelLister implements ProviderModelLister {
-
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
 
     /** Builds the {@link BedrockClient} used for one {@link #list} call. Test seam — production
      *  always goes through {@link #defaultClient}; a unit test injects a factory that returns a
@@ -55,13 +52,8 @@ public final class BedrockModelLister implements ProviderModelLister {
     private final Duration timeout;
     private final ClientFactory clientFactory;
 
-    public BedrockModelLister() {
-        this(DEFAULT_TIMEOUT);
-    }
-
     /** @param timeout per-call ceiling on the {@code ListFoundationModels} request — production wires
-     *  this to {@code ModelCatalogProperties#getFetchTimeout()}; the no-arg constructor keeps the
-     *  previous fixed default for callers (tests) that do not care. */
+     *  this to {@code ModelCatalogProperties#getFetchTimeout()}. */
     public BedrockModelLister(Duration timeout) {
         this(timeout, BedrockModelLister::defaultClient);
     }

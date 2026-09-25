@@ -424,10 +424,7 @@ class JevFrustrationDetectorTest {
     }
 
     @Test
-    void itDeclaresTheUnclearedConversationSuppression() {
-        assertEquals(
-                BuiltInDetector.ConversationSuppression.FLAGGED_UNCLEARED,
-                detector().conversationSuppression());
+    void anEmptyPageCarriesNoPauseReason() {
         assertNull(detector().score(signal("{}"), List.of()).pauseReason());
     }
 
@@ -463,7 +460,8 @@ class JevFrustrationDetectorTest {
                 null,
                 null,
                 null,
-                "2026-09-21T11:59:00Z");
+                "2026-09-21T11:59:00Z",
+                null);
     }
 
     /** A turn root with a clean user, assistant, user, assistant prefix, in conversation {@code conv}. */

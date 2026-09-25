@@ -17,8 +17,7 @@ public final class RcaDtos {
      * own call on what that measurement means.
      *
      * <p>Wire name and column stay {@code ruled_out} for continuity with reports written before the
-     * checks became subjective. {@code assessment} and {@code measurement} are null on those older
-     * reports (whose checks were threshold gates), so readers must fall back to {@code passed}.
+     * checks became subjective.
      *
      * @param check the check id — {@link RcaChecklist.Measurement#check}
      * @param passed legacy view of the assessment: true only when it is {@code ruled_out}
@@ -30,7 +29,7 @@ public final class RcaDtos {
             String check,
             boolean passed,
             String detail,
-            @Nullable String assessment,
+            String assessment,
             @Nullable String measurement) {
 
         /** {@code assessment} values — how much of the movement this check accounts for. */

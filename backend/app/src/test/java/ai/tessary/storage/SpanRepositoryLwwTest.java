@@ -9,6 +9,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -77,8 +78,8 @@ class SpanRepositoryLwwTest {
     @Test
     @DisplayName("the completed version replaces the partial one that arrived first")
     void newerEventTsWins() {
-        assertEquals(1, spans.upsert(version("streaming", null, t0)));
-        assertEquals(1, spans.upsert(version("chat", 42L, t0.plusSeconds(3))));
+        write(version("streaming", null, t0));
+        write(version("chat", 42L, t0.plusSeconds(3)));
 
         SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();
         assertEquals("chat", read.name());
@@ -89,22 +90,19 @@ class SpanRepositoryLwwTest {
     @Test
     @DisplayName("a partial version redelivered after the final one changes nothing")
     void olderEventTsLoses() {
-        assertEquals(1, spans.upsert(version("chat", 42L, t0.plusSeconds(3))));
-        assertEquals(
-                0,
-                spans.upsert(version("streaming", null, t0)),
-                "the guard rejects the write outright rather than half-applying it");
+        write(version("chat", 42L, t0.plusSeconds(3)));
+        write(version("streaming", null, t0));
 
         SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();
-        assertEquals("chat", read.name());
+        assertEquals("chat", read.name(), "the guard rejects the write outright rather than half-applying it");
         assertEquals(42L, read.totalTokens(), "a replayed partial must not blank out real usage");
     }
 
     @Test
     @DisplayName("on an equal event_ts the latest arrival wins")
     void equalEventTsGoesToTheLatestArrival() {
-        assertEquals(1, spans.upsert(version("first", 1L, t0)));
-        assertEquals(1, spans.upsert(version("second", 2L, t0)));
+        write(version("first", 1L, t0));
+        write(version("second", 2L, t0));
 
         SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();
         assertEquals("second", read.name(), "second-granularity clocks make ties the common case, not the edge");
@@ -114,7 +112,7 @@ class SpanRepositoryLwwTest {
     @Test
     @DisplayName("a newer version replaces what the producer said, never what the platform derived")
     void setListExcludesPlatformDerivedColumns() {
-        spans.upsert(version("streaming", null, t0));
+        write(version("streaming", null, t0));
         // The path resolver runs and materializes ancestry.
         jdbc.sql("UPDATE span SET path = :p::ltree, path_state = 'resolved', correlation_state = 'done'"
                         + " WHERE project_id = :pid AND trace_id = :tid AND id = :id")
@@ -127,7 +125,7 @@ class SpanRepositoryLwwTest {
                 spans.findById(pid, traceId, spanId).orElseThrow().createdAt();
 
         // The completed version arrives, carrying no path (an arrival never does).
-        spans.upsert(version("chat", 42L, t0.plusSeconds(3)));
+        write(version("chat", 42L, t0.plusSeconds(3)));
 
         SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();
         assertEquals("chat", read.name(), "the producer's columns did move");
@@ -142,11 +140,11 @@ class SpanRepositoryLwwTest {
     @DisplayName("parent_span_id is producer-sourced and does move with a newer version")
     void setListIncludesParentSpanId() {
         SpanRow parent = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", t0, null);
-        spans.upsert(version("streaming", null, t0));
+        write(version("streaming", null, t0));
         assertNull(spans.findById(pid, traceId, spanId).orElseThrow().parentSpanId());
 
         SpanRow reparented = withParent(version("chat", 42L, t0.plusSeconds(3)), parent.id());
-        spans.upsert(reparented);
+        write(reparented);
 
         assertEquals(
                 parent.id(),
@@ -157,29 +155,35 @@ class SpanRepositoryLwwTest {
     @Test
     @DisplayName("the payload row is guarded by the same event_ts, so it can never lag its span")
     void payloadFollowsTheSameGuard() {
-        spans.upsert(version("streaming", null, t0));
-        payloads.upsert(new SpanPayloadRow(pid, traceId, spanId, "prompt", null, null, null, t0.toString()));
+        write(version("streaming", null, t0));
+        write(new SpanPayloadRow(pid, traceId, spanId, "prompt", null, null, null, t0.toString()));
 
-        spans.upsert(version("chat", 42L, t0.plusSeconds(3)));
-        assertEquals(
-                1,
-                payloads.upsert(new SpanPayloadRow(
-                        pid,
-                        traceId,
-                        spanId,
-                        "prompt",
-                        "completion",
-                        null,
-                        null,
-                        t0.plusSeconds(3).toString())));
-        assertEquals(
-                0,
-                payloads.upsert(new SpanPayloadRow(pid, traceId, spanId, "stale", null, null, null, t0.toString())),
-                "a replayed partial payload beside a final span row is exactly the disagreement this prevents");
+        write(version("chat", 42L, t0.plusSeconds(3)));
+        write(new SpanPayloadRow(
+                pid,
+                traceId,
+                spanId,
+                "prompt",
+                "completion",
+                null,
+                null,
+                t0.plusSeconds(3).toString()));
+        write(new SpanPayloadRow(pid, traceId, spanId, "stale", null, null, null, t0.toString()));
 
         SpanPayloadRow read = payloads.find(pid, traceId, spanId).orElseThrow();
         assertEquals("completion", read.output());
-        assertNotEquals("stale", read.input());
+        assertNotEquals(
+                "stale",
+                read.input(),
+                "a replayed partial payload beside a final span row is exactly the disagreement this prevents");
+    }
+
+    private void write(SpanRow row) {
+        spans.upsertAll(List.of(row));
+    }
+
+    private void write(SpanPayloadRow row) {
+        payloads.upsertAll(List.of(row));
     }
 
     private SpanRow version(String name, @Nullable Long outputTokens, Instant eventTs) {

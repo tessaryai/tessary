@@ -25,7 +25,6 @@ public class ErrorCatalog {
 
     private static final List<Class<? extends ErrorCode>> REGISTERED = List.of(
             CommonError.class,
-            JudgeError.class,
             IngestError.class,
             ModelConfigError.class,
             VersionError.class,
@@ -39,27 +38,15 @@ public class ErrorCatalog {
             MeteringError.class,
             CapabilityError.class,
             RcaError.class,
-            SlackError.class,
             CaseError.class,
             AuthError.class,
             DecisionError.class,
             RetentionError.class);
 
-    /**
-     * The registered enums, for a caller outside this module that needs to check codes against them.
-     * Returns the same immutable {@code List.of} the validator walks, so the two can never drift.
-     */
-    public static List<Class<? extends ErrorCode>> registered() {
-        return REGISTERED;
-    }
-
     @PostConstruct
     public void validate() {
         Map<String, ErrorCode> byCode = new HashMap<>();
         for (Class<? extends ErrorCode> cls : REGISTERED) {
-            if (!cls.isEnum()) {
-                throw new IllegalStateException("ErrorCode impls must be enums: " + cls.getName());
-            }
             ErrorCode[] constants = cls.getEnumConstants();
             for (ErrorCode ec : constants) {
                 ErrorCode prev = byCode.put(ec.code(), ec);

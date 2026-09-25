@@ -1,17 +1,15 @@
-# observer-analyzer E2B template (v2 SDK build)
+# Agent sandbox E2B template (v2 SDK build)
 
-The microVM every agentic lane runs in: it clones the target repo at HEAD and runs
-**OpenCode** over the diff + the committed `.tessary/` bundle. Defined in code with the
-**E2B v2 build system** (no `e2b.toml`, no Dockerfile).
+The microVM every agentic lane runs in: it materializes a finding's dossier, clones the target
+repo at HEAD when the caller sends a clone URL, and runs **OpenCode** over them. Defined in code
+with the **E2B v2 build system** (no `e2b.toml`). The sibling `Dockerfile` builds the same runtime
+as the Docker backend's agent image.
 
 ## Files
 - `template.ts` — the image definition (base image, `git`, the `opencode-ai` CLI +
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
-  through the SDK. Required by `analyze.js` / `rca.js` / `triage.js` / `synthesize.js` /
-  `codegen.js`.
-- `analyze.js` — runs inside the sandbox: clone → checkout → repo-only bundle check → agent run
-  → emit verdict. (Node builtins only.)
+  through the SDK. Required by `rca.js` and `triage.js`.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
   `evidence.json`, `checklist.md`) → read-only agent run wired to the platform's MCP surface → emit
   verdict + hypotheses + the markdown investigation. It reads every trace it cites through MCP, so
@@ -48,7 +46,7 @@ pnpm exec tsx build.ts                            # == pnpm run build
 |---|---|---|
 | *(none)* | build + publish under the `default` tag | by hand |
 | `--release=<semver>` | build **only if the recipe hash changed**, tag `<semver>` + `recipe-<hash>` | `build-agent-template` |
-| `--verify=<semver>` | assert public + namespaced name, then boot it and run seven checks | `verify-agent-template` |
+| `--verify=<semver>` | assert public + namespaced name, then boot it and run four checks | `verify-agent-template` |
 | `--promote=<semver>` | move `latest` and `default` onto that build | `finalize` |
 | `--rollback=<semver>` | remove the `<semver>` tag, keep `recipe-<hash>` | `cleanup` |
 
@@ -57,6 +55,5 @@ pnpm exec tsx build.ts                            # == pnpm run build
 - The name is stable, so rebuilds update the same template; tags are what distinguish builds.
 - Verify: `e2b template list` shows `tessary/tessary-agent-sandbox`.
 
-> Network egress: this template (unlike the air-gapped grader template) reaches
-> github.com + the model provider at run time. Credentials are never baked in —
+> Network egress: this template reaches github.com + the model provider at run time. Credentials are never baked in —
 > the launcher injects them per invocation.

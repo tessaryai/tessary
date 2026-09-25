@@ -14,6 +14,7 @@ import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
@@ -137,7 +138,7 @@ class MetricBaselineRepositoryTest {
     }
 
     @Test
-    @DisplayName("closing a window writes the control ring, carries the straddling tail, and leaves the watermark")
+    @DisplayName("closing a window writes the control ring, opens an empty window, and leaves the watermark")
     void closeRotatesTheWindowAndKeepsTheWatermark() {
         Scope scope = scope("baseline-close");
         String id = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a")).id();
@@ -146,27 +147,16 @@ class MetricBaselineRepositoryTest {
         baselines.updateCurrentSketch(
                 id, "{\"kind\":\"hist\",\"n\":500}", null, null, "[{\"t\":\"tr-in-window\"}]", now());
 
-        // A batch legitimately straddles the cut: windows are cut on event time, and one ingest page can
-        // hold samples from both sides. The caller splits it and hands the far side back, so those samples
-        // open the next window instead of being counted into the closed one or dropped.
-        baselines.closeWindow(
-                id,
-                CONTROL_RING,
-                "2026-07-20T18:00:00Z",
-                "{\"kind\":\"hist\",\"n\":12}",
-                null,
-                null,
-                "[{\"t\":\"tr-after-cut\"}]",
-                12,
-                now());
+        baselines.closeWindow(id, CONTROL_RING, now());
 
         MetricBaselineRow row = baselines.findById(scope.projectId, id).orElseThrow();
         assertEquals(CONTROL_RING, row.controlJson(), "the closed window went into the control ring");
-        assertEquals("{\"kind\":\"hist\",\"n\":12}", row.currentSketchJson());
+        assertNull(row.currentSketchJson());
         // The refs rotate with the sketch they belong to. Leaving the closed window's list behind would
         // open a window already holding a population it never measured.
-        assertEquals("[{\"t\":\"tr-after-cut\"}]", row.currentRefsJson(), "the carry's refs, not the closed window's");
-        assertEquals(12, row.currentCount(), "current_count is per WINDOW, so it resets to the carry");
+        assertNull(row.currentRefsJson(), "the closed window's refs go with it");
+        assertNull(row.currentOpenedAt(), "the next batch's earliest sample opens the new window");
+        assertEquals(0, row.currentCount(), "current_count is per WINDOW, so it resets");
         // counted_through_* is per ROW, not per window. Resetting it here would re-admit the tail of the
         // window just closed into the window just opened — the double count the watermark exists to stop.
         assertEquals("obs-500", row.countedThroughId());
@@ -214,7 +204,7 @@ class MetricBaselineRepositoryTest {
         classifiers.seedBuiltIns(projectId);
         return new Scope(
                 projectId,
-                signals.findByKey(projectId, BuiltInDetector.Kind.DURATION_DRIFT)
+                ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
                         .orElseThrow()
                         .id());
     }
@@ -233,7 +223,6 @@ class MetricBaselineRepositoryTest {
                 BucketKind.CALL_SITE,
                 bucketKey,
                 State.LEARNING,
-                null,
                 null,
                 null,
                 null,

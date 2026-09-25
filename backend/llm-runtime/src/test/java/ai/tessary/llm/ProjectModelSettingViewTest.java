@@ -64,7 +64,6 @@ class ProjectModelSettingViewTest {
                         providerCredentials,
                         mock(ProjectOrgResolver.class),
                         mock(ai.tessary.llm.catalog.ModelCatalogFetchService.class)),
-                mock(ChatModelFactory.class),
                 resolver,
                 priceModels,
                 mock(ai.tessary.pricing.PriceBookRepository.class),
@@ -94,14 +93,8 @@ class ProjectModelSettingViewTest {
     }
 
     @Test
-    void onlyTheGroupWhoseRequestsWeBuildOffersATierOrAnEffortControl() {
-        // The two per-request controls, sent as data rather than inferred client-side. An AGENT_VM lane
-        // hands a model id to an agent that composes its own requests, so a control shown there would
-        // record a preference no request ever carries.
+    void everySectionShipsItsHeadingAndCopy() {
         for (var g : view().groups()) {
-            boolean isRequestGroup = g.id() == LaneGroup.LLM_CALLS;
-            assertEquals(isRequestGroup, g.tiered(), "tier control on " + g.id());
-            assertEquals(isRequestGroup, g.effortTunable(), "effort control on " + g.id());
             assertFalse(g.label().isBlank(), "every section needs a heading");
             assertFalse(g.description().isBlank(), "and the line of copy under it");
         }
@@ -158,7 +151,7 @@ class ProjectModelSettingViewTest {
         // Serialization rather than record accessors, because the frontend reads the JSON: a dropped
         // @JsonProperty renames a field to camelCase and every consumer silently reads undefined. The
         // absent-field assertions are the cutover's own: there is no default model anywhere in this
-        // payload any more, and LaneView.tiered was replaced by the group it was a lossy view of.
+        // payload any more, and LaneView.tiered is retired.
         JsonNode json = new ObjectMapper().valueToTree(view());
 
         assertTrue(json.at("/default_model_key").isMissingNode(), "a default named a provider the org may not have");
@@ -179,15 +172,12 @@ class ProjectModelSettingViewTest {
         assertEquals(
                 "anthropic.claude-sonnet-5",
                 rca.at("/provider_options/0/default_model_key").asText());
-        assertTrue(rca.at("/tiered").isMissingNode(), "the group carries this now, once per section");
+        assertTrue(rca.at("/tiered").isMissingNode(), "a retired field");
 
-        assertEquals("llm_calls", json.at("/groups/0/id").asText());
-        assertEquals("agent_vm", json.at("/groups/1/id").asText());
-        assertTrue(json.at("/groups/0/effort_tunable").asBoolean());
-        assertFalse(json.at("/groups/1/effort_tunable").asBoolean());
-        assertEquals("decision_calls", json.at("/groups/2/id").asText());
-        assertFalse(json.at("/groups/2/model_selectable").asBoolean());
-        assertTrue(json.at("/groups/1/model_selectable").asBoolean());
+        assertEquals("agent_vm", json.at("/groups/0/id").asText());
+        assertEquals("decision_calls", json.at("/groups/1/id").asText());
+        assertFalse(json.at("/groups/1/model_selectable").asBoolean());
+        assertTrue(json.at("/groups/0/model_selectable").asBoolean());
 
         // Every surviving lane, on the wire name it ships under — "grading", "synthesis" and
         // "assistant" are gone; this set is what a client may now PUT.

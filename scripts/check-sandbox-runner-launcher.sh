@@ -27,17 +27,15 @@ node --test
 # with --experimental-test-module-mocks: mock.module still needs the mocked specifier
 # (@opencode-ai/sdk) resolvable on disk even though it replaces its exports, and agent-stream.js
 # itself requires undici at load time — so a real install comes first. --prod is enough (the test
-# needs no devDependency); this package also depends on re2, a native addon, but does not import
-# it, and the pnpm store already has it built. This package's own "test" script in package.json
+# needs no devDependency). This package's own "test" script in package.json
 # runs the same command but nothing else invoked it — added here, alongside the launcher's tests,
 # so a regression fails this gate instead of none.
 (cd "$ROOT/sandbox-runner/agent-sandbox" && pnpm install --frozen-lockfile --prod && node --experimental-test-module-mocks --test)
 
 # Base-URL parity between the launcher and the backend's PlatformCatalog. Nothing asserted this
 # before, and the drift it would have caught was real and shipped: ANTHROPIC held the bare host
-# `https://api.anthropic.com` in both places, but BOTH consumers append a bare path to that value
-# (OpenCode's @ai-sdk/anthropic appends `messages`; langchain4j's DefaultAnthropicClient appends
-# `messages` too — its own default already carries the /v1/). So every agentic run 404'd, and
+# `https://api.anthropic.com` in both places, but OpenCode's @ai-sdk/anthropic appends the bare
+# path `messages` to that value. So every agentic run 404'd, and
 # OpenCode folded the 404 into an empty assistant turn, which surfaced as "opencode produced no
 # usable reply" with zero tokens and a valid key.
 #

@@ -38,15 +38,15 @@ class ClassifierSweepRegistryTest {
     private record FixedSweep(Set<String> kinds) implements ClassifierSweep {
         @Override
         public SweepOutcome sweep(SweepContext ctx) {
-            return SweepOutcome.EMPTY;
+            return new SweepOutcome(0, 0);
         }
     }
 
     @Configuration(proxyBeanMethods = false)
     static class TwoSweeps {
         @Bean
-        ClassifierSweep drift() {
-            return new FixedSweep(Set.of(BuiltInDetector.Kind.BEHAVIOR_DRIFT));
+        ClassifierSweep toolErrors() {
+            return new FixedSweep(Set.of(BuiltInDetector.Kind.TOOL_ERROR));
         }
 
         @Bean
@@ -59,12 +59,12 @@ class ClassifierSweepRegistryTest {
     static class TwoSweepsClaimingOneKind {
         @Bean
         ClassifierSweep first() {
-            return new FixedSweep(Set.of(BuiltInDetector.Kind.SOP_CONFORMANCE));
+            return new FixedSweep(Set.of(BuiltInDetector.Kind.TOOL_ERROR));
         }
 
         @Bean
         ClassifierSweep second() {
-            return new FixedSweep(Set.of(BuiltInDetector.Kind.SOP_CONFORMANCE));
+            return new FixedSweep(Set.of(BuiltInDetector.Kind.TOOL_ERROR));
         }
     }
 
@@ -77,7 +77,7 @@ class ClassifierSweepRegistryTest {
                     ClassifierSweepRegistry registry = ctx.getBean(ClassifierSweepRegistry.class);
                     assertEquals(
                             Set.of(
-                                    BuiltInDetector.Kind.BEHAVIOR_DRIFT,
+                                    BuiltInDetector.Kind.TOOL_ERROR,
                                     BuiltInDetector.Kind.DURATION_DRIFT,
                                     BuiltInDetector.Kind.COST_DRIFT),
                             Set.copyOf(registry.registeredKinds()));
@@ -94,7 +94,7 @@ class ClassifierSweepRegistryTest {
         context.withUserConfiguration(TwoSweeps.class)
                 .withBean(ClassifierSweepRegistry.class)
                 .run(ctx -> assertTrue(ctx.getBean(ClassifierSweepRegistry.class)
-                        .forKind(BuiltInDetector.Kind.SOP_CONFORMANCE)
+                        .forKind(BuiltInDetector.Kind.SECRET_LEAK)
                         .isEmpty()));
     }
 
@@ -120,8 +120,7 @@ class ClassifierSweepRegistryTest {
                 .withBean(ClassifierSweepRegistry.class)
                 .run(ctx -> assertTrue(
                         ctx.getStartupFailure() != null
-                                && rootCauseMessage(ctx.getStartupFailure())
-                                        .contains(BuiltInDetector.Kind.SOP_CONFORMANCE),
+                                && rootCauseMessage(ctx.getStartupFailure()).contains(BuiltInDetector.Kind.TOOL_ERROR),
                         "a kind claimed twice must name itself in the failure"));
     }
 
@@ -145,11 +144,11 @@ class ClassifierSweepRegistryTest {
                 .map(BuiltInClassifierCatalog.BuiltIn::classifierKey)
                 .toList();
         assertTrue(
-                keys.contains(BuiltInDetector.Kind.BEHAVIOR_DRIFT),
-                "behaviour drift must stay in the catalog in an edition that does not ship its sweep");
+                keys.contains(BuiltInDetector.Kind.DURATION_DRIFT),
+                "duration drift must stay in the catalog in an edition that does not ship its sweep");
         assertTrue(
-                keys.contains(BuiltInDetector.Kind.SOP_CONFORMANCE),
-                "and so must SOP conformance; the flag layer withholds them, the catalog never drops them");
+                keys.contains(BuiltInDetector.Kind.TOOL_ERROR),
+                "and so must tool errors; the flag layer withholds them, the catalog never drops them");
     }
 
     private static BuiltInClassifierCatalog catalog() {

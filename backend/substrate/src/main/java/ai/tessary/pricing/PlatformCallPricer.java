@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
-import ai.tessary.llmspi.ServiceTier;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Optional;
@@ -25,10 +24,10 @@ import org.springframework.stereotype.Component;
  * not: its {@code prompt_tokens} INCLUDES the cached-prompt tokens, so a caller must carve the cache-read
  * tokens out of the input count before calling in, or those tokens are billed twice (full input rate plus
  * the discounted cache-read rate). That carve-out stays with the caller, where the provider's token
- * semantics are known ({@code LlmCaller.uncachedInput}); this class is a pure per-bucket table read.
+ * semantics are known; this class is a pure per-bucket table read.
  *
- * <p><b>Empty is a first-class answer, and it is not zero.</b> No model resolved, no book in force
- * carrying a rate, or a tier with no published factor all yield empty, and the caller writes NULL. A wrong
+ * <p><b>Empty is a first-class answer, and it is not zero.</b> No model resolved, or no book in force
+ * carrying a rate, yields empty, and the caller writes NULL. A wrong
  * cost is worse than a missing one, because only the missing one is visible as missing.
  */
 @Component
@@ -69,31 +68,24 @@ public class PlatformCallPricer {
      * @param modelName the model string as the caller resolved it (a Bedrock inference-profile id, a bare
      *     OpenAI id, …) — resolved to a {@code model.id} by {@link ModelResolver}'s exact → region-strip →
      *     vendor-strip precedence, the same one ingest uses
-     * @param tier the tier the call was SERVED at; its {@link ServiceTier#priceFactor()} scales every
-     *     bucket, so a Flex call is billed and reported at half Standard rather than silently at full
-     *     price. A null tier prices at Standard; {@link ServiceTier#PRIORITY}, whose premium AWS states
-     *     per model and does not publish as a multiplier, yields empty
      * @param inputTokens the BILLABLE input count — cache-read tokens already carved out where the
      *     provider folds them in (see the class javadoc)
      */
     public Optional<PricedCall> price(
             @Nullable String modelName,
-            @Nullable ServiceTier tier,
             @Nullable Integer inputTokens,
             @Nullable Integer outputTokens,
             @Nullable Integer cacheReadTokens,
             @Nullable Integer cacheWriteTokens) {
-        BigDecimal factor = tier == null ? BigDecimal.ONE : tier.priceFactor();
-        if (factor == null) return Optional.empty();
         Optional<ModelRate> found = models.resolve(modelName).flatMap(books::rateFor);
         if (found.isEmpty()) return Optional.empty();
 
         ModelRate rate = found.get();
         ModelRates rates = rate.rates();
-        BigDecimal in = cost(rates.inputPerMtok(), inputTokens, factor);
-        BigDecimal out = cost(rates.outputPerMtok(), outputTokens, factor);
-        BigDecimal cacheRead = cost(rates.cacheReadPerMtok(), cacheReadTokens, factor);
-        BigDecimal cacheWrite = cost(rates.cacheWritePerMtok(), cacheWriteTokens, factor);
+        BigDecimal in = cost(rates.inputPerMtok(), inputTokens);
+        BigDecimal out = cost(rates.outputPerMtok(), outputTokens);
+        BigDecimal cacheRead = cost(rates.cacheReadPerMtok(), cacheReadTokens);
+        BigDecimal cacheWrite = cost(rates.cacheWritePerMtok(), cacheWriteTokens);
         return Optional.of(new PricedCall(
                 rate.priceBookVersion(),
                 in,
@@ -108,10 +100,8 @@ public class PlatformCallPricer {
      * was consumed — which is a different statement from the empty {@link #price} above, where no rate for
      * the MODEL exists at all and the whole call is unpriced.
      */
-    private static BigDecimal cost(@Nullable BigDecimal perMtok, @Nullable Integer tokens, BigDecimal factor) {
+    private static BigDecimal cost(@Nullable BigDecimal perMtok, @Nullable Integer tokens) {
         if (perMtok == null || tokens == null || tokens <= 0) return BigDecimal.ZERO;
-        return perMtok.multiply(factor)
-                .multiply(BigDecimal.valueOf(tokens))
-                .divide(MILLION, COST_SCALE, RoundingMode.HALF_UP);
+        return perMtok.multiply(BigDecimal.valueOf(tokens)).divide(MILLION, COST_SCALE, RoundingMode.HALF_UP);
     }
 }

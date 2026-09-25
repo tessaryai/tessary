@@ -60,6 +60,5 @@ class KindNormalizerTest {
         // no attributes → falls back to the op-name mapping.
         assertEquals(KindNormalizer.LLM, KindNormalizer.normalize("chat", Map.of()));
         assertEquals(KindNormalizer.TOOL, KindNormalizer.normalize("execute_tool", Map.of()));
-        assertEquals(KindNormalizer.LLM, KindNormalizer.normalize("chat", null));
     }
 }

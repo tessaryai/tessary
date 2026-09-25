@@ -125,10 +125,14 @@ class RetentionSettingsIntegrationTest {
                 .andExpect(jsonPath("$.data.classes[0].from_policy").value(true))
                 .andExpect(jsonPath("$.data.classes[1].ttl_days").value(0))
                 .andExpect(jsonPath("$.data.classes[1].from_policy").value(true));
-        var effective = resolver.resolveByDataClass(project.id());
-        assertEquals(30, effective.get(RetentionResolver.DataClass.TRACES).ttlDays(), "the sweeper sees the override");
         assertEquals(
-                false, effective.get(RetentionResolver.DataClass.DETECTIONS).bounded(), "0 keeps forever");
+                30,
+                effective(project.id(), RetentionResolver.DataClass.TRACES).ttlDays(),
+                "the sweeper sees the override");
+        assertEquals(
+                false,
+                effective(project.id(), RetentionResolver.DataClass.DETECTIONS).bounded(),
+                "0 keeps forever");
 
         mvc.perform(put(path)
                         .cookie(session)
@@ -148,9 +152,7 @@ class RetentionSettingsIntegrationTest {
                 .andExpect(status().isBadRequest());
         assertEquals(
                 traceDefault,
-                resolver.resolveByDataClass(project.id())
-                        .get(RetentionResolver.DataClass.TRACES)
-                        .ttlDays());
+                effective(project.id(), RetentionResolver.DataClass.TRACES).ttlDays());
 
         // A member reads the page but cannot change it: deletion is owner/admin business.
         mvc.perform(post("/api/orgs/" + org.slug() + "/members")
@@ -178,5 +180,12 @@ class RetentionSettingsIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(7, 7)))
                 .andExpect(status().isForbidden());
+    }
+
+    private RetentionResolver.EffectiveRetention effective(String projectId, RetentionResolver.DataClass dataClass) {
+        return resolver.resolve(projectId).stream()
+                .filter(e -> e.dataClass() == dataClass)
+                .findFirst()
+                .orElseThrow();
     }
 }

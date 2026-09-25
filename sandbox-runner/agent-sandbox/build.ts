@@ -41,20 +41,6 @@ const NAME = 'tessary-agent-sandbox';
  */
 const PUBLIC_REF = 'tessary/tessary-agent-sandbox';
 
-/**
- * Files template.ts bakes into /home/user/tessary-contract — the bundle contract the observer's
- * prompts point the agent at. Staged from the platform's own contract/ copies (the single source
- * of truth since the plugin dropped its synthesis machinery) into ./vendor/, because the e2b
- * build context is this directory and cannot reach ../../contract directly.
- */
-const CONTRACT_FILES = [
-  'validate.py',
-  'pipeline_io.py',
-  'AUTHORING_CONTRACT.md',
-  'output_format.md',
-  'grader.schema.json',
-];
-
 /** cpuCount/memoryMB are build INPUTS — a change to either produces a different sandbox. */
 const RESOURCES = { cpuCount: 2, memoryMB: 2048 };
 
@@ -69,19 +55,7 @@ const RECIPE_INPUTS = [
   'mcp-relay.js',
   'rca.js',
   'triage.js',
-  'tessary-evals-validate',
-  ...CONTRACT_FILES.map((f) => `../../contract/${f}`),
 ];
-
-function stageContract() {
-  const src = path.resolve(__dirname, '../../contract');
-  const vendor = path.resolve(__dirname, 'vendor');
-  fs.rmSync(vendor, { recursive: true, force: true });
-  fs.mkdirSync(vendor);
-  for (const f of CONTRACT_FILES) {
-    fs.copyFileSync(path.join(src, f), path.join(vendor, f));
-  }
-}
 
 /**
  * A content address for the recipe, carried as a tag on the build it produced.
@@ -142,7 +116,6 @@ async function templateInfo(): Promise<{ templateID: string; public: boolean; na
 
 /** Build and publish under the default tag: the documented by-hand path, unchanged. */
 async function buildDefault() {
-  stageContract();
   const info = await Template.build(template, NAME, { ...RESOURCES, onBuildLogs: defaultBuildLogger() });
   console.log(`built template '${info.name}' (id=${info.templateId}) tags=${info.tags?.join(',')}`);
 }
@@ -169,7 +142,6 @@ async function release(version: string) {
     return;
   }
 
-  stageContract();
   const info = await Template.build(template, NAME, {
     ...RESOURCES,
     tags: [version, recipe],
@@ -213,21 +185,16 @@ async function verify(version: string) {
   try {
     // Each of these is a distinct failure this release must not ship, not a smoke test for its own
     // sake: bash missing (the SDK cannot exec at all), the opencode prune having deleted the
-    // variant on PATH, PyYAML absent (the validator crashes in-VM), a script or contract file that
-    // never got copied, and the native re2 addon failing to load.
+    // variant on PATH, and a script that never got copied.
     const checks: Array<[string, string]> = [
       ['bash is the exec shell', 'echo "$BASH_VERSION" | grep -q .'],
       ['opencode runs', 'opencode --version'],
-      ['pyyaml is baked', 'python3 -c "import yaml"'],
       ['jq runs', 'jq --version'],
-      ['validator is on PATH', 'command -v tessary-evals-validate'],
-      ['contract is baked', 'test -f /home/user/tessary-contract/validate.py'],
       [
         'agent scripts are baked',
         'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/agent-stream.js'
           + ' && test -f /home/user/mcp-relay.js',
       ],
-      ['native modules load', 'cd /home/user && node -e "require(\'re2\'); require(\'acorn\')"'],
     ];
     const failed: string[] = [];
     for (const [label, cmd] of checks) {

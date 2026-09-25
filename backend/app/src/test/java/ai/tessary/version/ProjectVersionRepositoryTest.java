@@ -25,11 +25,11 @@ class ProjectVersionRepositoryTest {
     @Test
     void findOrMaterialize_isIdempotentPerCommit() {
         String pid = TenantFixture.bootstrap(tenants, "pv-idem").project().id();
-        var a = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_BENCHMARK);
-        var b = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_OBSERVER_FINDING);
+        var a = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_PIPELINE_SYNC);
+        var b = repo.findOrMaterialize(pid, "sha-1", "a-later-reason");
         assertEquals(a.id(), b.id(), "same commit re-materializes the same row, no duplicate");
         assertEquals(1, repo.listTimeline(pid).size());
-        assertEquals(ProjectVersionRow.REASON_BENCHMARK, b.materializedReason(), "first writer's reason wins");
+        assertEquals(ProjectVersionRow.REASON_PIPELINE_SYNC, b.materializedReason(), "first writer's reason wins");
     }
 
     @Test
@@ -41,19 +41,10 @@ class ProjectVersionRepositoryTest {
     }
 
     @Test
-    void aspectStatus_canTransitionToStale() {
-        String pid = TenantFixture.bootstrap(tenants, "pv-aspect").project().id();
-        service.reasonObserverFinding(pid, "sha-3");
-        service.markGraders(pid, "sha-3", ProjectVersionRow.STATUS_STALE);
-        var row = repo.findByCommit(pid, "sha-3").orElseThrow();
-        assertEquals(ProjectVersionRow.STATUS_STALE, row.gradersStatus());
-    }
-
-    @Test
     void timeline_listsMaterializedVersions() {
         String pid = TenantFixture.bootstrap(tenants, "pv-timeline").project().id();
-        service.reasonBenchmark(pid, "sha-a");
-        service.reasonBenchmark(pid, "sha-b");
+        service.reasonPipelineSync(pid, "sha-a");
+        service.reasonPipelineSync(pid, "sha-b");
         assertEquals(2, service.timeline(pid).size());
         assertTrue(service.timeline(pid).stream().anyMatch(v -> v.commitSha().equals("sha-a")));
     }

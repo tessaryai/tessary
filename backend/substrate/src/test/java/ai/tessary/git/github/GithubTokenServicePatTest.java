@@ -34,7 +34,7 @@ class GithubTokenServicePatTest {
 
     private GitIntegrationRow patIntegration(SecretBox box, String token) throws Exception {
         String enc = box.seal(mapper.writeValueAsString(Map.of("token", token)));
-        return new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", enc, null, "t", "t");
+        return new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", enc, "t", "t");
     }
 
     @Test
@@ -72,7 +72,7 @@ class GithubTokenServicePatTest {
         // sealed elsewhere) — installationId-only rows are covered by other tests; here we assert
         // the no-credentials case still reaches the App gate rather than silently no-op'ing.
         GitIntegrationRow integ =
-                new GitIntegrationRow("i2", "p1", "github", null, "acme", "web", "main", null, null, "t", "t");
+                new GitIntegrationRow("i2", "p1", "github", null, "acme", "web", "main", null, "t", "t");
         TessaryException e = assertThrows(TessaryException.class, () -> svc.authHeader(integ));
         assertEquals(GitError.MISSING_APP_CONFIG, e.error());
     }

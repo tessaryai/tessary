@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -39,59 +38,15 @@ public final class ToolErrorEvidence {
      * {@code tool_error_rate:<bucket_key>:<direction>}.
      *
      * <p><b>Legible on purpose, though no longer a headline.</b> The Classifiers page used to render a
-     * cause key verbatim in mono as the finding's title; it now leads with {@link #title} and keeps the
-     * key as detail. This stays readable anyway — it is what someone pastes into a query, and an opaque
-     * id would make that step guesswork.
+     * cause key verbatim in mono as the finding's title; it now leads with the finding's title
+     * ({@code FindingTitle}) and keeps the key as detail. This stays readable anyway — it is what
+     * someone pastes into a query, and an opaque id would make that step guesswork.
      *
      * <p>No reference segment, unlike metric drift's. A CUSUM has one reference (tool-error.md §4.6), so a
      * fourth segment could only ever hold one value and would be noise.
      */
     public static String causeKey(String bucketKey, Decision decision) {
         return MEASURE + ":" + bucketKey + ":" + decision.direction().wire();
-    }
-
-    /**
-     * A sentence, not a metric: {@code "search_docs showing elevated error rates"}.
-     *
-     * <p><b>No rate in the headline.</b> It used to carry one, and the number it carried was the tool's
-     * lifetime average, which read 6.2% during an 80% outage. Measuring it over the run fixes the number
-     * but not the shape of the sentence: a percentage in a headline invites a reader to weigh two
-     * findings by comparing them, and two tools' error rates are not comparable. The criticality badge is
-     * what carries "how much does this matter"; {@link #basis} carries the arithmetic.
-     *
-     * <p>Direction survives because the down arm still runs, and a tool that stopped reporting errors has
-     * either been fixed or stopped reporting.
-     */
-    public static String title(String bucketKey, Decision decision) {
-        String movement = decision.direction() == ToolErrorDetector.Direction.UP ? "elevated" : "reduced";
-        return String.format(Locale.ROOT, "%s showing %s error rates", shortName(bucketKey), movement);
-    }
-
-    /**
-     * Why this crossed <b>its own</b> bar, in this detector's terms.
-     *
-     * <p>Triage's ranked list mixes detectors that share no threshold, so this says what the bar was
-     * rather than normalizing onto someone else's scale — the posture {@code MetricDriftSource} takes for
-     * the same reason.
-     */
-    public static String basis(Decision decision, int patternCount) {
-        StringBuilder b = new StringBuilder(String.format(
-                Locale.ROOT,
-                "Sustained change against this tool's own in-control rate: CUSUM %.1f past a %.1f "
-                        + "decision interval, over the %,d calls since onset, %s to %s (%+.2fpp).",
-                decision.statistic(),
-                decision.threshold(),
-                decision.callsSinceOnset(),
-                pct(decision.baselineRate()),
-                pct(decision.currentRate()),
-                decision.deltaPp()));
-        if (patternCount > 0) {
-            b.append(
-                    patternCount == 1
-                            ? " One error pattern accounts for it."
-                            : " " + patternCount + " error patterns.");
-        }
-        return b.toString();
     }
 
     /**
@@ -105,11 +60,6 @@ public final class ToolErrorEvidence {
      * blends severity, duration and traffic, which is the right shape for that and the wrong shape for
      * anything else.
      */
-    public static double severity(Decision decision) {
-        return severityOf(decision.criticality());
-    }
-
-    /** The same squash, for a case rebuilt from a persisted blob rather than a live decision. */
     public static double severityOf(double criticality) {
         double c = Math.max(0.0, criticality);
         return Math.min(1.0, c / (c + 60.0));
@@ -183,11 +133,7 @@ public final class ToolErrorEvidence {
         if (windowClosedAt != null) window.put("closed_at", windowClosedAt);
         window.put("kind", "recomputed");
 
-        try {
-            return JSON.writeValueAsString(root);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("tool error evidence failed to serialize", e);
-        }
+        return root.toString();
     }
 
     /**
@@ -275,7 +221,7 @@ public final class ToolErrorEvidence {
             /** Cohen's h between the baseline and current rate: how large the shift is, independent of
              *  sample size. */
             double effectSize,
-            /** The cross-detector ranked-list weight, 0..1 — see {@code ToolErrorEvidence#severity}. */
+            /** The cross-detector ranked-list weight, 0..1 — see {@code ToolErrorEvidence#severityOf}. */
             double criticality) {}
 
     /** Parse the blob for the detail surface, or null when it cannot be read. */
@@ -350,13 +296,6 @@ public final class ToolErrorEvidence {
     public static String shortName(String bucketKey) {
         int colon = bucketKey.indexOf(':');
         return colon >= 0 && colon + 1 < bucketKey.length() ? bucketKey.substring(colon + 1) : bucketKey;
-    }
-
-    private static String pct(double rate) {
-        double p = rate * 100.0;
-        // Sub-0.1% rates are exactly where this detector is most interesting, and "0.0%" would erase the
-        // whole finding — a tool going from 0.02% to 0.9% must not read as "0.0% to 0.9%".
-        return p > 0 && p < 0.1 ? String.format(Locale.ROOT, "%.2f%%", p) : String.format(Locale.ROOT, "%.1f%%", p);
     }
 
     private static double round(double v, int places) {

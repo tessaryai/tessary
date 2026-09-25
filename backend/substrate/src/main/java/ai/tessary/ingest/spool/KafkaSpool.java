@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
@@ -390,10 +391,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     }
 
     private static ConsumerRecord<String, byte[]> record(Claimed claimed) {
-        if (!(claimed.receipt() instanceof KafkaReceipt r)) {
-            throw new IllegalStateException("a Kafka spool claim carries its record");
-        }
-        return r.record();
+        return ((KafkaReceipt) Objects.requireNonNull(claimed.receipt())).record();
     }
 
     private boolean deadLetter(ConsumerRecord<String, byte[]> record) {

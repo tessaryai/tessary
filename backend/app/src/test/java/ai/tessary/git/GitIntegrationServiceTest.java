@@ -38,8 +38,7 @@ class GitIntegrationServiceTest {
 
     /** A service whose one provider answers however this test needs it to. */
     private GitIntegrationService withProvider(GitProviderClient client) {
-        return new GitIntegrationService(
-                repo, secretBox, mapper, new GitProviderFactory(List.of(client), List.of(), List.of()));
+        return new GitIntegrationService(repo, secretBox, mapper, new GitProviderFactory(List.of(client), List.of()));
     }
 
     private ConnectRequest github() {
@@ -53,7 +52,7 @@ class GitIntegrationServiceTest {
         assertEquals("github", row.provider());
         assertEquals("tessary", row.repoOwner());
         assertNotNull(row.credentialsEnc(), "installation id is sealed at rest");
-        assertEquals(row.id(), service.require(pid).id());
+        assertEquals(row.id(), service.find(pid).orElseThrow().id());
     }
 
     @Test
@@ -61,12 +60,6 @@ class GitIntegrationServiceTest {
         String pid = TenantFixture.bootstrap(tenants, "git-dup").project().id();
         service.connect(pid, github());
         assertThrows(TessaryException.class, () -> service.connect(pid, github()));
-    }
-
-    @Test
-    void require_throwsWhenUnbound() {
-        String pid = TenantFixture.bootstrap(tenants, "git-none").project().id();
-        assertThrows(TessaryException.class, () -> service.require(pid));
     }
 
     @Test
@@ -97,26 +90,6 @@ class GitIntegrationServiceTest {
         public String resolveHeadSha(GitIntegrationRow integ, String branch) {
             throw new UnsupportedOperationException();
         }
-
-        @Override
-        public CommitComparison compare(GitIntegrationRow integ, String baseSha, String headSha) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean isAncestor(GitIntegrationRow integ, String ancestorSha, String descendantSha) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<RepoFile> getTreeFiles(GitIntegrationRow integ, String sha, String pathPrefix) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ChangeRequest openChangeRequest(GitIntegrationRow integ, ChangeRequestSpec spec) {
-            throw new UnsupportedOperationException();
-        }
     }
 
     private static ConnectRequest pat(String branch) {
@@ -133,7 +106,7 @@ class GitIntegrationServiceTest {
 
         // "main" was a guess. The repo's real default branch is what RCA has to check out.
         assertEquals("trunk", row.defaultBranch());
-        assertEquals("trunk", svc.require(pid).defaultBranch());
+        assertEquals("trunk", svc.find(pid).orElseThrow().defaultBranch());
     }
 
     @Test

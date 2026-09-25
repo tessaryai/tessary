@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,7 +32,7 @@ class OpenRouterModelListerTest {
     private final HttpClient http = mock(HttpClient.class);
 
     private OpenRouterModelLister lister() {
-        return new OpenRouterModelLister(http, new ObjectMapper());
+        return new OpenRouterModelLister(http, new ObjectMapper(), Duration.ofSeconds(5));
     }
 
     private static ResolvedCredential cred(String apiKey) {

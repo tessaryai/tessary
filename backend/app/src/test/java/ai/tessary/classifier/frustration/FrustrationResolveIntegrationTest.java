@@ -31,6 +31,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.sql.Timestamp;
@@ -120,7 +121,7 @@ class FrustrationResolveIntegrationTest {
 
         CaseRow resolved = cases.findById(pid, opened.id()).orElseThrow();
         assertEquals(CaseRow.State.RESOLVED, resolved.state());
-        assertEquals(CaseRow.Disposition.FIXED, resolved.disposition());
+        assertEquals("fixed", resolved.disposition());
         Map<String, Object> state = state(pid);
         assertNull(state.get("baseline_calls"), "the reference is re-learned from here");
         assertNull(state.get("baseline_failures"));
@@ -255,7 +256,7 @@ class FrustrationResolveIntegrationTest {
 
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
-        return classifiers.findByKey(pid, "frustration").orElseThrow();
+        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
     /** {@code perHour} one-turn conversations an hour, the first {@code rate} of each hour flagged. */

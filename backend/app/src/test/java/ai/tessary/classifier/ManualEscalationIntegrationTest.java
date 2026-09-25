@@ -24,10 +24,9 @@ import ai.tessary.git.GitIntegrationRepository;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
 import java.time.Instant;
@@ -84,9 +83,6 @@ class ManualEscalationIntegrationTest {
 
     @Autowired
     TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     @Autowired
     JdbcClient jdbc;
@@ -183,7 +179,7 @@ class ManualEscalationIntegrationTest {
         assertFalse(view.alreadyEscalated(), "the press escalates rather than refusing the finding");
         assertEquals(1, triageJobs(p.projectId()), "and it queues the one microVM it promised");
         assertEquals(
-                "[classifier_key, finding_id, verdict_id]",
+                "[finding_id]",
                 jdbc
                         .sql("SELECT jsonb_object_keys(payload) FROM job WHERE id = :id ORDER BY 1")
                         .param("id", view.jobId())
@@ -298,14 +294,11 @@ class ManualEscalationIntegrationTest {
         assertEquals(
                 Set.of("turn_duration:" + BUCKET + ":slower:pinned", "tool_duration:tool:search_docs:slower:pinned"),
                 causeKeys(p, BuiltInDetector.Kind.DURATION_DRIFT),
-                "duration_drift owns both duration measures and neither cost nor behaviour");
+                "duration_drift owns both duration measures and not cost");
         assertEquals(
                 Set.of("cost:" + BUCKET + ":dearer:pinned"),
                 causeKeys(p, BuiltInDetector.Kind.COST_DRIFT),
                 "cost is the only measure that opens a cost_drift finding — the token measures ride as evidence");
-        assertTrue(
-                causeKeys(p, BuiltInDetector.Kind.BEHAVIOR_DRIFT).isEmpty(),
-                "behaviour drift's causes are its three kinds, none of which is a distribution shift");
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -329,15 +322,15 @@ class ManualEscalationIntegrationTest {
     private void seedIntegration(String projectId) {
         String now = Instant.now().toString();
         integrations.insert(new GitIntegrationRow(
-                Ids.ulid(), projectId, "github", "github.com", "acme", "app", "main", "enc", "sha", now, now));
+                Ids.ulid(), projectId, "github", "github.com", "acme", "app", "main", "enc", now, now));
     }
 
     private record Project(String projectId, String baselineId) {}
 
     private Project project(String slug) {
-        String projectId = bootstrapGranted(slug).project().id();
+        String projectId = TenantFixture.bootstrap(tenants, slug).project().id();
         classifiers.seedBuiltIns(projectId);
-        String classifierId = signals.findByKey(projectId, BuiltInDetector.Kind.DURATION_DRIFT)
+        String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
                 .orElseThrow()
                 .id();
         String now = Instant.now().toString();
@@ -350,7 +343,6 @@ class ManualEscalationIntegrationTest {
                         BucketKind.CALL_SITE,
                         BUCKET,
                         State.ARMED,
-                        null,
                         null,
                         null,
                         null,
@@ -406,22 +398,5 @@ class ManualEscalationIntegrationTest {
      */
     private static String classifierFor(String causeKey) {
         return causeKey.startsWith("cost:") ? BuiltInDetector.Kind.COST_DRIFT : BuiltInDetector.Kind.DURATION_DRIFT;
-    }
-
-    /**
-     * Bootstrap a tenant whose org has behaviour drift and SOP conformance switched on before its
-     * project is created.
-     *
-     * <p>Two things make this necessary. Both classifiers are off by default, so without a grant
-     * these cases would assert the capability default rather than the behaviour they name. And the
-     * grant has to precede the project, because project creation is what seeds the built-in
-     * classifiers: grant afterwards and the classifier row is never inserted, leaving the test
-     * hunting findings from a classifier the project does not have.
-     */
-    private TenantFixture.Setup bootstrapGranted(String name) {
-        return TenantFixture.bootstrap(tenants, name, org -> {
-            capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT);
-            capabilities.grant(org.id(), Capability.SOP_CONFORMANCE);
-        });
     }
 }

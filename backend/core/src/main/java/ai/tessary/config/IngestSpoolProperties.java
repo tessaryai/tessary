@@ -18,7 +18,6 @@ public class IngestSpoolProperties {
 
     public static final Set<String> MODES = Set.of("memory", "kafka");
 
-    private String mode = "memory";
     private long maxLagMs = 300_000;
     private Kafka kafka = new Kafka();
 
@@ -143,17 +142,12 @@ public class IngestSpoolProperties {
         this.kafka = kafka;
     }
 
-    public String getMode() {
-        return mode;
-    }
-
     public void setMode(String mode) {
         String m = mode == null ? "" : mode.trim().toLowerCase(Locale.ROOT);
         if (!MODES.contains(m)) {
             throw new IllegalArgumentException(
                     "tessary.ingest.spool.mode must be one of " + MODES + ", not '" + mode + "'");
         }
-        this.mode = m;
     }
 
     public long getMaxLagMs() {

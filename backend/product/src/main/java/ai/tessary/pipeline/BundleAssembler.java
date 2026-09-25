@@ -23,16 +23,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
- * Parses a sharded {@code .tessary/} bundle into a {@link Pipeline}, shared by
- * the multipart upload path ({@code ImportController}) and the observer's
- * auto-pull path ({@code BundleImportService}). Either feeds the same
- * classify/apply logic via {@code (relativePath -> body)} pairs.
+ * Parses a sharded {@code .tessary/} bundle into a {@link Pipeline} for the multipart upload path
+ * ({@code ImportController}), which feeds the classify/apply logic {@code (relativePath -> body)}
+ * pairs.
  *
  * <p>Expected layout (the leading {@code .tessary/} is optional — browsers may
  * strip it from {@code webkitRelativePath}, and a repo tree carries it):
@@ -67,15 +65,12 @@ public class BundleAssembler {
         this.yamlMapper = yamlObjectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    /** A parsed pipeline plus the repo identity and knowledge index the bundle declares (all nullable). */
+    /** A parsed pipeline plus the repo identity the bundle declares (all nullable). */
     public record AssembledBundle(
             Pipeline pipeline,
             @Nullable String commitSha,
             @Nullable String repoOwner,
-            @Nullable String repoName,
-            @Nullable String knowledgeIndexJson) {}
-
-    private static final String KNOWLEDGE_INDEX = "knowledge/index.json";
+            @Nullable String repoName) {}
 
     /** A single bundle file: {@code relativePath} (pre-normalisation) and its decoded text body. */
     public record NamedBody(String relativePath, String body) {}
@@ -85,19 +80,8 @@ public class BundleAssembler {
         boolean sawAnyShard = false;
 
         for (NamedBody f : files) {
-            if (f == null || f.body() == null) continue;
             String name = f.relativePath();
-            if (name == null || name.isBlank()) continue;
             String relPath = normalisePath(name);
-
-            // The knowledge index is the one knowledge/ file we keep — it powers
-            // deterministic Tier-1 diff→entity mapping. The prose markdown stays
-            // in the repo (read on demand), not the DB.
-            if (KNOWLEDGE_INDEX.equalsIgnoreCase(relPath)) {
-                sawAnyShard = true;
-                sc.knowledgeIndexJson = f.body();
-                continue;
-            }
 
             Shard shard = classify(relPath);
             if (shard == Shard.IGNORE) continue;
@@ -195,7 +179,7 @@ public class BundleAssembler {
     }
 
     private <T> List<T> readList(JsonNode node, Class<T> elementType) throws IOException {
-        if (node == null || node.isMissingNode() || node.isNull()) return List.of();
+        if (node.isMissingNode() || node.isNull()) return List.of();
         if (!node.isArray()) {
             throw new TessaryException(PipelineError.EXPECTED_YAML_LIST, node.getNodeType());
         }
@@ -292,9 +276,6 @@ public class BundleAssembler {
         List<Capability> capabilities = List.of();
         boolean capabilitiesSeen;
 
-        @Nullable
-        String knowledgeIndexJson;
-
         final List<CallSite> callSites = new ArrayList<>();
         final List<FailureMode> failureModes = new ArrayList<>();
 
@@ -316,18 +297,18 @@ public class BundleAssembler {
                     readProgress(meta.path("progress")),
                     capabilities);
             // Repo identity / commit are forward-compatible: the plugin stamps them
-            // into meta.yaml so an uploaded or auto-pulled bundle knows which commit
+            // into meta.yaml so an uploaded bundle knows which commit
             // it was synthesized against. Accept either commit_sha or source_commit_sha.
             String commitSha =
                     firstNonBlank(textOrNull(meta.path("commit_sha")), textOrNull(meta.path("source_commit_sha")));
             JsonNode repo = meta.path("repo");
             String repoOwner = textOrNull(repo.path("owner"));
             String repoName = textOrNull(repo.path("name"));
-            return new AssembledBundle(pipeline, commitSha, repoOwner, repoName, knowledgeIndexJson);
+            return new AssembledBundle(pipeline, commitSha, repoOwner, repoName);
         }
 
         private @Nullable Runtime readRuntime(JsonNode node) {
-            if (node == null || node.isMissingNode() || node.isNull()) return null;
+            if (node.isMissingNode() || node.isNull()) return null;
             try {
                 return yamlMapper.treeToValue(node, Runtime.class);
             } catch (Exception e) {
@@ -336,7 +317,7 @@ public class BundleAssembler {
         }
 
         private @Nullable Progress readProgress(JsonNode node) {
-            if (node == null || node.isMissingNode() || node.isNull()) return null;
+            if (node.isMissingNode() || node.isNull()) return null;
             try {
                 return yamlMapper.treeToValue(node, Progress.class);
             } catch (Exception e) {
@@ -345,7 +326,7 @@ public class BundleAssembler {
         }
 
         private @Nullable String textOrNull(JsonNode node) {
-            if (node == null || node.isMissingNode() || node.isNull()) return null;
+            if (node.isMissingNode() || node.isNull()) return null;
             return node.asText(null);
         }
 
@@ -353,14 +334,5 @@ public class BundleAssembler {
             if (a != null && !a.isBlank()) return a;
             return (b != null && !b.isBlank()) ? b : null;
         }
-    }
-
-    /** Convenience for the multipart path: build {@link NamedBody}s from a path→body map. */
-    public static List<NamedBody> namedBodies(Map<String, String> pathToBody) {
-        List<NamedBody> out = new ArrayList<>(pathToBody.size());
-        for (Map.Entry<String, String> e : pathToBody.entrySet()) {
-            out.add(new NamedBody(e.getKey(), e.getValue()));
-        }
-        return List.copyOf(out);
     }
 }

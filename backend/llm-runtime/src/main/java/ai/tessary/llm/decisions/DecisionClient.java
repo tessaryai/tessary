@@ -3,8 +3,8 @@ package ai.tessary.llm.decisions;
 
 /**
  * Asks a hosted decision model typed questions about a state. A decision call is a hosted-classifier
- * call, not a chat completion: it does not go through {@code ChatModel}, and {@code JevDecisionClient}
- * gives it the GenAI span, the book pricing and the {@code llm_call} row {@code LlmCaller} gives a chat.
+ * call, not a chat completion: {@code JevDecisionClient} gives it a GenAI span, the book pricing and an
+ * {@code llm_call} row.
  */
 public interface DecisionClient {
 

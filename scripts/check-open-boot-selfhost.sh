@@ -13,7 +13,7 @@
 # same backend image contents.
 #
 # NEVER RUN AGENT-SIDE, EVER — same rule as check-open-boot.sh, same reason (needs Docker to build
-# and boot a real stack). Run by a human (`task check:open:boot:selfhost`) or the dispatch-only
+# and boot a real stack). Run by a human (`task check:open:boot:selfhost`) or
 # `.github/workflows/boot-checks.yml` (its second job). Never part of `task check` or
 # scripts/check.sh — see its EXCLUDED manifest row.
 #
@@ -104,9 +104,8 @@ echo "$P: exporting the working tree (faithful export) -> $TMP"
 bash "$ROOT/scripts/lib/export-simulate.sh" "$TMP"
 
 # The self-host artifact, named directly and on purpose. This is NOT a dev-stack invocation, so
-# scripts/lib/dev-compose.sh (the dev file's single derivation, check-open-boundary.sh rule 4) is
-# the wrong tool here: docker-compose.yml has no overlay fragment to merge, and in the export
-# there is no overlay to find anyway.
+# scripts/lib/dev-compose.sh (the dev file's single derivation) is the wrong tool here: it names
+# the dev file.
 COMPOSE="docker compose -f docker-compose.yml"
 if [ "$NEGATIVE_HEALTH" = 1 ]; then
     # A failing backend probe with a short budget, layered over the real file so nothing else

@@ -45,14 +45,6 @@ public class ClassifierRepository {
                 .optional();
     }
 
-    public Optional<ClassifierRow> findByKey(String projectId, String classifierKey) {
-        return jdbc.sql("SELECT " + COLS + " FROM classifier WHERE project_id = :pid AND classifier_key = :key")
-                .param("pid", projectId)
-                .param("key", classifierKey)
-                .query((rs, n) -> map(rs))
-                .optional();
-    }
-
     public void insert(ClassifierRow row) {
         jdbc.sql("""
             INSERT INTO classifier (id, project_id, classifier_key, name, description, detector, config_json,

@@ -51,7 +51,6 @@ class OnboardingRepositoryTest {
                 projectId,
                 List.of(new RawEntry(
                         "onb-trace-root",
-                        null,
                         "agent",
                         "user question",
                         "agent answer",

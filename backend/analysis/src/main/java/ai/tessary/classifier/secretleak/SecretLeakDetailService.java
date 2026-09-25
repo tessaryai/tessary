@@ -53,7 +53,6 @@ public class SecretLeakDetailService {
      * @return null when the newest finding is not a live {@code secret_leak} facet
      */
     public @Nullable SecretLeakDetail detail(List<FindingRow> caseFindings) {
-        if (caseFindings.isEmpty()) return null;
         FindingRow finding = caseFindings.get(0);
         String callSiteId = finding.callSiteId();
         if (!FindingRow.Cause.ARMED_WINDOW.equals(finding.causeKind())

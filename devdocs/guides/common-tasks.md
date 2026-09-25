@@ -84,10 +84,8 @@ files live in `classifiers/groundedness/`, and the rate test runs as a `Classifi
 (`GroundednessRateService`) once the sweep reaches the head of the stream.
 
 (This heading replaced *New curation kind*. Curation — the accept/edit/reject overlay over an
-imported pipeline — was removed on the backend along with graders,
-`CurationController` and the `curation_entry` table. Frontend still carries dead `Curation`/
-`CurationEntry` types (`frontend/src/api/types.ts`) and an orphaned `client.ts` stub hitting a
-`/curation/*` route that no longer exists — do not resurrect it as a model for new work.)
+imported pipeline — was removed along with graders, `CurationController` and the `curation_entry`
+table; do not resurrect it as a model for new work.)
 
 ## Upgrading to a new contract version
 

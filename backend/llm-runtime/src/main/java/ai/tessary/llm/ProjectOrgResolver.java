@@ -15,10 +15,8 @@ import org.springframework.stereotype.Component;
  * front of grading for no benefit. There is no eviction because a project cannot change orgs; a
  * deleted project's stale entry is harmless — nothing looks it up again.
  *
- * <p>Extracted from {@link ChatModelFactory} once
- * {@link AgenticCredentialResolver} needed the identical lookup and had reimplemented it inline and
- * uncached — two independent copies of the same cache would drift or double the query load with no
- * behavioral benefit, so both now share one instance via Spring.
+ * <p>Shared by {@link AgenticCredentialResolver} and {@link ProjectModelSettings} so there is one
+ * copy of the cache rather than two that drift or double the query load.
  */
 @Component
 public class ProjectOrgResolver {

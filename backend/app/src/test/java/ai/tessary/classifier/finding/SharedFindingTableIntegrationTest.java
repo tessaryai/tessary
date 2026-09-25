@@ -7,19 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.plan.Capability;
-import ai.tessary.storage.AnnotationRepository;
-import ai.tessary.storage.AnnotationRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,8 +30,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * them is a database constraint or a predicate rather than Java, so a unit test would assert the mock.
  *
  * <p>What is pinned here is the set of rules that make ONE table safe for four classifiers: the live
- * uniqueness arbiter and its {@code blocked} arm, the bounded append-only evidence set, the case's
- * mandatory pointer at a finding, and the correction anchor that outlives the verdict TTL.
+ * uniqueness arbiter and its {@code blocked} arm, the bounded append-only evidence set, and the
+ * case's mandatory pointer at a finding.
  */
 @SpringBootTest
 class SharedFindingTableIntegrationTest {
@@ -48,13 +46,7 @@ class SharedFindingTableIntegrationTest {
     FindingService behaviorDrift;
 
     @Autowired
-    AnnotationRepository annotations;
-
-    @Autowired
     TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     @Autowired
     JdbcClient jdbc;
@@ -86,8 +78,14 @@ class SharedFindingTableIntegrationTest {
                 evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now),
                 "a repeated reference is absorbed by ux_finding_evidence_ref");
 
-        assertEquals(1, evidence.recordExemplarTrace(p.id(), findingId, "trace-exemplar", now));
-        assertTrue(evidence.exemplarTraceId(p.id(), findingId).isPresent());
+        assertEquals(
+                1,
+                evidence.record(
+                        p.id(),
+                        findingId,
+                        FindingEvidenceRow.Role.EXEMPLAR,
+                        List.of(FindingEvidenceRepository.Ref.trace("trace-exemplar")),
+                        now));
         assertEquals(population + 1, evidence.listByFinding(p.id(), findingId).size());
 
         // The cost of the claim, readable off the finding without a count(*).
@@ -98,16 +96,11 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * The read side of the population: {@code get_finding_evidence} pages this repository, and its keyset
-     * is SQL, a row comparison over {@code (role, rank, id)} with a cast on each slot, so a unit test
-     * against a mock would prove nothing about the one thing that can be wrong here.
-     *
-     * <p>The property that matters is completeness. A population is only auditable if walking it returns
-     * every row exactly once, so the walk below is asserted against the whole set rather than against the
-     * first page, and it crosses a role boundary on the way (the order is role-major).
+     * The read side of the population: the dossier's enumeration reads the first page of this repository
+     * in the detector's own order, and needs the cursor to say whether more rows follow.
      */
     @Test
-    @DisplayName("the evidence page walks the whole population once, and the counts report every role")
+    @DisplayName("the evidence page is the unpaged order's head, and the counts report every role")
     void evidencePagesInStableOrderAndCountsEveryRole() {
         Project p = project("finding-evidence-paging");
         String findingId = firing(p, "gram-paging");
@@ -126,40 +119,19 @@ class SharedFindingTableIntegrationTest {
                         FindingEvidenceRepository.Ref.trace("ref-2")),
                 now);
 
-        List<String> walked = new ArrayList<>();
-        String cursor = null;
-        int pages = 0;
-        do {
-            FindingEvidenceRepository.Page page = evidence.page(p.id(), findingId, null, 3, cursor);
-            for (FindingEvidenceRow row : page.rows()) walked.add(row.role() + ':' + row.id());
-            cursor = page.nextCursor();
-            pages++;
-        } while (cursor != null && pages < 10);
-
-        assertEquals(8, walked.size(), "the walk returned " + walked.size() + " of 8 refs: " + walked);
+        List<String> unpaged = evidence.listByFinding(p.id(), findingId).stream()
+                .map(r -> r.role() + ':' + r.id())
+                .toList();
+        FindingEvidenceRepository.Page head = evidence.page(p.id(), findingId, 3);
         assertEquals(
-                8,
-                walked.stream().distinct().count(),
-                "a keyset that re-emits a row is as wrong as one that skips it: " + walked);
-        assertEquals(
-                evidence.listByFinding(p.id(), findingId).stream()
-                        .map(r -> r.role() + ':' + r.id())
-                        .toList(),
-                walked,
+                unpaged.subList(0, 3),
+                head.rows().stream().map(r -> r.role() + ':' + r.id()).toList(),
                 "the paged order must be the unpaged order");
+        assertNotNull(head.nextCursor(), "a page that stopped short of the set says more rows follow");
 
-        // Narrowing to one role pages only that role, and the page still ends with a null cursor.
-        FindingEvidenceRepository.Page baseline =
-                evidence.page(p.id(), findingId, FindingEvidenceRow.Role.BASELINE, 50, null);
-        assertEquals(3, baseline.rows().size());
-        assertNull(baseline.nextCursor(), "a page that exhausted the set mints no cursor");
-
-        // An unreadable token is page one, never an error: the only failure mode a feed can absorb.
-        assertEquals(
-                walked.size(),
-                evidence.page(p.id(), findingId, null, 50, "not-a-cursor")
-                        .rows()
-                        .size());
+        FindingEvidenceRepository.Page whole = evidence.page(p.id(), findingId, 50);
+        assertEquals(8, whole.rows().size());
+        assertNull(whole.nextCursor(), "a page that exhausted the set mints no cursor");
 
         // Every role in the vocabulary is reported, so a detector with no reference side reads as an
         // explicit zero rather than as a key somebody forgot to send.
@@ -171,7 +143,7 @@ class SharedFindingTableIntegrationTest {
 
         // count_only sizes the set without walking it: rows omitted on a finding that HAS eight of them,
         // so an empty refs list here is the caller's own request rather than an evidence set that vanished.
-        var sized = behaviorDrift.findingEvidence(p.id(), findingId, null, 100, null, true);
+        var sized = behaviorDrift.findingEvidence(p.id(), findingId);
         assertTrue(sized.refs().isEmpty(), "the cheap first call spends nothing on rows");
         assertTrue(sized.rowsOmitted(), "rowsOmitted is what separates 'did not ask' from 'has none'");
         assertNull(sized.nextCursor(), "a call that returned no rows must not offer to resume after them");
@@ -341,25 +313,16 @@ class SharedFindingTableIntegrationTest {
         // The positive control. Without it every assertion below would also pass on a finding that was
         // never written, and the test would be proving nothing but its own fixture failing quietly.
         assertEquals(
-                1,
-                behaviorDrift
-                        .findingEvidence(owner.id(), findingId, null, 100, null, false)
-                        .refs()
-                        .size(),
+                1L,
+                behaviorDrift.findingEvidence(owner.id(), findingId).counts().get(FindingEvidenceRow.Role.MEMBER),
                 "the owner reads its own evidence");
 
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> behaviorDrift.findingEvidence(stranger.id(), findingId, null, 100, null, false));
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> behaviorDrift.findingEvidence(stranger.id(), findingId));
         assertEquals(ClassifierError.FINDING_NOT_FOUND, e.error(), "a cross-tenant id must not read as forbidden");
 
-        assertThrows(
-                TessaryException.class,
-                () -> behaviorDrift.findingEvidence(stranger.id(), findingId, null, 100, null, true),
-                "count_only is the cheap first call, so it is also the cheap first probe");
-
         assertTrue(
-                evidence.page(stranger.id(), findingId, null, 100, null).rows().isEmpty(),
+                evidence.page(stranger.id(), findingId, 100).rows().isEmpty(),
                 "the page's own project predicate is what makes the service guard belt-and-braces");
         assertEquals(
                 0L,
@@ -397,81 +360,31 @@ class SharedFindingTableIntegrationTest {
         assertTrue(fresh.triageVerdict() == null, "the new row starts unruled, exactly like a first firing");
     }
 
-    /**
-     * A correction anchors on {@code of_finding_id}, the only anchor there is. A verdict pointer would
-     * age out on the 90-day verdict TTL, so a human's correction would outlive the row it was attached
-     * to and the training signal would be lost by a clock rather than by a decision.
-     */
-    @Test
-    @DisplayName("a correction anchors on the finding, the only anchor left")
-    void annotationsAnchorOnTheFinding() {
-        Project p = project("finding-annotation-anchor");
-        String findingId = firing(p, "gram-annotation");
-        annotations.upsert(new AnnotationRow(
-                Ids.ulid(),
-                p.id(),
-                AnnotationRow.SubjectKind.TRACE,
-                "session-1",
-                "trace-1",
-                null,
-                "behavior_drift",
-                "user-1",
-                AnnotationRow.AnnotatorKind.HUMAN,
-                "boolean",
-                null,
-                null,
-                null,
-                null,
-                findingId,
-                true,
-                null,
-                Instant.now().toString(),
-                null));
-
-        assertEquals(
-                1L,
-                jdbc.sql("SELECT count(*) FROM annotation WHERE project_id = :pid AND of_finding_id = :fid")
-                        .param("pid", p.id())
-                        .param("fid", findingId)
-                        .query(Long.class)
-                        .single(),
-                "the anchor is stored, and it is the finding rather than a verdict");
-    }
-
     // ---- fixtures ---------------------------------------------------------------------------------
 
     private Project project(String name) {
-        return bootstrapGranted(name).project();
+        return TenantFixture.bootstrap(tenants, name).project();
     }
 
-    /** One behaviour-drift firing against {@code gram}, returning the finding that owns the cause. */
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    /** One classifier firing against {@code gram}, returning the finding that owns the cause. */
     private String firing(Project p, String gram) {
-        return findings.recordFiring(
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-1",
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + gram,
                         gram,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "cs-a",
-                        Instant.now().toString())
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
-    }
-
-    /**
-     * Bootstrap a tenant whose org has behaviour drift switched on before its project is created. This
-     * build's default has {@code behavior_drift} off, so without a grant these cases would assert the
-     * capability default rather than the behaviour they name. The grant has to precede the project,
-     * because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project
-     * does not have.
-     */
-    private TenantFixture.Setup bootstrapGranted(String name) {
-        return TenantFixture.bootstrap(tenants, name, org -> {
-            capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT);
-        });
     }
 }

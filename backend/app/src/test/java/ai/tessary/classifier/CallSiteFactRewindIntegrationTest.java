@@ -31,13 +31,13 @@ import org.springframework.boot.test.context.SpringBootTest;
  * The chicken-and-egg this feature exists to break, end to end against the real pgvector Postgres.
  *
  * <p>The platform must ingest correctly-tagged traces before the plugin will assess the repo, and it
- * is that repo assessment (agentic synthesis) which captures {@code call_site.output_schema}. So a
- * project's first traffic is always swept by Malformed Output before it has anything to gate on: it
- * abstains, and the cursor advances over the abstention.
+ * is that assessment's bundle which declares {@code call_site.output_schema}. So a project's first
+ * traffic is always swept by Malformed Output before it has anything to gate on: it abstains, and the
+ * cursor advances over the abstention.
  *
  * <p>These tests pin the fix at its real seams: a fact landing rewinds exactly the signals that
- * declare it, an unchanged re-capture rewinds nothing, and a fact change never disturbs a signal that
- * reads only the trace.
+ * declare it, an unchanged re-declaration rewinds nothing, and a fact change never disturbs a signal
+ * that reads only the trace.
  *
  * <p>{@link ai.tessary.model.CallSite} facts have one live reader in this build: {@code
  * MalformedOutputDetector} declares {@code OUTPUT_SCHEMA}. {@code
@@ -113,15 +113,12 @@ class CallSiteFactRewindIntegrationTest {
     }
 
     @Test
-    void capturingASchemaReopensTheHistorySweptBeforeItExisted() {
+    void declaringASchemaReopensTheHistorySweptBeforeItExisted() {
         String pid = projectWithSweptHistory("fact-rewind-schema");
         assertEquals(SWEPT_ID, jobFor(pid, "malformed_output").cursorId(), "setup: history already swept");
-        pipelineService.ensureCallSite(pid, "cs-answer");
 
-        // Synthesis finally runs and reads the call site's declared structured output.
-        assertTrue(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA),
-                "a first capture is a genuine change");
+        // The bundle finally declares the call site's structured output.
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"), "the schema-gated built-in re-reads its whole history");
         assertEquals(
@@ -133,62 +130,39 @@ class CallSiteFactRewindIntegrationTest {
     @Test
     void aFactOnlyRewindsTheSignalsThatDeclareIt() {
         String pid = projectWithSweptHistory("fact-rewind-isolation");
-        pipelineService.ensureCallSite(pid, "cs-answer");
 
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"), "declares OUTPUT_SCHEMA");
-        // Frustration reads the user's own words, so nothing captured from the repo can invalidate it.
+        // Frustration reads the user's own words, so nothing declared by the repo can invalidate it.
         assertFalse(rewound(pid, "frustration"), "reads the trace alone");
         assertFalse(rewound(pid, "secret_leak"), "reads the trace alone");
     }
 
     @Test
-    void reCapturingTheSameSchemaRewindsNothing() {
-        String pid = projectWithSweptHistory("fact-rewind-idempotent");
-        pipelineService.ensureCallSite(pid, "cs-answer");
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
-
-        // Re-sweep to a fresh high-water mark, as the rewound sweep would.
-        ClassifierJobRow after = jobFor(pid, "malformed_output");
-        jobs.claimBatch("resweep", 500, 300, 5);
-        jobs.markSwept(after.id(), SWEPT_AT, SWEPT_ID);
-
-        // Every generation run re-reads the same code. Re-scoring all history on each one would be
-        // pure waste, so an unchanged capture must be silent.
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA),
-                "re-writing an identical schema is not a change");
-        assertFalse(rewound(pid, "malformed_output"), "an unchanged capture leaves the cursor where it was");
-    }
-
-    @Test
     void clearingAStaleSchemaAlsoRewinds() {
         String pid = projectWithSweptHistory("fact-rewind-clear");
-        pipelineService.ensureCallSite(pid, "cs-answer");
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
         ClassifierJobRow job = jobFor(pid, "malformed_output");
         jobs.claimBatch("resweep-clear", 500, 300, 5);
         jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
 
         // The code stopped declaring structured output. History scored against the withdrawn schema is
         // as wrong as history scored against no schema — both need re-reading.
-        assertTrue(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-answer", null),
-                "clearing a stale capture is a change");
+        pipelineService.replace(pid, pipelineWithNullSchema("cs-answer", "rag_answer"));
+
         assertTrue(rewound(pid, "malformed_output"), "the withdrawn schema's verdicts are re-derived");
     }
 
     @Test
     void rewindSurvivesASignalThatHasNeverSwept() {
-        // A project that captured a schema before any sweep job existed must not blow up; its first
+        // A project that declared a schema before any sweep job existed must not blow up; its first
         // sweep already starts from a null cursor, so there is nothing to rewind.
         String pid =
                 TenantFixture.bootstrap(tenants, "fact-rewind-nojob").project().id();
         signals.seedBuiltIns(pid);
-        pipelineService.ensureCallSite(pid, "cs-answer");
 
-        assertTrue(pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA));
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(
                 jobs.listByProject(pid).stream().allMatch(j -> j.cursorId() == null),
@@ -202,9 +176,8 @@ class CallSiteFactRewindIntegrationTest {
         // per-call-site cursor. Safe because the worker's verdict write is idempotent.
         String pid = projectWithSweptHistory("fact-rewind-whole-signal");
         pipelineService.ensureCallSite(pid, "cs-one");
-        pipelineService.ensureCallSite(pid, "cs-two");
 
-        pipelineService.setCallSiteOutputSchema(pid, "cs-two", SCHEMA);
+        pipelineService.upsert(pid, pipelineWithCallSite("cs-two", "rag_answer", SCHEMA));
 
         assertNull(
                 jobFor(pid, "malformed_output").cursorAt(),
@@ -222,9 +195,8 @@ class CallSiteFactRewindIntegrationTest {
                 .findFirst()
                 .orElseThrow();
         signals.setEnabled(pid, malformed.id(), false);
-        pipelineService.ensureCallSite(pid, "cs-answer");
 
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         signals.setEnabled(pid, malformed.id(), true);
         assertTrue(rewound(pid, "malformed_output"), "the history is waiting for it when it comes back on");
@@ -232,54 +204,20 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void aKeyReorderedSchemaIsNotAChange() {
-        // The agent re-reads the same code on every generation run and emits the keys in whatever order
-        // that run produced. Compared raw against a text column, an identical schema would read as a
-        // change and rewind the whole history on every single run.
+        // A producer emits the keys in whatever order its run produced. Compared raw against a text
+        // column, an identical schema would read as a change and rewind the whole history on every
+        // import.
         String pid = projectWithSweptHistory("fact-rewind-key-order");
-        pipelineService.ensureCallSite(pid, "cs-answer");
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
         ClassifierJobRow job = jobFor(pid, "malformed_output");
         jobs.claimBatch("resweep-key-order", 500, 300, 5);
         jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
 
         String reordered = "{\"required\":[\"answer\"],\"properties\":{\"answer\":{\"type\":\"string\"}},"
                 + "\"type\":\"object\"}";
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-answer", reordered),
-                "the same schema with its keys in a different order is the same schema");
-        assertFalse(rewound(pid, "malformed_output"), "so nothing is re-scored");
-    }
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", reordered));
 
-    @Test
-    void aBundleImportDoesNotDropACapturedSchema() {
-        // output_schema is platform-captured, not bundle content, and replace() wipes call sites before
-        // re-inserting them. Losing it would silently un-arm the Malformed Output built-in AND make the
-        // next synth capture read as a first capture, rewinding all history on every import.
-        String pid = projectWithSweptHistory("fact-rewind-import-preserves");
-        pipelineService.replace(pid, pipelineWithCallSiteShape("cs-rag", "rag_answer"));
-        pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA);
-        ClassifierJobRow job = jobFor(pid, "malformed_output");
-        jobs.claimBatch("resweep-import", 500, 300, 5);
-        jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
-
-        pipelineService.replace(pid, pipelineWithCallSiteShape("cs-rag", "rag_answer"));
-
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA),
-                "the import carried the captured schema across the wipe, so re-capturing it is not a change");
-        assertFalse(rewound(pid, "malformed_output"), "and no history is needlessly re-scored");
-    }
-
-    @Test
-    void aSchemaDeclaredByTheBundleRewindsLikeAnyOtherCapture() {
-        // The bundle is the second writer of output_schema. A schema arriving via import must re-open
-        // the same stranded history a synthesis capture does — the classifier cannot tell, or care,
-        // which writer produced it.
-        String pid = projectWithSweptHistory("fact-rewind-bundle-schema");
-
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-
-        assertTrue(rewound(pid, "malformed_output"), "a bundle-declared schema re-opens the history");
+        assertFalse(rewound(pid, "malformed_output"), "the same schema with its keys reordered re-scores nothing");
     }
 
     @Test
@@ -297,82 +235,75 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void theDefaultUpsertImportPathRewindsToo() {
-        // ImportController's DEFAULT mode is upsert(pipeline, true), not replace — so every fact-change
-        // assertion proven only against replace() is proven against the path most imports don't take.
+        // ImportController's DEFAULT mode is upsert, not replace — so every fact-change assertion
+        // proven only against replace() is proven against the path most imports don't take.
         String pid = projectWithSweptHistory("fact-upsert-path");
 
-        pipelineService.upsert(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA), true);
+        pipelineService.upsert(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"), "a schema arriving via upsert re-opens the history");
     }
 
     @Test
-    void aGradersOnlyUpsertRewindsNothing() {
-        // replaceMeta=false never touches call_site, so it cannot move a fact — and must not pay for a
-        // fact diff or trigger a re-sweep.
-        String pid = projectWithSweptHistory("fact-upsert-graders-only");
-        pipelineService.upsert(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA), false);
-
-        assertFalse(rewound(pid, "malformed_output"), "a graders-only upload moves no call-site fact");
-    }
-
-    @Test
-    void anExplicitNullInTheBundleClearsTheCapturedSchema() {
-        // The contract's two nulls, end to end. A shard SILENT on output_schema keeps the platform's
-        // capture; a shard declaring `output_schema: null` asserts the code has no structured output
+    void anExplicitNullInTheBundleClearsTheStoredSchema() {
+        // The contract's two nulls, end to end. A shard SILENT on output_schema keeps the stored
+        // schema; a shard declaring `output_schema: null` asserts the code has no structured output
         // and clears it. Jackson binds that null to NullNode rather than Java null, so without the
         // isNull() branch the column would hold the string "null" — not SQL NULL — and the Malformed
         // Output built-in would keep reading it back as a schema forever.
         String pid = projectWithSweptHistory("fact-bundle-explicit-null");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA), "setup: the bundle's schema is stored");
+        assertNotNull(storedSchema(pid, "cs-rag"), "setup: the bundle's schema is stored");
 
         pipelineService.replace(pid, pipelineWithNullSchema("cs-rag", "rag_answer"));
 
-        assertTrue(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA),
-                "the capture was cleared, so re-capturing the schema is a genuine change again");
+        assertNull(storedSchema(pid, "cs-rag"), "the explicit null cleared the stored schema");
     }
 
     @Test
-    void aSilentShardKeepsTheCapturedSchemaThatAnExplicitNullWouldClear() {
+    void aSilentShardKeepsTheStoredSchemaThatAnExplicitNullWouldClear() {
         String pid = projectWithSweptHistory("fact-bundle-silent-vs-null");
-        pipelineService.ensureCallSite(pid, "cs-rag");
-        pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
 
-        // Silent on the fact — the platform's capture must survive the wipe-and-write.
+        // Silent on the fact — the stored schema must survive the wipe-and-write.
         pipelineService.replace(pid, pipelineWithCallSiteShape("cs-rag", "rag_answer"));
 
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-rag", SCHEMA),
-                "silence carried the capture across, so re-capturing it is not a change");
+        assertEquals(json(SCHEMA), storedSchema(pid, "cs-rag"), "silence carried the schema across");
     }
 
     @Test
-    void aBundleDeclaredSchemaOverridesTheCarriedCapture() {
-        // The repo is the source of truth. When the bundle declares a schema it must WIN over the
-        // platform's carried-across capture — otherwise a user correcting a stale capture by editing
-        // the bundle would be silently overwritten by the very mechanism that protects them.
+    void aBundleDeclaredSchemaOverridesTheCarriedSchema() {
+        // When the bundle declares a schema it must WIN over the carried-across one — otherwise a user
+        // correcting a stale schema by editing the bundle would be silently overwritten by the very
+        // mechanism that protects a silent shard.
         String pid = projectWithSweptHistory("fact-rewind-bundle-wins");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-        pipelineService.setCallSiteOutputSchema(pid, "cs-rag", "{\"type\":\"object\"}");
 
         String corrected = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"number\"}}}";
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", corrected));
 
-        assertFalse(
-                pipelineService.setCallSiteOutputSchema(pid, "cs-rag", corrected),
-                "the bundle's declaration is what is stored, so re-capturing it is not a change");
+        assertEquals(json(corrected), storedSchema(pid, "cs-rag"), "the bundle's declaration is what is stored");
+    }
+
+    private @Nullable JsonNode storedSchema(String projectId, String callSiteId) {
+        return pipelineService.getPipeline(projectId).callSites().stream()
+                .filter(cs -> cs.id().equals(callSiteId))
+                .findFirst()
+                .orElseThrow()
+                .outputSchema();
+    }
+
+    private static JsonNode json(String text) {
+        try {
+            return new ObjectMapper().readTree(text);
+        } catch (JacksonException e) {
+            throw new AssertionError("test fixture schema is not JSON", e);
+        }
     }
 
     /** A minimal meta-bearing pipeline carrying exactly one call site with the given shape. */
     private static Pipeline pipelineWithCallSite(String callSiteId, String shape, String outputSchemaJson) {
-        try {
-            return withCallSite(callSiteId, shape, new ObjectMapper().readTree(outputSchemaJson));
-        } catch (JacksonException e) {
-            throw new AssertionError("test fixture schema is not JSON", e);
-        }
+        return withCallSite(callSiteId, shape, json(outputSchemaJson));
     }
 
     private static Pipeline pipelineWithCallSiteShape(String callSiteId, String shape) {
@@ -426,9 +357,8 @@ class CallSiteFactRewindIntegrationTest {
     void unrelatedFactsDoNotCollideAcrossProjects() {
         String pid = projectWithSweptHistory("fact-rewind-scope-a");
         String otherPid = projectWithSweptHistory("fact-rewind-scope-b");
-        pipelineService.ensureCallSite(pid, "cs-answer");
 
-        pipelineService.setCallSiteOutputSchema(pid, "cs-answer", SCHEMA);
+        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"));
         assertFalse(rewound(otherPid, "malformed_output"), "another tenant's sweep is untouched");

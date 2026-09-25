@@ -9,43 +9,43 @@ const BASE =
 
 const SIZED = "h-9 px-2.5 text-small";
 
-type InputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean };
+type InputProps = InputHTMLAttributes<HTMLInputElement>;
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { invalid, className, ...rest },
+  { className, ...rest },
   ref,
 ) {
   return (
     <input
       ref={ref}
-      className={cn(BASE, SIZED, invalid && "border-[color:var(--color-error)]", className)}
+      className={cn(BASE, SIZED, className)}
       style={{ transitionDuration: "var(--duration-micro)" }}
       {...rest}
     />
   );
 });
 
-type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean };
+type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
-  { invalid, className, rows = 4, ...rest },
+  { className, rows = 4, ...rest },
   ref,
 ) {
   return (
     <textarea
       ref={ref}
       rows={rows}
-      className={cn(BASE, "px-2.5 py-2 text-small leading-relaxed font-mono", invalid && "border-[color:var(--color-error)]", className)}
+      className={cn(BASE, "px-2.5 py-2 text-small leading-relaxed font-mono", className)}
       style={{ transitionDuration: "var(--duration-micro)" }}
       {...rest}
     />
   );
 });
 
-type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean };
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
-  { invalid, className, children, ...rest },
+  { className, children, ...rest },
   ref,
 ) {
   return (
@@ -55,7 +55,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         BASE,
         SIZED,
         "appearance-none pr-7 bg-no-repeat",
-        invalid && "border-[color:var(--color-error)]",
         className,
       )}
       style={{

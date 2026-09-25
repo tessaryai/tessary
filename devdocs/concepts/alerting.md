@@ -62,8 +62,7 @@ AlertWorker.notifyOpenedCases
 CaseAlertEvaluator.due  →  one AlertEventRow per case, payload baked in
         │
         ▼  idempotent insert on (rule, case_id)
-AlertFiredEvent  ─┬─►  AlertDeliveryListener  →  webhook / PagerDuty / Sentry / Linear / (Slack)
-                  └─►  SlackBriefPublisher    →  the native Slack app's channel   (Slack only)
+AlertFiredEvent  ──►  AlertDeliveryListener  →  webhook / PagerDuty / Sentry / Linear / (Slack)
 ```
 
 ## Quiet hours defer; they never drop
@@ -122,8 +121,7 @@ enabled flag and its anchor.
 ## Transports, and why Slack is its own capability
 
 A rule decides *when*; a channel decides *where*. Five channel kinds exist — generic webhook, PagerDuty,
-Sentry, Linear, and Slack — plus the native Slack app's own channel post, which is not a channel row at
-all but a listener on the same event.
+Sentry, Linear, and Slack.
 
 **Slack is gated separately from alerting**, on `slack_enabled`, which is off. The two are different
 questions: alerting is the capability (a case reaches a human unattended) and Slack is one route to it. So
@@ -132,7 +130,7 @@ webhook — which is exactly why **Settings → Notifications leads with the web
 Slack one only to an org that has the capability. A partner who will never see the Slack option still has
 a working notification path, and never reads a mention of something they cannot have.
 
-The gate is applied in three places, and the third is the one that is easy to forget:
+The gate is applied in two places:
 
 1. **Creating or updating a channel** (`AlertChannelController`) — a `slack` channel is refused outright,
    so the refusal lands in front of the person rather than in a log.
@@ -140,22 +138,12 @@ The gate is applied in three places, and the third is the one that is easy to fo
    skipped at fan-out. Refusing only at write would leave every existing channel delivering forever; this
    is the same reasoning applied to a withdrawn classifier's output. No delivery-attempt row is
    written, because nothing was attempted — a withheld transport is not a failed send.
-3. **The native app**, outbound (`SlackBriefPublisher`) and inbound (`SlackMentionService`), both through
-   `SlackCapability` — live in the paid overlay, joined by the route itself
-   (`SlackMentionController`) and its `SlackMentionSource` port, so an open build simply has no
-   native app at all: without this jar the endpoint does not exist, and `AuthFilter` does not bypass its
-   path either — an open-only `auth/SelfAuthenticatingPath` port (`tenancy`) replaces the hard-coded
-   bypass, empty by default. Webhook-channel delivery
-   (item 2, `SlackDelivery`) is a different feature and stays open. The inbound gate is checked *after* the workspace install resolves, because the
-   install is what names the organization, and it stays silent rather than replying — posting "you do not
-   have Slack" into Slack is the one message the gate exists to prevent.
 
 **Slack runs out of process.** The protocol — signature verification, bot tokens, Web API calls, webhook
 posts — lives in the Slack adapter service (a Python service using `slack_sdk`; not
 part of the public export).
 The backend holds no Slack credential and cannot reach Slack directly; it POSTs a composed message to the
-adapter's `/deliver`, and the adapter calls back to `/internal/slack/mention` for the one thing it cannot
-answer. Every gate above is still evaluated on this side, before the adapter is ever called — the adapter
+adapter's `/deliver`. Every gate above is still evaluated on this side, before the adapter is ever called — the adapter
 makes no product decisions, which is what lets it be deleted whole if Slack never ships.
 
 **A second, unrelated switch.** Whether the adapter is deployed and reachable (`tessary.slack.base-url` +

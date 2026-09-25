@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.usage;
 
-import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.pricing.PlatformCallPricer;
 import ai.tessary.tenant.Ids;
 import java.math.BigDecimal;
@@ -46,42 +44,6 @@ public class LlmUsageAccountant {
     public LlmUsageAccountant(LlmCallWriteRepository ledger, PlatformCallPricer pricer) {
         this.ledger = ledger;
         this.pricer = pricer;
-    }
-
-    /**
-     * Record one in-process LLM call ({@code LlmCaller}'s lanes). {@code platformFunded} decides the
-     * funding side: the platform's own ambient identity versus the customer's pinned provider
-     * credential.
-     */
-    public void record(
-            @Nullable String projectId,
-            ModelLane lane,
-            @Nullable String model,
-            @Nullable ServiceTier tier,
-            boolean platformFunded,
-            @Nullable Integer inputTokens,
-            @Nullable Integer outputTokens,
-            @Nullable Integer cacheReadTokens,
-            @Nullable Integer cacheWriteTokens,
-            @Nullable BigDecimal costUsd,
-            @Nullable String priceBookVersion,
-            @Nullable Integer latencyMs) {
-        record(
-                projectId,
-                lane.wire(),
-                model,
-                tier == null ? null : tier.wireName(),
-                platformFunded,
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheWriteTokens,
-                costUsd,
-                priceBookVersion,
-                latencyMs,
-                // The per-call lanes have no single unit of work behind one call: a lane call is one
-                // among many, and pointing it at one is not attribution.
-                null);
     }
 
     /**
@@ -129,12 +91,11 @@ public class LlmUsageAccountant {
         Integer cacheRead = toInt(cacheReadTokens);
         Integer cacheWrite = toInt(cacheWriteTokens);
         PlatformCallPricer.PricedCall priced =
-                pricer.price(pricingId, null, in, out, cacheRead, cacheWrite).orElse(null);
+                pricer.price(pricingId, in, out, cacheRead, cacheWrite).orElse(null);
         record(
                 projectId,
                 lane,
                 model,
-                null,
                 platformFunded,
                 in,
                 out,
@@ -169,7 +130,6 @@ public class LlmUsageAccountant {
                 projectId,
                 lane,
                 model,
-                null,
                 false,
                 inputTokens,
                 outputTokens,
@@ -185,7 +145,6 @@ public class LlmUsageAccountant {
             @Nullable String projectId,
             String lane,
             @Nullable String model,
-            @Nullable String tier,
             boolean platformFunded,
             @Nullable Integer inputTokens,
             @Nullable Integer outputTokens,
@@ -202,7 +161,7 @@ public class LlmUsageAccountant {
                     projectId,
                     lane,
                     model,
-                    tier,
+                    null,
                     platformFunded ? LlmCallRow.CostFunding.PLATFORM : LlmCallRow.CostFunding.BYO,
                     inputTokens,
                     outputTokens,

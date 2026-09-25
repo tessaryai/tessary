@@ -11,15 +11,17 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Round-trips the Malformed Output built-in's schema seam against the real pgvector Postgres
- * (Testcontainers): {@link PipelineRepository#setCallSiteOutputSchema} writes (and null-clears)
- * {@code call_site.output_schema}, and {@link SubstrateReadRepository#callSiteOutputSchemas} reads
- * it back — schema-less call sites absent from the map, empty id set short-circuiting without SQL.
+ * Round-trips the Malformed Output built-in's schema read seam against the real pgvector Postgres
+ * (Testcontainers): {@link SubstrateReadRepository#callSiteOutputSchemas} reads back what
+ * {@code call_site.output_schema} holds — schema-less call sites absent from the map, empty id set
+ * short-circuiting without SQL.
  */
 @SpringBootTest
 class CallSiteOutputSchemaIntegrationTest {
@@ -36,34 +38,32 @@ class CallSiteOutputSchemaIntegrationTest {
     @Autowired
     TenantService tenants;
 
+    @Autowired
+    JdbcClient jdbc;
+
+    private void storeSchema(String projectId, String callSiteId, @Nullable String schema) {
+        jdbc.sql("UPDATE call_site SET output_schema = :schema WHERE project_id = :pid AND id = :id")
+                .param("schema", schema)
+                .param("pid", projectId)
+                .param("id", callSiteId)
+                .update();
+    }
+
     @Test
     void outputSchemaRoundTrips_andNullClearsStaleCapture() {
         String pid = TenantFixture.bootstrap(tenants, "cs-schema").project().id();
         pipelines.ensureCallSite(pid, "cs-with-schema");
         pipelines.ensureCallSite(pid, "cs-bare");
 
-        pipelines.setCallSiteOutputSchema(pid, "cs-with-schema", SCHEMA);
+        storeSchema(pid, "cs-with-schema", SCHEMA);
         Map<String, String> read = substrate.callSiteOutputSchemas(pid, Set.of("cs-with-schema", "cs-bare"));
-        assertEquals(SCHEMA, read.get("cs-with-schema"), "the captured schema reads back verbatim");
+        assertEquals(SCHEMA, read.get("cs-with-schema"), "the stored schema reads back verbatim");
         assertFalse(read.containsKey("cs-bare"), "a schema-less call site is absent from the map");
 
-        // Regeneration found the code no longer declares structured output: null clears the capture.
-        pipelines.setCallSiteOutputSchema(pid, "cs-with-schema", null);
+        storeSchema(pid, "cs-with-schema", null);
         assertTrue(
                 substrate.callSiteOutputSchemas(pid, Set.of("cs-with-schema")).isEmpty(),
-                "a null write clears the stale schema — the call site validates nothing");
-    }
-
-    @Test
-    void lastWriteWins_newerCaptureReplacesOlder() {
-        String pid = TenantFixture.bootstrap(tenants, "cs-schema-lww").project().id();
-        pipelines.ensureCallSite(pid, "cs-1");
-        pipelines.setCallSiteOutputSchema(pid, "cs-1", "{\"type\":\"object\"}");
-        pipelines.setCallSiteOutputSchema(pid, "cs-1", SCHEMA);
-        assertEquals(
-                SCHEMA,
-                substrate.callSiteOutputSchemas(pid, Set.of("cs-1")).get("cs-1"),
-                "the newest capture is the current truth");
+                "a cleared schema reads back as absent — the call site validates nothing");
     }
 
     @Test

@@ -10,10 +10,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * Facade over project versions (commit SHAs). Versions are materialized lazily
- * by callers that attach to a SHA — {@code reasonPipelineSync} at import,
- * {@code reasonBenchmark} when a run executes, {@code reasonObserverFinding}
- * when the observer triages a commit. Aspect statuses record, per version,
- * whether graders / datasets / the benchmark are in sync for that commit.
+ * by {@code reasonPipelineSync} at import, which also records that the graders
+ * are in sync for that commit.
  */
 @Service
 public class ProjectVersionService {
@@ -28,26 +26,6 @@ public class ProjectVersionService {
         ProjectVersionRow row = repo.findOrMaterialize(projectId, commitSha, ProjectVersionRow.REASON_PIPELINE_SYNC);
         repo.setAspectStatus(projectId, commitSha, Aspect.GRADERS, ProjectVersionRow.STATUS_SYNCED);
         return row;
-    }
-
-    public ProjectVersionRow reasonBenchmark(String projectId, String commitSha) {
-        return repo.findOrMaterialize(projectId, commitSha, ProjectVersionRow.REASON_BENCHMARK);
-    }
-
-    public ProjectVersionRow reasonObserverFinding(String projectId, String commitSha) {
-        return repo.findOrMaterialize(projectId, commitSha, ProjectVersionRow.REASON_OBSERVER_FINDING);
-    }
-
-    public void markGraders(String projectId, String commitSha, String status) {
-        repo.setAspectStatus(projectId, commitSha, Aspect.GRADERS, status);
-    }
-
-    public void markDatasets(String projectId, String commitSha, String status) {
-        repo.setAspectStatus(projectId, commitSha, Aspect.DATASETS, status);
-    }
-
-    public void markBenchmark(String projectId, String commitSha, String status) {
-        repo.setAspectStatus(projectId, commitSha, Aspect.BENCHMARK, status);
     }
 
     public ProjectVersionView get(String projectId, String commitSha) {

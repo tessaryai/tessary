@@ -1,7 +1,7 @@
 # Classifier quality: measured precision, recall, F1
 
 The current measured quality of the encoder classifier this tree serves, with the provenance of
-every number. The overlay's copy of this page adds frustration; this page carries groundedness.
+every number. This page carries groundedness.
 
 **Read the regime before you read the number.** The classifier has no single quality figure: it
 splits by the shape of the traffic it runs against, and quoting a single headline across regimes is

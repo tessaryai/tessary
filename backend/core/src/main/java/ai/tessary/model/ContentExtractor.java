@@ -10,34 +10,16 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Translate an arbitrary upstream "output" payload (text or JSON-serialized
- * message structure) into a list of {@link ContentBlock}.
+ * Readers of a stored upstream input/output payload (plain text or a JSON message structure).
  *
- * <p>Shapes recognised (vendor-neutral, keyed on the JSON structure, not the source):
- * <ol>
- *   <li>Plain string, emits a single text block verbatim.</li>
- *   <li>OpenAI-style messages array: {@code [{role, content: ... }]}.
- *       Each message's {@code content} is flattened: a string becomes a text block;
- *       an array of {@code {type:"text"|"image_url", ...}} parts becomes the
- *       respective blocks. Non-assistant turns are still included so the judge
- *       sees the whole transcript when present (we don't strip user turns,
- *       upstream stored what it stored).</li>
- *   <li>OTel gen_ai semconv messages array: {@code [{role, parts:[{type, ...}]}]},
- *       the shape stored from {@code gen_ai.input.messages}/{@code gen_ai.output.messages}.
- *       Each part is unwrapped to a first-class typed block: {@code text}→text,
- *       {@code reasoning}→reasoning (empty dropped), {@code tool_call}→tool_call,
- *       {@code tool_result}/{@code tool_call_response}→tool_result, image refs→image.
- *       See {@link #genAiPartsBlocks}, the same helper ingest uses to persist message
- *       blocks, so the persisted view and the judge view never diverge.</li>
- *   <li>Anthropic-style content array: {@code [{type:"text"|"image"|"tool_use"|
- *       "tool_result"|"thinking", ...}]}. {@code image.source.type=="base64"} becomes an
- *       {@code image_b64} block; {@code image.source.type=="url"} becomes an {@code image_url}
- *       block; tool/thinking parts become their typed blocks.</li>
- * </ol>
+ * <p>Text views: {@link #columnText} / {@link #columnTextForRoles} unwrap the role-tagged gen_ai
+ * message envelope for one or more roles, {@link #columnMessages} keeps each message's role, and
+ * {@link #flattenContentText} collapses a single message-content node to text.
+ * {@link #partPlaceholder} renders one content part as text, with a marker or placeholder for a
+ * non-text part.
  *
- * If parsing fails or the JSON shape is unrecognized, the entire payload is
- * returned as one text block. This is "first do no harm": grading still
- * proceeds, just with reduced fidelity.
+ * <p>Block view: {@link #blocksFromContent} turns a message-content node into {@link ContentBlock}s,
+ * keeping OpenAI-style and Anthropic-style image and document parts as typed media blocks.
  */
 public final class ContentExtractor {
 
@@ -60,21 +42,6 @@ public final class ContentExtractor {
             if (msg.isObject() && msg.has("role")) return true;
         }
         return false;
-    }
-
-    /**
-     * String overload of {@link #isMessageEnvelope(JsonNode)}: true when {@code raw} parses to a
-     * role-tagged gen_ai message envelope. A plain-string blob or unparseable / non-envelope JSON is
-     * {@code false}, used by the judge-view builder to decide whether to unwrap into typed blocks or
-     * ride the payload through verbatim.
-     */
-    public static boolean isMessageEnvelope(@Nullable String raw) {
-        if (raw == null || raw.isBlank()) return false;
-        try {
-            return isMessageEnvelope(MAPPER.readTree(raw));
-        } catch (JsonProcessingException e) {
-            return false;
-        }
     }
 
     /**
@@ -214,7 +181,7 @@ public final class ContentExtractor {
             // same terse placeholder rather than falling to "default", document_url in particular carries only a
             // "url" field, never "text"/"content", so leaving it out of this list means partTextField finds nothing
             // and it silently degrades to "[unsupported]" instead of "[file]". Neither node carries a
-            // "name"/"filename" JSON key (ContentBlock has no filename field, see its class doc), so this bottoms out
+            // "name"/"filename" JSON key (ContentBlock has no filename field), so this bottoms out
             // at the bare "[file]" label, exactly mirroring image_ref's bare "[image]" fallback just above (image_ref
             // carries no "caption"/"alt" key either).
             case "file",
@@ -326,13 +293,13 @@ public final class ContentExtractor {
 
     /**
      * Flatten an arbitrary message-content node to plain text, concatenating the
-     * text of any structured parts. Handles the common shapes seen on the judge /
-     * export boundary: a bare string; an OpenAI/Anthropic parts array of
+     * text of any structured parts. Handles the common shapes seen on the export
+     * boundary: a bare string; an OpenAI/Anthropic parts array of
      * {@code {type:"text", text|content:"…"}}; or an object carrying a
      * {@code text}/{@code content} field. Non-text parts (images, tool calls) are
      * dropped from the text view. Returns {@code ""} for null/empty.
      *
-     * <p>Shared by {@code TraceSpanMapper} so the OTel export and the judge agree
+     * <p>Shared by {@code TraceSpanMapper} and the column text views, so they agree
      * on how a message's content collapses to text.
      */
     public static String flattenContentText(@Nullable JsonNode content) {
@@ -379,7 +346,7 @@ public final class ContentExtractor {
      * same node to plain text and drops images. The export path ({@code TraceSpanMapper})
      * uses this to emit typed/labeled image parts instead of losing them in the text
      * flatten. A bare string yields a single text block; an OpenAI/Anthropic parts array
-     * yields per-part text + image blocks (same branches as {@link #extract(String)}).
+     * yields per-part text + image blocks.
      */
     public static List<ContentBlock> blocksFromContent(@Nullable JsonNode content) {
         if (content == null || content.isNull()) return List.of();
@@ -414,104 +381,7 @@ public final class ContentExtractor {
         }
     }
 
-    /** True if any block carries media (an image or a document). Callers that build a "verbatim"
-     *  judge view keep the extracted blocks (with their first-class media parts) for media-bearing
-     *  units rather than splicing raw base64/text-extraction into a text block.
-     *  {@link ContentBlock#isMedia()} is the single source of truth this delegates to, so a
-     *  document-only unit is not misclassified as "no media" and routed to the wrong
-     *  ({@code rawBlocks}) branch by {@code TraceTransformer.judgeView}. */
-    public static boolean hasMedia(@Nullable List<ContentBlock> blocks) {
-        if (blocks == null) return false;
-        for (ContentBlock b : blocks) {
-            if (b != null && b.isMedia()) return true;
-        }
-        return false;
-    }
-
-    public static List<ContentBlock> extract(@Nullable String payload) {
-        if (payload == null || payload.isEmpty()) return List.of();
-
-        // Cheap pre-check: if it doesn't look like JSON, return as text.
-        String trimmed = payload.stripLeading();
-        if (trimmed.isEmpty() || (trimmed.charAt(0) != '[' && trimmed.charAt(0) != '{')) {
-            return List.of(ContentBlock.text(payload));
-        }
-
-        JsonNode root;
-        try {
-            root = MAPPER.readTree(payload);
-        } catch (Exception e) {
-            return List.of(ContentBlock.text(payload));
-        }
-
-        List<ContentBlock> out = new ArrayList<>();
-        if (root.isArray()) {
-            // Either OpenAI messages array (has "role") or Anthropic content array (has "type" only).
-            boolean hasRoles = false;
-            for (JsonNode n : root) {
-                if (n.has("role")) {
-                    hasRoles = true;
-                    break;
-                }
-            }
-            if (hasRoles) {
-                for (JsonNode msg : root) flattenOpenAiMessage(msg, out);
-            } else {
-                for (JsonNode part : root) flattenAnthropicPart(part, out);
-            }
-        } else if (root.isObject()) {
-            // Single OpenAI message wrapped in an object, or a single Anthropic part.
-            if (root.has("role")) {
-                flattenOpenAiMessage(root, out);
-            } else if (root.has("type")) {
-                flattenAnthropicPart(root, out);
-            } else {
-                return List.of(ContentBlock.text(payload));
-            }
-        }
-
-        if (out.isEmpty()) return List.of(ContentBlock.text(payload));
-        return List.copyOf(out);
-    }
-
     // --- OpenAI shape ---------------------------------------------------------
-
-    private static void flattenOpenAiMessage(JsonNode msg, List<ContentBlock> out) {
-        JsonNode content = msg.get("content");
-        if (content == null || content.isNull()) {
-            // The OTel gen_ai semconv envelope carries the message body in `parts`, not `content`
-            // ({@code [{role, parts:[{type,content|arguments,…}]}]}). Unwrap it into typed
-            // reasoning/tool_call/tool_result blocks, the same way ingest persists them.
-            JsonNode parts = msg.get("parts");
-            if (parts != null && parts.isArray()) {
-                out.addAll(genAiPartsBlocks(parts));
-                return;
-            }
-            // The assistant message may have only tool_calls and no content, emit typed tool_call blocks.
-            JsonNode toolCalls = msg.get("tool_calls");
-            if (toolCalls != null && toolCalls.isArray()) {
-                for (JsonNode tc : toolCalls) {
-                    JsonNode fn = tc.get("function");
-                    String name = fn != null
-                            ? fn.path("name").asText("")
-                            : tc.path("name").asText("");
-                    String args = fn != null ? fn.path("arguments").asText("") : "";
-                    out.add(ContentBlock.toolCall(name + "(" + args + ")", tc.toString()));
-                }
-            } else if (toolCalls != null && !toolCalls.isNull()) {
-                out.add(ContentBlock.text("tool_calls: " + toolCalls));
-            }
-            return;
-        }
-        if (content.isTextual()) {
-            String t = content.asText();
-            if (!t.isEmpty()) out.add(ContentBlock.text(t));
-            return;
-        }
-        if (content.isArray()) {
-            for (JsonNode part : content) flattenOpenAiPart(part, out);
-        }
-    }
 
     private static void flattenOpenAiPart(JsonNode part, List<ContentBlock> out) {
         String type = part.path("type").asText("");
@@ -545,15 +415,15 @@ public final class ContentExtractor {
                     out.add(ContentBlock.documentUrl(url));
                 } else {
                     // Neither a data: URI nor a URL, e.g. file_id (OpenAI Files API), unsupported today
-                    // (PDF bytes or a URL only). Same fallback as `default`: JSON-dumped text so the
-                    // judge can still see it, rather than silently dropping the part.
+                    // (PDF bytes or a URL only). Same fallback as `default`: JSON-dumped text so it
+                    // stays visible, rather than silently dropping the part.
                     out.add(ContentBlock.text(part.toString()));
                 }
             }
             case ContentBlock.TYPE_IMAGE_REF -> flattenImageRefPart(part, out);
             case ContentBlock.TYPE_DOCUMENT_REF -> flattenDocumentRefPart(part, out);
             default -> {
-                // Unknown part type, fall back to JSON-serialized text so the judge can still see it.
+                // Unknown part type, fall back to JSON-serialized text so it stays visible.
                 out.add(ContentBlock.text(part.toString()));
             }
         }
@@ -575,142 +445,33 @@ public final class ContentExtractor {
         return new DataUriPart(mime.isBlank() ? "application/pdf" : mime, uri.substring(comma + 1));
     }
 
-    // --- OTel gen_ai `parts` shape --------------------------------------------
-
-    /**
-     * Typed blocks from the OTel gen_ai {@code parts:[{type,content|text|arguments,…}]} shape, the
-     * canonical unwrap of the {@code [{role, parts:[…]}]} envelope. Structured parts
-     * ({@code tool_call}/{@code tool_result}/{@code reasoning}) become first-class typed blocks, the
-     * structured JSON is carried in {@link ContentBlock#data} and a readable summary in {@code text};
-     * empty reasoning is dropped. Plain text parts stay text; an unrecognised part is preserved whole as
-     * text (never dropped).
-     *
-     * <p>The canonical unwrap of the OTel gen_ai {@code parts} shape, shared by every reader of it,
-     * the judge view ({@link #extract} via {@link #flattenOpenAiMessage}) and the ingest edge's
-     * tool-call extraction, so the two can never diverge.
-     */
-    public static List<ContentBlock> genAiPartsBlocks(JsonNode parts) {
-        List<ContentBlock> out = new ArrayList<>();
-        if (parts == null || !parts.isArray()) return out;
-        for (JsonNode part : parts) {
-            if (part.isTextual()) {
-                if (!part.asText().isEmpty()) out.add(ContentBlock.text(part.asText()));
-                continue;
-            }
-            if (!part.isObject()) continue;
-            switch (part.path("type").asText("")) {
-                case "tool_call" -> {
-                    String name = part.path("name").asText("");
-                    JsonNode args = part.get("arguments");
-                    String summary = name + (args != null && !args.isNull() ? "(" + args + ")" : "()");
-                    out.add(ContentBlock.toolCall(summary, part.toString()));
-                }
-                // `tool_call_response` is the OTel gen_ai semconv name; `tool_result` is the
-                // Anthropic-style spelling other sources emit. Treat them as the same block.
-                case "tool_result", "tool_call_response" ->
-                    out.add(ContentBlock.toolResult(genAiPartText(part), part.toString()));
-                case "reasoning", "thinking" -> {
-                    String text = genAiPartText(part);
-                    if (!text.isEmpty()) out.add(ContentBlock.reasoning(text)); // drop empty reasoning
-                }
-                case ContentBlock.TYPE_IMAGE_REF -> flattenImageRefPart(part, out);
-                case ContentBlock.TYPE_DOCUMENT_REF -> flattenDocumentRefPart(part, out);
-                default -> {
-                    String text = genAiPartText(part);
-                    out.add(text.isEmpty() ? ContentBlock.text(part.toString()) : ContentBlock.text(text));
-                }
-            }
-        }
-        return out;
-    }
-
-    /** The textual payload of a gen_ai part, tolerant of the field names the spec uses across part
-     *  types: {@code content} (text/reasoning), {@code result} / {@code response} (a
-     *  {@code tool_call_response}), else {@code text}. A structured (object/array) value is serialized
-     *  as JSON rather than dropped. */
-    private static String genAiPartText(JsonNode part) {
-        JsonNode t = firstPresent(part, "content", "result", "response", "text");
-        if (t == null || t.isNull()) return "";
-        return t.isTextual() ? t.asText() : t.toString();
-    }
-
-    /** The first of {@code fields} present (and non-null-node) on {@code part}, else null. */
-    private static @Nullable JsonNode firstPresent(JsonNode part, String... fields) {
-        for (String f : fields) {
-            JsonNode v = part.get(f);
-            if (v != null && !v.isNull()) return v;
-        }
-        return null;
-    }
-
     // --- Anthropic shape ------------------------------------------------------
 
     private static void flattenAnthropicPart(JsonNode part, List<ContentBlock> out) {
         String type = part.path("type").asText("");
-        switch (type) {
-            case "text" -> {
-                String t = fieldText(part.get("text"));
-                if (!t.isEmpty()) out.add(ContentBlock.text(t));
-            }
-            case "image" -> {
-                JsonNode src = part.get("source");
-                if (src != null && src.isObject()) {
-                    String stype = src.path("type").asText("");
-                    if ("base64".equals(stype)) {
-                        String mt = src.path("media_type").asText("image/png");
-                        String data = src.path("data").asText("");
-                        if (!data.isEmpty()) out.add(ContentBlock.imageB64(data, mt));
-                    } else if ("url".equals(stype)) {
-                        String url = src.path("url").asText("");
-                        if (!url.isEmpty()) out.add(ContentBlock.imageUrl(url));
-                    }
-                }
-            }
-            // Anthropic document part: {type:"document", source:{type:"base64"|"url", ...}}. Only the
-            // base64/url PDF sources are handled; Anthropic's text-source and content-array (citations)
-            // document sources are explicitly out of scope today (PDF bytes or a URL only).
-            case "document" -> {
-                JsonNode src = part.get("source");
-                if (src != null && src.isObject()) {
-                    String stype = src.path("type").asText("");
-                    if ("base64".equals(stype)) {
-                        String mt = src.path("media_type").asText("application/pdf");
-                        String data = src.path("data").asText("");
-                        if (!data.isEmpty()) out.add(ContentBlock.documentB64(data, mt));
-                    } else if ("url".equals(stype)) {
-                        String url = src.path("url").asText("");
-                        if (!url.isEmpty()) out.add(ContentBlock.documentUrl(url));
-                    }
-                }
-            }
-            case "tool_use" -> {
-                String name = part.path("name").asText("");
-                JsonNode input = part.get("input");
-                String summary = name + (input != null && !input.isNull() ? "(" + input + ")" : "()");
-                out.add(ContentBlock.toolCall(summary, part.toString()));
-            }
-            case "tool_result" -> {
-                JsonNode c = part.get("content");
-                String content = c == null || c.isNull() ? "" : (c.isTextual() ? c.asText() : c.toString());
-                out.add(ContentBlock.toolResult(content, part.toString()));
-            }
-            case "thinking", "reasoning" -> {
-                String t = fieldText(part.has("thinking") ? part.get("thinking") : part.get("text"));
-                if (!t.isEmpty()) out.add(ContentBlock.reasoning(t));
-            }
-            case ContentBlock.TYPE_IMAGE_REF -> flattenImageRefPart(part, out);
-            case ContentBlock.TYPE_DOCUMENT_REF -> flattenDocumentRefPart(part, out);
-            default -> {
-                out.add(ContentBlock.text(part.toString()));
-            }
+        // Anthropic image or document part: {type:"image"|"document", source:{type:"base64"|"url", ...}}.
+        // Only the base64/url sources are handled; Anthropic's text-source and content-array
+        // (citations) document sources are explicitly out of scope today (PDF bytes or a URL only).
+        boolean image = "image".equals(type);
+        if (!image && !"document".equals(type)) return;
+        JsonNode src = part.get("source");
+        if (src == null || !src.isObject()) return;
+        String stype = src.path("type").asText("");
+        if ("base64".equals(stype)) {
+            String mt = src.path("media_type").asText(image ? "image/png" : "application/pdf");
+            String data = src.path("data").asText("");
+            if (!data.isEmpty()) out.add(image ? ContentBlock.imageB64(data, mt) : ContentBlock.documentB64(data, mt));
+        } else if ("url".equals(stype)) {
+            String url = src.path("url").asText("");
+            if (!url.isEmpty()) out.add(image ? ContentBlock.imageUrl(url) : ContentBlock.documentUrl(url));
         }
     }
 
     /**
      * An externalized image part ({@code {type:"image_ref", data:"<mediaId>", mediaType:"<mime>"}}),
      * the {@link ContentBlock}-shaped node {@code MediaExternalizer} writes in place of inline base64 at
-     * ingest. Both vendor branches route here so the persisted substrate's ref form re-parses back
-     * into a {@link ContentBlock#imageRef}; re-hydrating the ref to bytes is the media serve endpoint
+     * ingest. {@link #flattenOpenAiPart} routes here so the persisted substrate's ref form re-parses
+     * back into a {@link ContentBlock#imageRef}; re-hydrating the ref to bytes is the media serve endpoint
      * the trace viewer calls with the id.
      */
     private static void flattenImageRefPart(JsonNode part, List<ContentBlock> out) {
@@ -726,8 +487,8 @@ public final class ContentExtractor {
      * case a persisted {@code document_ref} node would fall to the {@code default} branch and re-parse
      * as a raw JSON-dumped text block instead of a real {@link ContentBlock#documentRef}, a round-trip
      * bug for this modality. {@code text} (the extracted PDF text, or a
-     * failure marker) rides through unchanged so the judge boundary never needs a MediaStore round trip
-     * for the common already-extracted case.
+     * failure marker) rides through unchanged so a reader never needs a MediaStore round trip for the
+     * common already-extracted case.
      */
     private static void flattenDocumentRefPart(JsonNode part, List<ContentBlock> out) {
         String mediaId = part.path("data").asText("");

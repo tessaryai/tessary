@@ -151,15 +151,13 @@
 # going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
 # the same source every other workflow's pnpm/action-setup reads and the rule drift-checks.yml's `frontend`
 # job states in as many words: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
-# ARG default covers the launcher build, and scripts/check-required-inputs.sh already holds every
-# such default equal to the Taskfile's pin, so dropping the build-arg removed a source rather than
+# ARG default covers the launcher build, so dropping the build-arg removed a source rather than
 # adding one.
 
 name: Release
 
-# ALL AUTOMATIC TRIGGERS ARE DISABLED. Nothing in this repository starts a workflow run on its
-# own; every workflow here is `workflow_dispatch` only, so runs happen when a human presses Run.
-# Re-arming them is tracked separately. The original trigger block
+# RELEASES ARE DISPATCH-ONLY: a release runs when a human presses Run. Re-arming the push trigger
+# is tracked separately. The original trigger block
 # for this file (generalized from publish-agent-image.yml's single-image `paths:` list) is
 # preserved commented-out immediately below — re-enabling is uncommenting it, nothing else.
 # on:
@@ -170,7 +168,6 @@ name: Release
 #       - 'frontend/**'
 #       - 'sandbox-runner/launcher/**'
 #       - 'sandbox-runner/agent-sandbox/**'
-#       - 'contract/**'
 #       - '.github/workflows/release.yml'
 #   workflow_dispatch:
 #     inputs:
@@ -294,11 +291,8 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Both stages of the same Dockerfile a local `docker build ./backend` runs. THE CONTEXT IS
-      # WHAT KEEPS THE OVERLAY OUT, structurally rather than by flag: backend/pom.xml's `paid`
-      # profile activates on a sibling pom merely existing, and that path is not inside
-      # ./backend, so the reactor here cannot see it and no `-P !paid` is needed to get an open
-      # build. `mvn dependency:go-offline` is its own layer and is covered by the cache below.
+      # Both stages of the same Dockerfile a local `docker build ./backend` runs.
+      # `mvn dependency:go-offline` is its own layer and is covered by the cache below.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -356,7 +350,7 @@ jobs:
       # Both stages, natively, same as build-backend. Context is the repo ROOT because this
       # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
       # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
-      # default IS the pin, held equal to the Taskfile's by scripts/check-required-inputs.sh.
+      # default IS the pin, kept equal to the Taskfile's by hand.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -411,16 +405,15 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # No build-once optimization here: re2@1.26.1 is a native addon compiled by node-gyp in
-      # the image, so this pnpm install genuinely happens twice, once per native arch runner.
+      # No build-once optimization here: the image's pnpm install runs once per native arch runner.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
           platforms: linux/${{ matrix.arch }}
-          # No PNPM_VERSION build-arg: this Dockerfile's ARG default IS the pin, and
-          # scripts/check-required-inputs.sh holds it equal to the Taskfile's. Passing one here
+          # No PNPM_VERSION build-arg: this Dockerfile's ARG default IS the pin, kept equal to the
+          # Taskfile's by hand. Passing one here
           # would put a third copy of the number in a workflow input.
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
@@ -469,8 +462,8 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above (re2 again).
-      # Repo-root context: this Dockerfile's own header requires it (reaches contract/).
+      # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above.
+      # Repo-root context: this Dockerfile's own header requires it.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -521,9 +514,8 @@ jobs:
   # and moving them is finalize's, for exactly the reason `<service>-latest` is.
   #
   # "IF IT HAS CHANGED" IS ANSWERED BY E2B, NOT BY GIT. build.ts hashes the real build inputs
-  # (template.ts, the three agent scripts, the validator wrapper, the five contract/ files, the
-  # cpu/memory pair) and carries the digest as a `recipe-<hash>` tag. A build already wearing this
-  # release's hash gets the version tag assigned to it and no rebuild happens. A `git diff` against
+  # (template.ts, the four agent scripts, the cpu/memory pair) and carries the digest as a
+  # `recipe-<hash>` tag. A build already wearing this release's hash gets the version tag assigned to it and no rebuild happens. A `git diff` against
   # the base tag would answer the same question about the SOURCE and be wrong in the one case that
   # matters: after a release whose template build failed, the source is unchanged at the next
   # attempt, so a diff would skip the rebuild and stamp a version onto a template that never got

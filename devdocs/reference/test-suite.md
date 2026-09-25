@@ -19,7 +19,7 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-classify-service `node --test`, `packages/mcp` `node --test` (the `mcp-bridge` row),
+`packages/mcp` `node --test` (the `mcp-bridge` row),
 `contract/tests` (the `vendored-plugin-rules` row), and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
@@ -33,13 +33,13 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (20 checks in the open edition): backend `mvn verify`, frontend, classify-service, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (17 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 17 RUN rows of the 30 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
-| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
+| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, plus repo-wide license-headers/price-book-contract/compose-artifact | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: slack-service, and the cross-language parity test inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh)` | The same pipeline on the EXPORT CANDIDATE | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
@@ -64,14 +64,13 @@ loop; use the full gate before merging.
 
 **CI runs the same gate on every pull request.** There is still no pre-commit hook, but
 `.github/workflows/check.yml` calls `scripts/check.sh` — the same manifest `task check` runs — on
-`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) is armed
-alongside it. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
+`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) and
+`boot-checks.yml` (the Docker-backed boot checks) also run on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
 so a red check has to be respected rather than enforced.
 
-Two gates are deliberately not on that per-PR path and live in the dispatch-only
+One gate is deliberately not on that per-PR path and lives in the dispatch-only
 `.github/workflows/drift-checks.yml`:
 
-- `conformance-parity` — regenerates the fixture pinning the Java port to the Python engine.
 - `vendored-plugin` — its freshness half fetches `tessaryai/plugins` over the network and hard-fails
   on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff. Its offline
   rules half runs per PR as the `vendored-plugin-rules` row.
@@ -177,8 +176,7 @@ that module's own tests, so code the `app` module's `@SpringBootTest` suite runs
 in the module that owns it. The aggregate report at `backend/app/target/site/jacoco-aggregate/`
 merges every module's exec data against every open module's classes; read that one for a module's
 real number. Refresh them locally
-with `task backend:coverage` (equivalent to `task backend:check:open` — same reactor, same
-profile — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
+with `task backend:coverage` (equivalent to `task backend:check` — same reactor — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
 CI's cadence). CI additionally uploads the reports as a build artifact
 (`backend-jacoco-coverage`), from `check.yml`'s single job, so it lands on every pull request rather
 than on the old weekly cron. `if: always()`, so a red run still leaves a baseline.

@@ -2,15 +2,14 @@
 'use strict';
 /*
  * Agentic RCA runner — runs INSIDE an E2B microVM (template tessary-agent-sandbox)
- * or on the host in local mode, exactly like analyze.js. The launcher injects the
+ * or on the host in local mode, exactly like triage.js. The launcher injects the
  * agent auth and invokes:  node rca.js <input.json>
  *
  *   input.json : { clone_url?, head_sha?, files, prompt, json_schema, model,
  *                  mcp: {url, token}, timeout_ms }
  *   stdout     : { raw: "<result envelope>", turns: [...], startMs }
  *
- * The run is READ-ONLY: unlike analyze.js there is no bundle-dir gate and no working-tree
- * change collection. The lane's permission rules state that to the agent as well as to us —
+ * The run is READ-ONLY: there is no working-tree change collection. The lane's permission rules state that to the agent as well as to us —
  * nothing here may edit.
  *
  * `files` is the FINDING's dossier (relative path → content), materialized under WORK/dossier/
@@ -56,17 +55,6 @@ function writeDossier(root, files) {
   }
 }
 
-// The backend sends the schema as a JSON string; the agent SDK wants the object.
-function parseSchema(raw) {
-  if (!raw) return null;
-  if (typeof raw === 'object') return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
@@ -78,17 +66,17 @@ async function main() {
 
   writeDossier(path.join(WORK, 'dossier'), input.files);
 
-  // 'error': the run's VALUE is the schema-constrained verdict JSON — a half-finished run must
-  // reject so the backend stamps the report failed instead of parsing a broken body.
+  // The run's VALUE is the schema-constrained verdict JSON — a half-finished run must reject so
+  // the backend stamps the report failed instead of parsing a broken body.
   let run;
   try {
     run = await runAgent({
       model: input.model,
       prompt: input.prompt,
-      jsonSchema: parseSchema(input.json_schema),
+      // The backend sends the schema as a JSON string; the agent SDK wants the object.
+      jsonSchema: JSON.parse(input.json_schema),
       mcp: input.mcp,
       permission: { edit: { '*': 'deny' } },
-      rejectOn: 'error',
       timeoutMs: input.timeout_ms,
       maxTurns: input.max_turns,
     });

@@ -122,12 +122,8 @@ function SourceRow({ source }: { source: IngestionSource }) {
   );
 }
 
-/**
- * "Connect a source" — the OTLP connect story, shared with the first-run wizard
- * (the first-run connect gate) via {@link OtlpConnect}. Kept a single source of truth so
- * onboarding and in-app connect never drift.
- */
-export function NewSourceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** "Connect a source": the OTLP connect story, rendered through {@link OtlpConnect}. */
+function NewSourceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Modal
       open={open}

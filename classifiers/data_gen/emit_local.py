@@ -3,8 +3,7 @@
 
 The platform's receiver is protobuf-only and authenticates a project-scoped `tsy_` bearer. The
 call site is a property of the agent surface, stamped on every span in the trace, rather than on
-TOOL spans only (which would shatter one agent into many call sites, none of which accumulates
-enough support for behaviour drift to arm).
+TOOL spans only (which would shatter one agent into many call sites).
 
 Shape produced, matching the substrate spine `StructuralEnricher` builds:
 
@@ -17,8 +16,7 @@ Shape produced, matching the substrate spine `StructuralEnricher` builds:
 One OTel trace per conversational TURN: that is what makes turn segmentation work.
 
 Timestamps are spread across a trailing window (default 28 days) preserving within-conversation
-ordering, so the quarantine -> graduation clock and the arming saturation curve have real time
-spread to work with.
+ordering.
 
 Resumable: emitted conversation ids are appended to a per-corpus ledger, so re-running neither
 duplicates nor loses work.
@@ -69,8 +67,8 @@ EXPORT_BATCH = 128
 
 
 # --------------------------------------------------------------------------------------------------
-# Corpus-independent intermediate form. Both loaders reduce to this, so the span builder is written
-# once and the two corpora cannot drift apart in shape.
+# Corpus-independent intermediate form. Every loader reduces to this, so the span builder is written
+# once and corpora cannot drift apart in shape.
 # --------------------------------------------------------------------------------------------------
 
 
@@ -170,243 +168,7 @@ def load_canary() -> Iterator[Conversation]:
     )
 
 
-def load_groundedness_canary() -> Iterator[Conversation]:
-    """One RAG turn whose answer contradicts the passage it retrieved.
-
-    The groundedness detector scores an `rag_answer`-shaped call site's answer against the
-    `retrieved_doc` rows of the nearest earlier retrieval span. This turn retrieves a passage
-    stating a 14-day return window and then answers with a 90-day window and a two-hour refund,
-    claims the passage does not support. Call site shape is a pipeline fact, not on the wire; the
-    local detection run sets it before emitting.
-    """
-    yield Conversation(
-        conversation_id="canary-groundedness-0001",
-        user_id="canary-operator",
-        turns=[
-            Turn(
-                user="How long do I have to return a jacket I bought online, and when would the refund land?",
-                steps=[
-                    Step(kind="llm", name="plan"),
-                    Step(
-                        kind="retrieval",
-                        name="policy_search",
-                        corpus="returns-policy",
-                        args={"query": "online return window and refund timing"},
-                        documents=[
-                            "Returns policy: items bought online may be returned within 14 days of delivery. "
-                            "Refunds are issued to the original payment method within 5 to 7 business days "
-                            "after the returned item is received at the warehouse."
-                        ],
-                        result={"hits": 1},
-                    ),
-                    # The classifier scores the LLM observation's OWN output, not the agent root's, so
-                    # the answering span carries the question and the answer the way a real chat span does.
-                    Step(
-                        kind="llm",
-                        name="answer",
-                        args="How long do I have to return a jacket I bought online, and when would the refund land?",
-                        result=(
-                            "You have 90 days from delivery to return the jacket. The refund is paid to your card "
-                            "within 2 hours of the courier collecting the parcel."
-                        ),
-                    ),
-                ],
-                assistant=(
-                    "You have 90 days from delivery to return the jacket. The refund is paid to your card "
-                    "within 2 hours of the courier collecting the parcel."
-                ),
-            )
-        ],
-        attributes={"tessary.canary": "true"},
-    )
-
-
-def load_frustration_canary() -> Iterator[Conversation]:
-    """Two user turns, the second unmistakably angry at the agent.
-
-    The frustration built-in fires only on frustration the agent caused, so the anger here
-    names the assistant's own failures, not a courier or a third party. Deterministic and fixture-free, like `canary`.
-    """
-    yield Conversation(
-        conversation_id="canary-frustration-0001",
-        user_id="canary-operator",
-        turns=[
-            Turn(
-                user="I need to change the delivery address on order 44812 before it ships.",
-                steps=[
-                    Step(kind="llm", name="plan", args="I need to change the delivery address on order 44812 before it ships."),
-                    Step(kind="tool", name="lookup_order", args={"order_id": "44812"}, result={"status": "packed"}),
-                    Step(
-                        kind="llm",
-                        name="answer",
-                        args="I need to change the delivery address on order 44812 before it ships.",
-                        result="I can see order 44812. Could you tell me the new address?",
-                    ),
-                ],
-                assistant="I can see order 44812. Could you tell me the new address?",
-            ),
-            Turn(
-                user=(
-                    "I already gave you the new address twice and you keep asking me for it again. "
-                    "This is the third time you have ignored what I typed. You are useless, you are wasting "
-                    "my time, and I want a human agent right now."
-                ),
-                steps=[
-                    Step(
-                        kind="llm",
-                        name="answer",
-                        args=(
-                            "I already gave you the new address twice and you keep asking me for it again. "
-                            "This is the third time you have ignored what I typed. You are useless, you are wasting "
-                            "my time, and I want a human agent right now."
-                        ),
-                        result="I am sorry for the trouble. Could you confirm the new address once more?",
-                    ),
-                ],
-                assistant="I am sorry for the trouble. Could you confirm the new address once more?",
-            ),
-        ],
-        attributes={"tessary.canary": "true"},
-    )
-
-
-DRIFT_CANARY_CONVERSATIONS = 320
-
-
-def load_drift_canary() -> Iterator[Conversation]:
-    """A stable order-support behaviour, repeated enough to fit and arm a drift profile.
-
-    Every conversation here runs the same four-step sequence, `llm:plan`, `tool:lookup_order`,
-    `tool:check_refund_eligibility`, `llm:answer`, with only the order id and wording varying, so
-    the alphabet saturates quickly and the profile arms past the reservoir/trace floors.
-    Deterministic and fixture-free; the companion `drift-canary-novel` breaks the sequence.
-    """
-    openers = [
-        "Where is my order {oid}? It was due yesterday.",
-        "Can I get a refund on order {oid}? The food arrived cold.",
-        "Order {oid} is missing the drinks I paid for.",
-        "I was charged twice for order {oid}.",
-    ]
-    for i in range(DRIFT_CANARY_CONVERSATIONS):
-        oid = 50000 + i
-        user = openers[i % len(openers)].format(oid=oid)
-        yield Conversation(
-            conversation_id=f"canary-drift-{i:04d}",
-            user_id=f"canary-customer-{i % 40:02d}",
-            turns=[
-                Turn(
-                    user=user,
-                    steps=[
-                        Step(kind="llm", name="plan", args=user),
-                        Step(kind="tool", name="lookup_order", args={"order_id": str(oid)}, result={"status": "delivered"}),
-                        Step(kind="tool", name="check_refund_eligibility", args={"order_id": str(oid)}, result={"eligible": i % 3 == 0}),
-                        Step(kind="llm", name="answer", args=user, result=f"I have looked up order {oid} and checked its refund eligibility; here is what I can do."),
-                    ],
-                    assistant=f"I have looked up order {oid} and checked its refund eligibility; here is what I can do.",
-                )
-            ],
-            attributes={"tessary.canary": "true"},
-        )
-
-
-def load_drift_canary_novel() -> Iterator[Conversation]:
-    """One conversation that breaks the fitted sequence: no lookup, two never-seen tools.
-
-    Against an armed profile fitted on `drift-canary`, the grams here are novel, firing the drift
-    detector. It also omits `tool:lookup_order`, so an engine SOP obliging that tool on every
-    conversation scores it as a violation once compiled: one conversation serves both arms.
-    """
-    user = "Order 99901 never arrived and nobody answers the phone. Give me my money back."
-    yield Conversation(
-        conversation_id="canary-drift-novel-0001",
-        user_id="canary-customer-99",
-        turns=[
-            Turn(
-                user=user,
-                steps=[
-                    Step(kind="llm", name="plan", args=user),
-                    Step(kind="tool", name="escalate_to_human", args={"reason": "no delivery"}, result={"ticket": "T-99901"}),
-                    Step(kind="tool", name="issue_manual_credit", args={"amount": 42.5}, result={"ok": True}),
-                    Step(kind="llm", name="answer", args=user, result="I have escalated this and issued a manual credit."),
-                ],
-                assistant="I have escalated this and issued a manual credit.",
-            )
-        ],
-        attributes={"tessary.canary": "true"},
-    )
-
-
-def load_drift_canary_violation() -> Iterator[Conversation]:
-    """A second sequence-breaking conversation, distinct id, for the conformance sweep.
-
-    Emitted after the SOP compiles so the sweep has a fresh turn to score; a re-emit of the novel
-    conversation would carry the same deterministic trace id and be deduplicated by ingest.
-    """
-    user = "Cancel order 99902 and refund me, the restaurant closed."
-    yield Conversation(
-        conversation_id="canary-drift-violation-0001",
-        user_id="canary-customer-98",
-        turns=[
-            Turn(
-                user=user,
-                steps=[
-                    Step(kind="llm", name="plan", args=user),
-                    Step(kind="tool", name="cancel_order", args={"order_id": "99902"}, result={"ok": True}),
-                    Step(kind="llm", name="answer", args=user, result="Cancelled and refunded."),
-                ],
-                assistant="Cancelled and refunded.",
-            )
-        ],
-        attributes={"tessary.canary": "true"},
-    )
-
-
 CORPORA: dict[str, CorpusSpec] = {
-    "drift-canary-violation": CorpusSpec(
-        key="drift-canary-violation",
-        call_site_id="paid-detections-canary-orders",
-        agent_name="paid-detections-canary-agent",
-        service_name="paid-detections-canary-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/tessary",
-        load=load_drift_canary_violation,
-    ),
-    "drift-canary": CorpusSpec(
-        key="drift-canary",
-        call_site_id="paid-detections-canary-orders",
-        agent_name="paid-detections-canary-agent",
-        service_name="paid-detections-canary-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/tessary",
-        load=load_drift_canary,
-    ),
-    "drift-canary-novel": CorpusSpec(
-        key="drift-canary-novel",
-        call_site_id="paid-detections-canary-orders",
-        agent_name="paid-detections-canary-agent",
-        service_name="paid-detections-canary-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/tessary",
-        load=load_drift_canary_novel,
-    ),
-    "groundedness-canary": CorpusSpec(
-        key="groundedness-canary",
-        call_site_id="paid-detections-canary-rag",
-        agent_name="paid-detections-canary-agent",
-        service_name="paid-detections-canary-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/tessary",
-        load=load_groundedness_canary,
-    ),
-    "frustration-canary": CorpusSpec(
-        key="frustration-canary",
-        call_site_id="paid-detections-canary-support",
-        agent_name="paid-detections-canary-agent",
-        service_name="paid-detections-canary-agent",
-        model="anthropic.claude-haiku-4-5",
-        repo_url="https://github.com/tessaryai/tessary",
-        load=load_frustration_canary,
-    ),
     "canary": CorpusSpec(
         key="canary",
         call_site_id="open-boot-check-canary",
@@ -451,9 +213,7 @@ def _base_attributes(spec: CorpusSpec, conv: Conversation, turn_index: int) -> d
     """Stamped on EVERY span in the trace.
 
     `session.id` + `gen_ai.conversation.id` together are what make `StructuralEnricher` interpose a
-    conversation context between the session root and its turns. `tessary.call_site.id` is on every
-    span rather than just the root because the drift sweep takes the first tagged span it finds and a
-    root-only tag would leave the scope hostage to span ordering.
+    conversation context between the session root and its turns.
     """
     return {
         "gen_ai.conversation.id": conv.conversation_id,

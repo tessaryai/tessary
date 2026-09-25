@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.model.JobStatus;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -138,7 +139,7 @@ class ClassifierWorkerDeadLetterTest {
                 JobSnapshot job = awaitJobSettled(classifierId);
                 assertEquals(attempt, job.attempts(), "attempt " + attempt);
                 if (attempt < MAX_ATTEMPTS) {
-                    assertEquals(ClassifierJobRow.FAILED, job.status(), "below the cap stays retryable");
+                    assertEquals(JobStatus.FAILED, job.status(), "below the cap stays retryable");
                 } else {
                     assertEquals(ClassifierJobRow.DEAD, job.status(), "the 5th consecutive failure crosses the cap");
                 }
@@ -164,7 +165,7 @@ class ClassifierWorkerDeadLetterTest {
             // The key lookup recovers: the next heartbeat (cooldown=0) revives the dead job and this sweep succeeds.
             providerToggle.setThrowing(false);
             worker.tick();
-            JobSnapshot revived = awaitJobStatus(classifierId, ClassifierJobRow.DONE);
+            JobSnapshot revived = awaitJobStatus(classifierId, JobStatus.DONE);
             assertEquals(
                     0,
                     revived.attempts(),
@@ -181,7 +182,7 @@ class ClassifierWorkerDeadLetterTest {
     private JobSnapshot awaitJobSettled(String classifierId) {
         for (int i = 0; i < 100; i++) {
             JobSnapshot job = jobRow(classifierId).orElse(null);
-            if (job != null && !ClassifierJobRow.CLAIMED.equals(job.status())) return job;
+            if (job != null && !JobStatus.CLAIMED.equals(job.status())) return job;
             sleep(100);
         }
         throw new AssertionError("signal job for " + classifierId + " never settled past 'claimed'");

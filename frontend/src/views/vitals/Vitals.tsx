@@ -195,8 +195,7 @@ export function Vitals() {
   const rows = useMemo(() => {
     const data = vitalsQ.data?.groups ?? [];
     if (!sort) return data;
-    const col = COLUMNS.find((c) => c.key === sort.key);
-    if (!col) return data;
+    const col = COLUMNS.find((c) => c.key === sort.key)!;
     const flip = sort.dir === "asc" ? 1 : -1;
     return [...data].sort((a, b) => {
       const va = col.sortValue(a);

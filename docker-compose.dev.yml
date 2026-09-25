@@ -60,23 +60,13 @@ services:
     # JVM) — no double-bind on 5005. suspend=n: boot normally so the healthcheck
     # still passes; switch to suspend=y to debug startup itself. The agent survives
     # devtools in-process restarts (task dev:reload-backend).
-    # Three steps (see Dockerfile.dev). First install the reactor root POM alone (-N): a module that
-    # lives OUTSIDE the root's directory — the paid overlay, mounted at /tessary-paid with
-    # <relativePath>../backend/pom.xml</relativePath> — has its parent resolved from the local
-    # repository, not from that path, because inside the container the path is not the file the
-    # reactor was started from (/app/pom.xml). On a cold maven-cache volume the parent is absent and
-    # the reactor cannot even be read ("Non-resolvable parent POM for ai.tessary.paid:tessary-paid").
-    # The host never shows this because ~/.m2 already holds the root POM from an earlier install.
-    # Harmless with no overlay: one POM, no compilation. Then install app's whole dependency chain
-    # into the cached local repo, then run ONLY the app module (spring-boot:run can't run
-    # reactor-wide — it dies on the non-executable parent pom — and app-only can't resolve its
-    # siblings unless installed).
+    # Two steps (see Dockerfile.dev): install app's whole dependency chain into the cached local
+    # repo, then run ONLY the app module (spring-boot:run can't run reactor-wide — it dies on the
+    # non-executable parent pom — and app-only can't resolve its siblings unless installed).
     command:
       - sh
       - -c
       - >-
-        mvn -B -q -N install
-        -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -q -pl app -am install -DskipTests
         -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
         mvn -B -pl app spring-boot:run
@@ -144,11 +134,6 @@ services:
       # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — see docker-compose.yml's
       # identical removal note; the switch it fed had zero production callers.
       TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=}
-      # Local dev: behavior-drift profiles re-fit after ≤10 min of idleness (prod: 6h) so a
-      # finished test burst arms within minutes instead of hours. The worker tick drops to 1 min
-      # to match — at the prod 15-min tick a 10-min idle deadline can overshoot by a full tick.
-      TESSARY_CLASSIFIER_BEHAVIOR_FIT_IDLE_INTERVAL_MS: "600000"
-      TESSARY_CLASSIFIER_BEHAVIOR_FIT_MS: "60000"
       # Local dev: turn ai.tessary logging up to DEBUG (logback-spring.xml + logging.level.ai.tessary).
       # INFO everywhere by default; prod never sets this. Framework logs stay at their defaults.
       APP_LOG_LEVEL: DEBUG
@@ -214,8 +199,7 @@ services:
       # `environment:` overrides `env_file:`, so a hardcoded value would hide the lines the setup
       # guide (classifiers/groundedness/setup/) writes. On a Mac that is serve.py running natively,
       # reached as http://host.docker.internal:<port>. Blank means groundedness is not set up and
-      # its sweeps are skipped. The classify service below cannot stand in for it: in the open
-      # edition it serves no classifier head, and groundedness sends a request shape it does not accept.
+      # its sweeps are skipped.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
       TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
@@ -275,7 +259,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
       # The Taskfile exports PNPM_VERSION (mirrored by the PNPM_VERSION Actions variable in CI);
-      # the fallback is the same literal, held equal by scripts/check-required-inputs.sh.
+      # the fallback is the same literal; keep the two equal by hand.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
     image: tessary-frontend-dev:latest
@@ -336,12 +320,7 @@ services:
   # forwards just the gen_ai (judge) spans on to Langfuse, so you can inspect prompt-cache
   # token usage (cache_read / cache_creation) per generation.
   #
-  # Uses a DEV-ONLY config (config.dev.alloy) with only the Langfuse trace branch. It does
-  # NOT reuse the prod config.alloy: that file also runs the host-metrics exporter (needs
-  # /host/proc + /host/sys bind-mounts) and a Grafana Cloud Tempo basic-auth block (needs
-  # non-empty creds) — both are *fatal config-load errors* without the prod mounts/creds,
-  # so reusing it crashed the agent on startup (exit 1) instead of backing off. The dev
-  # config drops all of that.
+  # Uses a DEV-ONLY config (config.dev.alloy) with only the Langfuse trace branch.
   #
   # Requires LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in .env (the same keys the
   # pull-ingest adapter already uses). Without them the gen_ai push 401s and backs off.
@@ -478,67 +457,6 @@ services:
       - sandbox-work:/launcher-work
     restart: "no"
 
-  # The encoder service, the SAME one that runs on ECS Fargate in production (classify-service/).
-  # In the open edition models.json is {}, so it serves no classifier head: what it serves is the
-  # conformance encoder /embed uses, baked because this dev build passes BAKE_EMBEDDERS=1, as
-  # production now does too (see below). Groundedness does not use this service; its model runs on
-  # a GPU outside Docker (classifiers/groundedness/serve.py). Subsequent builds reuse the weights
-  # layer unless models.json / embedders.json / download.js, the build args, or the lockfile change.
-  classify:
-    build:
-      context: ./classify-service
-      # A head marked "gated" in models.json has its weights in a private HF repo, and the build
-      # needs read access to bake it. The open edition names no head, so it needs no token.
-      # When one does, `export HF_TOKEN=...` in the SAME shell before building (or any build.secrets/no-cache
-      # rebuild); the token never lands in the image (BuildKit secret mount, not a build ARG).
-      # Putting it in .env is NOT enough on its own: Compose only auto-loads .env for ${...}
-      # substitution in this file's text, not as a real process env var — and the `environment:`
-      # secret source below needs a genuine exported shell variable. `task dev` does not
-      # export it for you.
-      # PNPM_VERSION single source — see the frontend service.
-      args:
-        PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
-        # Bake the SOP-conformance encoder (~1.7 GB) into the DEV image, so `task dev` can
-        # run a conformance sweep against a real /embed. The
-        # production passes it too, but only after the Fargate task was raised to 8 GB (see
-        # classify-service/README.md) — which is why it stays an opt-in build arg rather than an
-        # unconditional bake: the order is load-bearing. Local cost: a longer first build and
-        # the 8g mem_limit below.
-        BAKE_EMBEDDERS: "1"
-      secrets:
-        - hf_token
-    image: tessary-classify-dev:latest
-    expose:
-      - "8080"
-    ports:
-      # Publish to the host so the served heads are reachable from outside Docker. Dev-only;
-      # loopback-bound.
-      - "127.0.0.1:18080:8080"
-    environment:
-      PORT: "8080"
-      # Must equal the backend's TESSARY_OBSERVER_ENCODER_API_KEY.
-      CLASSIFY_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-dev-classify-key}
-    # 3g held the original 4 heads; adding groundedness as a 5th (MiniCheck-RoBERTa-Large fp32,
-    # ~1.4 GB resident) briefly needed 6g on 2026-07-15 — but the 2026-07-16 catalog reduction
-    # dropped refusal/jailbreak/unsafe_text, back down to 2 heads (frustration + groundedness).
-    # Re-measured directly (docker run --memory=Ng): 2g OOM-kills (exit 137), 3g and 4g both hold
-    # comfortably in isolation — but on a busy local VM (concurrent backend) 4g still OOM-kills
-    # under load, so dev ran at 6g, matching prod's 6 GB.
-    # 2026-08-11: this DEV image bakes the conformance encoder (BAKE_EMBEDDERS=1 above —
-    # gte-large-en-v1.5, ~1.7 GB fp32) and boot pre-warm loads it too. Re-measured the same way:
-    # 4g is OOM-killed during warmup, 5g and 6g hold, settling at ~4.5 GiB resident. 6g in
-    # isolation is the new 4g — one gap of headroom on a busy VM — so dev goes to 8g. Prod is
-    # unaffected while it keeps building without the arg; turning it on there requires resizing
-    # the ECS task 6 GB -> 8 GB first (infra repo, `classify_memory`; tessaryai/infrastructure#14).
-    # Prod's 6 GB would boot the encoder, but it is sized to leave the onnxruntime arena ~4 GB of
-    # high-water and the encoder eats most of that — hence 8 GB rather than "it fits".
-    mem_limit: 8g
-    volumes:
-      # Pick up server.js edits on `--force-recreate` without an image rebuild.
-      - ./classify-service/server.js:/app/server.js:ro
-    networks:
-      - tessary
-
 networks:
   tessary:
     driver: bridge
@@ -555,16 +473,3 @@ volumes:
   # the Engine API, and a project prefix would break the match. See that file for the mechanism.
   sandbox-work:
     name: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
-
-secrets:
-  # Sourced from the HF_TOKEN env var at BUILD time: read access to the private HF repo of any
-  # gated head a populated models.json names. The open edition names none, and groundedness is
-  # not a classify-service head.
-  # Only needed for a classify image build/rebuild, not for `docker compose up` on an
-  # already-built image. MUST be a real exported shell variable (`export HF_TOKEN=...`) in the
-  # same shell running `docker compose build`/`up --build` — Compose's `environment:` secret
-  # source reads the invoking process's actual env, NOT .env-file interpolation, so having it
-  # only in .env silently resolves to an empty secret (confirmed: this is exactly what broke a
-  # `task dev` run on 2026-07-15 — "Unauthorized access" pulling the private repo).
-  hf_token:
-    environment: HF_TOKEN

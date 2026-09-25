@@ -10,7 +10,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -18,9 +17,8 @@ import org.springframework.stereotype.Component;
 /**
  * The backend's one route to Slack: {@code POST slack-service/deliver}.
  *
- * <p>Both Java callers go through here — the {@link SlackChannel} alert channel (a user's incoming
- * webhook) and {@code SlackBriefPublisher} (the native app's channel post). They differ only in the
- * transport field, which is why they share a client rather than each holding their own HTTP call.
+ * <p>Its one caller is the {@link SlackChannel} alert channel, which posts through a user's incoming
+ * webhook.
  *
  * <p><b>The backend cannot reach Slack directly and that is deliberate.</b> No token, no signing secret,
  * no {@code slack.com} URL lives in this process any more; the adapter holds all of it. What this sends
@@ -37,9 +35,6 @@ public class SlackDelivery {
 
     /** A user-configured {@code hooks.slack.com} URL. No token; the URL is the credential. */
     public static final String TRANSPORT_WEBHOOK = "webhook";
-
-    /** {@code chat.postMessage} with the workspace bot token, which the adapter holds. */
-    public static final String TRANSPORT_BOT = "bot";
 
     private final SlackProperties props;
     private final ObjectMapper mapper;
@@ -68,28 +63,11 @@ public class SlackDelivery {
         return send(body);
     }
 
-    /** Post into a channel as the app, optionally threaded. */
-    public DeliveryResult sendAsBot(String channel, String text, @Nullable String threadTs) {
-        ObjectNode body = mapper.createObjectNode();
-        body.put("transport", TRANSPORT_BOT);
-        body.put("channel", channel);
-        body.put("text", text);
-        if (threadTs != null && !threadTs.isBlank()) {
-            body.put("thread_ts", threadTs);
-        }
-        return send(body);
-    }
-
     private DeliveryResult send(ObjectNode body) {
         if (!props.isConfigured()) {
             return DeliveryResult.failure(null, "slack-service is not configured");
         }
-        String payload;
-        try {
-            payload = mapper.writeValueAsString(body);
-        } catch (Exception e) {
-            return DeliveryResult.failure(null, "could not serialize slack delivery");
-        }
+        String payload = body.toString();
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(props.getBaseUrl() + "/deliver"))
                     .POST(HttpRequest.BodyPublishers.ofString(payload))

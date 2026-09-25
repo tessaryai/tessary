@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -163,16 +164,8 @@ public class BehaviorTriageEngine {
         ApiKeyService.Issued issued =
                 apiKeys.issue(projectId, principal, "triage-" + findingId + " (system)", KeyScope.ADMIN);
         try {
-            String sandboxKey = props.getTriageSandbox();
-            TriageSandbox sandbox = sandboxes.get(sandboxKey);
-            if (sandbox == null) {
-                // The boot-time validator already guarantees this is registered, so this is a
-                // defensive guard, not a path expected to trip in practice. It is a launcher-selection
-                // fault, not a run failure, so it takes the same error code an unreachable or
-                // misbehaving launcher does.
-                throw new TessaryException(
-                        ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, "unknown triage sandbox '" + sandboxKey + "'");
-            }
+            // validateSandboxConfig already refused to boot without this key registered.
+            TriageSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.getTriageSandbox()));
             TriageSandbox.SandboxRequest req = new TriageSandbox.SandboxRequest(
                     projectId,
                     findingId,
@@ -387,8 +380,8 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * The finding's title from {@link FindingTitle}, dropped when the cause carries no magnitude (an
-     * omission, novelty or surprisal, or a payload {@link FindingTitle} could not read): the `pattern`
+     * The finding's title from {@link FindingTitle}, dropped when {@link FindingTitle} could not read the
+     * payload: the `pattern`
      * line already shows the cause key in that case, and repeating it as a fake "claim" would be noise.
      */
     private static Optional<String> claimLine(FindingRow finding) {

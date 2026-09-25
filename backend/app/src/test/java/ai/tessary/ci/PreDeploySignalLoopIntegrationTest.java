@@ -127,11 +127,11 @@ class PreDeploySignalLoopIntegrationTest {
             assertEquals(PreDeployCheckRow.Status.ACTIVE, row.status(), "registered active");
             assertTrue(TouchedSurface.parse(row.surface()).isPresent(), "surface is a valid TouchedSurface wire name");
         }
-        List<String> surfaces = preDeployChecks.activeSurfaces(pid);
+        List<String> surfaces = rows.stream().map(PreDeployCheckRow::surface).toList();
         assertTrue(
                 surfaces.contains(TouchedSurface.TOOL_DEFINITION.wire())
                         && surfaces.contains(TouchedSurface.AGENT_LOOP.wire()),
-                "the implicated surfaces are the read-side join a future PR unions in: " + surfaces);
+                "the implicated surfaces are registered: " + surfaces);
 
         // Idempotency: a second tick over the same substrate registers no new checks.
         signalService.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
@@ -139,9 +139,14 @@ class PreDeploySignalLoopIntegrationTest {
         sleep(1_000);
         assertEquals(2, checks.listByProject(pid).size(), "re-discovery of the same signal is a no-op");
 
-        // The dismiss lifecycle drops the surface from the active read-side join without touching the signal.
+        // The dismiss lifecycle retires one check without touching the signal.
         preDeployChecks.dismiss(pid, rows.get(0).id());
-        assertEquals(1, preDeployChecks.activeSurfaces(pid).size(), "a dismissed check leaves the active surface set");
+        assertEquals(
+                1,
+                checks.listByProject(pid).stream()
+                        .filter(r -> PreDeployCheckRow.Status.ACTIVE.equals(r.status()))
+                        .count(),
+                "a dismissed check leaves the active set");
     }
 
     @Test

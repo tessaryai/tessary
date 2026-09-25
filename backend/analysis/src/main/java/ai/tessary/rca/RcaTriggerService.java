@@ -48,8 +48,7 @@ public class RcaTriggerService {
      * for a first trigger (re-presses coalesce onto the one report for the finding) and a fresh id for an
      * explicit re-run (which must get its own analysis).
      */
-    public RcaReportView trigger(
-            String projectId, String findingId, @Nullable String userId, @Nullable String runNonce) {
+    public RcaReportView trigger(String projectId, String findingId, String userId, @Nullable String runNonce) {
         FindingClaim finding = findings.findClaim(projectId, findingId).orElseThrow(() -> {
             // A 4xx ends the press with a log line GlobalExceptionHandler writes at DEBUG — invisible in
             // prod. Without this, "Run RCA does nothing" leaves no server-side trace at all. Codes only:

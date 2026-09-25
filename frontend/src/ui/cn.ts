@@ -3,9 +3,9 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
-/** The ten type-scale utilities, for {@link hasTypeSize}. */
+/** The nine type-scale utilities, for {@link hasTypeSize}. */
 const TYPE_SIZE =
-  /(?:^|\s)text-(display|metric|h1|h2|h3|body|code|small|column-header|label)(?:\s|$)/;
+  /(?:^|\s)text-(metric|h1|h2|h3|body|code|small|column-header|label)(?:\s|$)/;
 
 /**
  * Does this className already pick a size off the type scale?

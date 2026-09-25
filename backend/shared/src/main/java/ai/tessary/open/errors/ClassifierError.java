@@ -5,7 +5,6 @@ import org.springframework.http.HttpStatus;
 
 public enum ClassifierError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "No classifier '%s'"),
-    UNKNOWN_DETECTOR(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown classifier detector: %s"),
     INVALID_MODE(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid classifier mode: %s (expected 'discovery' or 'tracking')"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
     // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
@@ -28,12 +27,6 @@ public enum ClassifierError implements ErrorCode {
     PROVIDER_REQUIRED(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
-    DETECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "No detection '%s' on this classifier"),
-    /** The two ways a detection has nothing a grader run could evaluate — see ClassifierService#analyze. */
-    DETECTION_NOT_GRADABLE(
-            HttpStatus.CONFLICT, "Detection '%s' resolved no call site, so there are no graders to scope a run to"),
-    NO_GRADERS_FOR_CALL_SITE(
-            HttpStatus.CONFLICT, "Call site '%s' has no runnable grader, so a run would evaluate nothing"),
     // NO_REPO_TO_RULE_AGAINST used to sit here: a 409 on `Run analysis` for a project with no git
     // integration, back when the only Layer-2 lane rules against a committed spec. It is gone rather than
     // deprecated because the state it named cannot occur — a repo-less project is now ruled on the

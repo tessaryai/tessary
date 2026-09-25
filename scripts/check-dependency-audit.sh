@@ -4,8 +4,8 @@
 # feature toggle, since this repo's own Dependabot-alerts API is disabled. Invoke it directly:
 #   bash scripts/check-dependency-audit.sh
 #
-# Not wired into `task check` / scripts/check.sh's manifest (same as check-conformance-parity.sh
-# and check-migrations-populated.sh): this is not a per-PR gate, and it is not in CI either, run
+# Not wired into `task check` / scripts/check.sh's manifest (same as
+# check-migrations-populated.sh): this is not a per-PR gate, and it is not in CI either, run
 # it on demand with your own NVD key.
 #
 # Suppressions live in one file for all three ecosystems: `.github/dependency-suppressions.yml`,
@@ -63,12 +63,12 @@ for entry in data.get("suppressions") or []:
 PY
 }
 
-# ---- 1. maven: backend, open profile only (matches backend:check:open's own -P '!paid') ----
+# ---- 1. maven: backend ----
 # org.owasp:dependency-check-maven 13.0.0. Invoked by full coordinate rather than declared in
 # backend/pom.xml's <pluginManagement> because it is never bound to a lifecycle phase: nothing
 # here wants it running on every `mvn verify` alongside Spotless/PMD/SpotBugs, only on this
 # script's own explicit call.
-echo "== maven: backend (open profile) =="
+echo "== maven: backend =="
 _maven_suppression_xml="$(mktemp -t dependency-check-suppressions-XXXXXX.xml)"
 # rc is assigned inside the trap; declared here so shellcheck (SC2154) and readers see it.
 rc=0
@@ -94,25 +94,25 @@ _nvd_key_arg=()
 if [ -n "${NVD_API_KEY:-}" ]; then
   _nvd_key_arg+=("-Dnvd.api.key=$NVD_API_KEY")
 fi
-if ! mvn -B -f backend/pom.xml -P '!paid' \
+if ! mvn -B -f backend/pom.xml \
       org.owasp:dependency-check-maven:13.0.0:check \
       -DfailBuildOnCVSS=7 \
       -DsuppressionFiles="$_maven_suppression_xml" \
       ${_nvd_key_arg[@]+"${_nvd_key_arg[@]}"}; then
-  echo "ERROR: OWASP dependency-check found an unsuppressed CVSS>=7 finding in the open Maven" >&2
+  echo "ERROR: OWASP dependency-check found an unsuppressed CVSS>=7 finding in the Maven" >&2
   echo "       reactor. Add a documented suppression to $SUPPRESSIONS_FILE (ecosystems: [maven])" >&2
   echo "       if it is a false positive or accepted risk, or fix the dependency otherwise." >&2
   fail=1
 fi
 
-# ---- 2. the four pnpm workspaces in this checkout ----
+# ---- 2. the three pnpm workspaces in this checkout ----
 _npm_ignore_args=()
 while IFS= read -r _id; do
   [ -z "$_id" ] && continue
   _npm_ignore_args+=(--ignore "$_id")
 done <<<"$(_read_suppressions npm)"
 
-for _dir in frontend classify-service sandbox-runner/launcher sandbox-runner/agent-sandbox; do
+for _dir in frontend sandbox-runner/launcher sandbox-runner/agent-sandbox; do
   echo "== pnpm audit: $_dir =="
   if ! (cd "$_dir" && pnpm audit --audit-level=high ${_npm_ignore_args[@]+"${_npm_ignore_args[@]}"}); then
     echo "ERROR: pnpm audit found an unsuppressed high/critical advisory in $_dir. Add a" >&2
@@ -122,27 +122,22 @@ for _dir in frontend classify-service sandbox-runner/launcher sandbox-runner/age
   fi
 done
 
-# ---- 3. the two uv workspaces in this checkout ----
+# ---- 3. the uv workspace in this checkout ----
 _uv_ignore_args=()
 while IFS= read -r _id; do
   [ -z "$_id" ] && continue
   _uv_ignore_args+=(--ignore-vuln "$_id")
 done <<<"$(_read_suppressions uv)"
 
-# `[ -d ] || continue` rather than a shortened list: a checkout without slack-service/ skips
-# auditing it rather than dying on the cd.
-for _dir in slack-service classifiers; do
-  [ -d "$_dir" ] || { echo "== pip-audit: $_dir == skipped, not in this checkout"; continue; }
-  echo "== pip-audit: $_dir =="
-  # --all-extras: classifiers/pyproject.toml's `otlp` extra never syncs into a plain `uv run`'s
-  # env, so without this flag it goes unscanned while the audit silently reports only the base
-  # deps as covered.
-  if ! (cd "$_dir" && uv run --frozen --all-extras --with pip-audit pip-audit ${_uv_ignore_args[@]+"${_uv_ignore_args[@]}"}); then
-    echo "ERROR: pip-audit found an unsuppressed vulnerability in $_dir. Add a documented" >&2
-    echo "       suppression to $SUPPRESSIONS_FILE (ecosystems: [uv]) or bump the dependency." >&2
-    fail=1
-  fi
-done
+echo "== pip-audit: classifiers =="
+# --all-extras: classifiers/pyproject.toml's `otlp` extra never syncs into a plain `uv run`'s
+# env, so without this flag it goes unscanned while the audit silently reports only the base
+# deps as covered.
+if ! (cd classifiers && uv run --frozen --all-extras --with pip-audit pip-audit ${_uv_ignore_args[@]+"${_uv_ignore_args[@]}"}); then
+  echo "ERROR: pip-audit found an unsuppressed vulnerability in classifiers. Add a documented" >&2
+  echo "       suppression to $SUPPRESSIONS_FILE (ecosystems: [uv]) or bump the dependency." >&2
+  fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then
   exit 1

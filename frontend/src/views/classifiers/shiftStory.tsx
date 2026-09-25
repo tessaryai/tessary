@@ -93,7 +93,7 @@ function pctChange(then: number, now: number): number {
 }
 
 /** `+67%` / `96% faster` / `6.8× more`, whichever states the size of this move most plainly. */
-function moveWords(then: number, now: number, tone: Tone, measure: string): string {
+function moveWords(then: number, now: number, measure: string): string {
   const ratio = now / then;
   if (ratio >= 2) return `${ratio.toFixed(1)}× more`;
   if (ratio > 0 && ratio <= 0.5) {
@@ -102,7 +102,6 @@ function moveWords(then: number, now: number, tone: Tone, measure: string): stri
   }
   const pct = pctChange(then, now);
   const verb = measure === "cost" ? (pct >= 0 ? "more" : "less") : pct >= 0 ? "slower" : "faster";
-  void tone;
   return `${Math.abs(pct).toFixed(0)}% ${verb}`;
 }
 
@@ -124,17 +123,15 @@ export function pinsFor(shift: Shift): Pin[] {
   const p95 = pairOf(shift.quantiles, "p95");
   if (!p50?.then || !p50.now) return [];
   const m = shift.measure;
-  const tone = toneOf(shift);
   const unit = m === "cost" ? "turn" : "call";
 
   const median: Pin = {
-    label: `A typical ${unit} is ${moveWords(p50.then, p50.now, tone, m)}`,
+    label: `A typical ${unit} is ${moveWords(p50.then, p50.now, m)}`,
     detail: `${formatMeasure(m, p50.then)} to ${formatMeasure(m, p50.now)} at the median. This is the number that fired the finding.`,
     at: "after-p50",
   };
 
-  const flat = p95?.then != null && p95.then / p50.then < FLAT_WINDOW_RATIO;
-  if (flat && p95?.then != null) {
+  if (p95?.then != null && p95.then / p50.then < FLAT_WINDOW_RATIO) {
     const spread = ((p95.then / p50.then - 1) * 100).toFixed(0);
     return [
       {
@@ -152,7 +149,7 @@ export function pinsFor(shift: Shift): Pin[] {
   const medPct = pctChange(p50.then, p50.now);
   const tailLabel =
     Math.abs(tailPct) > Math.abs(medPct) * 2
-      ? `The tail moved ${moveWords(p95.then, p95.now, tone, m)}. That's the finding`
+      ? `The tail moved ${moveWords(p95.then, p95.now, m)}. That's the finding`
       : Math.abs(tailPct) < Math.abs(medPct)
         ? "The expensive tail moved less than the middle"
         : "The tail moved with the middle";
@@ -208,7 +205,7 @@ export function ShiftChart({ shift }: { shift: Shift }) {
   const m = shift.measure;
   const pins = pinsFor(shift);
   const pinX = (at: Pin["at"]) =>
-    at === "before-p50" ? x(p50.then as number) : at === "after-p50" ? x(p50.now as number) : x((p95?.now ?? p50.now) as number);
+    at === "before-p50" ? x(p50.then as number) : at === "after-p50" ? x(p50.now as number) : x(p95!.now as number);
   const pinRowY = (at: Pin["at"]) => (at === "before-p50" ? 70 : 118);
 
   const beforeEnd = p95?.then != null ? x(p95.then) : x(p50.then);

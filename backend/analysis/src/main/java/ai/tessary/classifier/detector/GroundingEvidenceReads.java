@@ -62,13 +62,5 @@ public interface GroundingEvidenceReads {
         public Evidence {
             documents = List.copyOf(documents);
         }
-
-        /**
-         * The documents joined with a newline — the pair head's premise shape, kept for the caller that
-         * still builds one. New callers pass {@link #documents()} through as passages instead.
-         */
-        public String text() {
-            return String.join("\n", documents);
-        }
     }
 }

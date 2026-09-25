@@ -2,7 +2,6 @@
 package ai.tessary.classifier.toolerror;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
-import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository.AcceptedReference;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
@@ -50,10 +49,6 @@ public final class ToolErrorTrend {
      * @param decision the alarm, carrying the rates, the effect size and the onset. <b>Its rates span the
      *     run since onset</b>, which is the only window that answers "how is this tool doing now"
      * @param baseline the in-control reference the spell is measured against
-     * @param observed the calls this sweep folded in — the buckets after the last watermark, not the whole
-     *     history since the reference. Incremental sweeps mean no single pass sees that history, and a
-     *     field that silently meant "everything" on a rebuild and "the last hour" on a resume would be
-     *     worse than one that means the same thing every time
      * @param onsetBucket the hour the spell began, or null when the detector could not bracket it
      * @param lastBucket the last hourly bucket this replay folded — the tool's own event clock, and what
      *     a persisted finding's {@code last_seen_at} is written from instead of the sweep's wall clock.
@@ -64,7 +59,6 @@ public final class ToolErrorTrend {
             String toolKey,
             Decision decision,
             ToolErrorRate baseline,
-            ToolErrorRate observed,
             @Nullable String onsetBucket,
             @Nullable String lastBucket) {}
 
@@ -133,16 +127,6 @@ public final class ToolErrorTrend {
 
     /** One tool's outcome: the state to carry forward, and its spell when it is alarming. */
     record Replayed(CarriedState carried, @Nullable Spell spell) {}
-
-    /** Replay one tool. Package-private so a test can drive a single series without assembling a map. */
-    static @Nullable Replayed replay(
-            String toolKey,
-            List<HourlyToolTally> buckets,
-            ToolErrorConfig config,
-            @Nullable AcceptedReference accepted,
-            @Nullable CarriedState carried) {
-        return replay(toolKey, buckets, config, accepted, carried, STATE_SCHEMA_VERSION);
-    }
 
     private static @Nullable Replayed replay(
             String toolKey,
@@ -221,7 +205,6 @@ public final class ToolErrorTrend {
         // is left exactly as it was.
         @Nullable CarriedState fence = resumed ? null : carried;
 
-        ToolErrorRate observed = new ToolErrorRate();
         for (int j = i; j < buckets.size(); j++) {
             HourlyToolTally b = buckets.get(j);
             // Strictly after the watermark. A bucket at or before it has already been folded in, and
@@ -229,7 +212,6 @@ public final class ToolErrorTrend {
             if (watermark != null && b.bucket().compareTo(watermark) <= 0) continue;
             if (fence != null && fence.fencedOff(b.bucket())) continue;
             state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
-            fold(observed, b.calls(), b.failures());
             watermark = b.bucket();
             // Judged first, learned from second, so no hour is judged against a reference that already
             // holds it the first time it is seen. Only hours after learnedThrough: a rebuild re-reads the
@@ -256,10 +238,7 @@ public final class ToolErrorTrend {
                 carried == null ? null : carried.resetAt());
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
-                next,
-                decision.fired()
-                        ? new Spell(toolKey, decision, baseline, observed, decision.onsetAt(), watermark)
-                        : null);
+                next, decision.fired() ? new Spell(toolKey, decision, baseline, decision.onsetAt(), watermark) : null);
     }
 
     /**
@@ -280,10 +259,5 @@ public final class ToolErrorTrend {
     /** Fold a bucket's counts into a rate. Bulk, for the reason {@link ToolErrorRate#addCounts} gives. */
     private static void fold(ToolErrorRate into, long calls, long failures) {
         into.addCounts(calls, failures);
-    }
-
-    /** The direction word a finding's cause key carries. */
-    public static String directionOf(Decision decision) {
-        return decision.direction() == Direction.UP ? "up" : "down";
     }
 }

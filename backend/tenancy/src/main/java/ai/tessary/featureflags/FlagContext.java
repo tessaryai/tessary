@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.featureflags;
 
-import ai.tessary.auth.TenantContext;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -26,10 +25,5 @@ public record FlagContext(@Nullable String orgId) {
     /** Target one org by ULID. */
     public static FlagContext forOrg(@Nullable String orgId) {
         return new FlagContext(orgId);
-    }
-
-    /** Build from a controller's resolved {@link TenantContext} — its org, ignoring user and project. */
-    public static FlagContext of(TenantContext ctx) {
-        return new FlagContext(ctx.orgId());
     }
 }

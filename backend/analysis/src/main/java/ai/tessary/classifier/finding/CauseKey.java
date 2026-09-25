@@ -19,11 +19,6 @@ public final class CauseKey {
 
     private CauseKey() {}
 
-    /** {@code <profile_id>:<cause_kind>:<key>:<workflow_key>} — the profile-scoped shape (0024/0033). */
-    public static String behaviorDrift(String profileId, String causeKind, String causeKey, String workflowKey) {
-        return profileId + ":" + causeKind + ":" + causeKey + ":" + workflowKey;
-    }
-
     /**
      * {@code <baseline_id>:<cause_key>} — the baseline-scoped shape (0042). The baseline id carries
      * environment scope, so dropping it merges a staging shift into the production finding.
@@ -38,16 +33,6 @@ public final class CauseKey {
      */
     public static String toolError(String causeKey) {
         return causeKey;
-    }
-
-    /**
-     * {@code <rule_id>:<kind>}. The kind is load-bearing rather than decoration: 0072 widened
-     * conformance's open-uniqueness to {@code (rule_id, kind)} because a fit-time baseline audit and a
-     * windowed drift test are two claims about one rule, and keyed on the rule alone each would
-     * overwrite the other's evidence.
-     */
-    public static String conformance(String ruleId, String kind) {
-        return ruleId + ":" + kind;
     }
 
     /**

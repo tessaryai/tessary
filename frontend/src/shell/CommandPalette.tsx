@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Inbox, Search, SearchX, Waypoints, type LucideIcon } from "lucide-react";
+import { Search, SearchX, Waypoints, type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { projectApi } from "../api/client";
 import { ApiError } from "../api/types";
@@ -17,11 +17,10 @@ import { useTenant } from "../tenant/TenantContext";
 import { cn } from "../ui";
 import { usePalette } from "./PaletteContext";
 import { useShellActions } from "./ShellActions";
-import { buildCommands, filterCommands, hitIsReachable, searchHitToCommand } from "./commands";
+import { buildCommands, filterCommands, searchHitToCommand } from "./commands";
 import type { Command, CommandGroup } from "./commands";
 import type { SearchHitType } from "../api/types";
 import { useNavigation } from "./useNavigation";
-import { useCapabilities } from "../capabilities/useCapabilities";
 import { pushRecent, readRecents } from "./recents";
 
 /** Debounce before hitting the search backend, so we issue one request per pause — not per keystroke. */
@@ -34,20 +33,15 @@ type SearchState =
   | { status: "error" };
 
 /**
- * Per-hit-type icon + semantic color. Graders read as the accent signal (text-accent), and the
- * navigational entities (cases/traces) stay muted — matching the design's "color is a signal, not
- * decoration" rule.
+ * Per-hit-type icon + semantic color. Navigational entities (traces) stay muted — matching the
+ * design's "color is a signal, not decoration" rule.
  */
 const HIT_ICON: Record<SearchHitType, { color: string; Icon: LucideIcon }> = {
-  case: { color: "text-muted", Icon: Inbox },
   trace: { color: "text-muted", Icon: Waypoints },
 };
 
 function HitIcon({ type }: { type: SearchHitType }) {
-  // Defensive: the wire type is a bare string — an unknown hit type renders no icon.
-  const entry = HIT_ICON[type] as { color: string; Icon: LucideIcon } | undefined;
-  if (!entry) return null;
-  const { color, Icon } = entry;
+  const { color, Icon } = HIT_ICON[type];
   return <Icon size={15} aria-hidden="true" className={cn("shrink-0", color)} />;
 }
 
@@ -103,7 +97,6 @@ function CommandPalette() {
   // The IA this org actually has. The palette offers exactly the sidebar's surfaces and the Settings
   // rail's sections — never a fourth, differently-filtered list (segment F4).
   const { liveNav, settingsSections, reserved, isPathReachable } = useNavigation();
-  const { isEnabled } = useCapabilities();
 
   const commands = useMemo<Command[]>(
     () =>
@@ -152,11 +145,7 @@ function CommandPalette() {
           if (controller.signal.aborted) return;
           setSearch({
             status: "done",
-            // Drop hits whose detail surface this org doesn't have — the index is not capability-aware,
-            // so a grader indexed before the flag went off would otherwise be offered and then bounce.
-            commands: res.hits
-              .filter((h) => hitIsReachable(h, isEnabled))
-              .map((h) => searchHitToCommand(h, navigate, projectBase)),
+            commands: res.hits.map((h) => searchHitToCommand(h, navigate, projectBase)),
           });
         })
         .catch((err) => {
@@ -170,8 +159,6 @@ function CommandPalette() {
       clearTimeout(timer);
       controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEnabled is rebuilt per render; the
-    // capability map behind it changing re-runs this through the query key anyway.
   }, [query, orgSlug, projectSlug, navigate, projectBase]);
 
   // Static groups: the synchronous nav/settings/actions/recents, substring-filtered as before.
@@ -415,11 +402,6 @@ function CommandPalette() {
                         {res.typeLabel}
                       </span>
                     )}
-                    {cmd.shortcut && !cmd.disabled && (
-                      <span className="shrink-0 font-mono text-label text-muted border border-border-strong rounded-control px-1.5">
-                        {cmd.shortcut}
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -455,6 +437,5 @@ function CommandPalette() {
 /** Reconstruct the route a nav/settings command targets (mirrors buildCommands). */
 function targetPath(cmd: Command, projectBase: string): string {
   if (cmd.group === "Navigation") return `${projectBase}${cmd.id.replace(/^nav:/, "")}`;
-  if (cmd.group === "Settings") return `${projectBase}settings/${cmd.id.replace(/^settings:/, "")}`;
-  return projectBase;
+  return `${projectBase}settings/${cmd.id.replace(/^settings:/, "")}`;
 }

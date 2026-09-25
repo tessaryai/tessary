@@ -71,12 +71,6 @@ public class MeteringWorker {
      */
     static final String BUCKET_DAY = UsageUnit.BUCKET_DAY;
 
-    /**
-     * Back-compat alias for the original hourly constant ({@code MeteringService} / tests still reference it).
-     * Kept as {@link #BUCKET_HOUR}.
-     */
-    static final String BUCKET_UNIT = BUCKET_HOUR;
-
     private final MetricRollupJobRepository jobs;
     private final MetricRollupRepository rollups;
     private final MeteringProperties props;
@@ -157,14 +151,6 @@ public class MeteringWorker {
     }
 
     /**
-     * Test seam: run the production {@link #meterOne} aggregation for one already-claimed job (so day-grain
-     * windowing and storage gating both run through real code in integration tests).
-     */
-    void meterClaimedForTest(MetricRollupJobRow job) {
-        meterOne(job);
-    }
-
-    /**
      * Aggregate one closed (project, bucket) and upsert one row per metered unit, then mark the job done.
      * Re-running a closed bucket overwrites each row with the same stable count — a no-op.
      *
@@ -173,7 +159,7 @@ public class MeteringWorker {
      * a table grading took with it. Per-lane, per-model LLM spend is unaffected — that view reads the
      * {@code llm_call} ledger through {@code LlmUsageQueryRepository}, which this worker never touched.
      */
-    private void meterOne(MetricRollupJobRow job) {
+    void meterOne(MetricRollupJobRow job) {
         String from = job.bucketStart();
         String to = bucketEnd(job.bucketStart(), job.granularity());
         String createdAt = Instant.now().toString();

@@ -112,12 +112,77 @@ public final class SubstrateV2Fixtures {
         return COUNTER.incrementAndGet() * 0x9E3779B97F4A7C15L;
     }
 
+    /** A session row in the get-or-create shape: identity plus both timestamps seeded from {@code at}. */
+    public static SessionRow sessionRow(String projectId, String sessionId, String at) {
+        return new SessionRow(projectId, sessionId, null, at, at, at, false);
+    }
+
+    /**
+     * A span row in the minimal ingest shape: identity, kind, timing and versioning, with no usage, no cost
+     * ({@code cost_source = 'unpriced'}) and unresolved ancestry.
+     */
+    public static SpanRow spanRow(
+            String projectId,
+            String traceId,
+            String spanId,
+            @Nullable String parentSpanId,
+            String kind,
+            String startedAt,
+            @Nullable String endedAt,
+            String eventTs) {
+        return new SpanRow(
+                projectId,
+                traceId,
+                spanId,
+                parentSpanId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                kind,
+                null,
+                parentSpanId == null,
+                null,
+                null,
+                null,
+                null,
+                startedAt,
+                endedAt,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                SpanRow.CostSource.UNPRICED,
+                null,
+                null,
+                null,
+                SpanRow.ResolverState.PENDING,
+                SpanRow.ResolverState.PENDING,
+                eventTs,
+                false,
+                null,
+                null,
+                null,
+                null);
+    }
+
     // ---- seeding ----------------------------------------------------------------------------------
 
     /** A session with both timestamps at {@code at}. */
     public SessionRow session(String projectId, String sessionId, Instant at) {
-        SessionRow row = SessionRow.of(projectId, sessionId, null, at.toString(), at.toString());
-        sessions.getOrCreate(row);
+        SessionRow row = sessionRow(projectId, sessionId, at.toString());
+        sessions.getOrCreateAll(List.of(row));
         return row;
     }
 
@@ -162,7 +227,7 @@ public final class SubstrateV2Fixtures {
                 projectVersionId,
                 startedAt.toString(),
                 startedAt.toString());
-        traces.getOrCreate(row);
+        traces.getOrCreateAll(List.of(row));
         return row;
     }
 
@@ -175,7 +240,7 @@ public final class SubstrateV2Fixtures {
      */
     public TraceV2Row namedTrace(String projectId, String traceId, @Nullable String name, Instant at) {
         TraceV2Row row = TraceV2Row.of(projectId, traceId, null, null, name, null, null, at.toString(), at.toString());
-        traces.getOrCreate(row);
+        traces.getOrCreateAll(List.of(row));
         return row;
     }
 
@@ -193,17 +258,16 @@ public final class SubstrateV2Fixtures {
             Instant startedAt,
             @Nullable Instant endedAt) {
         trace(projectId, traceId, startedAt);
-        SpanRow row = SpanRow.of(
+        SpanRow row = spanRow(
                 projectId,
                 traceId,
                 spanId,
                 parentSpanId,
                 kind,
-                null,
                 startedAt.toString(),
                 endedAt == null ? null : endedAt.toString(),
                 (endedAt == null ? startedAt : endedAt).toString());
-        spans.upsert(row);
+        spans.upsertAll(List.of(row));
         return row;
     }
 
@@ -271,7 +335,7 @@ public final class SubstrateV2Fixtures {
                 null,
                 null,
                 null);
-        spans.upsert(updated);
+        spans.upsertAll(List.of(updated));
         return updated;
     }
 
@@ -333,7 +397,7 @@ public final class SubstrateV2Fixtures {
                 null,
                 null,
                 null);
-        spans.upsert(updated);
+        spans.upsertAll(List.of(updated));
         return updated;
     }
 
@@ -390,7 +454,7 @@ public final class SubstrateV2Fixtures {
                 null,
                 null,
                 null);
-        spans.upsert(updated);
+        spans.upsertAll(List.of(updated));
         return updated;
     }
 
@@ -422,7 +486,7 @@ public final class SubstrateV2Fixtures {
             SpanRow span, @Nullable String input, @Nullable String output, @Nullable String attributesJson) {
         SpanPayloadRow row = new SpanPayloadRow(
                 span.projectId(), span.traceId(), span.id(), input, output, attributesJson, null, span.eventTs());
-        payloads.upsert(row);
+        payloads.upsertAll(List.of(row));
         return row;
     }
 
@@ -867,7 +931,7 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     null);
-            fx.spans.upsert(row);
+            fx.spans.upsertAll(List.of(row));
             if (writePayload) {
                 fx.payload(row, payloadInput, payloadOutput, payloadAttributes);
             }

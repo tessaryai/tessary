@@ -79,18 +79,12 @@ class ClassifierWorkerLoggingTest {
     ClassifierArming arming;
 
     /**
-     * The four sweeps as the worker sees them: one port, four beans, no concrete type named. Mocking
+     * The sweeps as the worker sees them: one port, two beans, no concrete type named. Mocking
      * the port rather than a concrete sweep class keeps every assertion below independent of which
      * concrete implementations this build carries.
      */
     @Mock
-    ClassifierSweep behaviorSweep;
-
-    @Mock
     ClassifierSweep metricSweep;
-
-    @Mock
-    ClassifierSweep conformanceSweep;
 
     @Mock
     ClassifierSweep toolErrorSweep;
@@ -105,12 +99,10 @@ class ClassifierWorkerLoggingTest {
 
     @BeforeEach
     void buildRegistry() {
-        when(behaviorSweep.kinds()).thenReturn(Set.of(BuiltInDetector.Kind.BEHAVIOR_DRIFT));
         when(metricSweep.kinds())
                 .thenReturn(Set.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT));
-        when(conformanceSweep.kinds()).thenReturn(Set.of(BuiltInDetector.Kind.SOP_CONFORMANCE));
         when(toolErrorSweep.kinds()).thenReturn(Set.of(BuiltInDetector.Kind.TOOL_ERROR));
-        sweeps = registryOf(behaviorSweep, metricSweep, conformanceSweep, toolErrorSweep);
+        sweeps = registryOf(metricSweep, toolErrorSweep);
     }
 
     /** A registry over exactly these beans, and nothing else on the classpath. */
@@ -289,15 +281,12 @@ class ClassifierWorkerLoggingTest {
 
         verify(toolErrorSweep).sweep(expected);
         verify(metricSweep, never()).sweep(any());
-        verify(conformanceSweep, never()).sweep(any());
-        verify(behaviorSweep, never()).sweep(any());
     }
 
     /**
      * The contract the registry gives a fitting-tier kind nothing is registered for: it is inert. One
-     * WARN, the job completes, and no other sweep runs in its place. This build ships no sweep for
-     * behaviour drift or SOP conformance, so this is that state's normal path here, and three other
-     * endings are ruled out: it must not throw, since the job is re-pended by every heartbeat and would
+     * WARN, the job completes, and no other sweep runs in its place. Three other endings are ruled
+     * out: it must not throw, since the job is re-pended by every heartbeat and would
      * burn the dead-letter budget of a project whose only fault is which sweeps this build carries; it
      * must not retire the classifier, since absence of a sweep says nothing about catalog membership and
      * leaving the catalog is permanent; and it must not fall through to another sweep.
@@ -313,7 +302,7 @@ class ClassifierWorkerLoggingTest {
                 substrate,
                 catalog,
                 preDeployChecks,
-                // This build carries no sweep for behaviour drift or SOP conformance.
+                // No sweep claims the kind below.
                 registryOf(metricSweep, toolErrorSweep),
                 TestObjectProvider.of(),
                 new ClassifierProperties(),
@@ -321,9 +310,9 @@ class ClassifierWorkerLoggingTest {
                 new SyncTaskExecutor());
 
         ClassifierJobRow job = new ClassifierJobRow(
-                "job-sop",
+                "job-unclaimed",
                 "proj-1",
-                "sig-sop",
+                "sig-unclaimed",
                 ClassifierJobRow.PENDING,
                 null,
                 null,
@@ -335,12 +324,12 @@ class ClassifierWorkerLoggingTest {
                 "now",
                 0);
         ClassifierRow signal = new ClassifierRow(
-                "sig-sop",
+                "sig-unclaimed",
                 "proj-1",
-                "sop-conformance",
-                "SOP conformance",
+                "unclaimed",
+                "Unclaimed",
                 null,
-                BuiltInDetector.Kind.SOP_CONFORMANCE,
+                "unclaimed_window_kind",
                 null,
                 true,
                 1,
@@ -348,8 +337,8 @@ class ClassifierWorkerLoggingTest {
                 ClassifierRow.Mode.TRACKING,
                 "now",
                 "now");
-        when(signals.findById("proj-1", "sig-sop")).thenReturn(Optional.of(signal));
-        when(catalog.grainFor(BuiltInDetector.Kind.SOP_CONFORMANCE)).thenReturn(Grain.WINDOW);
+        when(signals.findById("proj-1", "sig-unclaimed")).thenReturn(Optional.of(signal));
+        when(catalog.grainFor("unclaimed_window_kind")).thenReturn(Grain.WINDOW);
 
         worker.sweepForTest(job);
 
@@ -361,7 +350,7 @@ class ClassifierWorkerLoggingTest {
         assertTrue(
                 appender.list.stream().noneMatch(e -> e.getLevel() == Level.ERROR),
                 "it is not a failure either — no dead letter, no burnt attempt budget");
-        verify(jobs).markSwept("job-sop", null, null);
+        verify(jobs).markSwept("job-unclaimed", null, null);
         verify(metricSweep, never()).sweep(any());
         verify(toolErrorSweep, never()).sweep(any());
     }

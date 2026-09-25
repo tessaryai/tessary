@@ -14,7 +14,6 @@
 /* --- Motion (not a color/type/layout token, so it stays here) --- */
 @theme {
   --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 }
 
 /* =============================================================================
@@ -106,105 +105,19 @@
 }
 
 /* =============================================================================
- * MOTION PRIMITIVES — the v1.1 redesign's living surfaces. Short, restrained,
- * no bounce; all collapse under prefers-reduced-motion (handled globally above).
- * The agent mark is a CSS placeholder ready to swap for the Lottie when uploaded.
+ * MOTION PRIMITIVES — short, restrained, no bounce; all collapse under
+ * prefers-reduced-motion (handled globally above).
  * ============================================================================= */
 
-@keyframes tess-pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-@keyframes tess-ag-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.06); }
-}
 @keyframes tess-ag-ping {
   0% { transform: scale(0.72); opacity: 0.5; }
   75%, 100% { transform: scale(2); opacity: 0; }
 }
-@keyframes tess-ag-twinkle {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.78); }
-}
-@keyframes tess-ag-glow {
-  0%, 100% { box-shadow: 0 0 16px rgba(112, 182, 253, 0.22); }
-  50% { box-shadow: 0 0 26px rgba(112, 182, 253, 0.42); }
-}
-@keyframes tess-drawer-in {
-  from { transform: translateX(28px); }
-  to { transform: translateX(0); }
-}
-@keyframes tess-modal-in {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
 
-/* The looping "running"/"live" status dot — used by signal cards, the observer
- * watch indicator, and any in-flight state. */
-.tess-pulse-dot {
-  animation: tess-pulse-dot 2s ease-in-out infinite;
-}
-
-/* Traces surface motion (ported from the v1.1 prototype). All collapse under the
- * prefers-reduced-motion guard above (durations → 0, iteration-count → 1).
- *  - tt-pulse:  the "Reading your traces…" busy dots + the live stream dot.
- *  - tt-ping:   the expanding ring on the Connected/env "live" dot.
- *  - tt-wave:   the listening-state equaliser bars.
- *  - tt-rowin-h: the accent flash a newly-streamed row fades out from. */
-/* 2026-07 redesign shell motion (sheets/shell.md):
- *  - tsyRail:  the one right-rail slide-in (ui/Rail.tsx).
- *  - tsyPulse: generic attention pulse (pulse strip, live dots). */
+/* tsyRail: the one right-rail slide-in (ui/Rail.tsx). */
 @keyframes tsyRail {
   from { transform: translateX(14px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
-}
-@keyframes tsyPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-@keyframes tt-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-@keyframes tt-ping {
-  0% { transform: scale(0.7); opacity: 0.55; }
-  80%, 100% { transform: scale(2.4); opacity: 0; }
-}
-@keyframes tt-wave {
-  0%, 100% { transform: scaleY(0.4); }
-  50% { transform: scaleY(1); }
-}
-@keyframes tt-rowin-h {
-  from { background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)); }
-  to { background: var(--color-surface); }
-}
-
-/* The floating agent launcher — a dark-blue orb that breathes and glows, with
- * an expanding accent ping ring. Wraps the tessellated spark mark. The two
- * gradient stops are the accent hue (#70B6FD) darkened to ~21% and ~11%
- * lightness — decorative shades of the accent, not tokens. */
-.tess-agent-orb {
-  background: radial-gradient(circle at 34% 30%, #11365B, #0B1C2D);
-  animation: tess-ag-breathe 3.4s ease-in-out infinite, tess-ag-glow 3.4s ease-in-out infinite;
-}
-.tess-agent-ping {
-  animation: tess-ag-ping 2.8s var(--ease-enter) infinite;
-}
-.tess-agent-ping-delay {
-  animation: tess-ag-ping 2.8s var(--ease-enter) 1.4s infinite;
-}
-.tess-agent-twinkle {
-  animation: tess-ag-twinkle 2.4s ease-in-out infinite;
-}
-
-/* Overlay surfaces (agent drawer, modals) rise/slide on enter. */
-.tess-drawer-in {
-  animation: tess-drawer-in 0.3s var(--ease-enter);
-}
-.tess-modal-in {
-  animation: tess-modal-in 0.28s var(--ease-enter);
 }
 
 /* =============================================================================

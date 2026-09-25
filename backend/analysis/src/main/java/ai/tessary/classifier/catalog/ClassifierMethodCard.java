@@ -143,94 +143,6 @@ public final class ClassifierMethodCard {
             differently. Inputs that moved with the measure is the traffic changing.
             """;
 
-    private static final String BEHAVIOR_DRIFT = """
-            ## behavior_drift: a trajectory scored against a fitted n-gram model
-
-            **Measures** how surprising a trace's sequence of steps is under the call site's own fitted
-            profile: an omission, a novelty, or a high-surprisal path.
-
-            **Compares against** the profile: counts, not rows.
-
-            **The claim's numbers** are not a block of their own. This cause carries no measured shift, so
-            `get_finding` holds no `metric`, `toolError` or `armedWindow` for it. The claim is the finding's own
-            row: `causeKey` names the step or the sequence and is the claim itself, `traceCount` is how many
-            traces fired it, and `firstSeenAt` and `lastSeenAt` bound it. The profile's own counts are not on
-            this surface; what you can check is the traces.
-
-            **Evidence**
-            - `exemplar`: the trace the firing was recorded on.
-            - `member`: this cause's firings across batches, at trace grain. A cause builds its population
-              over time, so this is the union of every batch that fired it, not one batch's worth.
-
-            **Absent roles**
-            - No `baseline`, by construction. The reference is a fitted model; a model is counts, and there
-              is nothing to enumerate on that side. A zero here is the method, not a lost write.
-            - No `witness` or `changepoint`: this detector writes neither role.
-
-            ### Cause: `omission`
-
-            The listed step or steps appear in almost every other trace this call site produces, and this
-            trace performed none of them. The claim holds when the request was of the kind that gets those
-            steps and the trace skipped them anyway. A request that never needed the step is the traffic
-            differing, not the agent.
-
-            ### Cause: `novelty`
-
-            The listed action sequence is one this call site had not produced before. New is not wrong.
-            The claim holds when the trace really took that sequence and nothing in the request explains
-            why it would.
-
-            ### Cause: `surprisal`
-
-            The listed transition is one this call site makes far more rarely than its alternatives at
-            that point. Rare is not wrong. The claim holds when the trace really took it and nothing in
-            the request explains why it would.
-            """;
-
-    private static final String SOP_CONFORMANCE = """
-            ## sop_conformance: an obligation checked against the turns it applied to
-
-            **Measures** how often an SOP rule was honoured on the turns where it was in force. Two
-            different claims share this classifier, and `conformanceKind` in `get_finding` says which: a
-            `drift` finding says conformance fell, a `baseline` finding says it was never high. Both file the
-            cause `conformance_rule`, so the cause named in `finding.md` does not separate them and the kind
-            sections below are keyed on `conformanceKind`.
-
-            **Compares against** either the bundle's fitted expectation model plus a stored activation
-            count (the windowed drift test), or the very turns the fit ran on (the fit-time audit).
-
-            **The claim's numbers** sit differently for the two kinds. A `baseline` finding has a block of its
-            own in `get_finding` under `baseline`: `ruleKey`, `applicableTurns` (the activations the violations
-            were counted over), `violations`, and `fittedAt`. A `drift` finding has no block: its rates are in
-            the finding's `title`, its denominator is `traceCount`, which for this classifier counts the tested
-            window's activations rather than firings, and `causeKey` names the rule.
-
-            **Evidence**, all at trace grain, all refreshed on every pass, because the window rolls and
-            the union across sweeps is the traffic the deficit has actually been seen over.
-            - `exemplar`: the violating turns, ranked most-surprising-first. The order is part of the
-              claim.
-            - `member`: the activations the violation count is a fraction of.
-            - `baseline`: the fit-time audit's reference activations, where one exists as rows.
-            - `changepoint`: where the deficit starts concentrating. Descriptive, not a test. No other
-              classifier writes this role.
-
-            **Absent roles**
-            - No `baseline` on a windowed drift finding is correct: its reference is a fitted expectation
-              model, and no set of rows survives it.
-            - No `witness`: the violating turns are the `exemplar` rows, and this detector writes no `witness`.
-
-            ### Kind: `drift`
-
-            Conformance to the rule fell on the turns where it applied. The claim holds when the
-            `exemplar` turns really violate the rule as written and the turns where it applied are the
-            same kind of turns as before.
-
-            ### Kind: `baseline`
-
-            Conformance to the rule was never high on the turns the fit ran on. The claim holds when the
-            `exemplar` turns really violate the rule as written.
-            """;
-
     private static final String SECRET_LEAK = """
             ## secret_leak: a credential rule matched in one call site's output
 
@@ -396,8 +308,6 @@ public final class ClassifierMethodCard {
             BuiltInDetector.Kind.TOOL_ERROR, TOOL_ERROR,
             BuiltInDetector.Kind.DURATION_DRIFT, METRIC_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT, METRIC_DRIFT,
-            BuiltInDetector.Kind.BEHAVIOR_DRIFT, BEHAVIOR_DRIFT,
-            BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE,
             BuiltInDetector.Kind.SECRET_LEAK, SECRET_LEAK,
             BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT,
             BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION,

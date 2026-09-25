@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.toolerror.ToolFailure.Source;
+import ai.tessary.model.ErrorSignature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
@@ -195,7 +196,7 @@ class ToolFailureTest {
     @Test
     void signaturesAreBounded() {
         String sig = ToolFailure.signature("failure: " + "a".repeat(500));
-        assertTrue(sig.length() <= ToolFailure.MAX_SIGNATURE_LENGTH + 1, sig.length() + " chars");
+        assertTrue(sig.length() <= ErrorSignature.MAX_SIGNATURE_LENGTH + 1, sig.length() + " chars");
     }
 
     @Test

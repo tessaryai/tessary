@@ -178,14 +178,13 @@ class AlertChannelDeliveryTest {
         // recorded as a failure naming the missing adapter. A delivery that cannot be made must leave a
         // trace, since this log is the only visibility surface the fan-out has.
         List<DeliveryAttemptRow> log = attempts.listByProject(pid, 100);
-        long delivered = log.stream()
-                .filter(a -> a.status().equals(DeliveryAttemptRow.Status.DELIVERED))
-                .count();
+        long delivered =
+                log.stream().filter(a -> a.status().equals("delivered")).count();
         assertEquals(2, delivered, "the 2 directly-delivered channels succeeded");
         assertEquals(3, log.size(), "all 3 enabled channels were attempted");
         assertTrue(
                 log.stream()
-                        .anyMatch(a -> a.status().equals(DeliveryAttemptRow.Status.FAILED)
+                        .anyMatch(a -> a.status().equals("failed")
                                 && String.valueOf(a.error()).contains("slack-service")),
                 "the slack attempt failed naming the undeployed adapter");
 
@@ -205,7 +204,7 @@ class AlertChannelDeliveryTest {
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
         while (System.nanoTime() < deadline) {
             long resolved = attempts.listByProject(pid, 100).stream()
-                    .filter(a -> !a.status().equals(DeliveryAttemptRow.Status.PENDING))
+                    .filter(a -> !a.status().equals("pending"))
                     .count();
             if (resolved >= expected) return;
             Thread.sleep(50);

@@ -2553,7 +2553,6 @@ export interface components {
         };
         BehaviorFindingDetailView: {
             armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
-            baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
@@ -2567,9 +2566,7 @@ export interface components {
             caseId: string | null;
             causeKey: string;
             causeKind: string;
-            conformanceKind: string | null;
             detector: string | null;
-            evidence: components["schemas"]["EvidenceRefView"][];
             firstSeenAt: string;
             humanVerdictAt: string | null;
             id: string;
@@ -2589,26 +2586,6 @@ export interface components {
         BehaviorFindingsView: {
             findings: components["schemas"]["BehaviorFindingView"][];
             lane: string;
-        };
-        BehaviorProfileDebugView: {
-            /** Format: int32 */
-            alphabet_size: number;
-            armed_at: string | null;
-            call_site_id: string;
-            /** Format: double */
-            discovery_rate: number | null;
-            fit_carry_json: string | null;
-            last_trace_at: string | null;
-            /** Format: int32 */
-            max_order: number;
-            opened_at: string;
-            rare_symbols_json: string | null;
-            reservoir_json: string | null;
-            state: string;
-            /** Format: double */
-            threshold_d2: number | null;
-            /** Format: int64 */
-            trace_count: number;
         };
         BehaviorResolutionRequest: {
             action: string;
@@ -2650,7 +2627,6 @@ export interface components {
             capabilities: {
                 [key: string]: boolean;
             };
-            unavailable: string[];
         };
         Capability: {
             call_site_ids: string[];
@@ -2813,7 +2789,6 @@ export interface components {
             trace_totals: number[];
         };
         ClassifierDebugView: {
-            behavior_profiles: components["schemas"]["BehaviorProfileDebugView"][] | null;
             detector: string;
             family: string;
             id: string;
@@ -2875,15 +2850,6 @@ export interface components {
         ConfirmRequest: {
             org_slug?: string;
             project_slug?: string;
-        };
-        ConformanceBaselineView: {
-            /** Format: int64 */
-            applicableTurns: number;
-            fittedAt: string;
-            ruleKey: string;
-            violatingTraceIds: string[];
-            /** Format: int32 */
-            violations: number;
         };
         ConnectRequest: {
             defaultBranch?: string;
@@ -3007,15 +2973,6 @@ export interface components {
                 [key: string]: string;
             } | null;
             message?: string | null;
-        };
-        EvidenceRefView: {
-            grain: string;
-            /** Format: int32 */
-            rank: number | null;
-            role: string;
-            sessionId: string | null;
-            spanId: string | null;
-            traceId: string | null;
         };
         EvidenceSpanView: {
             callSiteId: string | null;
@@ -3249,7 +3206,6 @@ export interface components {
         GitIntegrationView: {
             defaultBranch: string;
             host: string;
-            observerCursorSha: string;
             provider: string;
             repoName: string;
             repoOwner: string;
@@ -3291,12 +3247,10 @@ export interface components {
         };
         GroupView: {
             description: string;
-            effort_tunable: boolean;
             /** @enum {string} */
-            id: "llm_calls" | "agent_vm" | "decision_calls";
+            id: "agent_vm" | "decision_calls";
             label: string;
             model_selectable: boolean;
-            tiered: boolean;
         };
         /** @enum {unknown} */
         HttpStatus: "100 CONTINUE" | "101 SWITCHING_PROTOCOLS" | "102 PROCESSING" | "103 EARLY_HINTS" | "200 OK" | "201 CREATED" | "202 ACCEPTED" | "203 NON_AUTHORITATIVE_INFORMATION" | "204 NO_CONTENT" | "205 RESET_CONTENT" | "206 PARTIAL_CONTENT" | "207 MULTI_STATUS" | "208 ALREADY_REPORTED" | "226 IM_USED" | "300 MULTIPLE_CHOICES" | "301 MOVED_PERMANENTLY" | "302 FOUND" | "303 SEE_OTHER" | "304 NOT_MODIFIED" | "307 TEMPORARY_REDIRECT" | "308 PERMANENT_REDIRECT" | "400 BAD_REQUEST" | "401 UNAUTHORIZED" | "402 PAYMENT_REQUIRED" | "403 FORBIDDEN" | "404 NOT_FOUND" | "405 METHOD_NOT_ALLOWED" | "406 NOT_ACCEPTABLE" | "407 PROXY_AUTHENTICATION_REQUIRED" | "408 REQUEST_TIMEOUT" | "409 CONFLICT" | "410 GONE" | "411 LENGTH_REQUIRED" | "412 PRECONDITION_FAILED" | "413 CONTENT_TOO_LARGE" | "413 PAYLOAD_TOO_LARGE" | "414 URI_TOO_LONG" | "415 UNSUPPORTED_MEDIA_TYPE" | "416 REQUESTED_RANGE_NOT_SATISFIABLE" | "417 EXPECTATION_FAILED" | "418 I_AM_A_TEAPOT" | "421 MISDIRECTED_REQUEST" | "422 UNPROCESSABLE_CONTENT" | "422 UNPROCESSABLE_ENTITY" | "423 LOCKED" | "424 FAILED_DEPENDENCY" | "425 TOO_EARLY" | "426 UPGRADE_REQUIRED" | "428 PRECONDITION_REQUIRED" | "429 TOO_MANY_REQUESTS" | "431 REQUEST_HEADER_FIELDS_TOO_LARGE" | "451 UNAVAILABLE_FOR_LEGAL_REASONS" | "500 INTERNAL_SERVER_ERROR" | "501 NOT_IMPLEMENTED" | "502 BAD_GATEWAY" | "503 SERVICE_UNAVAILABLE" | "504 GATEWAY_TIMEOUT" | "505 HTTP_VERSION_NOT_SUPPORTED" | "506 VARIANT_ALSO_NEGOTIATES" | "507 INSUFFICIENT_STORAGE" | "508 LOOP_DETECTED" | "509 BANDWIDTH_LIMIT_EXCEEDED" | "510 NOT_EXTENDED" | "511 NETWORK_AUTHENTICATION_REQUIRED";
@@ -3378,7 +3332,7 @@ export interface components {
             description: string;
             effective_model_key: string | null;
             /** @enum {string} */
-            group: "llm_calls" | "agent_vm" | "decision_calls";
+            group: "agent_vm" | "decision_calls";
             /** @enum {string} */
             id: "rca" | "triage" | "frustration";
             label: string;
@@ -3485,21 +3439,11 @@ export interface components {
         };
         ModelDescriptor: {
             agentic: boolean;
-            api_path: string | null;
             display_name: string;
-            effort_levels: string[];
             /** @enum {string} */
             endpoint: "RUNTIME" | "MANTLE";
-            explicit_cache_ttls: string[];
-            forced_tool_choice: boolean;
             inference_profile_id: string;
-            /** Format: int32 */
-            min_cache_checkpoint_tokens: number;
             model_key: string;
-            prompt_caching: boolean;
-            /** @enum {string} */
-            structured_output: "NATIVE" | "TOOL_CALL";
-            supported_tiers: ("standard" | "flex" | "priority" | "batch")[];
             vendor: string;
         };
         ModelRateView: {
@@ -3578,7 +3522,6 @@ export interface components {
             enabled: boolean;
             has_override: boolean;
             open_default: boolean;
-            unavailable: boolean;
         };
         Pack: {
             content_digest: string | null;
@@ -3892,7 +3835,7 @@ export interface components {
             updated_at: string;
         };
         RuledOutCheck: {
-            assessment: string | null;
+            assessment: string;
             check: string;
             detail: string;
             measurement: string | null;
@@ -4368,7 +4311,6 @@ export interface components {
             mcpToken?: boolean;
             mcpTokenId: string | null;
             orgId: string | null;
-            owner?: boolean;
             projectId: string | null;
             role: string | null;
             userEmail: string | null;

@@ -41,7 +41,7 @@ class PriceBookImporterIntegrationTest {
 
     private String versionOf(String source) {
         return books.currentBooks().stream()
-                .filter(b -> b.source().equals(source))
+                .filter(b -> b.version().startsWith(source + "-"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no book in force for source " + source))
                 .version();
@@ -52,7 +52,9 @@ class PriceBookImporterIntegrationTest {
     void boot_importsTheVendoredBook() {
         List<PriceBook> current = books.currentBooks();
         assertEquals(1, current.size(), "one book in force per source: " + current);
-        assertEquals(PriceBook.SOURCE_LITELLM, current.get(0).source());
+        assertTrue(
+                current.get(0).version().startsWith(PriceBook.SOURCE_LITELLM + "-"),
+                current.get(0).version());
         assertTrue(count("model") > 1000, "every snapshot key becomes a model row");
         assertTrue(count("model_price") > 1000, "and every one of them gets a rate row");
     }

@@ -175,11 +175,7 @@ public final class SecretLeakDetector implements BuiltInDetector {
 
     /** What {@link #Source} says about whether the credential itself is still sitting in stored output. */
     private static String storedAs(String source) {
-        return switch (source) {
-            case Source.REDACTION, Source.MARKER -> Stored.REDACTED;
-            case Source.OUTPUT -> Stored.RAW;
-            default -> Stored.UNKNOWN;
-        };
+        return Source.OUTPUT.equals(source) ? Stored.RAW : Stored.REDACTED;
     }
 
     /** Evidence's {@code stored} member: whether the credential itself is still sitting in stored output. */
@@ -188,7 +184,6 @@ public final class SecretLeakDetector implements BuiltInDetector {
 
         static final String REDACTED = "redacted";
         static final String RAW = "raw";
-        static final String UNKNOWN = "unknown";
     }
 
     private Detection fired(String rule, String confidence, String source, @Nullable String masked) {
@@ -197,12 +192,7 @@ public final class SecretLeakDetector implements BuiltInDetector {
         evidence.put("source", source);
         if (masked != null) evidence.put("masked", masked);
         evidence.put("stored", storedAs(source));
-        String json;
-        try {
-            json = mapper.writeValueAsString(evidence);
-        } catch (JsonProcessingException e) {
-            json = "{\"pattern\":\"" + rule + "\"}";
-        }
-        return Detection.fired(Detection.Severity.CRITICAL, json, confidence);
+        return Detection.fired(
+                Detection.Severity.CRITICAL, mapper.valueToTree(evidence).toString(), confidence);
     }
 }

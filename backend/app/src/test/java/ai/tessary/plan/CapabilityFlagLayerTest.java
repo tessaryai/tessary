@@ -21,8 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * This build's resolution contract, against real {@code org_feature_flag} rows:
  *
  * <ol>
- *   <li>with no rows at all, every capability is on except the set in {@link #OFF_BY_DEFAULT},
- *       which is deliberately not {@code Capability.defaultEnabled()};
+ *   <li>with no rows at all, every capability is on except the set in {@link #OFF_BY_DEFAULT};
  *   <li>an org's row overrides that default in both directions;
  *   <li>clearing the row returns the capability to the default rather than leaving it off;
  *   <li>one org's row does not touch another's.
@@ -31,9 +30,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest
 class CapabilityFlagLayerTest {
 
-    /** What an open build serves before anybody touches it. Mirrors CapabilityService's two private sets. */
-    private static final Set<Capability> OFF_BY_DEFAULT =
-            EnumSet.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.TRIAGE_AUTOMATIC);
+    /** What an open build serves before anybody touches it. Mirrors CapabilityService's private set. */
+    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC);
 
     @Autowired
     TenantService tenants;
@@ -48,7 +46,7 @@ class CapabilityFlagLayerTest {
     DbFeatureFlags flags;
 
     @Test
-    void withNoOverrides_everythingIsOnExceptThePaidClassifiersAndAutomaticTriage() {
+    void withNoOverrides_everythingIsOnExceptAutomaticTriage() {
         var fix = TenantFixture.bootstrap(tenants, "cap-default");
         String orgId = fix.org().id();
 
@@ -60,12 +58,6 @@ class CapabilityFlagLayerTest {
                     resolved.isEnabled(capability),
                     capability.wire() + " should default " + (expected ? "on" : "off") + " in an open build");
         }
-        // The three that are off are off for two different reasons, and the payload has to say which.
-        // groundedness is not among them: whether its model answers pauses sweeping, never the capability.
-        assertEquals(
-                Set.of(Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE),
-                Set.copyOf(capabilities.unavailable()),
-                "only the two paid classifiers are UNAVAILABLE; triage_automatic is merely off");
     }
 
     @Test

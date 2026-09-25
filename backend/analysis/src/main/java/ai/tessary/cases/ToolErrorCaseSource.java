@@ -36,11 +36,6 @@ public class ToolErrorCaseSource implements CaseSource {
     private static final Logger log = LoggerFactory.getLogger(ToolErrorCaseSource.class);
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.TOOL_ERROR;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return BuiltInDetector.Kind.TOOL_ERROR.equals(classifierKey);
     }

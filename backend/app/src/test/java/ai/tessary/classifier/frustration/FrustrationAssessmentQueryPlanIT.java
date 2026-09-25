@@ -10,6 +10,7 @@ import ai.tessary.classifier.ClassifierService;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Locale;
@@ -86,7 +87,8 @@ class FrustrationAssessmentQueryPlanIT {
                 .project()
                 .id();
         classifierService.seedBuiltIns(pid);
-        ClassifierRow signal = classifiers.findByKey(pid, "frustration").orElseThrow();
+        ClassifierRow signal =
+                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
         seed(pid, signal.id());
 
         String range = explain(String.format(Locale.ROOT, """

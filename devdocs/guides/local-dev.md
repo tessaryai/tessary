@@ -34,10 +34,8 @@ Dev images: JVM-mode backend with Spring Boot devtools, Vite dev server with HMR
 ```bash
 task dev                                                   # → tmux session, asks its questions on first run
 task dev:configure                                         # answer them again; the next `task dev` applies it
-task dev:slim                                              # encoder classifiers already answered: no (was `dev:2gb`, still aliased)
 
 task dev:up                                                # no tmux: same containers and questions, detached, logs via `task dev:logs`
-task dev:up:slim                                           # = TESSARY_SKIP_CLASSIFY=1 task dev:up
 ```
 
 ### The questions `task dev` asks
@@ -47,34 +45,17 @@ The dev stack runs like the one `docker compose -f oci://docker.io/tessaryai/tes
 | Question | Options | Recommended | Without a terminal |
 |---|---|---|---|
 | Where should triage and RCA agents run? | `docker` (a sandbox container per run, built from this checkout's `sandbox-runner/agent-sandbox/` — always up to date with your changes), `e2b` (microVMs, from the published `tessary/tessary-agent-sandbox` template; needs `E2B_API_KEY` and a public MCP URL), `off` | `docker` | `off` |
-| Run the encoder classifier service? | No (every classifier runs: frustration on your OpenRouter or TypeSafe key, groundedness on its own model server), Yes (8 GB container, weight download; it serves `/embed` for SOP-conformance fits and no classifier head) | No | Yes |
 | Enforce sign-in? | Yes, No | Yes | Yes |
 
-An answer is taken from the first of these that has one: the environment (including a preset like `task dev:slim`), `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it. Presets are never saved, so running `task dev:slim` once does not turn later plain `task dev` runs into slim ones.
+An answer is taken from the first of these that has one: the environment, `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it.
 
-The non-interactive defaults for agents and the classifier service are what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
+The non-interactive default for agents is what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
 
 With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag — a boot-time failure there stops the whole run rather than surfacing as an opaque 502 on the first `/rca` or `/triage`. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
 
 Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and the launcher key default to the same placeholders `docker-compose.yml` ships. Set real ones in `.env` for anything beyond local development.
 
 `task dev` serves the stack at http://localhost. Set `TESSARY_DEV_PORT` (e.g. `8100`, in the environment or `.env`) if port 80 is taken or not bindable, and it serves at http://localhost:8100 instead.
-
-### Slim mode — what runs
-
-`dev:slim` (and `TESSARY_SKIP_CLASSIFY=1` in front of any dev task) starts everything except the two encoder services. The list is derived from compose itself in `scripts/lib/dev-services.sh`, so a new service joins slim mode automatically and both entry points agree by construction.
-
-| Service | Slim | Notes |
-|---|---|---|
-| `postgres` | ✅ | Postgres 16 + pgvector, on `localhost:5433` for `psql` |
-| `backend` | ✅ | Spring Boot + devtools, JDWP on `:5005` |
-| `frontend` | ✅ | Vite dev server, HMR over the bind mount |
-| `caddy` | ✅ | Reverse proxy on `TESSARY_DEV_PORT` (default 80) — the entry point, unchanged |
-| `alloy` | ❌ | Opt-in: behind the `observability` Compose profile, off by default. `COMPOSE_PROFILES=observability` to forward `gen_ai` judge spans to Langfuse |
-| `classify` | ❌ | Encoder service. Serves `/embed` for SOP-conformance fits; in the open edition `models.json` is `{}`, so it serves no classifier head. Build downloads HF weights (`BAKE_EMBEDDERS` bakes ~1.7 GB into the dev image); container capped at 8 GB |
-| `compile` | ❌ | SOP-conformance fitter. `depends_on: classify`, and every fit calls its `/embed` — without classify it can only dead-letter, so it goes too |
-
-So the product is whole in slim mode: the browser, every page, ingestion, triage, RCA. The one thing dormant is SOP-conformance fits, which need `classify`'s `/embed` and stay dormant until a full `task dev`. Frustration is not encoder-backed: it runs in slim mode once an OpenRouter or TypeSafe key is saved. Groundedness does not use `classify` either: its model runs on the Mac's GPU outside Docker, set up by [`groundedness-setup-mac.md`](../../classifiers/groundedness/setup/groundedness-setup-mac.md), and runs the same in either mode.
 
 Where tmux isn't available (CI, an agent, a plain `ssh`), `task dev:up` is the way in.
 
@@ -138,4 +119,4 @@ account required to boot the open edition.
 
 ## Without Docker, prod-style
 
-`task backend:build` → produces the executable bootJar at `backend/app/target/app-*-exec.jar`, run with `java -jar`; the plain `app-*.jar` beside it is the module jar the paid assembly depends on. `task frontend:build` → produces `frontend/dist/`. Serve the dist yourself with any static file server / reverse proxy that also proxies `/api/*`, `/auth/*`, `/mcp`, `/webhooks/*`, `/v1/traces` to the backend jar — see `frontend/caddy/base.caddy` + `frontend/caddy/render.sh` for the routes the shipped production image renders (there is no standalone open-edition Caddyfile.prod to reuse directly) — and run the jar directly.
+`task backend:build` → produces the executable bootJar at `backend/app/target/app-*-exec.jar`, run with `java -jar`; the plain `app-*.jar` beside it is the ordinary classpath jar. `task frontend:build` → produces `frontend/dist/`. Serve the dist yourself with any static file server / reverse proxy that also proxies `/api/*`, `/auth/*`, `/mcp`, `/v1/traces` to the backend jar — see `frontend/caddy/base.caddy` + `frontend/caddy/render.sh` for the routes the shipped production image renders (there is no standalone open-edition Caddyfile.prod to reuse directly) — and run the jar directly.

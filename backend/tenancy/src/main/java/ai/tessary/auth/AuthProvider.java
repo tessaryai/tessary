@@ -22,20 +22,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>The nested types below are moved here verbatim from {@code WorkOsClient} — same field names,
  * same order, same nullability — so every existing call site's accessor chain (notably
- * {@link AuthFilter}'s refresh-path null-coalescing over {@code r.workosUserId()/email()/...})
+ * {@link AuthFilter}'s refresh-path null-coalescing over {@code r.workosUserId()/organizationId()})
  * keeps compiling and behaving unchanged. The field names still say "workos" because that is the
  * wire shape WorkOS returns and the DB column {@link PasswordAuthProvider} also populates,
  * with a synthetic id, for its own principals; renaming them is out of scope here.
  */
 public interface AuthProvider {
-
-    /**
-     * True when this provider has enough configuration to be used — e.g. an API key and client id
-     * are both set. {@link AuthFilter} treats "no provider configured" as the normal state of a
-     * self-hosted instance (see {@link AuthProperties}), not as consent to serve requests
-     * unauthenticated.
-     */
-    boolean isEnabled();
 
     /** Build the URL the browser is redirected to in order to sign in, carrying the given CSRF state. */
     String authorizationUrl(String state);
@@ -93,8 +85,7 @@ public interface AuthProvider {
             @Nullable String firstName,
             @Nullable String lastName,
             @Nullable String profilePictureUrl,
-            @Nullable String organizationId,
-            @Nullable String sessionId) {
+            @Nullable String organizationId) {
 
         public static AuthResult from(JsonNode body) {
             JsonNode user = body.path("user");
@@ -111,8 +102,7 @@ public interface AuthProvider {
                     body.path("organization_id").isMissingNode()
                                     || body.path("organization_id").isNull()
                             ? null
-                            : body.path("organization_id").asText(),
-                    body.path("session_id").asText(null));
+                            : body.path("organization_id").asText());
         }
 
         public @Nullable String displayName() {
@@ -122,7 +112,7 @@ public interface AuthProvider {
     }
 
     /** Result of sending an invitation. */
-    record Invitation(@Nullable String id, @Nullable String acceptInvitationUrl) {}
+    record Invitation(@Nullable String id) {}
 
     /** Signals a failure talking to the identity provider — caller decides how to surface it (usually 502). */
     final class AuthException extends RuntimeException {

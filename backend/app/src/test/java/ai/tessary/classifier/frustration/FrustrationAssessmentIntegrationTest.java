@@ -36,6 +36,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -142,8 +143,7 @@ class FrustrationAssessmentIntegrationTest {
 
         assertEquals(1, fired.size());
         String version = JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
-        Assessment row =
-                assessments.find(pid, signal.id(), "tr-flagged", version).orElseThrow();
+        Assessment row = find(pid, signal.id(), "tr-flagged", version);
         assertEquals(pid, row.projectId());
         assertEquals(signal.id(), row.classifierId());
         assertEquals("span-tr-flagged", row.spanId());
@@ -165,8 +165,7 @@ class FrustrationAssessmentIntegrationTest {
         assertEquals(
                 RESPONDED, mapper.readTree(row.responseJson()).path("model").asText());
 
-        Assessment calmRow =
-                assessments.find(pid, signal.id(), "tr-calm", version).orElseThrow();
+        Assessment calmRow = find(pid, signal.id(), "tr-calm", version);
         assertFalse(calmRow.frustrated());
         assertEquals("sess-2", calmRow.conversationId(), "no thread, so the session");
 
@@ -291,7 +290,7 @@ class FrustrationAssessmentIntegrationTest {
 
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
-        return classifiers.findByKey(pid, "frustration").orElseThrow();
+        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
     private ClassifierJobRow job(String pid, String classifierId) {
@@ -317,7 +316,8 @@ class FrustrationAssessmentIntegrationTest {
                 null,
                 null,
                 null,
-                startedAt.toString());
+                startedAt.toString(),
+                null);
         when(assembler.assembleStructured(obs))
                 .thenReturn(Optional.of(new StructuredThread(
                         List.of(
@@ -352,6 +352,41 @@ class FrustrationAssessmentIntegrationTest {
                 new FrustrationProperties(),
                 mapper,
                 Clock.fixed(Instant.now(), ZoneOffset.UTC));
+    }
+
+    /** The row the scorer wrote for a turn, read straight off the table. */
+    private Assessment find(String projectId, String classifierId, String traceId, String scorerVersion) {
+        return jdbc.sql("""
+                        SELECT id, project_id, classifier_id, trace_id, span_id, conversation_id, call_site_id,
+                               turn_started_at, frustrated, scorer_version, provider, model, request::text AS request,
+                               response::text AS response, input_tokens, cost_usd, latency_ms
+                          FROM frustration_assessment
+                         WHERE project_id = :pid AND classifier_id = :cid AND trace_id = :traceId
+                           AND scorer_version = :scorerVersion
+                        """)
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("traceId", traceId)
+                .param("scorerVersion", scorerVersion)
+                .query((rs, n) -> new Assessment(
+                        rs.getString("id"),
+                        rs.getString("project_id"),
+                        rs.getString("classifier_id"),
+                        rs.getString("trace_id"),
+                        rs.getString("span_id"),
+                        rs.getString("conversation_id"),
+                        rs.getString("call_site_id"),
+                        rs.getTimestamp("turn_started_at").toInstant(),
+                        rs.getBoolean("frustrated"),
+                        rs.getString("scorer_version"),
+                        rs.getString("provider"),
+                        rs.getString("model"),
+                        rs.getString("request"),
+                        rs.getString("response"),
+                        (Integer) rs.getObject("input_tokens"),
+                        rs.getBigDecimal("cost_usd"),
+                        (Integer) rs.getObject("latency_ms")))
+                .single();
     }
 
     private int count(String table, String pid) {

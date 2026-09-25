@@ -14,7 +14,7 @@
 # is the findings, never the diff; a baseline is a record, not an allowlist.
 #
 # Never run agent-side: needs Docker, the network and minutes. Run by a human
-# (`task check:exposure:sweep`) or the dispatch-only boot-checks.yml. Excluded from
+# (`task check:exposure:sweep`) or boot-checks.yml. Excluded from
 # `task check` (see scripts/check.sh's manifest).
 set -euo pipefail
 P=check-exposure-sweep
@@ -29,15 +29,6 @@ for arg in "$@"; do
 done
 for tool in docker curl jq python3 shasum; do command -v "$tool" >/dev/null || { echo "$P: $tool is required" >&2; exit 2; }; done
 
-# ARM 3's FORBIDDEN-STRING LIST IS A VARIABLE because export-forbidden-strings.txt does not exist
-# in this checkout; the caller passes the path in. Same shape and reason as
-# check-classifier-quality-doc.sh's CQ_DOC.
-#
-# When the list is not there the sweep records `not-scanned` rather than silently dropping the
-# row, so the absence is visible. It is NOT a finding: this repo has no such list, so
-# boot-checks.yml legitimately runs this arm without it, and a permanently red public gate
-# is the failure mode that gets a gate switched off.
-EXPOSURE_FORBIDDEN="${EXPOSURE_FORBIDDEN:-scripts/lib/export-forbidden-strings.txt}"
 docker info >/dev/null 2>&1 || { echo "$P: the docker daemon is not reachable" >&2; exit 2; }
 
 # shellcheck source=scripts/lib/cloud-credential-denylist.sh
@@ -296,19 +287,6 @@ secret_re='AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9]{32
 hits="$(grep -rEo "$secret_re" "$TMP/srv" --include='*.js' --include='*.html' --include='*.css' --include='*.json' 2>/dev/null | sort -u | head -20 || true)"
 _record BUNDLE "credential-shaped or path-revealing strings" "$(printf '%s' "$hits" | grep -c . || true)" ""
 [ -z "$hits" ] || _finding "the bundle carries credential-shaped or path-revealing strings: $(printf '%s' "$hits" | tr '\n' ' ' | cut -c1-300)"
-if [ -f "$EXPOSURE_FORBIDDEN" ]; then
-    fhits=0
-    while IFS='|' read -r pattern kind _; do
-        [ -n "$pattern" ] && [ "${pattern#\#}" = "$pattern" ] || continue
-        if [ "$kind" = literal ]; then grep -rqF -- "$pattern" "$TMP/srv" 2>/dev/null && fhits=$((fhits + 1)) && _finding "the bundle carries forbidden string $pattern"
-        else grep -rqE -- "$pattern" "$TMP/srv" 2>/dev/null && fhits=$((fhits + 1)) && _finding "the bundle matches forbidden pattern $pattern"; fi
-    done < "$EXPOSURE_FORBIDDEN"
-    _record BUNDLE "forbidden-strings hits" "$fhits" ""
-else
-    echo "$P: arm 3 did NOT scan for forbidden strings — '$EXPOSURE_FORBIDDEN' is not in this" >&2
-    echo "     checkout. Set EXPOSURE_FORBIDDEN to the list to run that half." >&2
-    _record BUNDLE "forbidden-strings hits" "not-scanned" "no list at $EXPOSURE_FORBIDDEN"
-fi
 
 # ---- arm 4: SSRF and traversal --------------------------------------------------------------
 echo "$P: arm 4, SSRF and traversal"

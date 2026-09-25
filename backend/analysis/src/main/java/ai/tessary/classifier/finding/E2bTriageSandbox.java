@@ -109,8 +109,8 @@ public class E2bTriageSandbox implements TriageSandbox {
         this.credentials = credentials;
         this.usage = usage;
         // The instrumentation scope is this class's own package, matching the convention every other
-        // sandbox here follows (E2bRcaSandbox names ai.tessary.rca, E2bAnalysisSandbox
-        // ai.tessary.observer). A trace query filtering on a stale scope goes empty rather than
+        // sandbox here follows (E2bRcaSandbox names ai.tessary.rca). A trace query filtering on a stale scope goes
+        // empty rather than
         // wrong, which beats freezing a string that lies about where the code lives.
         this.tracer = openTelemetry.getTracer("ai.tessary.classifier.finding");
         this.mapper = mapper;
@@ -168,7 +168,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             span.setAttribute("langfuse.trace.metadata.project_id", req.projectId());
             span.setAttribute("tessary.triage.finding_id", req.findingId());
             // Without the discriminator Langfuse never types this as a generation and the Alloy
-            // langfuse branch drops it outright (see E2bAnalysisSandbox).
+            // langfuse branch drops it outright.
             span.setAttribute("gen_ai.operation.name", AgentSpanTelemetry.OP_INVOKE_AGENT);
             span.setAttribute("gen_ai.request.model", model);
 

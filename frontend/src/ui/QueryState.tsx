@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ReactNode } from "react";
 import { ApiError } from "../api/types";
 import { Spinner, Skeleton } from "./Spinner";
-import { EmptyState } from "./EmptyState";
 import { cn } from "./cn";
 
 /**
@@ -17,11 +15,11 @@ import { cn } from "./cn";
  */
 
 /** Inline "Loading…" line — spinner + muted text, polite to screen readers. */
-export function LoadingRow({ label = "Loading…", className }: { label?: string; className?: string }) {
+export function LoadingRow() {
   return (
-    <div role="status" aria-live="polite" className={cn("flex items-center gap-2 text-small text-muted", className)}>
+    <div role="status" aria-live="polite" className="flex items-center gap-2 text-small text-muted">
       <Spinner size="sm" />
-      <span>{label}</span>
+      <span>Loading…</span>
     </div>
   );
 }
@@ -72,33 +70,4 @@ export function TableSkeleton({ rows = 6, cols = 4, className }: { rows?: number
       </div>
     </div>
   );
-}
-
-/**
- * One wrapper for the loading → error → empty → content lifecycle of a query.
- * Pass the TanStack Query flags plus the data; render content via `children`.
- * Keeps a surface's happy path uncluttered while guaranteeing all three states
- * are handled. `isEmpty` defaults to never — pass it when content can be empty.
- */
-export function QueryState({
-  isLoading,
-  isError,
-  error,
-  isEmpty = false,
-  loading,
-  empty,
-  children,
-}: {
-  isLoading: boolean;
-  isError: boolean;
-  error?: unknown;
-  isEmpty?: boolean;
-  loading?: ReactNode;
-  empty?: ReactNode;
-  children: ReactNode;
-}) {
-  if (isLoading) return <>{loading ?? <LoadingRow />}</>;
-  if (isError) return <ErrorNote error={error} />;
-  if (isEmpty) return <>{empty ?? <EmptyState title="Nothing here yet" />}</>;
-  return <>{children}</>;
 }

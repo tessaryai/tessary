@@ -186,9 +186,9 @@ export function CasePage() {
   const ranked = frustration != null || groundedness != null;
   const cause = ranked ? null : causeLine(c);
   const frustrationCauses =
-    frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes ?? [] : [];
+    frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes : [];
   const groundednessCauses =
-    groundedness && report?.report_kind === "groundedness_causes" && !analysing ? report.causes ?? [] : [];
+    groundedness && report?.report_kind === "groundedness_causes" && !analysing ? report.causes : [];
 
   // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
@@ -637,7 +637,7 @@ function Answer({
   if (!report || report.status === "failed") return null;
 
   const verdict = report.verdict ? RCA_VERDICT_LABEL[report.verdict] ?? undefined : undefined;
-  const lead = (report.hypotheses ?? [])[0];
+  const lead = report.hypotheses[0];
 
   if (!lead) {
     if (!report.summary) return null;
@@ -691,12 +691,12 @@ function Attribution({
     );
   }
 
-  const hypotheses = report.hypotheses ?? [];
+  const hypotheses = report.hypotheses;
   // EVERY check, not just the eliminated ones. This used to filter to assessment === "ruled_out",
   // which silently dropped the two assessments that actually bear on the cause: a `contributing`
   // check is part of the story and an `explains` check IS the story. On the run that prompted this
   // redesign, `failing_cohort_shape` came back "contributing" and never reached the page at all.
-  const checks = report.ruled_out ?? [];
+  const checks = report.ruled_out;
   const eliminated = checks.filter((c) => c.assessment === "ruled_out").length;
   const [, ...rest] = hypotheses;
 
@@ -1052,7 +1052,7 @@ function FrustrationCauses({
   basePath: string;
   onShow: (index: number) => void;
 }) {
-  const causes = report.causes ?? [];
+  const causes = report.causes;
   const withRepo = report.repo_available === true;
   if (causes.length === 0) {
     return report.summary ? (
@@ -1123,13 +1123,11 @@ function FrustrationCauses({
           </p>
         )}
       </Card>
-      {report.id && (
-        <p className="mt-2.5 mb-0 text-small">
-          <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
-            View the full report
-          </Link>
-        </p>
-      )}
+      <p className="mt-2.5 mb-0 text-small">
+        <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
+          View the full report
+        </Link>
+      </p>
     </Block>
   );
 }
@@ -1207,7 +1205,7 @@ function GroundednessCauses({
   basePath: string;
   onShow: (index: number) => void;
 }) {
-  const causes = report.causes ?? [];
+  const causes = report.causes;
   const withRepo = report.repo_available === true;
   if (causes.length === 0) {
     return report.summary ? (
@@ -1279,13 +1277,11 @@ function GroundednessCauses({
           </p>
         )}
       </Card>
-      {report.id && (
-        <p className="mt-2.5 mb-0 text-small">
-          <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
-            View the full report
-          </Link>
-        </p>
-      )}
+      <p className="mt-2.5 mb-0 text-small">
+        <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
+          View the full report
+        </Link>
+      </p>
     </Block>
   );
 }

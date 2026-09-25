@@ -34,12 +34,8 @@ public class ApiKeyRepository {
                 .optional();
     }
 
-    public List<ApiKey> findByProject(String projectId, boolean includeRevoked) {
-        String sql = includeRevoked
-                ? "SELECT " + COLS + " FROM api_key WHERE project_id = :pid ORDER BY created_at DESC"
-                : "SELECT " + COLS
-                        + " FROM api_key WHERE project_id = :pid AND revoked_at IS NULL ORDER BY created_at DESC";
-        return jdbc.sql(sql)
+    public List<ApiKey> findByProject(String projectId) {
+        return jdbc.sql("SELECT " + COLS + " FROM api_key WHERE project_id = :pid ORDER BY created_at DESC")
                 .param("pid", projectId)
                 .query(ApiKeyRepository::map)
                 .list();

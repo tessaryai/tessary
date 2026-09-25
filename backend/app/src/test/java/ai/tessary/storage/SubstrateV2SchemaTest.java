@@ -200,17 +200,19 @@ class SubstrateV2SchemaTest {
     @DisplayName("a span cannot be written before its trace exists")
     void fkOrdering_spanRequiresItsTrace() {
         String traceId = SubstrateV2Fixtures.traceId();
-        SpanRow orphan = SpanRow.of(
-                pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", null, t0.toString(), null, t0.toString());
+        SpanRow orphan = SubstrateV2Fixtures.spanRow(
+                pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0.toString(), null, t0.toString());
 
         assertThrows(
                 DataIntegrityViolationException.class,
-                () -> spans.upsert(orphan),
+                () -> spans.upsertAll(List.of(orphan)),
                 "fk_span_trace is what makes the ingest order load-bearing rather than merely tidy");
 
         // Get-or-create the trace first — §6.1 step 2 — and the identical write lands.
-        traces.getOrCreate(TraceV2Row.of(pid, traceId, null, null, null, null, null, t0.toString(), t0.toString()));
-        assertEquals(1, spans.upsert(orphan));
+        traces.getOrCreateAll(
+                List.of(TraceV2Row.of(pid, traceId, null, null, null, null, null, t0.toString(), t0.toString())));
+        spans.upsertAll(List.of(orphan));
+        assertTrue(spans.findById(pid, traceId, orphan.id()).isPresent());
     }
 
     @Test
@@ -220,10 +222,11 @@ class SubstrateV2SchemaTest {
         String sessionId = SubstrateV2Fixtures.sessionId();
         TraceV2Row row = TraceV2Row.of(pid, traceId, sessionId, null, null, null, null, t0.toString(), t0.toString());
 
-        assertThrows(DataIntegrityViolationException.class, () -> traces.getOrCreate(row));
+        assertThrows(DataIntegrityViolationException.class, () -> traces.getOrCreateAll(List.of(row)));
 
-        sessions.getOrCreate(SessionRow.of(pid, sessionId, null, t0.toString(), t0.toString()));
-        assertTrue(traces.getOrCreate(row));
+        sessions.getOrCreateAll(List.of(SubstrateV2Fixtures.sessionRow(pid, sessionId, t0.toString())));
+        traces.getOrCreateAll(List.of(row));
+        assertTrue(traces.findById(pid, traceId).isPresent());
     }
 
     @Test
@@ -246,10 +249,10 @@ class SubstrateV2SchemaTest {
         SpanPayloadRow payload =
                 new SpanPayloadRow(pid, traceId, spanId, "prompt", "completion", null, null, t0.toString());
 
-        assertThrows(DataIntegrityViolationException.class, () -> payloads.upsert(payload));
+        assertThrows(DataIntegrityViolationException.class, () -> payloads.upsertAll(List.of(payload)));
 
         fx.span(pid, traceId, spanId, null, "llm", t0, null);
-        assertEquals(1, payloads.upsert(payload));
+        payloads.upsertAll(List.of(payload));
         assertNotNull(payloads.find(pid, traceId, spanId).orElseThrow().input());
 
         jdbc.sql("DELETE FROM span WHERE project_id = :pid AND trace_id = :tid")

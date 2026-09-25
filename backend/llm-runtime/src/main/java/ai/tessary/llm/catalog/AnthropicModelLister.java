@@ -15,8 +15,7 @@ import java.util.List;
 /**
  * Lists {@code GET https://api.anthropic.com/v1/models} — native Anthropic auth ({@code x-api-key} +
  * {@code anthropic-version}), NOT the OpenAI-compat shape {@link OpenAiCompatModelLister} covers,
- * because Anthropic's direct API never spoke that dialect (the same reason {@code ChatModelFactory}
- * builds Anthropic through {@code AnthropicChatModel} rather than {@code OpenAiChatModel}). Response
+ * because Anthropic's direct API never spoke that dialect. Response
  * shape: {@code {"data":[{"id":"...", "display_name":"..."}], "has_more":bool, "last_id":"..."}} — a
  * cursor-paginated list, unlike OpenAI's single page; {@link #MAX_PAGES} bounds the walk so a vendor
  * bug in {@code has_more} cannot loop this call forever.
@@ -26,10 +25,9 @@ import java.util.List;
  */
 public final class AnthropicModelLister implements ProviderModelLister {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
     private static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/models";
 
-    /** Anthropic's stable API version header — the same value langchain4j-anthropic's client pins. */
+    /** Anthropic's stable API version header. */
     private static final String ANTHROPIC_VERSION = "2023-06-01";
 
     /** A page is up to 1,000 models; six pages is generous headroom over Anthropic's real catalog size
@@ -41,22 +39,10 @@ public final class AnthropicModelLister implements ProviderModelLister {
     private final String baseUrl;
     private final Duration timeout;
 
-    public AnthropicModelLister(HttpClient http, ObjectMapper mapper) {
-        this(http, mapper, DEFAULT_BASE_URL, DEFAULT_TIMEOUT);
-    }
-
     /** @param timeout per-call ceiling on each page request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}; the 2-arg constructor keeps the previous
-     *  fixed default for callers (tests) that do not care. */
+     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
     public AnthropicModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_BASE_URL, timeout);
-    }
-
-    /** Test seam only — production always resolves to {@link #DEFAULT_BASE_URL}: unlike the
-     *  OpenAI-compat providers, Anthropic's direct API has exactly one real host, so there is no
-     *  credential-supplied override to honor here. */
-    AnthropicModelLister(HttpClient http, ObjectMapper mapper, String baseUrl) {
-        this(http, mapper, baseUrl, DEFAULT_TIMEOUT);
     }
 
     AnthropicModelLister(HttpClient http, ObjectMapper mapper, String baseUrl, Duration timeout) {

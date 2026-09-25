@@ -4,6 +4,7 @@ package ai.tessary.classifier.frustration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.storage.SessionRepository;
@@ -85,8 +86,9 @@ class ConversationThreadAssemblerIntegrationTest {
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
 
         SubstrateObservation scored = substrate
-                .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
-                .orElseThrow();
+                .observationsByIds(
+                        pid, List.of(new GroundingEvidenceReads.SpanRef(scoredRef.traceId(), scoredRef.spanId())))
+                .get(0);
         StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
@@ -125,8 +127,9 @@ class ConversationThreadAssemblerIntegrationTest {
         SpanRef scoredRef = seedTwinTurn(pid, sessionId, c1, base.plusMillis(3_000), user("nevermind"), null, null);
 
         SubstrateObservation scored = substrate
-                .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
-                .orElseThrow();
+                .observationsByIds(
+                        pid, List.of(new GroundingEvidenceReads.SpanRef(scoredRef.traceId(), scoredRef.spanId())))
+                .get(0);
         StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
@@ -152,8 +155,9 @@ class ConversationThreadAssemblerIntegrationTest {
         seedTurn(pid, sessionId, base.plusMillis(1_000), user("can you export this?"), assistant("Sure."));
 
         SubstrateObservation scored = substrate
-                .observationById(pid, scoredRef.traceId(), scoredRef.spanId())
-                .orElseThrow();
+                .observationsByIds(
+                        pid, List.of(new GroundingEvidenceReads.SpanRef(scoredRef.traceId(), scoredRef.spanId())))
+                .get(0);
         StructuredThread thread = assembler.assembleStructured(scored).orElseThrow();
 
         assertEquals(
@@ -251,7 +255,9 @@ class ConversationThreadAssemblerIntegrationTest {
     }
 
     private SubstrateObservation scored(String pid, SpanRef ref) {
-        return substrate.observationById(pid, ref.traceId(), ref.spanId()).orElseThrow();
+        return substrate
+                .observationsByIds(pid, List.of(new GroundingEvidenceReads.SpanRef(ref.traceId(), ref.spanId())))
+                .get(0);
     }
 
     private SpanRef seedTurn(

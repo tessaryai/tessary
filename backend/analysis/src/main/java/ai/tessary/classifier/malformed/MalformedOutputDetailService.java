@@ -142,18 +142,8 @@ public class MalformedOutputDetailService {
             node = null;
         }
 
-        String pretty;
         boolean isJson = node != null;
-        if (isJson) {
-            try {
-                pretty = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(node);
-            } catch (JsonProcessingException e) {
-                pretty = toValidate;
-                isJson = false;
-            }
-        } else {
-            pretty = toValidate;
-        }
+        String pretty = node != null ? node.toPrettyString() : toValidate;
 
         List<Integer> highlightLines = List.of();
         if (isJson

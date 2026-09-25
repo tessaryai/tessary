@@ -5,8 +5,7 @@
 # The detached counterpart to scripts/dev.sh: same containers and the same questions, no log
 # windows and no cheat-sheet, so it works where tmux does not (CI, agents, a plain `ssh`). The
 # questions come from scripts/lib/dev-choices.sh and are only asked on a terminal; anywhere else
-# the saved answers or the non-interactive defaults apply. It honours TESSARY_SKIP_CLASSIFY=1
-# exactly as `task dev:slim` does, sharing the derivation in scripts/lib/dev-services.sh.
+# the saved answers or the non-interactive defaults apply.
 #
 # Deliberately NOT the profiling overlay, even under TESSARY_PROFILING=1: the overlay attaches a
 # -javaagent to the backend, and a detached `up` with no log window is the last place you want a
@@ -23,16 +22,7 @@ dev_choices_resolve
 dev_choices_summary
 dev_choices_export_sandbox_env
 
-# shellcheck source=lib/dev-services.sh
-. "$REPO_ROOT/scripts/lib/dev-services.sh"
-
-# One derivation of the `-f` set (it merges the overlay module's compose fragment when present);
-# already at the repo root, which that relative probe needs. The same string must feed
-# dev_up_services and the `up` below, see the note in scripts/lib/dev-services.sh about what
-# diverging `-f` sets do.
+# One derivation of the `-f` set; already at the repo root, which its relative paths need.
 COMPOSE="$(bash "$REPO_ROOT/scripts/lib/dev-compose.sh")"
-UP_SERVICES="$(dev_up_services "$COMPOSE")"
 
-# Intentionally unquoted: empty ⇒ all services; otherwise word-splits into the service list.
-# shellcheck disable=SC2086
-$COMPOSE up -d --build $UP_SERVICES
+$COMPOSE up -d --build

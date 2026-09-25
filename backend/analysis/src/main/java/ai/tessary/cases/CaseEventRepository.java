@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CaseEventRepository {
 
-    private static final String COLS = "id, case_id, project_id, kind, actor, summary, detail, created_at";
+    private static final String COLS = "id, kind, actor, summary, detail, created_at";
 
     private final JdbcClient jdbc;
 
@@ -58,8 +58,6 @@ public class CaseEventRepository {
     private static CaseEventRow map(ResultSet rs) throws SQLException {
         return new CaseEventRow(
                 rs.getString("id"),
-                rs.getString("case_id"),
-                rs.getString("project_id"),
                 rs.getString("kind"),
                 rs.getString("actor"),
                 rs.getString("summary"),

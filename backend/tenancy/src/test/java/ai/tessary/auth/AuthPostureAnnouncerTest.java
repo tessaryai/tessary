@@ -4,7 +4,6 @@ package ai.tessary.auth;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -17,7 +16,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * {@code tessary.auth.disabled} alone decides which posture this announces,
- * regardless of {@link AuthProvider#isEnabled()} -- crew review caught this class still branching
+ * regardless of which {@link AuthProvider} is configured -- crew review caught this class still branching
  * on the retired "configured provider always wins" precedence, so it kept announcing "enforced"
  * even while {@link AuthFilter} was actually bypassing every request. No test existed for this
  * class before that finding.
@@ -48,13 +47,10 @@ class AuthPostureAnnouncerTest {
 
     @Test
     void disabledFlagWarnsEvenWithAnEnabledProviderConfigured() {
-        // The exact scenario the flag applies to: a real, "enabled" provider is
+        // The exact scenario the flag applies to: a real provider is
         // present, but the operator's own flag says bypass everything. Before the fix, this cell
         // logged "enforced" -- the opposite of what AuthFilter actually did.
-        AuthProvider enabledProvider = mock(AuthProvider.class);
-        when(enabledProvider.isEnabled()).thenReturn(true);
-
-        new AuthPostureAnnouncer(enabledProvider, disabled(true)).announce();
+        new AuthPostureAnnouncer(mock(AuthProvider.class), disabled(true)).announce();
 
         assertEquals(1, appender.list.size());
         ILoggingEvent event = appender.list.get(0);
@@ -64,40 +60,11 @@ class AuthPostureAnnouncerTest {
 
     @Test
     void enabledProviderWithNoOptOutEnforcesQuietly() {
-        AuthProvider enabledProvider = mock(AuthProvider.class);
-        when(enabledProvider.isEnabled()).thenReturn(true);
-
-        new AuthPostureAnnouncer(enabledProvider, disabled(false)).announce();
+        new AuthPostureAnnouncer(mock(AuthProvider.class), disabled(false)).announce();
 
         assertEquals(1, appender.list.size());
         ILoggingEvent event = appender.list.get(0);
         assertEquals(Level.INFO, event.getLevel());
         assertTrue(event.getFormattedMessage().contains("enforced"));
-    }
-
-    @Test
-    void disabledProviderWithNoOptInWarnsUnconfigured() {
-        AuthProvider disabledProvider = mock(AuthProvider.class);
-        when(disabledProvider.isEnabled()).thenReturn(false);
-
-        new AuthPostureAnnouncer(disabledProvider, disabled(false)).announce();
-
-        assertEquals(1, appender.list.size());
-        ILoggingEvent event = appender.list.get(0);
-        assertEquals(Level.WARN, event.getLevel());
-        assertTrue(event.getFormattedMessage().contains("No identity provider is configured"));
-    }
-
-    @Test
-    void disabledProviderWithOptInWarnsAuthDisabled() {
-        AuthProvider disabledProvider = mock(AuthProvider.class);
-        when(disabledProvider.isEnabled()).thenReturn(false);
-
-        new AuthPostureAnnouncer(disabledProvider, disabled(true)).announce();
-
-        assertEquals(1, appender.list.size());
-        ILoggingEvent event = appender.list.get(0);
-        assertEquals(Level.WARN, event.getLevel());
-        assertTrue(event.getFormattedMessage().contains("AUTH IS DISABLED"));
     }
 }

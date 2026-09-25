@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Case, Vitals } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, PageHeader, TableSkeleton } from "../../ui";
-import { Dot, ListChassis, StateDot, causeLine, detectorLabel, magnitudePair, timeAgo } from "./bits";
+import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
 import { PipelineEmpty } from "./PipelineEmpty";
 import { resolveState } from "./emptyState";
 import { useOnboarding } from "../onboarding/useOnboarding";
@@ -33,7 +33,6 @@ export function Triage() {
   const triageQ = useQuery({ queryKey: ["cases", api.base], queryFn: api.getTriage });
   // The pulse strip is deterministic vitals, never judged and never paged.
   const vitalsQ = useQuery({ queryKey: ["vitals", "triage", api.base], queryFn: () => api.getVitals(7) });
-  // Passive read (no poll): Triage is not the screen someone stares at while wiring an exporter.
   const onboarding = useOnboarding();
   /*
    * Whether the org holds a model provider key — the fact that separates "triage looked and found
@@ -147,7 +146,6 @@ function EmptyRow({ lens }: { lens: Lens }) {
 }
 
 function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void }) {
-  const pair = magnitudePair(item);
   const resolved = item.state === "resolved";
   const cause = causeLine(item);
 
@@ -185,17 +183,6 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
           <span>{resolved ? `resolved ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
         </span>
       </span>
-
-      {/* Magnitude only where the detector actually moved a rate; otherwise the
-          row stays quiet rather than printing a number that means something else. */}
-      {pair && (
-        <span
-          className="font-mono text-fg text-body"
-          style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
-        >
-          {pair}
-        </span>
-      )}
     </button>
   );
 }

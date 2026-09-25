@@ -1,18 +1,16 @@
 ---
 title: "Open Edition"
-description: "What the open edition of Tessary includes, which classifiers run out of the box, what needs configuring, what is unavailable here, and where the product's boundaries are today."
+description: "What the open edition of Tessary includes, which classifiers run out of the box, what needs configuring, and where the product's boundaries are today."
 ---
 
 The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). It is the build you get when you self-host. This page says what runs in it, what you have to configure first, and what it cannot do.
 
-Four categories are worth keeping apart, because they need different things from you:
+Two categories are worth keeping apart, because they need different things from you:
 
 | Category | What it means for you |
 | --- | --- |
 | Included and on by default | Works after first boot. Nothing to configure. |
 | Included, needs configuration | Present in this build, but waits on something you supply. |
-| Unavailable in the open edition | The code behind it is not in this build. No setting turns it on. |
-| Not in service yet | Defined in the product, but not running for anyone in any edition today. |
 
 ## What the open edition includes
 
@@ -36,21 +34,6 @@ The three drift classifiers compare a call site against its own history, so each
 
 Each of these is switchable per project under **Classifiers**.
 
-## Classifiers that are not currently available
-
-Two classifiers exist in the product and cannot run in the open edition. They are reported as unavailable rather than off, because no setting turns them on here.
-
-| Classifier | Why it cannot run here |
-| --- | --- |
-| `behavior_drift` | The detector code behind it is not on this build's classpath. |
-| `sop_conformance` | The detector code is not in this build, and the classifier is not in service in any edition. See [Not in service yet](#not-in-service-yet). |
-
-`groundedness` is in this build: its model is public (`tessaryai/groundedness-classifier-v1`, MIT) and needs a GPU, so it is listed under [Capabilities that require configuration](#capabilities-that-require-configuration) rather than here.
-
-<Note>
-  You will not find these two in the **Classifiers** list. A withheld built-in is filtered out of the listing and returns a 404 if you address it directly, and the capability API refuses an override for one rather than accepting it and doing nothing. The product does not offer a switch that would produce no findings.
-</Note>
-
 ## Capabilities that require configuration
 
 These are in this build and waiting on something from you.
@@ -66,12 +49,6 @@ These are in this build and waiting on something from you.
 | Slack notifications | The deployment's own Slack credentials, on top of the organization capability. Both must be present, and they fail closed independently. |
 
 Replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
-
-## Not in service yet
-
-`sop_conformance` is defined in the product, and it is switched off for every organization in every edition. What holds it back is supply rather than capability: it scores an authored rulebook against the turns a rule applied to, and no per-project artifact bundle has been deployed for it yet.
-
-Treat it as a classifier that does not run today rather than as something the open edition leaves out.
 
 ## Current product boundaries
 

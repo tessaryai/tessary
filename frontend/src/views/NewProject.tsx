@@ -29,9 +29,7 @@ export function NewProject() {
     },
   });
 
-  if (!orgSlug) return null;
-
-  const error = create.isError ? ((create.error as ApiError).message ?? "Could not create project") : null;
+  const error = create.isError ? (create.error as ApiError).message : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center px-6">

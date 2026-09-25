@@ -29,6 +29,7 @@ import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -296,7 +297,8 @@ class GroundednessFlaggedAnswersIntegrationTest {
         String pid = project.id();
         capabilities.grant(org.id(), Capability.GROUNDEDNESS);
         classifierService.seedBuiltIns(pid);
-        ClassifierRow signal = classifiers.findByKey(pid, "groundedness").orElseThrow();
+        ClassifierRow signal =
+                ClassifierRows.byKey(classifiers, pid, "groundedness").orElseThrow();
 
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, signal, start, 0, 7, 0.05);

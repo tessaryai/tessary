@@ -31,8 +31,6 @@ spring:
       connection-timeout: 10000
       leak-detection-threshold: 30000
       pool-name: evals-hikari
-  liquibase:
-    enabled: true
 
 # Cookie is sent over HTTPS only in prod (Caddy terminates TLS, X-Forwarded-Proto
 # is honoured via server.forward-headers-strategy). Without this flag the cookie
@@ -90,13 +88,11 @@ management:
   otlp:
     # Metrics ride Micrometer's OTLP registry (separate from the OTel SDK), which
     # is HTTP/protobuf only, so it must hit Alloy's HTTP receiver (4318).
-    # Off by default: url/step below are only meaningful once a self-hoster sets
-    # MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true. Unlike tracing/logging above, this profile
-    # DOES set `enabled` itself (Micrometer's OTLP registry is a different autoconfig from the
-    # OTel SDK's), so it has to be flipped here, not just left to application.yaml.
+    # Like tracing/logging above, only url/step live here; the `enabled` flag comes from
+    # application.yaml (off by default). url/step are only meaningful once a self-hoster sets
+    # MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true.
     metrics:
       export:
-        enabled: false
         url: http://alloy:4318/v1/metrics
         step: 30s
   metrics:

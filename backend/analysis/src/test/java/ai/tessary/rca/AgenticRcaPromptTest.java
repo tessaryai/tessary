@@ -269,7 +269,6 @@ class AgenticRcaPromptTest {
     private static RcaReportRow report(String reportKind) {
         return new RcaReportRow(
                 "rpt-1",
-                "proj-1",
                 "job-1",
                 "finding",
                 "fnd-1",

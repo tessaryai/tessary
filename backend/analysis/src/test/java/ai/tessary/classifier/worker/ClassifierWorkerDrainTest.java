@@ -257,7 +257,8 @@ class ClassifierWorkerDrainTest {
                     null,
                     "ok",
                     null,
-                    "2026-09-13T00:00:0" + i + "Z"));
+                    "2026-09-13T00:00:0" + i + "Z",
+                    null));
         }
         return out;
     }

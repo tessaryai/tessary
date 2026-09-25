@@ -206,7 +206,6 @@ class SpanBatchWriterIntegrationTest {
         // batch mid-transaction and left the shell this test exists to forbid.
         RawEntry uncommittable = new RawEntry(
                 "tool-1",
-                null,
                 "execute_tool",
                 "{\"result\":\"\\u0000\"}",
                 "out-tool-1",
@@ -241,9 +240,9 @@ class SpanBatchWriterIntegrationTest {
         SpanBatchWriter isolated = newWriter(traces);
         List<RawEntry> batch = new ArrayList<>();
         batch.add(span("ok", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()));
-        batch.add(new RawEntry(null, null, "no id", "i", "o", null, Map.of(), null, traceId, t0.toString()));
-        batch.add(new RawEntry("no-start", null, "n", "i", "o", null, Map.of(), null, traceId, null));
-        batch.add(new RawEntry("x".repeat(600), null, "n", "i", "o", null, Map.of(), null, traceId, t0.toString()));
+        batch.add(new RawEntry(null, "no id", "i", "o", null, Map.of(), null, traceId, t0.toString(), null));
+        batch.add(new RawEntry("no-start", "n", "i", "o", null, Map.of(), null, traceId, null, null));
+        batch.add(new RawEntry("x".repeat(600), "n", "i", "o", null, Map.of(), null, traceId, t0.toString(), null));
 
         assertEquals(1, isolated.write(pid, batch), "one writable row of four");
         assertEquals(3, isolated.droppedSpans(), "no id, no start time, and an id that is not an identifier");
@@ -691,7 +690,6 @@ class SpanBatchWriterIntegrationTest {
             @Nullable String model) {
         return new RawEntry(
                 spanId,
-                null,
                 spanId,
                 "in-" + spanId,
                 "out-" + spanId,
@@ -709,7 +707,6 @@ class SpanBatchWriterIntegrationTest {
     private static RawEntry named(RawEntry raw, String name) {
         return new RawEntry(
                 raw.sourceExternalId(),
-                raw.sourceUrl(),
                 name,
                 raw.input(),
                 raw.output(),
@@ -729,7 +726,6 @@ class SpanBatchWriterIntegrationTest {
         attrs.putAll(usageAttrs(input, output));
         return new RawEntry(
                 raw.sourceExternalId(),
-                raw.sourceUrl(),
                 raw.name(),
                 raw.input(),
                 raw.output(),

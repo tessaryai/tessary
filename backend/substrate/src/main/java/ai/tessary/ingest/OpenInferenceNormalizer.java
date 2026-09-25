@@ -18,8 +18,8 @@ import org.jspecify.annotations.Nullable;
  * re-emits via {@link ai.tessary.ingest.export.TraceSpanMapper} to the same {@code gen_ai.*} span.
  *
  * <p>This is a standalone seam: an adapter (Braintrust), the trace-upload parser, and a future OTLP receiver all
- * call the same normalizer. It is <b>dormant</b> unless OpenInference keys are present — {@link #isOpenInference}
- * gates it — so non-OI inputs are untouched.
+ * call the same normalizer. It is <b>dormant</b> unless OpenInference keys are present — callers gate it on
+ * {@link #isOpenInference} — so non-OI inputs are untouched.
  *
  * <p>Authority: the key map is {@code devdocs/reference/trace-schema.md} (§OpenInference → gen_ai), realized via
  * {@link GenAiAttributes}. Never invent an attribute where a standard {@code gen_ai.*} one exists. Per the
@@ -56,26 +56,15 @@ public final class OpenInferenceNormalizer {
                 || attrs.containsKey(GenAiAttributes.OI_OUTPUT_MESSAGES);
     }
 
-    /** True when the JSON node (an attributes object) carries any OpenInference signal. */
-    public static boolean isOpenInference(@Nullable JsonNode attrs) {
-        if (attrs == null || !attrs.isObject()) return false;
-        return attrs.has(GenAiAttributes.OI_SPAN_KIND)
-                || attrs.has(GenAiAttributes.OI_MODEL_NAME)
-                || attrs.has(GenAiAttributes.OI_INPUT_MESSAGES)
-                || attrs.has(GenAiAttributes.OI_OUTPUT_MESSAGES);
-    }
-
     /**
      * Normalize an OpenInference attribute object into canonical {@code gen_ai.*} fields. Tolerant: missing keys
-     * yield {@code null} fields; never throws on shape surprises (degrades to what it can read). Returns
-     * {@code null} only when {@code attrs} carries no OpenInference signal at all.
+     * yield {@code null} fields; never throws on shape surprises (degrades to what it can read). Callers gate
+     * on {@link #isOpenInference} first.
      *
      * @param attrs the span's flattened OpenInference attributes as a JSON object (e.g. {@code llm.input_messages}
      *     either as a nested array or a JSON-encoded string)
      */
-    public static @Nullable Canonical normalize(@Nullable JsonNode attrs) {
-        if (attrs == null || !isOpenInference(attrs)) return null;
-
+    public static Canonical normalize(JsonNode attrs) {
         String spanKind = text(attrs.get(GenAiAttributes.OI_SPAN_KIND));
         String opName = GenAiAttributes.operationNameForSpanKind(spanKind);
         String operationKind = KindNormalizer.normalize(opName);
@@ -109,21 +98,18 @@ public final class OpenInferenceNormalizer {
 
     /**
      * Build a canonical {@link RawEntry} from an OpenInference attribute object, threading the transport-level
-     * identifiers the attributes don't carry (ids, urls, timestamps, parent/trace). Returns {@code null} when the
-     * attributes are not OpenInference, so a caller can fall through to its existing path.
+     * identifiers the attributes don't carry (ids, timestamps, parent/trace). Callers gate on
+     * {@link #isOpenInference} first.
      */
-    public static @Nullable RawEntry toRawEntry(
-            @Nullable JsonNode attrs,
+    public static RawEntry toRawEntry(
+            JsonNode attrs,
             @Nullable String sourceExternalId,
-            @Nullable String sourceUrl,
             @Nullable String name,
             @Nullable String parentId,
             @Nullable String traceId,
             @Nullable String timestamp,
             @Nullable Map<String, Object> extraMetadata) {
-        if (attrs == null) return null;
         Canonical c = normalize(attrs);
-        if (c == null) return null;
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (extraMetadata != null) metadata.putAll(extraMetadata);
@@ -142,7 +128,6 @@ public final class OpenInferenceNormalizer {
 
         return new RawEntry(
                 sourceExternalId,
-                sourceUrl,
                 name,
                 c.input(),
                 c.output(),
@@ -176,11 +161,7 @@ public final class OpenInferenceNormalizer {
             out.add(msg);
         }
         if (out.isEmpty()) return null;
-        try {
-            return MAPPER.writeValueAsString(out);
-        } catch (Exception e) {
-            return null;
-        }
+        return out.toString();
     }
 
     /** Extract a message's content text: scalar {@code message.content}, multimodal {@code message.contents}, plus tool calls. */

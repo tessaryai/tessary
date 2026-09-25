@@ -26,35 +26,35 @@ class RedactionEngineTest {
     @Test
     void apply_redactsEmailWithBuiltInPattern() {
         CompiledRule email = builtInEmail();
-        String out = RedactionEngine.apply("contact me at jane.doe@example.com please", List.of(email));
+        String out = RedactionEngine.apply("contact me at jane.doe@example.com please", List.of(email), null);
         assertEquals("contact me at [REDACTED_EMAIL] please", out, "the email must be replaced verbatim");
     }
 
     @Test
     void apply_redactsEveryMatchNotJustTheFirst() {
         CompiledRule digits = rule("digits", "\\d+", "#");
-        assertEquals("#-#-#", RedactionEngine.apply("12-345-6", List.of(digits)), "replaceAll, not replaceFirst");
+        assertEquals("#-#-#", RedactionEngine.apply("12-345-6", List.of(digits), null), "replaceAll, not replaceFirst");
     }
 
     @Test
     void apply_appliesRulesInOrder() {
         CompiledRule a = rule("a", "foo", "bar");
         CompiledRule b = rule("b", "bar", "baz");
-        assertEquals("baz", RedactionEngine.apply("foo", List.of(a, b)), "second rule sees the first's output");
+        assertEquals("baz", RedactionEngine.apply("foo", List.of(a, b), null), "second rule sees the first's output");
     }
 
     @Test
     void apply_returnsSameReferenceWhenNoRuleMatches() {
         String text = "nothing sensitive here";
         CompiledRule email = rule("email", "\\d{3}-\\d{2}-\\d{4}", "[SSN]");
-        assertSame(text, RedactionEngine.apply(text, List.of(email)), "no-match must not allocate a new string");
+        assertSame(text, RedactionEngine.apply(text, List.of(email), null), "no-match must not allocate a new string");
     }
 
     @Test
     void apply_nullAndEmptyArePassedThrough() {
         CompiledRule any = rule("any", ".", "x");
-        assertNull(RedactionEngine.apply(null, List.of(any)));
-        assertEquals("", RedactionEngine.apply("", List.of(any)));
+        assertNull(RedactionEngine.apply(null, List.of(any), null));
+        assertEquals("", RedactionEngine.apply("", List.of(any), null));
     }
 
     @Test
@@ -62,7 +62,7 @@ class RedactionEngineTest {
         CompiledRule r = rule("r", "secret", "$1\\n[X]");
         assertEquals(
                 "$1\\n[X]",
-                RedactionEngine.apply("secret", List.of(r)),
+                RedactionEngine.apply("secret", List.of(r), null),
                 "a $ or backslash in the replacement is substituted literally, never interpreted");
     }
 
@@ -191,7 +191,7 @@ class RedactionEngineTest {
         CompiledRule phone = builtInPhone();
         String json = "{\"action\":\"screenshot\",\"tabId\":1234567890}";
 
-        String out = RedactionEngine.applyToJson(json, List.of(phone));
+        String out = RedactionEngine.applyToJson(json, List.of(phone), null);
 
         assertSame(json, out, "no string leaf matched, so the original reference must come back");
         assertNotNull(JsonNodeAssert.parse(out), "the document must still be JSON");
@@ -201,7 +201,7 @@ class RedactionEngineTest {
     @Test
     void applyToJson_stillRedactsStringLeaves() {
         CompiledRule phone = builtInPhone();
-        String out = RedactionEngine.applyToJson("{\"contact\":\"call 555-123-4567 now\"}", List.of(phone));
+        String out = RedactionEngine.applyToJson("{\"contact\":\"call 555-123-4567 now\"}", List.of(phone), null);
 
         assertNotNull(out);
         assertFalse(out.contains("555-123-4567"), "a phone number in a string leaf must be redacted");
@@ -219,7 +219,7 @@ class RedactionEngineTest {
         CompiledRule phone = builtInPhone();
         String json = "{\"name\":\"navigate\",\"arguments\":\"{\\\"tabId\\\": 1234567890}\"}";
 
-        String out = RedactionEngine.applyToJson(json, List.of(phone));
+        String out = RedactionEngine.applyToJson(json, List.of(phone), null);
 
         assertSame(json, out, "the nested number must be left alone, so nothing changed at any depth");
     }
@@ -230,7 +230,7 @@ class RedactionEngineTest {
         CompiledRule email = builtInEmail();
         String json = "{\"arguments\":\"{\\\"to\\\": \\\"jane@example.com\\\"}\"}";
 
-        String out = RedactionEngine.applyToJson(json, List.of(email));
+        String out = RedactionEngine.applyToJson(json, List.of(email), null);
 
         assertNotNull(out);
         assertFalse(out.contains("jane@example.com"), "PII inside the nested document must be redacted");
@@ -249,7 +249,7 @@ class RedactionEngineTest {
 
         assertEquals(
                 RedactionEngine.applyToTextParts(prose, List.of(email)),
-                RedactionEngine.applyToJson(prose, List.of(email)),
+                RedactionEngine.applyToJson(prose, List.of(email), null),
                 "non-JSON input must be redacted exactly as the text path would");
     }
 
@@ -262,7 +262,7 @@ class RedactionEngineTest {
         CompiledRule email = builtInEmail();
         String mixed = "{\"ok\":true}\nthen jane@example.com said so";
 
-        String out = RedactionEngine.applyToJson(mixed, List.of(email));
+        String out = RedactionEngine.applyToJson(mixed, List.of(email), null);
 
         assertNotNull(out);
         assertFalse(out.contains("jane@example.com"), "the prose after the object must still be redacted");
@@ -278,7 +278,7 @@ class RedactionEngineTest {
         CompiledRule email = builtInEmail();
         String json = "{ \"a\" : [ 1, 2, 3 ],  \"b\" : \"nothing here\" }";
 
-        assertSame(json, RedactionEngine.applyToJson(json, List.of(email)), "no match must not reformat");
+        assertSame(json, RedactionEngine.applyToJson(json, List.of(email), null), "no match must not reformat");
     }
 
     /** Media segmenting must survive the structural path: a base64 run inside a string leaf stays whole. */
@@ -288,7 +288,7 @@ class RedactionEngineTest {
         String blob = "A".repeat(400) + "9".repeat(400);
         String json = "{\"content\":\"jane@example.com data:image/png;base64," + blob + " end\"}";
 
-        String out = RedactionEngine.applyToJson(json, List.of(email));
+        String out = RedactionEngine.applyToJson(json, List.of(email), null);
 
         assertNotNull(out);
         assertTrue(out.contains(blob), "the binary payload must survive byte-identical inside a string leaf");
@@ -329,11 +329,13 @@ class RedactionEngineTest {
         CompiledRule email = builtInEmail();
         assertEquals(
                 "contact [REDACTED_EMAIL] please",
-                RedactionEngine.apply("contact jane.doe+tag@example.co.uk please", List.of(email)));
-        assertEquals("[REDACTED_EMAIL]", RedactionEngine.apply("a@b.io", List.of(email)));
+                RedactionEngine.apply("contact jane.doe+tag@example.co.uk please", List.of(email), null));
+        assertEquals("[REDACTED_EMAIL]", RedactionEngine.apply("a@b.io", List.of(email), null));
         assertEquals(
-                "[REDACTED_EMAIL]", RedactionEngine.apply("user_name%test@sub.domain.example.com", List.of(email)));
-        assertEquals("no address here", RedactionEngine.apply("no address here", List.of(email)), "no false positive");
+                "[REDACTED_EMAIL]",
+                RedactionEngine.apply("user_name%test@sub.domain.example.com", List.of(email), null));
+        assertEquals(
+                "no address here", RedactionEngine.apply("no address here", List.of(email), null), "no false positive");
     }
 
     /**
@@ -359,7 +361,7 @@ class RedactionEngineTest {
                 Duration.ofSeconds(5),
                 () -> assertSame(
                         body,
-                        RedactionEngine.apply(body, List.of(email)),
+                        RedactionEngine.apply(body, List.of(email), null),
                         "nothing matches, so the input must come back unchanged"),
                 "the built-in email pattern went superlinear again — check its quantifiers are bounded");
     }
@@ -372,27 +374,28 @@ class RedactionEngineTest {
         // AWS's own documentation key is on gitleaks' allowlist, so the corpus leaves it and the prefix rule
         // behind it still redacts: the reason those rules stay.
         assertEquals(
-                "api_key: [REDACTED_API_KEY] set", RedactionEngine.apply("api_key: AKIAIOSFODNN7EXAMPLE set", chain));
+                "api_key: [REDACTED_API_KEY] set",
+                RedactionEngine.apply("api_key: AKIAIOSFODNN7EXAMPLE set", chain, null));
         assertEquals(
                 "client_secret=[REDACTED_API_KEY]",
-                RedactionEngine.apply("client_secret=ghp_abcdefghijklmnopqrstuvwxyz0123456789", chain),
+                RedactionEngine.apply("client_secret=ghp_abcdefghijklmnopqrstuvwxyz0123456789", chain, null),
                 "a sequential placeholder is on gitleaks' allowlist, and the prefix rule still takes it");
         assertEquals(
                 "client_secret=[REDACTED_SECRET]",
-                RedactionEngine.apply("client_secret=ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5", chain),
+                RedactionEngine.apply("client_secret=ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5", chain, null),
                 "a real-looking token goes to the corpus, which keeps the key name beside it");
         assertEquals(
                 "access_token=[REDACTED_SECRET]",
-                RedactionEngine.apply("access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij", chain),
+                RedactionEngine.apply("access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij", chain, null),
                 "a token assigned to access_token is the corpus's generic-api-key, which leaves the name");
         assertEquals(
                 "token [REDACTED_JWT] end",
-                RedactionEngine.apply("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij end", chain),
+                RedactionEngine.apply("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij end", chain, null),
                 "a bare JWT too short for gitleaks' jwt rule is still taken by the prefix rule");
         // The secret-assignment rule replaces the key name together with the value, by design.
         assertEquals(
                 "[REDACTED_SECRET]",
-                RedactionEngine.apply("password: hunter22", chain),
+                RedactionEngine.apply("password: hunter22", chain, null),
                 "a password too plain for gitleaks to call a secret still redacts");
     }
 
@@ -436,7 +439,7 @@ class RedactionEngineTest {
                 + "\\\"key\\\":\\\"AKIA" + "QYLPMN5HHHFPZAM2\\\",\\\"tabId\\\":1234567890,"
                 + "\\\"dry_run\\\":false}\"}";
 
-        String out = RedactionEngine.applyToJson(json, builtInChain());
+        String out = RedactionEngine.applyToJson(json, builtInChain(), null);
 
         assertEquals(
                 "{\"name\":\"deploy\",\"arguments\":\"{\\\"region\\\":\\\"us-east-1\\\","

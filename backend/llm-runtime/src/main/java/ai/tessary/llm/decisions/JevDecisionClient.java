@@ -39,7 +39,7 @@ import org.springframework.stereotype.Component;
  * {@code Retry-After}; 401 and 403 are not, since only a new key can change the answer.
  *
  * <p><b>Pricing.</b> Every call is priced under {@code typesafe/<bare model id>} whichever gateway
- * carried it, on the REQUESTED id, as {@code LlmCaller} prices on the resolved name: the book has no
+ * carried it, on the REQUESTED id: the book has no
  * {@code openrouter/typesafe/...} key, and the echoed dated version is not a book key. A cost the
  * provider reports in its body stays in the returned response body as an audit copy and is never the
  * booked figure.
@@ -50,8 +50,6 @@ public class JevDecisionClient implements DecisionClient {
     private static final Logger log = LoggerFactory.getLogger(JevDecisionClient.class);
 
     static final String SPAN_NAME = "decision-call";
-    static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
-    static final int DEFAULT_MAX_ATTEMPTS = 3;
     static final long BASE_BACKOFF_MS = 1_000L;
 
     /** A provider asking for a longer wait than this is treated as down for this call. */
@@ -68,8 +66,8 @@ public class JevDecisionClient implements DecisionClient {
     private final HttpClient http;
     private final ObjectMapper mapper;
     private final Tracer tracer;
-    private final @Nullable PlatformCallPricer pricer;
-    private final @Nullable LlmUsageAccountant accountant;
+    private final PlatformCallPricer pricer;
+    private final LlmUsageAccountant accountant;
     private final Sleeper sleeper;
     private final Duration timeout;
     private final int maxAttempts;
@@ -78,9 +76,9 @@ public class JevDecisionClient implements DecisionClient {
     public JevDecisionClient(
             ObjectMapper mapper,
             OpenTelemetry openTelemetry,
-            @Nullable PlatformCallPricer pricer,
-            @Nullable LlmUsageAccountant accountant,
-            @Nullable FrustrationProperties props) {
+            PlatformCallPricer pricer,
+            LlmUsageAccountant accountant,
+            FrustrationProperties props) {
         this(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
                 mapper,
@@ -88,16 +86,16 @@ public class JevDecisionClient implements DecisionClient {
                 pricer,
                 accountant,
                 Thread::sleep,
-                props == null ? DEFAULT_TIMEOUT : Duration.ofMillis(Math.max(1, props.getTimeoutMs())),
-                props == null ? DEFAULT_MAX_ATTEMPTS : props.getMaxAttempts());
+                Duration.ofMillis(Math.max(1, props.getTimeoutMs())),
+                props.getMaxAttempts());
     }
 
     JevDecisionClient(
             HttpClient http,
             ObjectMapper mapper,
             OpenTelemetry openTelemetry,
-            @Nullable PlatformCallPricer pricer,
-            @Nullable LlmUsageAccountant accountant,
+            PlatformCallPricer pricer,
+            LlmUsageAccountant accountant,
             Sleeper sleeper,
             Duration timeout,
             int maxAttempts) {
@@ -128,9 +126,8 @@ public class JevDecisionClient implements DecisionClient {
             Integer in = intOrNull(response.path("usage").path("input_tokens"));
             Integer out = intOrNull(response.path("usage").path("output_tokens"));
             String responded = response.path("model").asText("");
-            PlatformCallPricer.PricedCall priced = pricer == null
-                    ? null
-                    : pricer.price(pricingId(target), null, in, out, null, null).orElse(null);
+            PlatformCallPricer.PricedCall priced =
+                    pricer.price(pricingId(target), in, out, null, null).orElse(null);
             DecisionAnswer answer = new DecisionAnswer(
                     target.provider(),
                     target.modelId(),
@@ -170,13 +167,7 @@ public class JevDecisionClient implements DecisionClient {
     }
 
     private String post(DecisionTarget target, ObjectNode body) {
-        String json;
-        try {
-            json = mapper.writeValueAsString(body);
-        } catch (IOException e) {
-            throw new TessaryException(
-                    DecisionError.MALFORMED_ANSWER, e, target.provider(), "request not serializable");
-        }
+        String json = body.toString();
         HttpRequest httpRequest = HttpRequest.newBuilder(target.endpoint())
                 .timeout(timeout)
                 .header("Authorization", "Bearer " + target.apiKey())
@@ -330,9 +321,7 @@ public class JevDecisionClient implements DecisionClient {
     }
 
     private void book(String projectId, String lane, DecisionAnswer answer) {
-        LlmUsageAccountant ledger = accountant;
-        if (ledger == null) return;
-        ledger.recordDecisionCall(
+        accountant.recordDecisionCall(
                 projectId,
                 lane,
                 answer.requestedModel(),

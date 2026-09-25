@@ -72,18 +72,12 @@ public class RetrievedDocRepository {
         return source;
     }
 
-    /**
-     * One JDBC batch of {@link #insert}s.
-     */
+    /** Batch-inserts rows; ON CONFLICT DO NOTHING makes replays no-ops. */
     public void insertAll(List<RetrievedDocRow> rows) {
         if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
                 INSERT_SQL, rows.stream().map(RetrievedDocRepository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
-    }
-
-    public void insert(RetrievedDocRow row) {
-        jdbc.sql(INSERT_SQL).paramSource(params(row)).update();
     }
 
     /** One retrieved passage together with the producer span id it belongs to. */

@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Wires this build's {@link AgenticCredentialResolver}. The {@code @ConditionalOnMissingBean} sits
  * on the {@code @Bean} method so another build can register its own resolver and this one yields,
- * the same shape as {@code EditionConfig} and {@code OrgCreationLimitConfig}.
+ * the same shape as {@code OrgCreationLimitConfig}.
  */
 @Configuration(proxyBeanMethods = false)
 public class LlmSeamConfig {

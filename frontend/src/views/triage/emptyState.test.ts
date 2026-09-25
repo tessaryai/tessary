@@ -56,11 +56,7 @@ function onboarding(over: Partial<Onboarding> = {}): Onboarding {
       baseline_best_window_count: 25,
     },
     stage: "watching",
-    stageIndex: 3,
-    warmingUp: true,
     fittingProgress: 0.25,
-    isLoading: false,
-    error: null,
     ...over,
   };
 }

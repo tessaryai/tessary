@@ -4,7 +4,6 @@ package ai.tessary.classifier.finding.dossier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -54,8 +53,7 @@ class ClassifierDossierAssemblerTest {
                  "onset_at":"2026-08-01T00:00:00Z","window":{"opened_at":"2026-08-01T00:00:00Z","closed_at":"2026-08-02T00:00:00Z","kind":"recomputed"}}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -83,7 +81,7 @@ class ClassifierDossierAssemblerTest {
                  "cause_kind":"frustration_rate","workflow_key":"","native_cause_key":"support-chat"}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt()))
                 .thenReturn(pageOf(
                         List.of(
                                 new FindingEvidenceRow(
@@ -120,8 +118,7 @@ class ClassifierDossierAssemblerTest {
                  ]}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -133,38 +130,6 @@ class ClassifierDossierAssemblerTest {
         assertTrue(
                 subB >= 0 && subA >= 0 && subB < subA, "higher `covered` (sub_b, 0.71) must rank above sub_a (0.20)");
         assertTrue(dossier.contains("1200 → 2100"), "the paired before/after quantile must be rendered");
-    }
-
-    @Test
-    void windowFindingShapeFallsBackToTheRawPayloadWhenNoRefCurPairExists() throws Exception {
-        // A window block with no ref/cur-shaped sibling field anywhere — the generic fallback's own
-        // fallback: state that plainly and include the raw payload rather than fabricate a comparison.
-        String payload = "{\"window\":{\"opened_at\":\"2026-08-01T00:00:00Z\",\"closed_at\":\"2026-08-02T00:00:00Z\"},"
-                + "\"note\":\"no comparable pair here\"}";
-        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
-
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
-
-        assertTrue(out.isPresent());
-        assertTrue(out.get().contains("No paired before/after fields found"));
-    }
-
-    @Test
-    void windowFindingShapePairsAGenericRefCurField() throws Exception {
-        String payload =
-                "{\"window\":{\"opened_at\":\"a\",\"closed_at\":\"b\"}," + "\"latency_ms\":{\"ref\":100,\"cur\":900}}";
-        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
-
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
-
-        assertTrue(out.isPresent());
-        assertTrue(out.get().contains("latency_ms: 100 → 900"));
     }
 
     @Test
@@ -188,12 +153,7 @@ class ClassifierDossierAssemblerTest {
         List<FindingEvidenceRow> rows =
                 List.of(row(FindingEvidenceRow.Role.MEMBER, 1), row(FindingEvidenceRow.Role.MEMBER, 2));
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(
-                        eq(PROJECT_ID),
-                        eq(FINDING_ID),
-                        any(),
-                        eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP),
-                        any()))
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
                 .thenReturn(pageOf(rows, false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
@@ -215,12 +175,7 @@ class ClassifierDossierAssemblerTest {
             page.add(row(FindingEvidenceRow.Role.MEMBER, i));
         }
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(
-                        eq(PROJECT_ID),
-                        eq(FINDING_ID),
-                        any(),
-                        eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP),
-                        any()))
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
                 .thenReturn(pageOf(page, true)); // more rows exist beyond this page
 
         Optional<String> out = ClassifierDossierAssembler.assemble(

@@ -66,7 +66,6 @@ class GithubAppConfigServiceTest {
 
         assertEquals("byo-app-id", props.getAppId());
         assertEquals("byo-pem", props.getPrivateKeyPem());
-        assertEquals("byo-hook", props.getWebhookSecret());
         assertEquals("byo-slug", props.getAppSlug());
         assertEquals("byo-client", props.getClientId());
         assertEquals("byo-secret", props.getClientSecret());
@@ -74,7 +73,7 @@ class GithubAppConfigServiceTest {
 
     @Test
     void persist_upsertsAndLiveUpdatesTheSameBean_noRestartNeeded() {
-        service.persist("new-id", "new-pem", "new-hook", "new-slug", "new-client-id", "new-client-secret");
+        service.persist("new-id", "new-pem", "new-slug", "new-client-id", "new-client-secret");
 
         // Live-updated immediately: a concurrent authHeader()/isConfigured() call reads this same bean.
         assertEquals("new-id", props.getAppId());
@@ -95,7 +94,7 @@ class GithubAppConfigServiceTest {
 
         ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
                 ai.tessary.open.errors.TessaryException.class,
-                () -> service.persist("new-id", "new-pem", "new-hook", "new-slug", "new-client", "new-secret"));
+                () -> service.persist("new-id", "new-pem", "new-slug", "new-client", "new-secret"));
         assertEquals(ai.tessary.open.errors.GitError.APP_ALREADY_CONFIGURED, e.error());
 
         // Neither the row nor the live bean moved.

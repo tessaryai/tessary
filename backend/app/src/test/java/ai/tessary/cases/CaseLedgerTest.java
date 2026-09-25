@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.tenant.Ids;
@@ -47,7 +48,7 @@ class CaseLedgerTest {
     @Autowired
     TenantService tenants;
 
-    private static final String DETECTOR = CaseRow.Detector.BEHAVIOR_DRIFT;
+    private static final String DETECTOR = CaseRow.Detector.CLASSIFIER;
 
     @Test
     void opensOnceAndRecordsOpened() {
@@ -276,20 +277,25 @@ class CaseLedgerTest {
                 -0.4);
     }
 
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
     /** A finding of this project's own, for a test that needs a SECOND one under the same case. */
     private String freshFinding(Project p, String cause) {
-        return findings.recordFiring(
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-" + cause,
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + cause,
                         "cause-" + cause,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "call-site-a",
-                        Instant.now().toString())
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
     }
 

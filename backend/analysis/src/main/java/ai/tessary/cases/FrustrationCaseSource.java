@@ -28,11 +28,6 @@ import org.springframework.stereotype.Component;
 public class FrustrationCaseSource implements CaseSource {
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.FRUSTRATION;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return BuiltInDetector.Kind.FRUSTRATION.equals(classifierKey);
     }

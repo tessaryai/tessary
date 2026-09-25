@@ -77,7 +77,7 @@ class GithubInstallControllerTest {
     }
 
     private GitIntegrationRow row() {
-        return new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", "enc", null, "t", "t");
+        return new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", "enc", "t", "t");
     }
 
     // ---- authorize-url -----------------------------------------------------

@@ -92,7 +92,6 @@ class PipelineRepositoryTest {
         assertNotNull(empty);
         assertTrue(empty.callSites().isEmpty());
         assertTrue(empty.failureModes().isEmpty());
-        assertFalse(repo.exists(fix.project().id()));
     }
 
     @Test

@@ -23,7 +23,7 @@
 // to ITS OWN in-memory implementation, but Node's version is defined on `globalThis` first with a
 // getter, and jsdom's assignment loses that race — `window.localStorage.getItem` then silently
 // resolves to `undefined` (not a thrown error) because Node's storage getter refuses to work
-// without a file. `DensityProvider`'s `persist` prop (density.tsx, mounted for nearly every route)
+// without a file. `DensityProvider` (density.tsx, mounted for nearly every route)
 // reads `localStorage` on its very first render, so every route smoke-tested here hit this.
 // Overriding both with a plain in-memory polyfill sidesteps the collision entirely.
 

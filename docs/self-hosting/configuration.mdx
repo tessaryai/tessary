@@ -32,7 +32,7 @@ Compose builds the Postgres connection from these values. You only set `TESSARY_
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `TESSARY_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as source credentials and provider API keys. | A placeholder, published in `docker-compose.yml` |
+| `TESSARY_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as provider API keys. | A placeholder, published in `docker-compose.yml` |
 
 Generate a key with:
 
@@ -217,10 +217,7 @@ upgrade. There is no license check, feature gate, or other in-app behavior that 
 
 **Tessary will never use your conversations to train or improve any model. No exceptions, no
 toggle.** This is an absolute guarantee, not a default you could accidentally switch off. See
-`devdocs/reference/principles.md` § "Product & positioning" for the full argument, backed by two
-guard tests in the codebase
-(`NoSharedModelTrainingGuaranteeTest`, `PriorContributionGuardTest`) that fail the build if this
-ever stops being true.
+`devdocs/reference/principles.md` § "Product & positioning" for the full argument.
 
 ## Ingest and OTLP
 

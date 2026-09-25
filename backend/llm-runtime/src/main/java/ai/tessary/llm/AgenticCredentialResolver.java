@@ -84,9 +84,8 @@ public class AgenticCredentialResolver {
      * {@link ModelConfigError#AGENTIC_IAM_ROLE_UNSUPPORTED} when the org's Bedrock/mantle credential
      * is {@code auth_mode=iam_role}: an E2B microVM cannot assume the
      * operator's own ambient AWS identity, and there is no {@code roleArn}/STS-relay path for it to
-     * use instead. IAM-role auth stays usable for the backend's own direct judge calls
-     * ({@link ChatModelFactory}); a credential meant to drive a sandbox agent must be
-     * {@code api_key} mode.
+     * use instead. IAM-role auth stays usable for the backend's own model-catalog listing; a
+     * credential meant to drive a sandbox agent must be {@code api_key} mode.
      */
     public Credential resolve(String projectId, ModelProvider provider) {
         String orgId = orgResolver.orgIdFor(projectId);

@@ -15,8 +15,6 @@ import ai.tessary.git.GitProviderFactory;
 import ai.tessary.tenant.ApiKey;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.KeyScope;
-import ai.tessary.tenant.OrgMembershipRepository;
-import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,8 +66,6 @@ class AgenticRcaEngineTest {
                 mock(GitIntegrationRepository.class),
                 mock(GitProviderFactory.class),
                 mock(ApiKeyService.class),
-                mock(ProjectRepository.class),
-                mock(OrgMembershipRepository.class),
                 new ObjectMapper());
     }
 
@@ -129,24 +125,7 @@ class AgenticRcaEngineTest {
     void aGroundednessRunUsesTheGroundednessPromptSchemaAndParser() {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl("https://tessary.test/");
-        RcaJobRow job = new RcaJobRow(
-                "job-1",
-                "proj-1",
-                "fnd-1",
-                "finding",
-                "fnd-1",
-                "groundedness_rate",
-                "2026-05-01T00:00:00Z",
-                "2026-05-04T00:00:00Z",
-                "2026-05-08T00:00:00Z",
-                "user-1",
-                "claimed",
-                "worker-1",
-                null,
-                1,
-                null,
-                "2026-05-08T01:00:00Z",
-                "2026-05-08T01:00:00Z");
+        RcaJobRow job = new RcaJobRow("job-1", "proj-1", "fnd-1", "finding", "fnd-1", "groundedness_rate", "user-1");
         RcaReportRow report = groundednessReport();
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN))
                 .thenReturn(new ApiKeyService.Issued(
@@ -174,14 +153,7 @@ class AgenticRcaEngineTest {
                 + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
                 + "\"excerpt\":\"top_k=1\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}]}");
         AgenticRcaEngine engine = new AgenticRcaEngine(
-                props,
-                List.of(sandbox),
-                noRepo(),
-                mock(GitProviderFactory.class),
-                apiKeys,
-                mock(ProjectRepository.class),
-                mock(OrgMembershipRepository.class),
-                new ObjectMapper());
+                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
         Map<String, String> dossier = Map.of("finding.md", "# f");
 
         AgenticRcaEngine.Result result =
@@ -224,7 +196,6 @@ class AgenticRcaEngineTest {
     private static RcaReportRow groundednessReport() {
         return new RcaReportRow(
                 "rpt-1",
-                "proj-1",
                 "job-1",
                 "finding",
                 "fnd-1",

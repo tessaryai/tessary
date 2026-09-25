@@ -27,13 +27,8 @@ import org.jspecify.annotations.Nullable;
  * @param shiftMultiple the multiple of the in-control rate the detector is tuned to catch quickly
  * @param shiftFloor the smallest absolute rise worth arming for, as a rate: what makes a tool that
  *     has never failed detectable at all
- * @param minEffectSize Cohen's h reported on a finding. <b>Not a trigger</b>, see the constant
  * @param minBaselineCalls calls the in-control reference must hold before anything is judged
  * @param downArmMinRate in-control rate below which the improvement arm does not run
- * @param settleSeconds retired as a read filter, kept on the wire. The repository now gates on
- *     {@code trace.is_settled}, which states what this window was estimating; the field stays because it
- *     is persisted classifier config and dropping it from the schema would fail to parse every deployed
- *     bundle that carries it.
  * @param maxPatterns failure signatures a finding's breakdown carries before the tail folds
  * @param minDecisionInterval the lower clamp on the derived threshold. {@link #MIN_DECISION_INTERVAL} for
  *     tool_error, which never reads it from a blob; see the constant for who may lower it
@@ -46,10 +41,8 @@ public record ToolErrorConfig(
         long arlTarget,
         double shiftMultiple,
         double shiftFloor,
-        double minEffectSize,
         int minBaselineCalls,
         double downArmMinRate,
-        int settleSeconds,
         int maxPatterns,
         double minDecisionInterval,
         int freezeBaselineCalls) {
@@ -126,18 +119,6 @@ public record ToolErrorConfig(
     public static final double DEFAULT_SHIFT_FLOOR = 0.005;
 
     /**
-     * EXPERIMENT(tool-error-tuning): a reference point for Cohen's h. <b>Never a trigger.</b>
-     * Small-shift suppression is handled in {@link #decisionIntervalFor(double)} instead: a
-     * threshold calibrated to the tool's own base rate refuses small drifts on its own, and
-     * nothing downstream has to.
-     *
-     * <p>0.05 remains a useful landmark when reading a finding: a doubling from 1% to 2% is
-     * h=0.083 and 20.0% to 21.1% is h=0.032, which is why the number survives even though
-     * nothing branches on it.
-     */
-    public static final double DEFAULT_MIN_EFFECT_SIZE = 0.05;
-
-    /**
      * EXPERIMENT(tool-error-tuning): calls the in-control reference must hold before anything is judged.
      *
      * <p>A <em>wait</em>, not a skip: a tool under this keeps accumulating rather than being dropped, so
@@ -159,17 +140,6 @@ public record ToolErrorConfig(
      */
     public static final double DEFAULT_DOWN_ARM_MIN_RATE = 0.01;
 
-    /**
-     * EXPERIMENT(tool-error-tuning): five minutes, matching the drift slice, because both wait on the
-     * same exporter.
-     *
-     * <p>This measure genuinely needs it even though a tool call is a single span. The span's arrival is
-     * its own completion signal, but the denominator is not one span: a turn's tool calls arrive across
-     * several batch flushes, so reading a trace early counts some of its calls and not others, and there
-     * is no reason to believe the ones that landed first fail at the same rate as the ones that had not.
-     */
-    public static final int DEFAULT_SETTLE_SECONDS = 300;
-
     /** EXPERIMENT(tool-error-tuning): signatures in a finding's breakdown before the tail folds. */
     public static final int DEFAULT_MAX_PATTERNS = 8;
 
@@ -186,12 +156,8 @@ public record ToolErrorConfig(
         // the log-likelihood ratio identically zero, which is a detector that can never fire.
         shiftMultiple = clamp(shiftMultiple, 1.05, 100.0, DEFAULT_SHIFT_MULTIPLE);
         shiftFloor = clamp(shiftFloor, 0.0001, 0.5, DEFAULT_SHIFT_FLOOR);
-        // Up to pi, the largest h two proportions can differ by (0 against 1). Clamped even though nothing
-        // branches on it, so a nonsense value cannot reach a finding a human reads.
-        minEffectSize = clamp(minEffectSize, 0.0, Math.PI, DEFAULT_MIN_EFFECT_SIZE);
         minBaselineCalls = clampInt(minBaselineCalls, 30, 1_000_000, DEFAULT_MIN_BASELINE_CALLS);
         downArmMinRate = clamp(downArmMinRate, 0.0001, 0.5, DEFAULT_DOWN_ARM_MIN_RATE);
-        settleSeconds = clampInt(settleSeconds, 0, 86_400, DEFAULT_SETTLE_SECONDS);
         maxPatterns = clampInt(maxPatterns, 1, ToolErrorRate.MAX_PATTERNS, DEFAULT_MAX_PATTERNS);
         minDecisionInterval =
                 clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
@@ -205,20 +171,16 @@ public record ToolErrorConfig(
             long arlTarget,
             double shiftMultiple,
             double shiftFloor,
-            double minEffectSize,
             int minBaselineCalls,
             double downArmMinRate,
-            int settleSeconds,
             int maxPatterns,
             double minDecisionInterval) {
         this(
                 arlTarget,
                 shiftMultiple,
                 shiftFloor,
-                minEffectSize,
                 minBaselineCalls,
                 downArmMinRate,
-                settleSeconds,
                 maxPatterns,
                 minDecisionInterval,
                 minBaselineCalls);
@@ -229,19 +191,15 @@ public record ToolErrorConfig(
             long arlTarget,
             double shiftMultiple,
             double shiftFloor,
-            double minEffectSize,
             int minBaselineCalls,
             double downArmMinRate,
-            int settleSeconds,
             int maxPatterns) {
         this(
                 arlTarget,
                 shiftMultiple,
                 shiftFloor,
-                minEffectSize,
                 minBaselineCalls,
                 downArmMinRate,
-                settleSeconds,
                 maxPatterns,
                 MIN_DECISION_INTERVAL);
     }
@@ -281,10 +239,8 @@ public record ToolErrorConfig(
                 DEFAULT_ARL_TARGET,
                 DEFAULT_SHIFT_MULTIPLE,
                 DEFAULT_SHIFT_FLOOR,
-                DEFAULT_MIN_EFFECT_SIZE,
                 DEFAULT_MIN_BASELINE_CALLS,
                 DEFAULT_DOWN_ARM_MIN_RATE,
-                DEFAULT_SETTLE_SECONDS,
                 DEFAULT_MAX_PATTERNS);
     }
 
@@ -303,10 +259,8 @@ public record ToolErrorConfig(
                     root.path("arl_target").asLong(DEFAULT_ARL_TARGET),
                     root.path("shift_multiple").asDouble(DEFAULT_SHIFT_MULTIPLE),
                     root.path("shift_floor").asDouble(DEFAULT_SHIFT_FLOOR),
-                    root.path("min_effect_size").asDouble(DEFAULT_MIN_EFFECT_SIZE),
                     root.path("min_baseline_calls").asInt(DEFAULT_MIN_BASELINE_CALLS),
                     root.path("down_arm_min_rate").asDouble(DEFAULT_DOWN_ARM_MIN_RATE),
-                    root.path("settle_seconds").asInt(DEFAULT_SETTLE_SECONDS),
                     root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS),
                     MIN_DECISION_INTERVAL,
                     // Absent means the minimum: the reference freezes the moment judging starts.

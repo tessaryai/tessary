@@ -116,8 +116,7 @@ public class AlertDeliveryDispatcher {
             if (result.ok()) {
                 attempts.markDelivered(attemptId, result.httpStatus());
             } else {
-                attempts.markFailed(
-                        attemptId, result.httpStatus(), result.error() == null ? "delivery failed" : result.error());
+                attempts.markFailed(attemptId, result.httpStatus(), result.error());
                 log.info(
                         Markers.OPS,
                         "alert delivery failed projectId={} channel={} kind={} http={} reason={}",

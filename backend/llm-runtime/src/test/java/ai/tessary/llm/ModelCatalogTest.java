@@ -124,7 +124,7 @@ class ModelCatalogTest {
     }
 
     @Test
-    void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantleLikeChatModelFactoryAlreadyDid() {
+    void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantle() {
         assertEquals("gpt-5.6-terra", ModelCatalog.pricingId(ModelProvider.OPENAI, "gpt-5.6-terra"));
         assertEquals("claude-sonnet-5", ModelCatalog.pricingId(ModelProvider.ANTHROPIC, "claude-sonnet-5"));
         assertEquals("gemini-3.1-pro-preview", ModelCatalog.pricingId(ModelProvider.GEMINI, "gemini-3.1-pro-preview"));

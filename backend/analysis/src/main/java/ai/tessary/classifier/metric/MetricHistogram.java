@@ -146,10 +146,6 @@ public final class MetricHistogram implements MetricSketch {
         this.bins = new long[grid.bins()];
     }
 
-    public Grid grid() {
-        return grid;
-    }
-
     /** Samples that fell below {@code grid.lo()}. Non-zero means the range starts too high. */
     public long underflow() {
         return underflow;
@@ -184,12 +180,7 @@ public final class MetricHistogram implements MetricSketch {
             throw new IllegalArgumentException(
                     "cannot merge sketches on different grids: " + gridId() + " vs " + other.gridId());
         }
-        if (!(other instanceof MetricHistogram h)) {
-            // Same grid, different summary structure. Bin-wise addition is what makes merge exact, and
-            // there is no exact way to fold a different representation in — refuse rather than approximate.
-            throw new IllegalArgumentException(
-                    "cannot merge " + other.getClass().getSimpleName() + " into a histogram");
-        }
+        MetricHistogram h = (MetricHistogram) other;
         for (int i = 0; i < bins.length; i++) {
             bins[i] += h.bins[i];
         }
@@ -366,11 +357,7 @@ public final class MetricHistogram implements MetricSketch {
         }
         Payload payload = new Payload(
                 KIND, grid.lo(), grid.ratio(), grid.bins(), count, underflow, overflow, clampedSumLog, sparse);
-        try {
-            return JSON.writeValueAsString(payload);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("failed to serialize metric histogram", e);
-        }
+        return JSON.valueToTree(payload).toString();
     }
 
     /** Rehydrate a payload written by {@link #toJson()}. Prefer {@link MetricSketch#fromJson(String)}. */
@@ -380,9 +367,6 @@ public final class MetricHistogram implements MetricSketch {
             payload = JSON.readValue(json, Payload.class);
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("malformed metric histogram json", e);
-        }
-        if (!KIND.equals(payload.kind())) {
-            throw new IllegalArgumentException("not a metric histogram payload: kind=" + payload.kind());
         }
         MetricHistogram out = new MetricHistogram(new Grid(payload.lo(), payload.ratio(), payload.bins()));
         Map<String, Long> binCounts = payload.binCounts() == null ? new HashMap<>() : payload.binCounts();

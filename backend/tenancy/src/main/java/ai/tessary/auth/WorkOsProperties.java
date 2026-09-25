@@ -16,10 +16,9 @@ import org.springframework.stereotype.Component;
  * class is WorkOS-specific only, and only {@link WorkOsClient} (via {@link AuthProviderConfig})
  * depends on it directly.
  *
- * <p>When {@code apiKey} or {@code clientId} is blank there is no identity provider. That
- * alone does NOT open the instance: {@link AuthFilter} additionally requires
- * {@link AuthProperties#isDisabled()}, and without it every guarded path answers 401. Production
- * must set both regardless -- {@link AuthRequiredInProdGuard} refuses to start without them.
+ * <p>When {@code apiKey} or {@code clientId} is blank, {@link AuthProviderConfig} falls back to
+ * {@link PasswordAuthProvider}. That never opens the instance: {@link AuthFilter} bypasses only
+ * under {@link AuthProperties#isDisabled()}.
  */
 @Component
 @ConfigurationProperties(prefix = "workos")
@@ -53,7 +52,7 @@ public class WorkOsProperties {
         this.redirectUri = redirectUri;
     }
 
-    /** True when API key + client id are both set; used by AuthFilter to decide if auth is enforced. */
+    /** True when API key + client id are both set: whether {@link AuthProviderConfig} selects WorkOS. */
     public boolean isEnabled() {
         return apiKey != null && !apiKey.isBlank() && clientId != null && !clientId.isBlank();
     }

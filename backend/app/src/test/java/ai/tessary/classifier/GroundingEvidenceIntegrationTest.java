@@ -135,7 +135,7 @@ class GroundingEvidenceIntegrationTest {
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
 
         assertTrue(
-                got.text().contains("5-7 business days"),
+                String.join("\n", got.documents()).contains("5-7 business days"),
                 "the answering span owns no retrieved_doc row — trace scope is the only way it sees one");
         assertTrue(got.conversationDidExternalWork());
     }
@@ -161,7 +161,7 @@ class GroundingEvidenceIntegrationTest {
 
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
 
-        assertEquals("", got.text(), "evidence must be bounded to what preceded the answer");
+        assertEquals("", String.join("\n", got.documents()), "evidence must be bounded to what preceded the answer");
         assertTrue(got.conversationDidExternalWork(), "the trace still reached outside — this is BLIND");
     }
 
@@ -180,7 +180,7 @@ class GroundingEvidenceIntegrationTest {
         doc(pid, reranker, 0, "result", "Refunds are issued within 5-7 business days.", at);
         doc(pid, reranker, 1, "candidate", "Gift cards are non-refundable under any circumstances.", at);
 
-        String text = evidenceFor(pid, answer).text();
+        String text = String.join("\n", evidenceFor(pid, answer).documents());
 
         assertEquals(
                 1,
@@ -201,7 +201,7 @@ class GroundingEvidenceIntegrationTest {
             doc(pid, retrieval, i, "result", "passage number " + i + " about refunds", at);
         }
 
-        String text = evidenceFor(pid, answer).text();
+        String text = String.join("\n", evidenceFor(pid, answer).documents());
 
         // Assert the BOUNDARY, not presence-of-first and absence-of-last. With LIMIT pushed inside the
         // DISTINCT ON subquery — the exact nesting bug this test exists to catch — Postgres returns
@@ -231,7 +231,7 @@ class GroundingEvidenceIntegrationTest {
         SpanRef answer = span(pid, traceId, "llm", "Refunds take 5-7 days.", at);
         doc(pid, retrieval, 0, null, "Refunds are issued within 5-7 business days.", at);
 
-        assertTrue(evidenceFor(pid, answer).text().contains("5-7 business days"));
+        assertTrue(String.join("\n", evidenceFor(pid, answer).documents()).contains("5-7 business days"));
     }
 
     @Test
@@ -279,7 +279,7 @@ class GroundingEvidenceIntegrationTest {
 
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
 
-        assertEquals("", got.text(), "tool results are not an evidence carrier");
+        assertEquals("", String.join("\n", got.documents()), "tool results are not an evidence carrier");
         assertTrue(got.conversationDidExternalWork(), "but the trace did reach outside, which is what abstains it");
     }
 
@@ -309,7 +309,7 @@ class GroundingEvidenceIntegrationTest {
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, followUp);
 
         assertTrue(
-                got.text().contains("5-7 business days"),
+                String.join("\n", got.documents()).contains("5-7 business days"),
                 "turn 1 has no retrieval of its own — conversation scope is the only way it sees turn 0's");
         assertTrue(got.conversationDidExternalWork());
     }
@@ -338,7 +338,7 @@ class GroundingEvidenceIntegrationTest {
 
         // Absent, or present-but-blank-and-not-reached-outside — never conversation A's document.
         assertTrue(
-                got == null || (got.text().isEmpty() && !got.conversationDidExternalWork()),
+                got == null || (String.join("\n", got.documents()).isEmpty() && !got.conversationDidExternalWork()),
                 "conversation B must not see conversation A's retrieval");
     }
 
@@ -365,7 +365,7 @@ class GroundingEvidenceIntegrationTest {
         SpanRef followUp =
                 spanInSession(pid, turn2, sessionId, "llm", "Returns are free for 30 days.", t0.plusSeconds(60));
 
-        String text = evidenceFor(pid, followUp).text();
+        String text = String.join("\n", evidenceFor(pid, followUp).documents());
 
         assertTrue(text.contains("SET-B"), "the nearest prior retrieval (turn 1) must be the evidence");
         assertFalse(text.contains("SET-A"), "an OLDER retrieval (turn 0) must not blend into the premise");

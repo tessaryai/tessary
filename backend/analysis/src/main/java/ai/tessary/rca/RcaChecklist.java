@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -128,14 +129,8 @@ public class RcaChecklist {
         long total = counts.stream().mapToLong(FacetCount::count).sum();
         if (total == 0) return "(no traffic)";
         return counts.stream()
-                .map(c -> String.format(
-                        Locale.ROOT,
-                        "%s %.0f%% (%d)",
-                        c.value() == null ? "(none)" : c.value(),
-                        c.count() * 100.0 / total,
-                        c.count()))
-                .reduce((a, b) -> a + ", " + b)
-                .orElse("(no traffic)");
+                .map(c -> String.format(Locale.ROOT, "%s %.0f%% (%d)", c.value(), c.count() * 100.0 / total, c.count()))
+                .collect(Collectors.joining(", "));
     }
 
     private static void appendTopValues(
@@ -152,8 +147,7 @@ public class RcaChecklist {
                         e.getKey(),
                         e.getValue().size(),
                         e.getValue().size() * 100.0 / traces))
-                .reduce((a, b) -> a + ", " + b)
-                .orElse("");
+                .collect(Collectors.joining(", "));
         sb.append("- ").append(dimension).append(": ").append(values).append('\n');
     }
 

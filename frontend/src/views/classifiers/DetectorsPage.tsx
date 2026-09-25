@@ -50,20 +50,16 @@ import {
 } from "./groundedness";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
-  BEHAVIOR_DETECTOR,
   CONTAINER,
   Fact,
   RailBlock,
   ResolveVerbs,
-  SOP_CONFORMANCE_DETECTOR,
   SectionLabel,
   VerbButton,
   ago,
   chainWords,
   firstSentence,
 } from "./shared";
-// This build's `@paid` alias; see src/paid/index.ts for the mechanism.
-import { paid } from "@paid";
 
 /** `ClassifierView.readiness` while Malformed Output has no call site schema to validate against. */
 const WAITING_ON_SCHEMAS = "waiting_on_schemas";
@@ -95,11 +91,7 @@ const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
 const DebugSection = lazy(() => import("./debug/DebugSection"));
 
 /** The detectors that open findings. Their rails get a Findings block; nobody else's does. */
-const FINDING_DETECTORS: ReadonlySet<string> = new Set([
-  BEHAVIOR_DETECTOR,
-  ...METRIC_DRIFT_DETECTORS,
-  SOP_CONFORMANCE_DETECTOR,
-]);
+const FINDING_DETECTORS: ReadonlySet<string> = METRIC_DRIFT_DETECTORS;
 
 /** Detections shown in the rail. Enough to read a pattern, short of a second page. */
 const DETECTION_LIMIT = 25;
@@ -413,7 +405,7 @@ function RailFindings({ classifier }: { classifier: Classifier }) {
 
   const findingsQ = useQuery({
     queryKey: key,
-    queryFn: () => api.listBehaviorFindings("open", "all", undefined, classifier.detector),
+    queryFn: () => api.listBehaviorFindings(classifier.detector),
   });
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });
   const analyzeM = useMutation({ mutationFn: (id: string) => api.analyzeBehaviorFinding(id), onSuccess: invalidate });
@@ -515,7 +507,7 @@ function RailFindingRow({
         </VerbButton>
         {/* A ruling freezes the finding by construction (decision 1): once triaged, every verb on
             it 409s, so the verbs stop being offered rather than staying up as a dead override. */}
-        {!triaged && <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={onResolve} />}
+        {!triaged && <ResolveVerbs busy={busy} onResolve={onResolve} />}
         {summary && (
           <button
             type="button"
@@ -532,9 +524,8 @@ function RailFindingRow({
 }
 
 /**
- * Detector evidence is heterogeneous JSON: `{matched, pattern, field}` from the regex
- * detectors, `{missing, missing_total}` from omission, `{surprisal, threshold}` from
- * surprisal. Flatten the top level rather than special-casing each detector: every
+ * Detector evidence is heterogeneous JSON, e.g. `{matched, pattern, field}` from the regex
+ * detectors. Flatten the top level rather than special-casing each detector: every
  * detector's evidence is small and bounded by construction (never the trace payload).
  */
 function evidenceSummary(json: string | null | undefined): string | null {
@@ -567,8 +558,7 @@ function truncate(s: string, max: number): string {
  *
  * <p>There is no per-detection "Run analysis". A detection is a Layer-1 flag, a filter, not
  * evidence, and running graders on one would confirm something nobody had decided was worth
- * confirming. Analysis is offered on the finding, where the cause has already been made, and the
- * grader lane is one of the choices there.
+ * confirming. Analysis is offered on the finding, where the cause has already been made.
  */
 export function DetectionRow({ event }: { event: ClassifierEvent }) {
   const summary = evidenceSummary(event.evidence_json);
@@ -698,16 +688,8 @@ function ClassifierRail({
 }) {
   const { api } = useTenant();
   const [restarting, setRestarting] = useState(false);
-  const isBehavior = classifier?.detector === BEHAVIOR_DETECTOR;
-  const isConformance = classifier?.detector === SOP_CONFORMANCE_DETECTOR;
   const isMetricDrift = classifier != null && METRIC_DRIFT_DETECTORS.has(classifier.detector);
   const hasFindings = classifier != null && FINDING_DETECTORS.has(classifier.detector);
-
-  const changelogQ = useQuery({
-    queryKey: ["behavior-baseline-events", api.base],
-    queryFn: () => api.listBehaviorBaselineEvents(50),
-    enabled: isBehavior,
-  });
 
   // The traces that tripped this classifier. Keyed on the id so switching rows refetches
   // rather than showing the previous classifier's detections under a new title.
@@ -792,14 +774,6 @@ function ClassifierRail({
         </dl>
       </RailBlock>
 
-      {/* Above Findings on purpose: whether a rule is armed decides whether the absence of findings
-          under it means anything, so it has to be read first.
-
-          This build renders no Rulebook block: paid.classifierRail() returns null here. The
-          `isConformance` guard stays in this file since the detector key is open vocabulary, so a
-          build with no rulebook implementation simply shows nothing in its place. */}
-      {isConformance && paid.classifierRail(SOP_CONFORMANCE_DETECTOR)}
-
       {hasFindings && <RailFindings classifier={classifier} />}
 
       {isMetricDrift && (
@@ -835,47 +809,6 @@ function ClassifierRail({
           </div>
         )}
       </RailBlock>
-
-      {/* This build renders no Baselines block: paid.classifierRail() returns null here. The
-          `isBehavior` guard stays in this file since the detector key is open vocabulary, so a
-          build with no baselines implementation simply shows nothing in its place. */}
-      {isBehavior && paid.classifierRail(BEHAVIOR_DETECTOR)}
-
-      {isBehavior && (
-        <RailBlock label="Baseline changelog">
-          {changelogQ.isLoading && <LoadingRow />}
-          {changelogQ.isError && <ErrorNote error={changelogQ.error} />}
-          {/*
-            * `isSuccess`, not "no rows and not loading": a failed read also has no rows too, and
-            * rendering "Nothing has changed the baseline yet." there would be an assertion about
-            * the baseline made from the absence of an answer about it.
-            */}
-          {changelogQ.isSuccess && (changelogQ.data ?? []).length === 0 && (
-            <p className="text-subtle m-0 text-small">
-              Nothing has changed the baseline yet.
-            </p>
-          )}
-          {/* Date in a fixed gutter so the events line up as a column, not a ragged list. */}
-          <ul className="m-0 p-0" style={{ listStyle: "none" }}>
-            {(changelogQ.data ?? []).map((e) => (
-              <li key={e.id} className="flex items-baseline gap-3 py-1 px-0 text-small">
-                <span className="shrink-0 font-mono text-subtle" style={{ width: 72 }}>
-                  {new Date(e.occurredAt).toLocaleDateString()}
-                </span>
-                <span className="min-w-0 text-muted">
-                  {e.event}
-                  {e.gramKey && (
-                    <>
-                      {" · "}
-                      <span className="font-mono">{e.gramKey}</span>
-                    </>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </RailBlock>
-      )}
 
       <div className="border-t border-border mt-4.5 pt-4.5">
         <Suspense fallback={<LoadingRow />}>

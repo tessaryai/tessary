@@ -120,10 +120,8 @@ public record FrustrationConfig(
                 arlTarget,
                 shiftMultiple,
                 shiftFloor,
-                ToolErrorConfig.DEFAULT_MIN_EFFECT_SIZE,
                 minBaselineConversations,
                 ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
-                ToolErrorConfig.DEFAULT_SETTLE_SECONDS,
                 ToolErrorConfig.DEFAULT_MAX_PATTERNS,
                 minDecisionInterval);
     }

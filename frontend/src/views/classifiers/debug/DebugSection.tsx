@@ -10,8 +10,6 @@ import { DecisionDebug } from "./sections/DecisionDebug";
 import { DeterministicDebug } from "./sections/DeterministicDebug";
 import { EncoderDebug } from "./sections/EncoderDebug";
 import { MetricDriftDebug } from "./sections/MetricDriftDebug";
-// The alias resolves to the stub next door in this build; a build may override it.
-import { paid } from "@paid";
 
 /**
  * Everything the platform already computes for this classifier that the rail above doesn't render:
@@ -62,12 +60,6 @@ function FamilySection({ debug }: { debug: ClassifierDebug }) {
   switch (debug.family) {
     case "metric_drift":
       return <MetricDriftDebug baselines={debug.metric_baselines ?? []} />;
-    // Kept deliberately: deleting this arm would not fail to compile, it would fall through to
-    // `default` and render `DeterministicDebug` for a drift classifier, a wrong panel rather than a
-    // missing one. Answering `null` through the seam renders nothing, and `RawFallback` below still
-    // prints the whole payload.
-    case "behavior_drift":
-      return paid.debugSection(debug);
     case "encoder":
       return <EncoderDebug />;
     case "decision":
