@@ -43,10 +43,21 @@ public class ErrorCatalog {
             DecisionError.class,
             RetentionError.class);
 
+    private final List<Class<? extends ErrorCode>> registered;
+
+    public ErrorCatalog() {
+        this(REGISTERED);
+    }
+
+    /** A catalog over {@code registered} in place of {@link #REGISTERED}, for a test to build a collision. */
+    ErrorCatalog(List<Class<? extends ErrorCode>> registered) {
+        this.registered = registered;
+    }
+
     @PostConstruct
     public void validate() {
         Map<String, ErrorCode> byCode = new HashMap<>();
-        for (Class<? extends ErrorCode> cls : REGISTERED) {
+        for (Class<? extends ErrorCode> cls : registered) {
             ErrorCode[] constants = cls.getEnumConstants();
             for (ErrorCode ec : constants) {
                 ErrorCode prev = byCode.put(ec.code(), ec);
@@ -60,6 +71,6 @@ public class ErrorCatalog {
                 }
             }
         }
-        log.info("error catalog: {} unique codes across {} domains", byCode.size(), REGISTERED.size());
+        log.info("error catalog: {} unique codes across {} domains", byCode.size(), registered.size());
     }
 }

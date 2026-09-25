@@ -72,4 +72,35 @@ class SecretBoxTest {
         p.setSecretKey(Base64.getEncoder().encodeToString(new byte[16]));
         assertThrows(IllegalStateException.class, () -> new SecretBox(p));
     }
+
+    /**
+     * The bug: a mistyped {@code TESSARY_SECRET_KEY} surfaces as a bare base64 decoder error, or boots
+     * and fails later; it must fail construction saying the key is not base64.
+     */
+    @Test
+    void nonBase64KeyRejectsAtConstructionNamingTheKey() {
+        TessaryProperties p = new TessaryProperties();
+        p.setSecretKey("not base64!!");
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> new SecretBox(p));
+        assertEquals("tessary.secret-key is not valid base64", ex.getMessage());
+    }
+
+    /** The bug: a blank key counts as configured, and the first seal fails deep inside a request. */
+    @Test
+    void blankKeyIsUnconfigured() {
+        TessaryProperties p = new TessaryProperties();
+        p.setSecretKey("   ");
+        assertEquals(false, new SecretBox(p).isConfigured());
+    }
+
+    /**
+     * The bug: a stored token that is not base64 (a truncated or hand-edited column) escapes as the
+     * decoder's IllegalArgumentException, which callers that handle an unreadable secret do not catch.
+     */
+    @Test
+    void openRejectsANonBase64TokenAsUnreadable() {
+        SecretBox box = boxWith(key((byte) 0x33));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> box.open("%%%"));
+        assertEquals("SecretBox.open: invalid base64", ex.getMessage());
+    }
 }

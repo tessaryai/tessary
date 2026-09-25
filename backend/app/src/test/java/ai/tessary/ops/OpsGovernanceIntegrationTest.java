@@ -7,6 +7,7 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -45,5 +46,26 @@ class OpsGovernanceIntegrationTest {
         assertEquals(1, rows.size());
         assertEquals(90, rows.get(0).ttlDays());
         assertEquals(null, rows.get(0).coldAfterDays());
+    }
+
+    /**
+     * The bugs: deleting one data class's policy also clears the other's (the WHERE loses its data_class),
+     * or a delete with nothing to delete reports that it removed a row.
+     */
+    @Test
+    void retentionPolicyDeleteRemovesOnlyThatDataClass() {
+        String pid = project("ops-retention-delete");
+        retentionPolicies.upsert(
+                new RetentionPolicyRow(Ids.ulid(), pid, RetentionPolicyRow.DataClass.TRACES, 30, null, now(), "{}"));
+        retentionPolicies.upsert(new RetentionPolicyRow(
+                Ids.ulid(), pid, RetentionPolicyRow.DataClass.DETECTIONS, 60, null, now(), "{}"));
+
+        assertEquals(true, retentionPolicies.delete(pid, RetentionPolicyRow.DataClass.TRACES));
+        assertEquals(false, retentionPolicies.delete(pid, RetentionPolicyRow.DataClass.TRACES));
+        assertEquals(
+                List.of(RetentionPolicyRow.DataClass.DETECTIONS),
+                retentionPolicies.listByProject(pid).stream()
+                        .map(RetentionPolicyRow::dataClass)
+                        .toList());
     }
 }

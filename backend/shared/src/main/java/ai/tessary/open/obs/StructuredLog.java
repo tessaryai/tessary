@@ -108,14 +108,6 @@ public final class StructuredLog {
             return this;
         }
 
-        /** Add a field only when the condition is true and the value is non-null. */
-        public Builder field(String key, @Nullable Object value, boolean condition) {
-            if (condition && value != null) {
-                fields.put(key, value);
-            }
-            return this;
-        }
-
         /** Add a {@code durationMs} field measured from the supplied instant to now. */
         public Builder durationMs(Instant start) {
             if (start != null) {
