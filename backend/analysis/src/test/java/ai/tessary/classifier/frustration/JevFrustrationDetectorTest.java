@@ -313,7 +313,7 @@ class JevFrustrationDetectorTest {
         SubstrateObservation opener = observation("t-open");
         facts.put("t-open", new TurnFacts("conv-a", NOW));
         when(assembler.assembleStructured(opener))
-                .thenReturn(Optional.of(new StructuredThread(List.of(), text("user", "hello"))));
+                .thenReturn(Optional.of(new StructuredThread(List.of(), text("user", "hello"), 1)));
         SubstrateObservation anonymous = eligibleTurn("t-anon", null);
 
         JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(opener, anonymous));
@@ -482,7 +482,8 @@ class JevFrustrationDetectorTest {
                                 text("assistant", "first answer"),
                                 text("user", "second question"),
                                 text("assistant", "second answer")),
-                        text("user", "still wrong " + traceId))));
+                        text("user", "still wrong " + traceId),
+                        3)));
         return obs;
     }
 

@@ -48,12 +48,6 @@ public class ClassifierProperties {
     private long deadLetterCooldownSeconds = 1800;
 
     /**
-     * Row cap on how many of a conversation's most-recent spans the frustration classifier reads per
-     * scored turn, so one long conversation is never walked in full on the sweep.
-     */
-    private int threadMaxObservations = 40;
-
-    /**
      * How stale an idle behaviour profile may get before the periodic fit re-runs it anyway. A trace
      * delta is the fast path, but it cannot be the only one: graduation and quarantine expiry are
      * driven by wall clock, not by arrivals, so an epoch that stops receiving traces must still be
@@ -323,14 +317,6 @@ public class ClassifierProperties {
 
     public void setDeadLetterCooldownSeconds(long v) {
         this.deadLetterCooldownSeconds = v;
-    }
-
-    public int getThreadMaxObservations() {
-        return threadMaxObservations;
-    }
-
-    public void setThreadMaxObservations(int v) {
-        this.threadMaxObservations = v;
     }
 
     public long getBehaviorFitIdleIntervalMs() {

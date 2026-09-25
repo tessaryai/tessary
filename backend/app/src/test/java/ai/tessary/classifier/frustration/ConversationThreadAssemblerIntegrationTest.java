@@ -2,6 +2,7 @@
 package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * DB-backed proof that {@link ConversationThreadAssembler} walks a whole conversation, not just the
@@ -52,6 +54,9 @@ class ConversationThreadAssemblerIntegrationTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    JdbcClient jdbc;
 
     private SubstrateV2Fixtures fx;
 
@@ -156,6 +161,97 @@ class ConversationThreadAssemblerIntegrationTest {
                 thread.earlier().stream().map(StructuredThread.Message::text).toList(),
                 "turns stored after the scored one but started before it are earlier; the later turn is not");
         assertEquals("nevermind", thread.current().text());
+    }
+
+    @Test
+    void aTurnThatRanManyToolsStillLeavesItsMessages() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-busy-turn").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        seedTurn(pid, sessionId, base.plusMillis(1_000), user("deploy the app"), assistant("On it."));
+        String busy = SubstrateV2Fixtures.traceId();
+        fx.turn(pid, busy, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Fixed it."));
+        for (int i = 1; i <= 45; i++) {
+            fx.spanSeed(pid)
+                    .traceId(busy)
+                    .sessionId(sessionId)
+                    .kind("tool")
+                    .name("search")
+                    .at(base.plusMillis(2_000 + i))
+                    .write();
+        }
+        SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
+
+        StructuredThread thread =
+                assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
+
+        assertEquals(List.of("deploy the app", "On it.", "still failing", "Fixed it."), texts(thread));
+    }
+
+    @Test
+    void countsEveryEarlierTurnOfALongConversation() {
+        String pid = TenantFixture.bootstrap(tenants, "thread-long").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        for (int i = 1; i <= 50; i++) {
+            seedTurn(pid, sessionId, base.plusMillis(i * 1_000L), user("question " + i), assistant("answer " + i));
+        }
+        SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(51_000), user("nevermind"), null);
+
+        FrustrationTurnBuilder.EligibleTurn turn = new FrustrationTurnBuilder(assembler)
+                .buildTurn(scored(pid, scoredRef))
+                .orElseThrow();
+
+        assertEquals(51, turn.userTurn());
+    }
+
+    @Test
+    void aSubAgentTraceIsNotPartOfTheReply() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-sub-agent").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        seedTurn(pid, sessionId, base.plusMillis(1_000), user("deploy the app"), assistant("On it."));
+        SpanRef parent =
+                seedTurn(pid, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Let me retry."));
+        String child = SubstrateV2Fixtures.traceId();
+        fx.turn(pid, child, sessionId, base.plusMillis(2_500), null, assistant("sub-agent notes"));
+        jdbc.sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
+                .param("parent", parent.traceId())
+                .param("pid", pid)
+                .param("child", child)
+                .update();
+        SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
+
+        StructuredThread thread =
+                assembler.assembleStructured(scored(pid, scoredRef)).orElseThrow();
+
+        assertEquals(List.of("deploy the app", "On it.", "still failing", "Let me retry."), texts(thread));
+    }
+
+    @Test
+    void aReplyWithNoUserMessageBeforeItMakesTheTurnIneligible() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-no-user").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        seedTurn(pid, sessionId, base.plusMillis(1_000), user("deploy the app"), assistant("On it."));
+        seedTurn(pid, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Let me retry."));
+        fx.turn(pid, SubstrateV2Fixtures.traceId(), sessionId, base.plusMillis(2_500), null, assistant("Also this."));
+        SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
+
+        assertTrue(new FrustrationTurnBuilder(assembler)
+                .buildTurn(scored(pid, scoredRef))
+                .isEmpty());
+    }
+
+    private SubstrateObservation scored(String pid, SpanRef ref) {
+        return substrate.observationById(pid, ref.traceId(), ref.spanId()).orElseThrow();
     }
 
     private SpanRef seedTurn(

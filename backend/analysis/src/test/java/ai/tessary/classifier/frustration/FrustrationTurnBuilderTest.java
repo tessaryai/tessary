@@ -14,7 +14,6 @@ import ai.tessary.classifier.frustration.FrustrationTurnBuilder.TurnState;
 import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
-import ai.tessary.config.ClassifierProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,14 +42,13 @@ class FrustrationTurnBuilderTest {
     }
 
     private static Optional<TurnState> build(Caps caps, SubstrateObservation... chronological) {
-        List<SubstrateObservation> newestFirst = new ArrayList<>(List.of(chronological));
-        java.util.Collections.reverse(newestFirst);
+        List<SubstrateObservation> earlier = List.of(chronological).subList(0, chronological.length - 1);
+        int turns = (int)
+                earlier.stream().map(SubstrateObservation::traceId).distinct().count();
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
-        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyInt()))
-                .thenReturn(newestFirst);
-        ClassifierProperties props = new ClassifierProperties();
-        props.setThreadMaxObservations(40);
-        return new FrustrationTurnBuilder(new ConversationThreadAssembler(substrate, props), caps)
+        when(substrate.priorTurns(anyString(), anyString(), anyInt()))
+                .thenReturn(new SubstrateReadRepository.PriorTurns(earlier, turns));
+        return new FrustrationTurnBuilder(new ConversationThreadAssembler(substrate), caps)
                 .build(chronological[chronological.length - 1]);
     }
 
@@ -128,7 +126,7 @@ class FrustrationTurnBuilderTest {
                 text("user", "e")));
         Message blank = slots.get(blankSlot);
         slots.set(blankSlot, new Message(blank.role(), "", false, false));
-        StructuredThread thread = new StructuredThread(slots.subList(0, 4), slots.get(4));
+        StructuredThread thread = new StructuredThread(slots.subList(0, 4), slots.get(4), 3);
         assertTrue(FrustrationTurnBuilder.format(thread, Caps.DEFAULT).isEmpty(), "slot " + blankSlot);
     }
 

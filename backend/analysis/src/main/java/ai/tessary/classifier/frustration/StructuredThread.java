@@ -12,8 +12,9 @@ import java.util.List;
  * @param earlier the messages before the scored turn, oldest first; consecutive assistant messages are
  *     already joined into one turn
  * @param current the scored turn's user message
+ * @param turn the scored turn's 1-based position among its conversation's turns
  */
-record StructuredThread(List<Message> earlier, Message current) {
+record StructuredThread(List<Message> earlier, Message current, int turn) {
 
     public StructuredThread {
         earlier = List.copyOf(earlier);
