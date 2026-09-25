@@ -43,4 +43,20 @@ describe("redactMediaData", () => {
 
     expect(redactMediaData(raw)).toEqual(raw);
   });
+
+  it("elides an OpenAI input_image or output_image data URI under either field, keeping an https url", () => {
+    const dataUri = `data:image/png;base64,${"A".repeat(4096)}`;
+
+    expect(redactMediaData({ type: "input_image", image_url: dataUri })).toEqual({
+      type: "input_image",
+      image_url: "<image data elided, 4.0 KB>",
+    });
+    expect(redactMediaData({ type: "output_image", url: dataUri, image_url: "https://cdn.example/a.png" })).toEqual({
+      type: "output_image",
+      url: "<image data elided, 4.0 KB>",
+      image_url: "https://cdn.example/a.png",
+    });
+    const linked = { type: "input_image", image_url: "https://cdn.example/b.png" };
+    expect(redactMediaData(linked)).toBe(linked);
+  });
 });
