@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -115,6 +117,12 @@ class RcaWorkerTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    RcaChecklist checklist;
+
+    @Autowired
+    JdbcClient jdbc;
 
     @MockitoBean
     AgenticRcaEngine engine;
@@ -496,6 +504,143 @@ class RcaWorkerTest {
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
         assertEquals(List.of(cause), view.causes());
         assertTrue(view.hypotheses().isEmpty());
+    }
+
+    /**
+     * The checklist measured over real spans. Catches a share or cohort count taken per SPAN instead of per
+     * trace (two gpt-4o spans on one trace are one trace), a failing tool counted when it succeeded, a
+     * dimension with no values rendered as an empty line, and the no-data sides reading as a zero share
+     * rather than saying there is nothing to compare.
+     */
+    @Test
+    void theChecklistMeasuresEachSideFromItsOwnSpans() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-checklist").project().id();
+        String baseline = SubstrateV2Fixtures.traceId();
+        fx().spanSeed(pid).traceId(baseline).at(FROM).model("gpt-4o").write();
+        fx().spanSeed(pid).traceId(baseline).at(FROM).model("gpt-4o").write();
+        String tf1 = SubstrateV2Fixtures.traceId();
+        fx().spanSeed(pid).traceId(tf1).at(SPLIT).model("gpt-4o").write();
+        fx().spanSeed(pid)
+                .traceId(tf1)
+                .at(SPLIT)
+                .kind("tool")
+                .name("search")
+                .status("error")
+                .write();
+        String tf2 = SubstrateV2Fixtures.traceId();
+        fx().spanSeed(pid)
+                .traceId(tf2)
+                .at(SPLIT)
+                .model("gpt-5-canary")
+                .errorType("Timeout")
+                .write();
+        fx().spanSeed(pid)
+                .traceId(tf2)
+                .at(SPLIT)
+                .kind("tool")
+                .name("search")
+                .errorType("Timeout")
+                .write();
+        String tf3 = SubstrateV2Fixtures.traceId();
+        fx().spanSeed(pid).traceId(tf3).at(SPLIT).model("gpt-4o").write();
+        fx().spanSeed(pid)
+                .traceId(tf3)
+                .at(SPLIT)
+                .kind("tool")
+                .name("lookup")
+                .status("ok")
+                .write();
+        List<String> flagged = List.of(tf1, tf2, tf3);
+
+        assertEquals(
+                List.of(new RcaChecklist.Measurement(
+                        "serving_model",
+                        "Share of LLM spans by serving model.\n"
+                                + "Baseline side: gpt-4o 100% (2)\n"
+                                + "Flagged side: gpt-4o 67% (2), gpt-5-canary 33% (1)\n"
+                                + "A model appearing only on the flagged side may be the cause, or a canary too"
+                                + " small to move the score — check whether it actually serves the failing traces.")),
+                checklist.measure(pid, List.of(baseline), flagged));
+        assertEquals(
+                new RcaChecklist.Measurement(
+                        "failing_cohort_shape",
+                        "Top facet values across the 3 failing trace(s):\n"
+                                + "- model: 'gpt-4o' on 2 (67%), 'gpt-5-canary' on 1 (33%)\n"
+                                + "- span error: 'Timeout' on 1 (33%)\n"
+                                + "- failing tool: 'search' on 2 (67%)"),
+                checklist.failingCohortShape(pid, new LinkedHashSet<>(flagged)));
+        assertEquals(
+                "Top facet values across the 1 failing trace(s):\n- model: 'gpt-4o' on 1 (100%)",
+                checklist.failingCohortShape(pid, Set.of(baseline)).finding(),
+                "a dimension with no values is left out, not printed empty");
+
+        assertTrue(
+                checklist.measure(pid, List.of(), flagged).get(0).finding().contains("Baseline side: (no traffic)\n"));
+        assertTrue(checklist
+                .measure(pid, List.of("tr_none_a"), List.of("tr_none_b"))
+                .get(0)
+                .finding()
+                .startsWith("No model-tagged traffic on either side"));
+        assertEquals(
+                "No flagged traces on this finding — nothing to group.",
+                checklist.failingCohortShape(pid, Set.of()).finding());
+        assertTrue(checklist
+                .failingCohortShape(pid, Set.of("tr_none"))
+                .finding()
+                .startsWith("1 failing trace(s), but none has readable observations"));
+    }
+
+    /**
+     * Catches a finding with no evidence at all (no baseline, no flagged trace, no session) being handed to the
+     * agent, which would investigate nothing and still stamp a verdict. It fails the job instead.
+     */
+    @Test
+    void aFindingWithNoEvidenceFailsWithoutReachingTheAgent() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "rca-no-evidence").project().id();
+
+        RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of()));
+        worker.run(job);
+
+        assertEquals("failed", reports.findByJobId(pid, job.id()).orElseThrow().status());
+        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
+    }
+
+    /** Catches the finding's own title and basis being left out of the dossier the agent starts from. */
+    @Test
+    void theFindingDocCarriesItsTitleAndBasis() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "rca-title-basis").project().id();
+        String failingTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
+        String findingId = seedFinding(pid, List.of(), List.of(failingTrace));
+        jdbc.sql("UPDATE finding SET title = 'Extraction skips the deadline', basis = 'seen on 9 of 10 traces'"
+                        + " WHERE project_id = :pid AND id = :id")
+                .param("pid", pid)
+                .param("id", findingId)
+                .update();
+        stubEngine(RcaReportRow.Verdict.INCONCLUSIVE, List.of());
+
+        worker.run(enqueue(pid, findingId));
+
+        String findingDoc = capturedDossier().get("finding.md");
+        assertTrue(findingDoc.contains("- title: Extraction skips the deadline\n"), findingDoc);
+        assertTrue(findingDoc.contains("- basis: seen on 9 of 10 traces\n"), findingDoc);
+    }
+
+    /**
+     * Full-column round trip of a claimed job. Catches a column read into the wrong field of the row the worker
+     * runs, which would analyse the wrong finding or issue the MCP key to the wrong principal.
+     */
+    @Test
+    void aClaimedJobReadsBackEveryColumn() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-claim").project().id();
+        String findingId = seedFinding(pid, List.of(), List.of());
+        RcaJobRow enqueued = enqueue(pid, findingId);
+
+        // The drain is parked (batch-size=0), so nothing else claims; a wide batch reaches this job.
+        List<RcaJobRow> claimed = jobs.claimBatch("rca-claim-test", 10_000, 60, 5);
+
+        assertTrue(claimed.contains(enqueued), claimed.toString());
     }
 
     // ---- helpers -----------------------------------------------------------------------------

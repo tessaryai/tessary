@@ -188,6 +188,123 @@ class RcaSynthesisOutputTest {
         assertEquals("## r", out.detailedReport());
     }
 
+    /**
+     * Catches the brace-slice salvage throwing its own, less useful failure (or none) when the slice it cut
+     * out of the prose does not bind either: the run must fail closed as UPSTREAM_FAILED carrying the first
+     * parse failure, which names where the reply the agent actually sent went wrong.
+     */
+    @Test
+    void proseAroundAnUnbindableObjectFailsClosedWithTheFirstFailure() {
+        TessaryException ex = assertThrows(
+                TessaryException.class,
+                () -> RcaSynthesisOutput.parse(
+                        MAPPER, "The answer is {verdict: inconclusive} as above.", NO_PRIOR, Set.of(), CHECKS, "proj"));
+
+        assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+        assertTrue(
+                ex.getCause() instanceof com.fasterxml.jackson.core.JsonProcessingException,
+                String.valueOf(ex.getCause()));
+    }
+
+    /**
+     * Catches a reply with no {@code hypotheses} key failing the run: the key is optional on a report whose
+     * verdict stands without one, and it reads as none.
+     */
+    @Test
+    void aReplyWithNoHypothesesKeyReadsAsNone() {
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
+                MAPPER, "{\"summary\":\"s\",\"verdict\":\"model_change\"}", NO_PRIOR, Set.of(), CHECKS, "proj");
+
+        assertEquals(List.of(), out.hypotheses());
+        assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, out.verdict());
+    }
+
+    /**
+     * Catches a blank or backwards-braced reply binding to an empty report instead of failing the run: there
+     * is nothing in either to persist.
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"   ", "} the braces are backwards {"})
+    void aReplyWithNothingToBindFailsClosed(String reply) {
+        TessaryException ex = assertThrows(
+                TessaryException.class,
+                () -> RcaSynthesisOutput.parse(MAPPER, reply, NO_PRIOR, Set.of(), CHECKS, "proj"));
+        assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+    }
+
+    /**
+     * A reply that fills the schema's optional fields with nulls and blanks. Catches any one of them failing
+     * the run instead of degrading: a blank summary falls back to the whole reply, a blank report to none, an
+     * untitled hypothesis is dropped, a missing confidence reads low, a missing rationale or receipt list reads
+     * empty, an assessment of no check is dropped, and a second assessment of the same check does not override
+     * the first.
+     */
+    @Test
+    void aSparseMetricReplyDegradesFieldByField() {
+        String reply = "{\"summary\":\"  \",\"verdict\":null,\"detailed_report\":\"  \","
+                + "\"hypotheses\":[{\"title\":null},{\"title\":\"Canary model\",\"confidence\":null,"
+                + "\"rationale\":null,\"evidence_trace_ids\":null}],"
+                + "\"checklist\":[{\"check\":null,\"assessment\":\"explains\"},"
+                + "{\"check\":\"serving_model\",\"assessment\":\"explains\",\"detail\":null},"
+                + "{\"check\":\"serving_model\",\"assessment\":\"ruled_out\",\"detail\":\"second\"}]}";
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(MAPPER, reply, NO_PRIOR, Set.of(), CHECKS, "proj");
+
+        assertEquals(reply, out.summary());
+        assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, out.verdict());
+        assertNull(out.detailedReport());
+        assertEquals(List.of(new RcaDtos.Hypothesis("Canary model", "low", "", List.of())), out.hypotheses());
+        assertEquals(
+                List.of(new RcaSynthesisOutput.ChecklistAssessment("serving_model", Assessment.EXPLAINS, "")),
+                out.checklist());
+    }
+
+    /**
+     * The same for a cause-naming reply. Catches a cause with a blank title surviving, a session cited twice
+     * counted twice, an unknown or missing attribution kind passed through, absent prose fields failing the
+     * run, and a reply with no causes key at all failing instead of finding nothing.
+     */
+    @Test
+    void aSparseCauseReplyDegradesFieldByField() {
+        String frustrationReply = "{\"verdict\":\"causes_identified\",\"causes\":[{\"title\":\" \"},"
+                + "{\"title\":\"Asks twice\",\"evidence_session_ids\":[\"s-1\",\"s-1\",\"s-9\"],"
+                + "\"attribution\":{\"kind\":null,\"path\":\" \"}}]}";
+
+        RcaSynthesisOutput.Parsed frustration =
+                RcaSynthesisOutput.parseFrustration(MAPPER, frustrationReply, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(frustrationReply, frustration.summary());
+        assertNull(frustration.detailedReport());
+        assertEquals(
+                List.of(new RcaDtos.Cause(
+                        "Asks twice",
+                        "",
+                        1,
+                        0,
+                        List.of("s-1"),
+                        List.of(),
+                        new RcaDtos.Attribution(RcaDtos.Attribution.UNKNOWN, null, null, null),
+                        "",
+                        "low")),
+                frustration.causes());
+
+        RcaSynthesisOutput.Parsed groundedness = RcaSynthesisOutput.parseGroundedness(
+                MAPPER,
+                "{\"verdict\":\"no_cause_found\",\"causes\":[{\"title\":\"One document\","
+                        + "\"evidence_trace_ids\":[\"tr-1\"]}]}",
+                TURNS,
+                COHORT,
+                "proj");
+        assertEquals(
+                List.of(new RcaDtos.Cause("One document", "", 0, 1, List.of(), List.of("tr-1"), null, "", "low")),
+                groundedness.causes());
+
+        assertEquals(
+                List.of(),
+                RcaSynthesisOutput.parseGroundedness(MAPPER, "{\"verdict\":\"no_cause_found\"}", TURNS, COHORT, "proj")
+                        .causes());
+    }
+
     @Test
     void nonJsonFailsClosed() {
         TessaryException ex = assertThrows(

@@ -7,6 +7,7 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
@@ -166,6 +167,7 @@ public class RcaWorker {
         }
     }
 
+    @ExcludeFromJacocoGeneratedReport("the local host name fails to resolve only on a host with broken name resolution")
     private static String shortHost() {
         try {
             return java.net.InetAddress.getLocalHost().getHostName();
