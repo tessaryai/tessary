@@ -28,6 +28,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @SpringBootTest
 class LlmUsageAccountantTest {
 
+    // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
+    private static final String SUBJECT_KIND = "behavior_finding";
+
     private static final String PRICED_MODEL = "claude-haiku-4-5";
 
     @Autowired
@@ -62,7 +65,7 @@ class LlmUsageAccountantTest {
                 2_000_000L,
                 0L,
                 null,
-                new LlmUsageAccountant.Subject("behavior_finding", "finding-1"));
+                new LlmUsageAccountant.Subject(SUBJECT_KIND, "finding-1"));
 
         LlmCallRow row = only(pid);
         // One million input tokens cost the per-MTok input rate, two million cache reads twice the cache-read
@@ -85,7 +88,7 @@ class LlmUsageAccountantTest {
                         expected,
                         rate.priceBookVersion(),
                         null,
-                        "behavior_finding",
+                        SUBJECT_KIND,
                         "finding-1",
                         row.createdAt()),
                 row);

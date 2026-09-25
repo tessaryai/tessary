@@ -41,6 +41,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class MeteringServiceTest {
 
+    // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
+    private static final String SUBJECT_KIND = "behavior_finding";
+
     private static final String ORG = "org-1";
 
     @Mock
@@ -180,7 +183,7 @@ class MeteringServiceTest {
         LlmUsageFilter triageLane = new LlmUsageFilter("triage", null, null);
         SubjectSpend row = new SubjectSpend("finding-1", 2, 500, new BigDecimal(cost), 1, "2026-09-01T10:00:00Z");
         when(llmCalls.orgTotal(ORG, null, null, triageLane)).thenReturn(slice(null, null, runs, cost));
-        when(llmCalls.bySubject(ORG, null, null, "behavior_finding", 5)).thenReturn(List.of(row));
+        when(llmCalls.bySubject(ORG, null, null, SUBJECT_KIND, 5)).thenReturn(List.of(row));
 
         TriageSpendView view = service().orgTriageSpend(ORG, null, null, 5);
 

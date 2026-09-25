@@ -70,6 +70,9 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest
 class MeteringIntegrationTest {
 
+    // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
+    private static final String SUBJECT_KIND = "behavior_finding";
+
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("tessary.metering.storage-enabled", () -> "true");
@@ -458,7 +461,7 @@ class MeteringIntegrationTest {
                 cost == null ? null : new BigDecimal(cost),
                 null,
                 null,
-                findingId == null ? null : "behavior_finding",
+                findingId == null ? null : SUBJECT_KIND,
                 findingId,
                 at));
     }
