@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -40,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -57,6 +60,10 @@ class JevDecisionClientTest {
     private final List<Long> sleeps = new ArrayList<>();
 
     private JevDecisionClient client() {
+        return client(sleeps::add);
+    }
+
+    private JevDecisionClient client(JevDecisionClient.Sleeper sleeper) {
         PriceBookRepository books = mock(PriceBookRepository.class);
         when(books.hasModel("typesafe/jev-latest")).thenReturn(true);
         when(books.rateFor("typesafe/jev-latest"))
@@ -64,7 +71,7 @@ class JevDecisionClientTest {
                         Optional.of(new ModelRate(BOOK, new ModelRates(new BigDecimal("0.042"), null, null, null))));
         PlatformCallPricer pricer = new PlatformCallPricer(new ModelResolver(books), books);
         return new JevDecisionClient(
-                http, mapper, OpenTelemetry.noop(), pricer, accountant, sleeps::add, Duration.ofSeconds(20), 3);
+                http, mapper, OpenTelemetry.noop(), pricer, accountant, sleeper, Duration.ofSeconds(20), 3);
     }
 
     private static DecisionTarget typesafe() {
@@ -320,5 +327,93 @@ class JevDecisionClientTest {
     @Test
     void targetToString_neverPrintsTheKey() {
         assertEquals(false, typesafe().toString().contains("ts-key"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void transportFailuresOnEveryAttempt_failTheCallAsUnavailable() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new IOException("reset"));
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
+
+        assertSame(DecisionError.PROVIDER_UNAVAILABLE, e.error());
+        assertEquals(2, sleeps.size(), "backs off between the three attempts, not after the last");
+        sent(3);
+    }
+
+    @Test
+    void aRetryAfterBeyondTheCeiling_failsAtOnceRatherThanWaiting() throws Exception {
+        stub(response(429, "", Map.of("Retry-After", List.of("60"))));
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
+
+        assertSame(DecisionError.PROVIDER_UNAVAILABLE, e.error());
+        assertEquals(List.of(), sleeps, "a provider asking for a minute is down for this call");
+        sent(1);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void anInterruptedSend_failsAsUnavailableAndKeepsTheInterrupt() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
+
+        TessaryException e;
+        boolean interrupted;
+        try {
+            e = assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertSame(DecisionError.PROVIDER_UNAVAILABLE, e.error());
+        assertTrue(interrupted, "the worker's shutdown request must survive the failed call");
+    }
+
+    @Test
+    void anInterruptedBackOff_failsAsUnavailableAndKeepsTheInterrupt() throws Exception {
+        stub(response(503, ""));
+        JevDecisionClient interruptedWhileWaiting = client(ms -> {
+            throw new InterruptedException();
+        });
+
+        TessaryException e;
+        boolean interrupted;
+        try {
+            e = assertThrows(
+                    TessaryException.class,
+                    () -> interruptedWhileWaiting.decide("p1", "frustration", typesafe(), request()));
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertSame(DecisionError.PROVIDER_UNAVAILABLE, e.error());
+        assertTrue(interrupted, "the worker's shutdown request must survive the back-off");
+        sent(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "[]| body is not an object",
+                "not json| body is not JSON",
+                "{\"answers\":{\"user_stance\":{\"type\":\"choice\",\"choice\":\"neutral_or_positive\","
+                        + "\"probabilities\":{\"neutral_or_positive\":\"high\"}}}}| non-numeric probability",
+                "{\"answers\":{\"user_stance\":{\"type\":\"choice\",\"choice\":\"neutral_or_positive\","
+                        + "\"probabilities\":{\"neutral_or_positive\":0.9,\"sarcastic\":0.1}}}}"
+                        + "| probability for an unasked option"
+            })
+    void anAnswerWeCannotTrust_isMalformedNamingWhy(String body, String why) throws Exception {
+        stub(response(200, body));
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
+
+        assertSame(DecisionError.MALFORMED_ANSWER, e.error());
+        assertEquals(DecisionError.MALFORMED_ANSWER.render(ModelProvider.TYPESAFE, why), e.getMessage());
     }
 }

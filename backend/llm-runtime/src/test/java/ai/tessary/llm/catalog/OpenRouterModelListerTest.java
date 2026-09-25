@@ -11,12 +11,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -128,5 +131,50 @@ class OpenRouterModelListerTest {
         stubResponse(200, "{\"data\":[]}");
 
         assertFalse(lister().list(cred(null)).stream().findAny().isPresent());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "google/gemini-3.1-pro, Google",
+        "moonshotai/kimi-k2.6, Moonshot",
+        "x-ai/grok-4.6, xAI",
+        "typesafe/jev-latest, TypeSafe"
+    })
+    void eachMakerGroupsUnderTheVendorSpellingItsStaticEntriesUse(String id, String vendor) throws Exception {
+        stubResponse(200, "{\"data\":[{\"id\":\"" + id + "\",\"name\":\"n\"}]}");
+
+        assertEquals(List.of(new ProviderModel(id, "n", vendor)), lister().list(cred(null)));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void aTransportFailureIsAListingFailure() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new IOException("reset"));
+
+        assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void anInterruptedFetchIsAListingFailureThatKeepsTheInterrupt() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
+
+        boolean interrupted;
+        try {
+            assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertTrue(interrupted, "the caller's interrupt must survive the failed fetch");
+    }
+
+    @Test
+    void anUnparseableBodyIsAListingFailure() throws Exception {
+        stubResponse(200, "<html>maintenance</html>");
+
+        assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
     }
 }

@@ -90,4 +90,27 @@ class ProjectModelSettingRepositoryTest {
                 repo.findByProject(b.project().id()).stream().noneMatch(r -> r.lane() == ModelLane.RCA),
                 "the write must not have reached the sibling project");
     }
+
+    @Test
+    void deleteDropsOnlyThatLaneOfThatProject() {
+        var fix = TenantFixture.bootstrap(tenants, "model-setting-delete");
+        var sibling = TenantFixture.bootstrap(tenants, "model-setting-delete-sibling");
+        String pid = fix.project().id();
+        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(pid, ModelLane.TRIAGE, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(sibling.project().id(), ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+
+        repo.delete(pid, ModelLane.RCA);
+        repo.delete(pid, ModelLane.RCA); // a no-op when there is no row
+
+        assertEquals(
+                List.of(ModelLane.TRIAGE),
+                repo.findByProject(pid).stream().map(ProjectModelSetting::lane).toList());
+        assertEquals(
+                List.of(ModelLane.RCA),
+                repo.findByProject(sibling.project().id()).stream()
+                        .map(ProjectModelSetting::lane)
+                        .toList(),
+                "the sibling project's choice for the same lane is untouched");
+    }
 }

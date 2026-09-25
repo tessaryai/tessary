@@ -21,6 +21,7 @@ import ai.tessary.model.Progress;
 import ai.tessary.model.Runtime;
 import ai.tessary.model.SourceSpan;
 import ai.tessary.model.TaxonomyNode;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
@@ -521,6 +522,12 @@ public class PipelineRepository {
     private @Nullable String writeJson(@Nullable Object value) {
         if (value == null) return null;
         if (value instanceof List<?> l && l.isEmpty()) return null;
+        return serialise(value);
+    }
+
+    @ExcludeFromJacocoGeneratedReport(
+            "every value here is a model record Jackson itself read from the bundle, so it always writes back")
+    private String serialise(Object value) {
         try {
             return mapper.writeValueAsString(value);
         } catch (Exception e) {

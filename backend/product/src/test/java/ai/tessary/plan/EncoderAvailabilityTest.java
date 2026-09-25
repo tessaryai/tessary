@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.plan;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import ai.tessary.config.ObserverProperties;
 import java.io.IOException;
@@ -12,11 +16,16 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.health.contributor.Status;
 
 /**
@@ -135,6 +144,63 @@ class EncoderAvailabilityTest {
         assertEquals("unreachable: ConnectException", encoder.snapshot().reason());
 
         assertTrue(encoder.refresh().available(), "a probe that finds it up again lifts the mark");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"heads\": [\"sentiment\"]}", "<html>ok</html>"})
+    void a200ThatDoesNotListTheHeadIsUnavailable(String body) throws IOException {
+        EncoderAvailability encoder = serve(200, body);
+
+        EncoderAvailability.Snapshot s = encoder.refresh();
+
+        assertFalse(s.available(), "another model's heads, or a body that is not JSON, is not this model");
+        assertEquals("healthz answered 200 without the groundedness head", s.reason());
+    }
+
+    @Test
+    void aUrlThatIsNotAUrlIsUnavailableWithThatReason() {
+        ObserverProperties props = new ObserverProperties();
+        props.getEncoder().setUrl("http://bad host:8000");
+
+        EncoderAvailability.Snapshot s = new EncoderAvailability(props).refresh();
+
+        assertFalse(s.available());
+        assertEquals("tessary.observer.encoder.url is not a URL", s.reason());
+    }
+
+    /** A diagnostic that can stop the platform starting is the worse bug: a bad URL is logged, not thrown. */
+    @Test
+    void aBootProbeThatCannotEvenBuildItsRequestNeverFailsStartup() {
+        ObserverProperties props = new ObserverProperties();
+        props.getEncoder().setUrl("ftp://encoder.internal");
+        EncoderAvailability encoder = new EncoderAvailability(props);
+
+        assertDoesNotThrow(encoder::probeOnBoot);
+
+        assertFalse(encoder.available());
+        assertEquals("not probed yet", encoder.snapshot().reason());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void anInterruptedProbeIsUnavailableAndKeepsTheInterrupt() throws Exception {
+        HttpClient client = mock(HttpClient.class);
+        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
+        ObserverProperties props = new ObserverProperties();
+        props.getEncoder().setUrl("http://127.0.0.1:8000");
+
+        EncoderAvailability.Snapshot s;
+        boolean interrupted;
+        try {
+            s = new EncoderAvailability(props, client).refresh();
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertFalse(s.available());
+        assertEquals("probe interrupted", s.reason());
+        assertTrue(interrupted, "the scheduler's shutdown request must survive the probe");
     }
 
     /** A loopback listener answering every request with {@code status} and {@code body}. */

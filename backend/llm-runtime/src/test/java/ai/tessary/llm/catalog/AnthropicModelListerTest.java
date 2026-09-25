@@ -142,4 +142,20 @@ class AnthropicModelListerTest {
 
         assertThrows(ModelListingException.class, () -> lister().list(cred("sk-ant-test")));
     }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void anInterruptedFetchIsAListingFailureThatKeepsTheInterrupt() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
+
+        boolean interrupted;
+        try {
+            assertThrows(ModelListingException.class, () -> lister().list(cred("sk-ant-test")));
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertTrue(interrupted, "the caller's interrupt must survive the failed fetch");
+    }
 }

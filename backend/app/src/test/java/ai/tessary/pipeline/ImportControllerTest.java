@@ -5,23 +5,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
+import ai.tessary.auth.TenantContext;
 import ai.tessary.model.Pipeline;
+import ai.tessary.open.errors.PipelineError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.ApiKeyService;
+import ai.tessary.tenant.OrgMembership;
+import ai.tessary.tenant.OrgMembershipRepository;
+import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,6 +41,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Covers the sharded {@code .tessary/} import surface (v0.4+ layout).
@@ -74,6 +88,15 @@ class ImportControllerTest {
 
     @Autowired
     AuthFilter authFilter;
+
+    @Autowired
+    ImportController controller;
+
+    @Autowired
+    OrgMembershipRepository memberships;
+
+    @Autowired
+    JdbcClient jdbc;
 
     final ObjectMapper mapper = new ObjectMapper();
     MockMvc mvc;
@@ -492,6 +515,85 @@ class ImportControllerTest {
                 .file(file(".tessary/pipeline/meta.yaml", META_YAML))
                 .header("Authorization", "Bearer " + token);
         mvc.perform(req).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void importDirectory_replaceMode_removesWhatTheBundleNoLongerDeclares() throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, "import-replace");
+        String token =
+                mcpTokens.issue(fix.project().id(), fix.user().id(), "replace").plaintext();
+        okMultipart(fix, token, null, bundle(".tessary/"));
+
+        JsonNode data = okMultipart(fix, token, "REPLACE", file(".tessary/pipeline/meta.yaml", META_YAML));
+
+        assertEquals("replace", data.get("mode").asText());
+        assertEquals(1, data.get("callSites").get("removed").asInt());
+        assertEquals(1, data.get("failureModes").get("removed").asInt());
+        assertEquals(
+                0, pipelineService.getPipeline(fix.project().id()).callSites().size());
+    }
+
+    /** A bundle that names its commit binds the project to it, so a later PR can be diffed against it. */
+    @Test
+    void importDirectory_bindsThePipelineToTheCommitAndRepoItDeclares() throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, "import-commit");
+        String token =
+                mcpTokens.issue(fix.project().id(), fix.user().id(), "commit").plaintext();
+        String meta = META_YAML + "commit_sha: 0a1b2c3d\nrepo:\n  owner: acme\n  name: summariser\n";
+
+        okMultipart(fix, token, null, file(".tessary/pipeline/meta.yaml", meta));
+
+        Map<String, Object> row = jdbc.sql(
+                        "SELECT synced_commit_sha, repo_owner, repo_name FROM pipeline_meta WHERE project_id = :pid")
+                .param("pid", fix.project().id())
+                .query()
+                .singleRow();
+        assertEquals(Map.of("synced_commit_sha", "0a1b2c3d", "repo_owner", "acme", "repo_name", "summariser"), row);
+    }
+
+    /** Only an owner (or the plugin's project token) may overwrite the pipeline; a member session may not. */
+    @Test
+    void importDirectory_aMemberSessionIsForbiddenAndChangesNothing() {
+        var fix = TenantFixture.bootstrap(tenants, "import-member");
+        Principal member = tenants.upsertUserFromWorkos(
+                "user_import_member_" + System.nanoTime(),
+                "import-member+" + System.nanoTime() + "@example.com",
+                "m",
+                null);
+        memberships.insert(OrgMembership.of(
+                fix.org().id(), member.id(), OrgMembership.MEMBER, Instant.now().toString()));
+        TenantContext session = new TenantContext(member.id(), member.email(), null, null, null, null);
+
+        ResponseStatusException e = assertThrows(
+                ResponseStatusException.class,
+                () -> controller.importDirectory(
+                        session, fix.org().slug(), fix.project().slug(), "upsert", bundle(".tessary/")));
+
+        assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+        assertEquals(
+                0, pipelineService.getPipeline(fix.project().id()).callSites().size());
+    }
+
+    /** A part whose bytes cannot be read is a named 400, not a 500 or a silently dropped shard. */
+    @Test
+    void importDirectory_aPartThatCannotBeReadIsRefusedByName() {
+        var fix = TenantFixture.bootstrap(tenants, "import-unreadable");
+        TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        MultipartFile unreadable =
+                new MockMultipartFile("files", ".tessary/pipeline/meta.yaml", "application/x-yaml", new byte[] {1}) {
+                    @Override
+                    public byte[] getBytes() throws IOException {
+                        throw new IOException("temp file gone");
+                    }
+                };
+
+        TessaryException e = assertThrows(
+                TessaryException.class,
+                () -> controller.importDirectory(
+                        owner, fix.org().slug(), fix.project().slug(), "upsert", new MultipartFile[] {unreadable}));
+
+        assertEquals(PipelineError.FILE_READ_FAILED, e.error());
+        assertEquals(PipelineError.FILE_READ_FAILED.render(".tessary/pipeline/meta.yaml"), e.getMessage());
     }
 
     // ================================================================== helpers

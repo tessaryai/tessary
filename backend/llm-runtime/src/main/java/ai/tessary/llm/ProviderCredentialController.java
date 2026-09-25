@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -77,6 +78,10 @@ public class ProviderCredentialController {
 
     private final ApplicationEventPublisher events;
 
+    /** How long {@link #catalog} waits on one provider; {@link #PER_PROVIDER_FETCH_DEADLINE} in production. */
+    private final Duration fetchDeadline;
+
+    @Autowired
     public ProviderCredentialController(
             ProviderCredentialRepository repo,
             SecretBox secretBox,
@@ -84,6 +89,19 @@ public class ProviderCredentialController {
             CapabilityService capabilities,
             ModelCatalogFetchService catalogFetchService,
             ApplicationEventPublisher events) {
+        this(repo, secretBox, resolver, capabilities, catalogFetchService, events, PER_PROVIDER_FETCH_DEADLINE);
+    }
+
+    /** Test seam: a short deadline, so a test can hang one provider without waiting ten seconds. */
+    ProviderCredentialController(
+            ProviderCredentialRepository repo,
+            SecretBox secretBox,
+            TenantPathResolver resolver,
+            CapabilityService capabilities,
+            ModelCatalogFetchService catalogFetchService,
+            ApplicationEventPublisher events,
+            Duration fetchDeadline) {
+        this.fetchDeadline = fetchDeadline;
         this.repo = repo;
         this.events = events;
         this.secretBox = secretBox;
@@ -198,9 +216,7 @@ public class ProviderCredentialController {
             Map<ModelProvider, List<ProviderModel>> results = new EnumMap<>(ModelProvider.class);
             for (Map.Entry<ModelProvider, Future<List<ProviderModel>>> entry : futures.entrySet()) {
                 try {
-                    results.put(
-                            entry.getKey(),
-                            entry.getValue().get(PER_PROVIDER_FETCH_DEADLINE.toMillis(), TimeUnit.MILLISECONDS));
+                    results.put(entry.getKey(), entry.getValue().get(fetchDeadline.toMillis(), TimeUnit.MILLISECONDS));
                 } catch (TimeoutException e) {
                     entry.getValue().cancel(true);
                 } catch (ExecutionException e) {

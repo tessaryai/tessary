@@ -139,4 +139,33 @@ class OpenAiCompatModelListerTest {
         String path = capturedRequest().uri().toString();
         assertTrue(path.endsWith("/v1/models") && !path.contains("//models"), path);
     }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void anInterruptedFetchIsAListingFailureThatKeepsTheInterrupt() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
+
+        boolean interrupted;
+        try {
+            assertThrows(
+                    ModelListingException.class,
+                    () -> lister().list(new ResolvedCredential(
+                            "sk-test", "https://api.openai.com/v1", null, null, null, false)));
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        assertTrue(interrupted, "the caller's interrupt must survive the failed fetch");
+    }
+
+    @Test
+    void anUnparseableBodyIsAListingFailure() throws Exception {
+        stubResponse(200, "<html>maintenance</html>");
+
+        assertThrows(
+                ModelListingException.class,
+                () -> lister().list(new ResolvedCredential(
+                        "sk-test", "https://api.openai.com/v1", null, null, null, false)));
+    }
 }

@@ -4,6 +4,7 @@ package ai.tessary.llm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -15,15 +16,26 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.llm.catalog.ModelCatalogFetchService;
+import ai.tessary.llm.catalog.ProviderModel;
 import ai.tessary.open.errors.CapabilityError;
+import ai.tessary.open.errors.ErrorCode;
+import ai.tessary.open.errors.IngestError;
+import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Organization;
+import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -308,5 +320,278 @@ class ProviderCredentialControllerTest {
         assertTrue(
                 response.data().models().stream().anyMatch(e -> e.provider() == ModelProvider.ANTHROPIC),
                 "an unrelated provider must be entirely unaffected by OpenAI's failure");
+    }
+
+    // ---- list: the org's roster, secrets reduced to booleans ----
+
+    @Test
+    void listShowsEachCredentialWithItsSecretsReducedToWhetherTheyAreSet() {
+        ProviderCredential openai = new ProviderCredential(
+                "c1",
+                ORG_ID,
+                null,
+                ModelProvider.OPENAI,
+                "https://gw.example.com",
+                "sealed",
+                null,
+                null,
+                null,
+                null,
+                null,
+                ProviderCredential.AUTH_MODE_API_KEY,
+                "t0",
+                "t1");
+        ProviderCredential role = new ProviderCredential(
+                "c2",
+                ORG_ID,
+                null,
+                ModelProvider.BEDROCK,
+                null,
+                null,
+                "us-east-1",
+                null,
+                null,
+                "arn:m",
+                null,
+                ProviderCredential.AUTH_MODE_IAM_ROLE,
+                "t0",
+                "t1");
+        ProviderCredential halfKeyed = new ProviderCredential(
+                "c3",
+                ORG_ID,
+                null,
+                ModelProvider.BEDROCK_MANTLE,
+                null,
+                null,
+                "us-west-2",
+                "sealed-ak",
+                null,
+                null,
+                null,
+                ProviderCredential.AUTH_MODE_API_KEY,
+                "t0",
+                "t1");
+        when(repo.findByOrg(ORG_ID)).thenReturn(List.of(openai, role, halfKeyed));
+
+        var views = controller.list(ctx, ORG_SLUG).data().credentials();
+
+        assertEquals(
+                List.of(
+                        new ProviderCredentialController.View(
+                                "c1",
+                                ModelProvider.OPENAI,
+                                "https://gw.example.com",
+                                true,
+                                null,
+                                false,
+                                null,
+                                null,
+                                "api_key",
+                                "t0",
+                                "t1"),
+                        new ProviderCredentialController.View(
+                                "c2",
+                                ModelProvider.BEDROCK,
+                                null,
+                                false,
+                                "us-east-1",
+                                true,
+                                "arn:m",
+                                null,
+                                "iam_role",
+                                "t0",
+                                "t1"),
+                        new ProviderCredentialController.View(
+                                "c3",
+                                ModelProvider.BEDROCK_MANTLE,
+                                null,
+                                false,
+                                "us-west-2",
+                                false,
+                                null,
+                                null,
+                                "api_key",
+                                "t0",
+                                "t1")),
+                views,
+                "an IAM-role credential is configured with no keys; an access key without its secret is not");
+    }
+
+    // ---- upsert: what a save refuses ----
+
+    /** SSRF: the override becomes a server-side outbound target, so an internal host is refused before any write. */
+    @Test
+    void upsertRefusesABaseUrlOverrideThatPointsInsideTheNetwork() {
+        var req = new ProviderCredentialController.UpsertRequest(
+                "http://169.254.169.254/latest", null, null, null, null, null, null, null);
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.upsert(ctx, ORG_SLUG, ModelProvider.CUSTOM, req));
+
+        assertEquals(IngestError.INVALID_BASE_URL, e.error());
+        verify(repo, never()).insert(any());
+    }
+
+    static Stream<Arguments> unsaveableCredentials() {
+        return Stream.of(
+                Arguments.of(
+                        "an AWS platform with no region",
+                        ModelProvider.BEDROCK,
+                        new ProviderCredentialController.UpsertRequest(null, null, null, null, null, null, null, null),
+                        ModelConfigError.BEDROCK_MISSING_REGION),
+                Arguments.of(
+                        "an auth mode that does not exist",
+                        ModelProvider.OPENAI,
+                        new ProviderCredentialController.UpsertRequest(
+                                null, null, null, null, null, null, null, "oauth"),
+                        ModelConfigError.UNKNOWN_PROVIDER),
+                Arguments.of(
+                        "an IAM role on a platform that never reads one",
+                        ModelProvider.OPENAI,
+                        new ProviderCredentialController.UpsertRequest(
+                                null, null, null, null, null, null, null, "iam_role"),
+                        ModelConfigError.UNKNOWN_PROVIDER));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("unsaveableCredentials")
+    void upsertRefusesACredentialThatCouldNeverRun(
+            String why, ModelProvider provider, ProviderCredentialController.UpsertRequest req, ErrorCode expected) {
+        when(repo.findByOrgAndProvider(ORG_ID, provider)).thenReturn(Optional.empty());
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.upsert(ctx, ORG_SLUG, provider, req));
+
+        assertEquals(expected, e.error(), why);
+        verify(repo, never()).insert(any());
+    }
+
+    /** AWS keys with nothing to seal them with must be refused, never stored in the clear. */
+    @Test
+    void upsertRefusesAwsKeysWhenNoSecretKeyIsConfigured() {
+        when(secretBox.isConfigured()).thenReturn(false);
+        var req = new ProviderCredentialController.UpsertRequest(
+                null, null, "us-east-1", "AKIA-ACCESS", "aws-secret", null, null, null);
+
+        TessaryException e = assertThrows(
+                TessaryException.class, () -> controller.upsert(ctx, ORG_SLUG, ModelProvider.BEDROCK, req));
+
+        assertEquals(ModelConfigError.SECRET_KEY_NOT_CONFIGURED, e.error());
+        verify(repo, never()).insert(any());
+    }
+
+    // ---- upsert: sent fields replace, blank ones clear ----
+
+    @Test
+    void upsertReplacesEverySentFieldAndABlankOneClearsIt() {
+        ProviderCredential existing = new ProviderCredential(
+                "cred_1",
+                ORG_ID,
+                "legacy_project",
+                ModelProvider.BEDROCK,
+                "https://8.8.8.8/old",
+                null,
+                "us-east-1",
+                "old-ak",
+                "old-sk",
+                "arn:old",
+                "old-name",
+                ProviderCredential.AUTH_MODE_API_KEY,
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z");
+        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.BEDROCK)).thenReturn(Optional.of(existing));
+        when(secretBox.isConfigured()).thenReturn(true);
+        when(secretBox.seal("AKIA-NEW")).thenReturn("sealed-ak");
+        when(secretBox.seal("secret-new")).thenReturn("sealed-sk");
+        var req = new ProviderCredentialController.UpsertRequest(
+                "", null, "eu-west-1", "AKIA-NEW", "secret-new", "", "new-name", "iam_role");
+
+        controller.upsert(ctx, ORG_SLUG, ModelProvider.BEDROCK, req);
+
+        ArgumentCaptor<ProviderCredential> written = ArgumentCaptor.forClass(ProviderCredential.class);
+        verify(repo).update(written.capture());
+        ProviderCredential row = written.getValue();
+        assertEquals(
+                new ProviderCredential(
+                        "cred_1",
+                        ORG_ID,
+                        "legacy_project",
+                        ModelProvider.BEDROCK,
+                        null,
+                        null,
+                        "eu-west-1",
+                        "sealed-ak",
+                        "sealed-sk",
+                        null,
+                        "new-name",
+                        ProviderCredential.AUTH_MODE_IAM_ROLE,
+                        "2026-01-01T00:00:00Z",
+                        row.updatedAt()),
+                row,
+                "sent values replace, a blank string clears, the id, project and creation time are kept");
+    }
+
+    @Test
+    void upsertAcceptsAPublicBaseUrlOverride() {
+        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.CUSTOM)).thenReturn(Optional.empty());
+        var req = new ProviderCredentialController.UpsertRequest(
+                "https://8.8.8.8/v1", null, null, null, null, null, "my-model", null);
+
+        var view = controller.upsert(ctx, ORG_SLUG, ModelProvider.CUSTOM, req).data();
+
+        assertEquals("https://8.8.8.8/v1", view.baseUrlOverride());
+        assertEquals("my-model", view.customModelName());
+    }
+
+    // ---- catalog: one stuck provider cannot hold the page ----
+
+    /**
+     * A provider that never answers is cut off at the deadline and cancelled, so the page renders its
+     * static entries; without the cancel the request would wait on the hung fetch forever.
+     */
+    @Test
+    void catalogCutsOffAHungProviderAtTheDeadlineAndKeepsEveryOtherLiveListing() {
+        ModelCatalogFetchService hanging = org.mockito.Mockito.mock(ModelCatalogFetchService.class, call -> {
+            if (call.getArgument(1) == ModelProvider.ANTHROPIC) {
+                return List.of(new ProviderModel("claude-live-9", "Claude Live 9", "Anthropic"));
+            }
+            new CountDownLatch(1).await();
+            return List.of();
+        });
+        var fast = new ProviderCredentialController(
+                repo, secretBox, resolver, capabilities, hanging, events, Duration.ofMillis(100));
+
+        var models = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> fast.catalog(ctx, ORG_SLUG))
+                .data()
+                .models();
+
+        assertTrue(models.stream().anyMatch(m -> "claude-live-9".equals(m.modelName())), "the answered provider");
+        assertTrue(
+                models.stream().anyMatch(m -> m.provider() == ModelProvider.OPENAI),
+                "a hung provider degrades to its static entries");
+    }
+
+    /** An interrupted request keeps its interrupt, so the servlet container can see the thread was asked to stop. */
+    @Test
+    void catalogKeepsTheCallersInterruptAndFallsBackToStaticEntries() {
+        ModelCatalogFetchService hanging = org.mockito.Mockito.mock(ModelCatalogFetchService.class, call -> {
+            new CountDownLatch(1).await();
+            return List.of();
+        });
+        var fast = new ProviderCredentialController(
+                repo, secretBox, resolver, capabilities, hanging, events, Duration.ofMillis(200));
+
+        Thread.currentThread().interrupt();
+        boolean stillInterrupted;
+        List<ai.tessary.llm.ModelCatalog.CatalogEntry> models;
+        try {
+            models = fast.catalog(ctx, ORG_SLUG).data().models();
+        } finally {
+            stillInterrupted = Thread.interrupted();
+        }
+
+        assertTrue(stillInterrupted, "the interrupt must survive the fan-out");
+        assertEquals(ModelCatalog.entries().size(), models.size());
+        assertTrue(models.containsAll(ModelCatalog.entries()), "every provider falls back to its static entries");
     }
 }

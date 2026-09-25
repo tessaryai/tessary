@@ -158,7 +158,7 @@ public final class AgentSpanTelemetry {
      * Stamp cost + token usage from the runner's result envelope onto {@code span} so Langfuse prices it
      * like any other generation (instead of a hollow model-only span).
      */
-    public static void recordUsage(Span span, ObjectMapper mapper, String envelopeJson) {
+    public static void recordUsage(Span span, ObjectMapper mapper, @Nullable String envelopeJson) {
         if (envelopeJson == null || envelopeJson.isBlank()) return;
         try {
             JsonNode env = mapper.readTree(envelopeJson);
@@ -261,7 +261,7 @@ public final class AgentSpanTelemetry {
      * offsets ({@code ts - runStartMs}), kept monotonic, so microVM↔host clock skew can't push a turn outside
      * the parent window.
      */
-    public static void recordTurns(Tracer tracer, JsonNode turns, long runStartMs, Instant parentStart) {
+    public static void recordTurns(Tracer tracer, @Nullable JsonNode turns, long runStartMs, Instant parentStart) {
         if (turns == null || !turns.isArray() || turns.isEmpty()) return;
         try {
             long prevOffset = 0L;

@@ -24,6 +24,8 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /** The validation gate and the automatic-selection semantics, without a database. */
 class ProjectModelSettingsTest {
@@ -382,6 +384,33 @@ class ProjectModelSettingsTest {
 
         when(repo.findByProject(PID)).thenReturn(List.of());
         assertTrue(settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic());
+    }
+
+    /**
+     * A stored row the validator would refuse today (written before a rule existed, or by hand) must not
+     * pin the lane: a chat model on a sandbox lane cannot drive the agent, a chat model on the decision
+     * lane cannot answer a decision, and a key naming no provider resolves nowhere.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "RCA, OPENAI:gpt-5.5, anthropic.claude-sonnet-5",
+        "FRUSTRATION, OPENAI:gpt-5.5, TYPESAFE:jev-latest",
+        "RCA, NOPE:some-model, anthropic.claude-sonnet-5"
+    })
+    void aStoredRowTheLaneCannotRunFallsBackToTheOrder(ModelLane lane, String stored, String fallback) {
+        when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored, ServiceTier.STANDARD)));
+
+        var resolved = settings.resolve(PID, lane).orElseThrow();
+
+        assertEquals(fallback, resolved.modelKey());
+        assertTrue(resolved.automatic());
+    }
+
+    @Test
+    void aCatalogKeyNamingNoProviderIsRejectedAsUnknown() {
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "NOPE:some-model"));
+        assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
     // ---- the non-Bedrock model_key union (GEMINI/GLM/GROK/CUSTOM) ----
