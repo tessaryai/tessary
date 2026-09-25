@@ -260,6 +260,7 @@ class E2bTriageSandboxTest {
                         any(),
                         any(),
                         any(),
+                        eq(false),
                         eq(100L),
                         eq(20L),
                         eq(0L),

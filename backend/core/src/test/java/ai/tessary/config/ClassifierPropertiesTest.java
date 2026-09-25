@@ -24,23 +24,21 @@ class ClassifierPropertiesTest {
                         Map.entry("tessary.classifier.lease-seconds", "13"),
                         Map.entry("tessary.classifier.max-attempts", "14"),
                         Map.entry("tessary.classifier.dead-letter-cooldown-seconds", "15"),
-                        Map.entry("tessary.classifier.thread-max-observations", "16"),
-                        Map.entry("tessary.classifier.triage-min-trace-count", "17"),
-                        Map.entry("tessary.classifier.triage-breaker-failures", "18"),
-                        Map.entry("tessary.classifier.triage-breaker-cooldown-seconds", "19"),
-                        Map.entry("tessary.classifier.triage-config-retry-seconds", "20"),
+                        Map.entry("tessary.classifier.triage-min-trace-count", "16"),
+                        Map.entry("tessary.classifier.triage-breaker-failures", "17"),
+                        Map.entry("tessary.classifier.triage-breaker-cooldown-seconds", "18"),
+                        Map.entry("tessary.classifier.triage-config-retry-seconds", "19"),
                         Map.entry("tessary.classifier.triage-mcp-base-url", "https://app.example"),
                         Map.entry("tessary.classifier.triage-sandbox", "local")));
 
         assertEquals(
-                List.of(11L, 12L, 13L, 14L, 15L, 16L, 17L, 18L, 19L, 20L),
+                List.of(11L, 12L, 13L, 14L, 15L, 16L, 17L, 18L, 19L),
                 List.of(
                         (long) p.getBatchSize(),
                         (long) p.getEncoderBatchSize(),
                         p.getLeaseSeconds(),
                         (long) p.getMaxAttempts(),
                         p.getDeadLetterCooldownSeconds(),
-                        (long) p.getThreadMaxObservations(),
                         p.getTriageMinTraceCount(),
                         (long) p.getTriageBreakerFailures(),
                         p.getTriageBreakerCooldownSeconds(),

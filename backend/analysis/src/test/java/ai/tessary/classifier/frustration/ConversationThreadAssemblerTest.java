@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
-import ai.tessary.config.ClassifierProperties;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -25,11 +24,11 @@ import org.junit.jupiter.params.provider.CsvSource;
  */
 class ConversationThreadAssemblerTest {
 
-    private static ConversationThreadAssembler assembler(SubstrateObservation... newestFirst) {
+    private static ConversationThreadAssembler assembler(SubstrateObservation... priorOldestFirst) {
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
-        when(substrate.conversationObservationsUpTo(anyString(), anyString(), anyString(), anyInt()))
-                .thenReturn(List.of(newestFirst));
-        return new ConversationThreadAssembler(substrate, new ClassifierProperties());
+        when(substrate.priorTurns(anyString(), anyString(), anyInt()))
+                .thenReturn(new SubstrateReadRepository.PriorTurns(List.of(priorOldestFirst), priorOldestFirst.length));
+        return new ConversationThreadAssembler(substrate);
     }
 
     private static SubstrateObservation span(
@@ -66,7 +65,7 @@ class ConversationThreadAssemblerTest {
                 "t2", "llm", "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"still empty\"}]}]", null);
         SubstrateObservation scored = span("t3", "llm", "[{\"role\":\"user\",\"content\":\"this is useless\"}]", null);
 
-        Optional<StructuredThread> thread = assembler(scored, second, first).assembleStructured(scored);
+        Optional<StructuredThread> thread = assembler(first, second).assembleStructured(scored);
 
         assertEquals(
                 Optional.of(new StructuredThread(
@@ -74,7 +73,8 @@ class ConversationThreadAssemblerTest {
                                 new Message("user", "the export is empty", true, false),
                                 new Message("assistant", "Try re-running it.", true, false),
                                 new Message("user", "still empty", true, false)),
-                        new Message("user", "this is useless", true, false))),
+                        new Message("user", "this is useless", true, false),
+                        3)),
                 thread);
     }
 }

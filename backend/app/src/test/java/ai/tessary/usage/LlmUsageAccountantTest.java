@@ -56,6 +56,7 @@ class LlmUsageAccountantTest {
                 "rca",
                 PRICED_MODEL,
                 PRICED_MODEL,
+                false,
                 1_000_000L,
                 0L,
                 2_000_000L,
@@ -94,7 +95,7 @@ class LlmUsageAccountantTest {
     void aReportedCostIsKeptVerbatimAndNamesNoBook() {
         String sandbox = project();
         accountant.recordSandboxRun(
-                sandbox, "triage", PRICED_MODEL, PRICED_MODEL, 10L, 20L, 0L, 0L, new BigDecimal("0.5"), null);
+                sandbox, "triage", PRICED_MODEL, PRICED_MODEL, false, 10L, 20L, 0L, 0L, new BigDecimal("0.5"), null);
         LlmCallRow run = only(sandbox);
         assertEquals(new BigDecimal("0.5000000000"), run.costUsd());
         assertEquals(null, run.priceBookVersion(), "no book produced a harness-reported figure");
@@ -141,7 +142,7 @@ class LlmUsageAccountantTest {
         // A count past the integer column is clamped to its ceiling rather than wrapped negative...
         String clamped = project();
         accountant.recordSandboxRun(
-                clamped, "rca", "unpriced-model", "unpriced-model", Long.MAX_VALUE, 0L, 0L, 0L, null, null);
+                clamped, "rca", "unpriced-model", "unpriced-model", false, Long.MAX_VALUE, 0L, 0L, 0L, null, null);
         LlmCallRow row = only(clamped);
         assertEquals(Integer.MAX_VALUE, row.inputTokens());
         assertEquals(null, row.costUsd(), "a model no book carries is unpriced, not free");
@@ -150,7 +151,7 @@ class LlmUsageAccountantTest {
         // from the run that spent the money.
         String deleted = "proj-" + UUID.randomUUID();
         assertDoesNotThrow(() -> accountant.recordSandboxRun(
-                deleted, "rca", "unpriced-model", "unpriced-model", 10L, 1L, 0L, 0L, null, null));
+                deleted, "rca", "unpriced-model", "unpriced-model", false, 10L, 1L, 0L, 0L, null, null));
         assertEquals(List.of(), rows(deleted));
     }
 
