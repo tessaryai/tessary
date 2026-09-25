@@ -66,7 +66,7 @@
              was checked by hand at introduction time. -->
         <pdfbox.version>3.0.8</pdfbox.version>
         <opentelemetry-instrumentation.version>2.31.1-alpha</opentelemetry-instrumentation.version>
-        <protobuf-java.version>4.36.0</protobuf-java.version>
+        <protobuf-java.version>4.36.2</protobuf-java.version>
         <!-- Testcontainers 2.x: the artifacts were regrouped, so the modules depend on
              `testcontainers-postgresql` / `testcontainers-junit-jupiter`, NOT the 1.x
              `postgresql` / `junit-jupiter` names. Docker is required to run `mvn verify`. -->
