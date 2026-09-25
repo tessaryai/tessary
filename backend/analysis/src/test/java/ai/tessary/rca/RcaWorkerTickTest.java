@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -22,6 +23,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
 import io.micrometer.tracing.Tracer;
+import java.net.UnknownHostException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -181,5 +183,17 @@ class RcaWorkerTickTest {
                 caseId,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z");
+    }
+
+    /**
+     * The bug: on a machine whose own host name does not resolve, building the lease owner throws and the
+     * worker bean never constructs, so nothing is ever swept there. It falls back to a fixed name instead.
+     */
+    @Test
+    void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {
+        assertEquals("box-1", RcaWorker.shortHost(() -> "box-1"));
+        assertEquals("host", RcaWorker.shortHost(() -> {
+            throw new UnknownHostException("box-1");
+        }));
     }
 }

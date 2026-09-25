@@ -526,7 +526,8 @@ public class PipelineRepository {
     }
 
     @ExcludeFromJacocoGeneratedReport(
-            "every value here is a model record Jackson itself read from the bundle, so it always writes back")
+            "defensive: the mapper is the app's own, and every value here is a model record it read from the"
+                    + " bundle")
     private String serialise(Object value) {
         try {
             return mapper.writeValueAsString(value);

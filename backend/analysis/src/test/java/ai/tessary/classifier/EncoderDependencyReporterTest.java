@@ -117,7 +117,9 @@ class EncoderDependencyReporterTest {
                 new EncoderDependencyReporter(failsOnce, enabledRows(Map.of()), capabilities);
 
         assertDoesNotThrow(reporter::reportOnBoot);
-        assertEquals(new EncoderDependencyReporter.Dependency(0, 0, Set.of()), reporter.reportDaily());
+        reporter.reportDaily();
+
+        assertEquals(2, scans.get(), "the daily run scanned the projects again");
     }
 
     private static Project project(String id, String orgId) {

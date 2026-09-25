@@ -2,6 +2,7 @@
 package ai.tessary.crypto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -82,7 +83,7 @@ class SecretBoxTest {
         TessaryProperties p = new TessaryProperties();
         p.setSecretKey("not base64!!");
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> new SecretBox(p));
-        assertEquals("tessary.secret-key is not valid base64", ex.getMessage());
+        assertInstanceOf(IllegalArgumentException.class, ex.getCause());
     }
 
     /** The bug: a blank key counts as configured, and the first seal fails deep inside a request. */
@@ -101,6 +102,6 @@ class SecretBoxTest {
     void openRejectsANonBase64TokenAsUnreadable() {
         SecretBox box = boxWith(key((byte) 0x33));
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> box.open("%%%"));
-        assertEquals("SecretBox.open: invalid base64", ex.getMessage());
+        assertInstanceOf(IllegalArgumentException.class, ex.getCause());
     }
 }

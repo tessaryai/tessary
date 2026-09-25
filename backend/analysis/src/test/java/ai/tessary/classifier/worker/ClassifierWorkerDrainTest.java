@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -32,6 +33,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.tracing.Tracer;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -428,5 +430,17 @@ class ClassifierWorkerDrainTest {
     private static String handle(List<SubstrateObservation> page) {
         SubstrateObservation last = page.get(page.size() - 1);
         return SubstrateReadRepository.handle(last.traceId(), last.observationId());
+    }
+
+    /**
+     * The bug: on a machine whose own host name does not resolve, building the lease owner throws and the
+     * worker bean never constructs, so nothing is ever swept there. It falls back to a fixed name instead.
+     */
+    @Test
+    void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {
+        assertEquals("box-1", ClassifierWorker.shortHost(() -> "box-1"));
+        assertEquals("host", ClassifierWorker.shortHost(() -> {
+            throw new UnknownHostException("box-1");
+        }));
     }
 }

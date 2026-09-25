@@ -19,7 +19,6 @@ import ai.tessary.llm.decisions.DecisionProviderResolver;
 import ai.tessary.llm.decisions.DecisionRequest;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -42,7 +41,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -314,20 +312,14 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     }
 
     /**
-     * Surface a task's failure. The executor's close has already waited for every task, and each task catches
-     * its own call's failures, so neither checked exception {@link Future#get} declares can reach here.
+     * Surface a task's failure. The executor's close has already waited for every task, so each future is
+     * done. A task catches its own call's runtime failures, so only an {@link Error} or a failure outside the
+     * call (scoring an answer) lands here, and it fails the page rather than dropping that conversation.
      */
-    @ExcludeFromJacocoGeneratedReport(
-            "close() has already waited for every task and each task catches its own failures, so the catches"
-                    + " Future.get forces cannot fire")
     private static void joinAll(List<Future<?>> futures) {
         for (Future<?> f : futures) {
-            try {
-                f.get();
-            } catch (ExecutionException e) {
-                throw new IllegalStateException("frustration send task failed", e);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            if (f.state() == Future.State.FAILED) {
+                throw new IllegalStateException("frustration send task failed", f.exceptionNow());
             }
         }
     }

@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -273,6 +274,19 @@ class BehaviorTriageEngineTest {
         assertEquals(
                 "[{\"path\":\"window.n_cur\",\"reason\":\"the count\",\"stdout\":null},"
                         + "{\"path\":\"checks/by_model.py\",\"reason\":\"split by model\",\"stdout\":\"haiku 41%\"}]",
+                engine(props(), fixedSandbox(Optional.empty()), memberships()).citationsJson(verdict));
+    }
+
+    /**
+     * The bug: a ruling that cites nothing writes {@code []} to {@code finding.triage_citations}, where every
+     * other uncited ruling carries NULL, so a query for uncited rulings ({@code triage_citations IS NULL})
+     * misses it.
+     */
+    @Test
+    void aRulingWithNoCitationsStoresNone() {
+        BehaviorTriageVerdict verdict = new BehaviorTriageVerdict(FindingRow.TriageVerdict.POSITIVE, "s", List.of());
+
+        assertNull(
                 engine(props(), fixedSandbox(Optional.empty()), memberships()).citationsJson(verdict));
     }
 

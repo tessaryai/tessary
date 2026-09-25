@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRow;
@@ -714,5 +715,18 @@ class GroundednessDetectorTest {
         assertTrue(
                 String.valueOf(got.evidenceJson()).contains("\"premise_had_evidence\":true"),
                 "a reader has to be able to tell what the answer was actually compared against");
+    }
+
+    /**
+     * The bug: a caller scoring one observation at a time gets a detection while no assessment row is written,
+     * so the rate test counts a flag without its trial. Only sweepBatch records trials; detect refuses.
+     */
+    @Test
+    void scoringOneObservationOutsideTheSweepIsRefused() {
+        GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.99));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> d.detect(obs("cs-1", "5 years of Python.", "The candidate knows Java."), null));
     }
 }

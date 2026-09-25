@@ -19,12 +19,12 @@ import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.gate.PreDeployCheckService;
 import ai.tessary.gate.PreDeployCheckService.ClassifierDiscovery;
-import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -114,8 +115,8 @@ public class ClassifierWorker {
     private final ClassifierProperties props;
     private final TaskExecutor executor;
     private final TraceMdcBridge traceBridge;
-    private final String leaseOwner =
-            shortHost() + "-" + UUID.randomUUID().toString().substring(0, 8);
+    private final String leaseOwner = shortHost(() -> InetAddress.getLocalHost().getHostName()) + "-"
+            + UUID.randomUUID().toString().substring(0, 8);
     private final RepeatedFailureLogger sweepFailures = new RepeatedFailureLogger(SWEEP_FAILURE_SUMMARY_EVERY);
 
     public ClassifierWorker(
@@ -876,11 +877,10 @@ public class ClassifierWorker {
         }
     }
 
-    @ExcludeFromJacocoGeneratedReport(
-            "asks the OS for the local host name; only a machine whose own name does not resolve reaches the catch")
-    private static String shortHost() {
+    /** The host name {@code hostName} reports, or {@code host} when this machine's own name does not resolve. */
+    static String shortHost(Callable<String> hostName) {
         try {
-            return java.net.InetAddress.getLocalHost().getHostName();
+            return hostName.call();
         } catch (Exception e) {
             return "host";
         }

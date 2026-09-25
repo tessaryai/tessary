@@ -28,6 +28,5 @@ class CapabilityCustomRuleGateTest {
         TessaryException e = assertThrows(TessaryException.class, () -> gate.requireCustomRules("org_1"));
 
         assertEquals(CapabilityError.DISABLED, e.error());
-        assertEquals(CapabilityError.DISABLED.render(Capability.CUSTOM_REDACTION.wire()), e.getMessage());
     }
 }

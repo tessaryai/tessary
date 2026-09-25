@@ -71,8 +71,8 @@ public class EncoderDependencyReporter {
     @Scheduled(
             fixedDelayString = "${tessary.classifier.encoder-dependency-report-ms:86400000}",
             initialDelay = 86_400_000)
-    public Dependency reportDaily() {
-        return report();
+    public void reportDaily() {
+        report();
     }
 
     /** What the report counted: the projects and orgs that depend on the encoder, and through which classifiers. */

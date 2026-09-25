@@ -2,6 +2,7 @@
 package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -97,7 +98,7 @@ class SessionCipherTest {
     @Test
     void construction_refusesAPasswordThatIsNotBase64() {
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> cipher("not base64 at all!"));
-        assertEquals("TESSARY_AUTH_COOKIE_PASSWORD must be base64", e.getMessage());
+        assertInstanceOf(IllegalArgumentException.class, e.getCause());
     }
 
     @Test

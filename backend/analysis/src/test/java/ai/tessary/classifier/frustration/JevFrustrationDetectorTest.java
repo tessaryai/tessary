@@ -4,6 +4,8 @@ package ai.tessary.classifier.frustration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -350,6 +352,45 @@ class JevFrustrationDetectorTest {
         assertEquals(1, sends.get(), "the turn waiting for a permit was not sent");
         assertTrue(keptInterrupt.get());
         assertEquals(1, Objects.requireNonNull(page.get()).sent());
+    }
+
+    /**
+     * The bug: a task that dies of something its own catch does not hold (an {@link Error} from the client)
+     * vanishes, and the page is scored as if that conversation had simply not been sent. It must fail the page.
+     */
+    @Test
+    void aTaskThatDiesOutsideItsCatchFailsThePage() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        AssertionError boom = new AssertionError("boom");
+        DecisionClient dies = (projectId, lane, t, request) -> {
+            throw boom;
+        };
+        JevFrustrationDetector d = new JevFrustrationDetector(
+                new FrustrationTurnBuilder(assembler),
+                dies,
+                providers,
+                assessments,
+                detections,
+                classifiers,
+                TransactionOperations.withoutTransaction(),
+                props,
+                mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> d.score(signal("{}"), List.of(turn)));
+
+        assertSame(boom, e.getCause());
+    }
+
+    /**
+     * The bug: the worker hands a paged detector one observation at a time and gets back a detection with no
+     * assessment row behind it. Paged detectors score whole pages; the one-at-a-time path refuses.
+     */
+    @Test
+    void aPagedDetectorRefusesToScoreOneObservation() {
+        JevFrustrationDetector d = detector();
+
+        assertThrows(IllegalStateException.class, () -> d.detect(observation("t-1"), null));
     }
 
     @Test

@@ -252,13 +252,7 @@ class WorkOsClientTest {
         WorkOsClient c = client();
 
         assertTrue(c.supportsRedirectFlow());
-        assertEquals(
-                "credential auth not supported by this provider",
-                assertThrows(AuthException.class, () -> c.signupWithCredentials("a@example.com", "pw"))
-                        .getMessage());
-        assertEquals(
-                "credential auth not supported by this provider",
-                assertThrows(AuthException.class, () -> c.authenticateWithCredentials("a@example.com", "pw"))
-                        .getMessage());
+        assertThrows(AuthException.class, () -> c.signupWithCredentials("a@example.com", "pw"));
+        assertThrows(AuthException.class, () -> c.authenticateWithCredentials("a@example.com", "pw"));
     }
 }

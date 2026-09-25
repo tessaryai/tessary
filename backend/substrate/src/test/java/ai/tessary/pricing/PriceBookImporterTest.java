@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.PricingProperties;
-import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -76,6 +75,11 @@ class PriceBookImporterTest {
 
         assertEquals(
                 announcements,
-                appender.list.stream().filter(e -> e.getLevel() == Level.INFO).count());
+                appender.list.stream()
+                        .filter(e -> e.getKeyValuePairs() != null
+                                && e.getKeyValuePairs().stream()
+                                        .anyMatch(kv ->
+                                                "event".equals(kv.key) && "pricing.book.imported".equals(kv.value)))
+                        .count());
     }
 }

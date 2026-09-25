@@ -22,7 +22,8 @@ final class CanonicalJson {
     private CanonicalJson() {}
 
     @ExcludeFromJacocoGeneratedReport(
-            "a JsonNode converted to plain maps, lists and scalars always serialises, so the catch cannot fire")
+            "defensive: the mapper is the app's own, and a JsonNode converted to plain maps, lists and scalars"
+                    + " always serialises")
     static String of(ObjectMapper mapper, JsonNode json) {
         try {
             return mapper.writer(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
