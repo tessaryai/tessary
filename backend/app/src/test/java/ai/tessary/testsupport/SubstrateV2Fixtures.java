@@ -11,6 +11,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
@@ -47,6 +48,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 public final class SubstrateV2Fixtures {
 
     private static final AtomicLong COUNTER = new AtomicLong();
+    private static final HexFormat HEX = HexFormat.of();
 
     private final SessionRepository sessions;
     private final TraceV2Repository traces;
@@ -88,12 +90,13 @@ public final class SubstrateV2Fixtures {
 
     /** A 16-hex-character OTel span id. */
     public static String spanId() {
-        return hex(16);
+        return HEX.toHexDigits(nextMixed());
     }
 
-    /** A 32-hex-character OTel trace id. */
+    /** A 32-hex-character OTel trace id. Unique by its first half; the second half only adds variety. */
     public static String traceId() {
-        return hex(32);
+        long mixed = nextMixed();
+        return HEX.toHexDigits(mixed) + HEX.toHexDigits(Long.reverse(mixed) * 0xBF58476D1CE4E5B9L);
     }
 
     /** A producer session string — free-form by contract, so this one deliberately is not hex. */
@@ -101,9 +104,12 @@ public final class SubstrateV2Fixtures {
         return "sess-" + COUNTER.incrementAndGet();
     }
 
-    private static String hex(int width) {
-        String s = Long.toHexString(COUNTER.incrementAndGet() * 0x9E3779B97F4A7C15L);
-        return (s + "0".repeat(width)).substring(0, width);
+    /**
+     * An odd multiplier is a bijection on {@code long}, so each counter value mixes to a distinct value,
+     * printed zero-padded to 16 digits. The old right-pad made counter {@code c} and {@code 16c} collide.
+     */
+    private static long nextMixed() {
+        return COUNTER.incrementAndGet() * 0x9E3779B97F4A7C15L;
     }
 
     // ---- seeding ----------------------------------------------------------------------------------
