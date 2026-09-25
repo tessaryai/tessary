@@ -7,7 +7,6 @@ import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
-import org.springframework.stereotype.Component;
 
 /**
  * The org's own {@link ProviderCredential}, decrypted and shaped for the sandbox
@@ -28,8 +27,11 @@ import org.springframework.stereotype.Component;
  * launcher itself never persists it to disk or forwards it to the agent's own prompt/context — see
  * {@code sandbox-runner/launcher/server.js}'s file-header doc and {@code requireCredential} for the
  * other half of that discipline.
+ *
+ * <p>Registered by {@link LlmSeamConfig} only when no other build supplies one, so another build can
+ * extend this class and fall back to a platform-held credential; {@link Credential#platformFunded()}
+ * is how that build tells the ledger whose bill the run lands on.
  */
-@Component
 public class AgenticCredentialResolver {
 
     private final ProviderCredentialRepository repo;
@@ -60,7 +62,20 @@ public class AgenticCredentialResolver {
             @JsonProperty("custom_model_name") @Nullable String customModelName,
             @JsonProperty("aws_region") @Nullable String awsRegion,
             @JsonProperty("aws_access_key") @Nullable String awsAccessKey,
-            @JsonProperty("aws_secret_key") @Nullable String awsSecretKey) {}
+            @JsonProperty("aws_secret_key") @Nullable String awsSecretKey,
+            @JsonProperty("platform_funded") boolean platformFunded) {
+
+        public Credential(
+                ModelProvider provider,
+                @Nullable String apiKey,
+                @Nullable String baseUrl,
+                @Nullable String customModelName,
+                @Nullable String awsRegion,
+                @Nullable String awsAccessKey,
+                @Nullable String awsSecretKey) {
+            this(provider, apiKey, baseUrl, customModelName, awsRegion, awsAccessKey, awsSecretKey, false);
+        }
+    }
 
     /**
      * Resolve, decrypt, and shape the org's credential for {@code provider} — the credential an

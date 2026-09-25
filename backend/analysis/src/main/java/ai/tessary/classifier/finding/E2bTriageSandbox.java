@@ -186,7 +186,8 @@ public class E2bTriageSandbox implements TriageSandbox {
             ModelProvider provider = resolved.map(ProjectModelSettings.ResolvedAgenticModel::provider)
                     .orElse(ModelProvider.BEDROCK);
             body.put("provider", provider.name());
-            body.set("credential", mapper.valueToTree(credentials.resolve(req.projectId(), provider)));
+            AgenticCredentialResolver.Credential credential = credentials.resolve(req.projectId(), provider);
+            body.set("credential", mapper.valueToTree(credential));
             // mcp.token is a live platform key — sent to the launcher, never logged. Not optional on
             // this lane: the dossier carries the detector's numbers and nothing else, so an agent
             // without this reads no trace at all and can only restate the claim back at us.
@@ -205,7 +206,13 @@ public class E2bTriageSandbox implements TriageSandbox {
             // Host anchor for the per-turn child spans (in-VM timestamps are offsets from startMs).
             Instant runStart = Instant.now();
             String respBody = postLauncher(
-                    mapper.writeValueAsString(body), cfg, req.projectId(), req.findingId(), model, pricingId);
+                    mapper.writeValueAsString(body),
+                    cfg,
+                    req.projectId(),
+                    req.findingId(),
+                    model,
+                    pricingId,
+                    credential.platformFunded());
             if (respBody == null) {
                 markError(span, "launcher did not answer");
                 return Optional.empty();
@@ -220,7 +227,7 @@ public class E2bTriageSandbox implements TriageSandbox {
                 return Optional.empty();
             }
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
-            bookUsage(req.projectId(), req.findingId(), model, pricingId, raw);
+            bookUsage(req.projectId(), req.findingId(), model, pricingId, raw, credential.platformFunded());
             String resultText = mapper.readTree(raw).path("result").asText("");
             if (resultText.isBlank()) {
                 markError(span, "agent returned no result");
@@ -284,7 +291,13 @@ public class E2bTriageSandbox implements TriageSandbox {
      * is at fault, since a run failure spends tokens exactly as a completed run does.
      */
     private @Nullable String postLauncher(
-            String bodyJson, Agentic cfg, String projectId, String findingId, String model, String pricingId)
+            String bodyJson,
+            Agentic cfg,
+            String projectId,
+            String findingId,
+            String model,
+            String pricingId,
+            boolean platformFunded)
             throws InterruptedException {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/triage"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -331,7 +344,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             // Book what the run spent before it failed, regardless of which bucket the status falls
             // into below: a launcher outage carries no usage (bookUsage no-ops on one), and a run
             // failure is exactly the case this exists for.
-            bookUsage(projectId, findingId, model, pricingId, resp.body());
+            bookUsage(projectId, findingId, model, pricingId, resp.body(), platformFunded);
             FailureClass failure = classifyFailure(resp.statusCode(), resp.body());
             if (failure == FailureClass.MISCONFIGURED) {
                 // A refusal is not an outage. 401/403/404 will answer identically until somebody
@@ -425,7 +438,13 @@ public class E2bTriageSandbox implements TriageSandbox {
      * Book the run's tokens and cost against the triage lane, and against the FINDING it ruled on.
      * One run is one ledger entry.
      */
-    private void bookUsage(String projectId, String findingId, String model, String pricingId, String envelopeJson) {
+    private void bookUsage(
+            String projectId,
+            String findingId,
+            String model,
+            String pricingId,
+            String envelopeJson,
+            boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
         if (u == null) return;
         usage.recordSandboxRun(
@@ -433,8 +452,7 @@ public class E2bTriageSandbox implements TriageSandbox {
                 ModelLane.TRIAGE.wire(),
                 model,
                 pricingId,
-                // Never platform-funded; see E2bRcaSandbox's identical note.
-                false,
+                platformFunded,
                 u.inputTokens(),
                 u.outputTokens(),
                 u.cacheReadTokens(),

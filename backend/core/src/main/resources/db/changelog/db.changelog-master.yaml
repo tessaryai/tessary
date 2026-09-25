@@ -103,3 +103,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0025-groundedness-rate.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0026-trace-created-at.sql
+      relativeToChangelogFile: false

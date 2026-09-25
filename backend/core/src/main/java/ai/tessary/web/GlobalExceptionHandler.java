@@ -3,6 +3,7 @@ package ai.tessary.web;
 
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.ErrorCode;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
@@ -11,6 +12,7 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -50,7 +52,13 @@ public class GlobalExceptionHandler {
             // RcaController), not centrally. Revisit only by widening that rule deliberately.
             log.debug("{} {}: {}", status.value(), ex.error().code(), ex.getMessage());
         }
-        return build(ex.error(), ex.getMessage(), null);
+        ResponseEntity<ApiResponse<Void>> response = build(ex.error(), ex.getMessage(), null);
+        if (ex instanceof Retryable retryable) {
+            return ResponseEntity.status(response.getStatusCode())
+                    .header(HttpHeaders.RETRY_AFTER, Integer.toString(retryable.retryAfterSeconds()))
+                    .body(response.getBody());
+        }
+        return response;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

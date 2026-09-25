@@ -144,7 +144,7 @@ public class OrganizationController {
         // failure can't leave an org with no membership or no default project. The owned-org cap
         // is checked in there too, under a per-owner lock, so a concurrent second request from
         // the same user cannot slip past it.
-        return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsPerUser()));
+        return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsFor(ctx.userId())));
     }
 
     @PatchMapping("/api/orgs/{orgSlug}")

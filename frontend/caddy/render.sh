@@ -28,7 +28,7 @@ site() {
         -e "s|@TLS_KEY_FILE@|$(esc "${TLS_KEY_FILE:-/certs/tls.key}")|g" "$here/$1"
 }
 
-printf '{\n\tadmin off\n'
+printf '{\n\tadmin off\n\timport /etc/caddy/extra/global/*.caddy\n'
 if [ -n "$proxies" ]; then
     printf '\tservers {\n\t\ttrusted_proxies static %s\n\t\tclient_ip_headers X-Forwarded-For\n\t}\n' "$proxies"
 fi

@@ -3,6 +3,8 @@ package ai.tessary.retention;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
+import ai.tessary.open.errors.RetentionError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.ops.RetentionPolicyRepository;
 import ai.tessary.ops.RetentionPolicyRow;
 import ai.tessary.tenant.Ids;
@@ -47,7 +49,8 @@ public class RetentionController {
             @JsonProperty("data_class") String dataClass,
             @JsonProperty("ttl_days") int ttlDays,
             @JsonProperty("from_policy") boolean fromPolicy,
-            @JsonProperty("platform_default_days") int platformDefaultDays) {}
+            @JsonProperty("platform_default_days") int platformDefaultDays,
+            @JsonProperty("max_ttl_days") int maxTtlDays) {}
 
     public record RetentionView(
             List<RetentionClassView> classes,
@@ -87,6 +90,10 @@ public class RetentionController {
             policies.delete(projectId, dataClass.wire());
             return;
         }
+        int max = resolver.maxTtlDays(projectId, dataClass);
+        if (max > 0 && (ttlDays == 0 || ttlDays > max)) {
+            throw new TessaryException(RetentionError.ABOVE_CEILING, ttlDays == 0 ? "forever" : ttlDays + " days", max);
+        }
         policies.upsert(new RetentionPolicyRow(
                 Ids.ulid(),
                 projectId,
@@ -100,7 +107,11 @@ public class RetentionController {
     private RetentionView view(String projectId, boolean canManage) {
         List<RetentionClassView> classes = resolver.resolve(projectId).stream()
                 .map(e -> new RetentionClassView(
-                        e.dataClass().wire(), e.ttlDays(), e.fromPolicy(), resolver.platformDefault(e.dataClass())))
+                        e.dataClass().wire(),
+                        e.ttlDays(),
+                        e.fromPolicy(),
+                        resolver.platformDefault(e.dataClass()),
+                        resolver.maxTtlDays(projectId, e.dataClass())))
                 .toList();
         return new RetentionView(classes, canManage);
     }

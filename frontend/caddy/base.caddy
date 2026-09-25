@@ -29,6 +29,9 @@
 		path /api/* /auth/* /mcp /mcp/* /webhooks/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/*
 	}
 	handle @backend {
+		# Another build may drop directives for the backend route here (a per-key rate ceiling,
+		# say). The glob matches nothing in this image, and Caddy treats that as no directives.
+		import /etc/caddy/extra/backend/*.caddy
 		reverse_proxy {$BACKEND_URL:backend:8080} {
 			# The client as Caddy resolved it: the peer, or, when the peer is one of the operator's
 			# TRUSTED_PROXIES, the address that proxy forwarded. Caddy applies the same rule to the
