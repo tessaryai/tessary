@@ -343,29 +343,22 @@ class TenantServiceTest {
      */
     @Test
     void ensureDefaultProject_promotesTheEarliestRealProject() {
+        // Present-day stamps: the org and project listings order by created_at, and a back-dated row here
+        // would become the install's "oldest" organization for every test that runs after this one.
+        java.time.Instant now = java.time.Instant.now();
+        String sampleAt = now.toString();
+        String realAt = now.plusSeconds(1).toString();
         Organization org = new Organization(
-                Ids.ulid(), null, tenants.uniqueSlug("no-default"), "No Default", "2026-01-01T00:00:00Z", null, null);
+                Ids.ulid(), null, tenants.uniqueSlug("no-default"), "No Default", sampleAt, null, null);
         orgs.insert(org);
         projects.insert(new Project(
-                Ids.ulid(),
-                org.id(),
-                "sample",
-                "Sample",
-                null,
-                "2026-01-01T00:00:00Z",
-                null,
-                "{\"sample\":true}",
-                false,
-                null));
-        Project real =
-                new Project(Ids.ulid(), org.id(), "real", "Real", "d", "2026-01-02T00:00:00Z", null, null, false, null);
+                Ids.ulid(), org.id(), "sample", "Sample", null, sampleAt, null, "{\"sample\":true}", false, null));
+        Project real = new Project(Ids.ulid(), org.id(), "real", "Real", "d", realAt, null, null, false, null);
         projects.insert(real);
 
         Project promoted = tenants.ensureDefaultProject(org.id());
 
-        assertEquals(
-                new Project(real.id(), org.id(), "real", "Real", "d", "2026-01-02T00:00:00Z", null, null, true, null),
-                promoted);
+        assertEquals(new Project(real.id(), org.id(), "real", "Real", "d", realAt, null, null, true, null), promoted);
         assertEquals(promoted, projects.findDefaultForOrg(org.id()).orElseThrow());
         assertEquals(2, projects.findByOrg(org.id()).size(), "nothing new is minted");
     }
