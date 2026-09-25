@@ -311,10 +311,13 @@ class GithubTokenServiceTest {
         assertEquals("interrupt".equals(failure), Thread.interrupted(), "only an interrupt sets the flag");
     }
 
+    /** Only an array is a page of repos: an object where the array belongs is not read as one. */
     @Test
     void listInstallationRepos_aPageWithoutTheArrayContributesNothing() {
         http.on(MINT, response(201, tokenJson("ghs_1", Instant.now().plusSeconds(3600))))
-                .on(REPOS, response(200, "{\"repositories\":{\"unexpected\":true}}"));
+                .on(
+                        REPOS,
+                        response(200, "{\"repositories\":{\"x\":{\"owner\":{\"login\":\"acme\"},\"name\":\"web\"}}}"));
 
         assertEquals(List.of(), service(configuredApp()).listInstallationRepos(77L, HOST));
     }
