@@ -45,7 +45,7 @@
         <palantir-java-format.version>2.91.0</palantir-java-format.version>
         <docker.api.version>1.44</docker.api.version>
         <error-prone.version>2.50.0</error-prone.version>
-        <forbiddenapis.version>3.10</forbiddenapis.version>
+        <forbiddenapis.version>3.11</forbiddenapis.version>
         <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
         <nullaway.version>0.14.1</nullaway.version>
         <pmd.version>7.27.0</pmd.version>
