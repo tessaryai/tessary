@@ -255,13 +255,13 @@ public class LauncherEncoderScorer implements EncoderScorer {
         return out;
     }
 
+    /**
+     * The host for the logs. A URL {@link URI#create} refuses throws here, which is the same exception the
+     * request's own {@code URI.create} would throw a line later.
+     */
     private static String hostOf(String baseUrl) {
-        try {
-            String host = URI.create(baseUrl).getHost();
-            return host == null || host.isBlank() ? baseUrl : host;
-        } catch (IllegalArgumentException e) {
-            return "invalid";
-        }
+        String host = URI.create(baseUrl).getHost();
+        return host == null || host.isBlank() ? baseUrl : host;
     }
 
     /**

@@ -31,6 +31,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -339,6 +341,31 @@ class GroundednessDetailServiceTest {
                 page.rows().stream().map(FlaggedAnswerView::traceId).toList());
         assertEquals(1, page.total());
         assertNull(page.nextCursor());
+    }
+
+    /**
+     * A cursor that is not an offset starts over at the first page instead of failing the request or reading a
+     * negative offset, and an answer whose stored score will not parse is still listed, unscored.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"abc", "-4"})
+    void anUnreadableCursorStartsOverAndAnUnreadableScoreIsUnscored(String cursor) {
+        CitedPages rates = new CitedPages()
+                .with(
+                        null,
+                        50,
+                        0,
+                        new AnswerPage(List.of(new CitedAnswer("tr_1", "sp", null, null, "{not json", false)), 1));
+
+        FlaggedAnswerPage page = service(rates, new StoredSpans()).page(finding(payload()), null, 50, cursor);
+
+        assertEquals(
+                new FlaggedAnswerPage(
+                        List.of(new FlaggedAnswerView(
+                                "tr_1", "sp", null, null, null, null, null, List.of(), null, false, false, false)),
+                        1,
+                        null),
+                page);
     }
 
     private static SubstrateObservation span(String traceId, String spanId, String question, String answer) {

@@ -167,6 +167,21 @@ class SecretLeakDetectorTest {
         assertEquals(Detection.Confidence.HIGH, d.confidence(), "a broken stamp must not hide a leak in plain sight");
     }
 
+    /**
+     * Read from the raw output, a lone keyword-context match is LOW, and a provider key later in the same
+     * output still wins: taking the first match would let a weak one mask the real leak beside it.
+     */
+    @Test
+    void theStrongestMatchInTheOutputWinsAndALoneWeakOneIsLow() {
+        Detection weak = detect("api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"");
+        assertEquals(Detection.Confidence.LOW, weak.confidence());
+        assertEquals("generic-api-key", evidence(weak).path("pattern").asText());
+
+        Detection both = detect("api_key = \"q7Zr2mK9xW4vN8pLr5Tq\" and AKIA" + "QYLPMN5HHHFPZAM2");
+        assertEquals(Detection.Confidence.HIGH, both.confidence());
+        assertEquals("aws-access-token", evidence(both).path("pattern").asText());
+    }
+
     private static JsonNode evidence(Detection d) {
         try {
             return MAPPER.readTree(Objects.requireNonNull(d.evidenceJson()));

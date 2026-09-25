@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The definition's tests. {@code devdocs/concepts/tool-error.md} §1 and §2 say what a tool failure is
@@ -229,5 +231,31 @@ class ToolFailureTest {
                 sql.chars().filter(c -> c == '(').count(),
                 sql.chars().filter(c -> c == ')').count(),
                 "unbalanced parentheses in a predicate that gets interpolated: " + sql);
+    }
+
+    /**
+     * What a result payload declares about itself. An error object is read for its message, then its code,
+     * then its type; one with none of them, or an error that is neither text nor an object, is still a
+     * declared error rather than a clean call. A flag that is not a boolean true, or a null error, declares
+     * nothing: reading those as failures would count a healthy tool as failing.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            nullValues = "NONE",
+            value = {
+                "{\"error\":{\"message\":\"card declined\",\"code\":\"E1\"}} | card declined",
+                "{\"error\":{\"message\":\" \",\"code\":\"E42\"}}           | E42",
+                "{\"error\":{\"code\":7,\"type\":\"Timeout\"}}              | Timeout",
+                "{\"error\":{}}                                            | result declared an error",
+                "{\"error\":[\"x\"]}                                         | result declared an error",
+                "{\"isError\":true,\"content\":\" \"}                          | tool result reported isError",
+                "{\"isError\":\"true\"}                                      | NONE",
+                "{\"isError\":false}                                       | NONE",
+                "{\"error\":null}                                          | NONE",
+                "[\"error\"]                                               | NONE"
+            })
+    void resultErrorReadsTheDeclaredErrorAndNothingElse(String result, @Nullable String declared) {
+        assertEquals(declared, ToolFailure.resultError(json(result)));
     }
 }

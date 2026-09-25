@@ -3,6 +3,7 @@ package ai.tessary.classifier.metric;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
@@ -31,6 +32,8 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -396,6 +399,32 @@ class MetricSourceTest {
                         .value(),
                 0.0,
                 "a billed zero is a value");
+    }
+
+    /**
+     * The cache-read share needs both prompt buckets and a prompt to divide by. A turn missing either bucket,
+     * or reporting a zero prompt, has no share: read as 0% it would look exactly like the cache collapsing,
+     * which is the regression this measure exists to page on.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            nullValues = "NONE",
+            value = {"1000, NONE", "NONE, 400", "0, 0"})
+    @DisplayName("a turn without both prompt buckets, or with no prompt, has no cache-read share")
+    void aTurnWithoutBothPromptBucketsHasNoCacheReadShare(@Nullable Long input, @Nullable Long cacheRead) {
+        String pid = project("metric-src-no-share");
+        String traceId = seedTurn(pid);
+        String rootId = insertObs(pid, traceId, null, "agent", "loop", "cs-a", T0, T0.plusMillis(800))
+                .spanId();
+        insertLlmLeaf(pid, traceId, rootId, "gpt-4o", input, 50L, cacheRead, null, null);
+
+        TurnMetrics turn = onlyTurn(pid, new Tally());
+
+        assertEquals(
+                Absence.BUCKET_NOT_REPORTED,
+                assertInstanceOf(Measurement.Absent.class, turn.cacheReadRatio())
+                        .reason());
+        assertNull(turn.tokenReadings().cacheReadPct(), "no share is folded into the tokens sketch");
     }
 
     // -----------------------------------------------------------------------------------------------

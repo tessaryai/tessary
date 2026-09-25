@@ -262,4 +262,46 @@ class MetricControlTest {
         assertNull(
                 control.resolve(moved, EVENT_DAY, Set.of()), "a ring of dead days answers nothing rather than wrongly");
     }
+
+    /**
+     * A day slot whose measure, workload or token blob will not parse is dropped from the read rather than
+     * failing it: one unreadable slot must not take the whole bucket's reference, or the sweep, down with it.
+     */
+    @Test
+    @DisplayName("an unreadable day slot or context blob is left out of the reference, not thrown")
+    void anUnreadableSlotIsLeftOutOfTheReference() {
+        String unknownKind = "{\"kind\":\"tdigest\"}";
+        String json = "{\"kind\":\"control\",\"days\":["
+                + "{\"d\":\"2026-08-09\",\"m\":" + unknownKind + "},"
+                + "{\"d\":\"2026-08-10\",\"m\":" + window(100, 1000).toJson()
+                + ",\"w\":{\"" + MetricWorkload.INPUT_TOKENS + "\":" + unknownKind + "}"
+                + ",\"t\":{\"" + MetricTokens.INPUT + "\":" + unknownKind + "}}]}";
+        MetricControl control = MetricControl.fromJson(json);
+
+        MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of());
+        assertNotNull(resolved);
+        assertEquals(1, resolved.daysUsed(), "only the readable day is in the reference");
+        assertEquals(100, resolved.measure().count());
+        assertNull(resolved.workload(), "an unreadable workload is absent, not a zeroed distribution");
+        assertNull(resolved.tokens());
+
+        // Folding a fresh window onto the unreadable day replaces it instead of throwing on the merge.
+        MetricControl.Resolved refolded = control.fold(GRID, "2026-08-09", window(50, 1000), workload(), tokens())
+                .resolve(GRID, EVENT_DAY, Set.of());
+        assertNotNull(refolded);
+        assertEquals(2, refolded.daysUsed());
+    }
+
+    /** Mass past the grid's top edge is reported at the edge: the median of a reference that is all overflow. */
+    @Test
+    @DisplayName("a reference whose mass is all past the grid reads its quantiles at the top edge")
+    void overflowMassReadsAtTheTopEdge() {
+        double pastTheTop = Math.exp(GRID.logHi()) * 2;
+        MetricControl.Resolved resolved = MetricControl.empty()
+                .fold(GRID, "2026-08-10", window(10, pastTheTop), workload(), tokens())
+                .resolve(GRID, EVENT_DAY, Set.of());
+
+        assertNotNull(resolved);
+        assertEquals(GRID.logHi(), resolved.measure().quantile(0.5));
+    }
 }

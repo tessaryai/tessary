@@ -173,4 +173,18 @@ class MalformedOutputDetectorTest {
         List<Detection> ds = d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}")), null);
         assertFalse(ds.get(0).fired(), "a remote-$ref schema is uncompilable, never fetched");
     }
+
+    /**
+     * The per-observation entry point judges exactly as the batch does: a violating output fires with the same
+     * evidence, and a conforming one stays quiet, whichever path the caller took.
+     */
+    @Test
+    void detectJudgesOneObservationAsTheBatchWould() {
+        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
+        SubstrateObservation violating = obs("cs-1", "{\"confidence\":\"high\"}");
+
+        assertEquals(d.detectBatch(List.of(violating), null).get(0), d.detect(violating, null));
+        assertTrue(d.detect(violating, null).fired());
+        assertFalse(d.detect(obs("cs-1", "{\"answer\":\"yes\"}"), null).fired());
+    }
 }

@@ -24,7 +24,6 @@ import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -201,10 +200,10 @@ public class GroundednessRateService implements ClassifierCatchUp {
         String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
         // Read once: an accessor called in the guard and again in the branch is two calls that only happen to agree.
         String onset = spell.decision().onsetAt();
-        Instant since = onset != null ? parse(onset, windowFrom) : windowFrom;
+        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
         // The end of the last hour the replay folded, not now: the traces stop where the spell's counts stop.
         Instant until =
-                spell.lastBucket() != null ? parse(spell.lastBucket(), at).plus(Duration.ofHours(1)) : at;
+                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
         String scorerVersion = config.scorerVersion();
         List<String> scored =
                 rates.scoredSince(projectId, signal.id(), scorerVersion, callSite, windowFrom, since, until);
@@ -232,7 +231,7 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 GroundednessEvidence.payload(
                         mapper, callSite, d, spell.baseline().failures(), config),
                 eventAt,
-                parse(eventAt, at).minus(QUIET_WINDOW).toString(),
+                Instant.parse(eventAt).minus(QUIET_WINDOW).toString(),
                 now);
         if (recorded == null) return; // a ruled finding already covers this spell up to its last hour
 
@@ -292,13 +291,5 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 d.baselineCalls(),
                 d.onsetAt(),
                 d.silence());
-    }
-
-    private static Instant parse(String instant, Instant fallback) {
-        try {
-            return Instant.parse(instant);
-        } catch (DateTimeParseException e) {
-            return fallback;
-        }
     }
 }

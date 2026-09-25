@@ -67,6 +67,10 @@ class LauncherEncoderScorerBackpressureTest {
     private volatile int failWith = 0;
     /** One score entry of a 200 reply, repeated per response. */
     private volatile String scoreEntry = "{\"unsupported\":0.9,\"conflict\":0.1,\"spans\":[]}";
+    /** When set, a 200 reply carries this body verbatim instead of the scores. */
+    private volatile @Nullable String rawBody = null;
+    /** When set, the reply is bytes that are not HTTP at all. */
+    private volatile boolean notHttp = false;
     /** When set, every request is held open until it counts down. */
     private volatile @Nullable CountDownLatch hold = null;
 
@@ -144,9 +148,16 @@ class LauncherEncoderScorerBackpressureTest {
             held.await(10, TimeUnit.SECONDS);
             open.decrementAndGet();
         }
+        if (notHttp) {
+            OutputStream raw = client.getOutputStream();
+            raw.write("garbage\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            raw.flush();
+            return;
+        }
         int status;
         String extraHeader = "";
         String payload;
+        String body200 = rawBody;
         if (failWith != 0) {
             status = failWith;
             payload = "{\"error\":\"stub failure\"}";
@@ -160,7 +171,10 @@ class LauncherEncoderScorerBackpressureTest {
             for (JsonNode r : responses) {
                 if (r.get("answer").asText().length() > rejectAnswersLongerThan) refused = true;
             }
-            if (refused) {
+            if (body200 != null) {
+                status = 200;
+                payload = body200;
+            } else if (refused) {
                 status = 400;
                 payload = "{\"error\":\"groundedness answer too long to score\"}";
             } else {
@@ -381,5 +395,72 @@ class LauncherEncoderScorerBackpressureTest {
             if (System.nanoTime() > deadline) throw new AssertionError("timed out waiting until " + what);
             LockSupport.parkNanos(Duration.ofMillis(1).toNanos());
         }
+    }
+
+    /** An encoder with no URL configured fails the sweep before anything is sent, naming the missing setting. */
+    @Test
+    void anUnconfiguredEncoderFailsBeforeSending() {
+        ObserverProperties props = new ObserverProperties();
+        LauncherEncoderScorer unconfigured = new LauncherEncoderScorer(props, MAPPER, unreachable::add, waits::add);
+
+        assertThrows(IllegalStateException.class, () -> unconfigured.scoreResponses("groundedness", List.of(r("a"))));
+        assertEquals(0, requests.get());
+        assertTrue(unreachable.isEmpty(), "a missing setting is a fault, not a model that is down");
+    }
+
+    /**
+     * An interrupt during the throttle backoff ends the request and keeps the thread's interrupt flag, so a
+     * cancelled sweep stops instead of posting again.
+     */
+    @Test
+    void anInterruptDuringTheBackoffEndsTheRequestAndKeepsTheFlag() {
+        throttleFirst = 1;
+        LauncherEncoderScorer interrupted =
+                new LauncherEncoderScorer(scorerProps(), MAPPER, unreachable::add, millis -> {
+                    throw new InterruptedException("sweep cancelled");
+                });
+
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> interrupted.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertTrue(Thread.interrupted(), "the interrupt is restored for the caller, then cleared here");
+        assertTrue(e.getCause() instanceof InterruptedException, String.valueOf(e.getCause()));
+        assertEquals(1, requests.get(), "no retry after the interrupt");
+    }
+
+    /**
+     * A 200 whose body is not JSON is a fault, and the exception carries no cause: Jackson's message quotes
+     * the body, and a chained cause would carry it into the worker's logs.
+     */
+    @Test
+    void anUnparseableReplyIsAFaultWithNoChainedBody() {
+        rawBody = "<html>secret-bearing proxy page</html>";
+
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertFalse(e instanceof EncoderUnreachableException);
+        assertEquals(null, e.getCause());
+        assertTrue(unreachable.isEmpty());
+    }
+
+    /** A connection that opened and then answered something other than HTTP is a fault, not an absent model. */
+    @Test
+    void aReplyThatIsNotHttpIsATransportFaultNotUnreachable() {
+        notHttp = true;
+
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
+
+        assertFalse(e instanceof EncoderUnreachableException, String.valueOf(e.getCause()));
+        assertTrue(e.getCause() instanceof IOException, String.valueOf(e.getCause()));
+        assertTrue(unreachable.isEmpty(), "the model answered; marking it down would pause a live encoder");
+    }
+
+    private ObserverProperties scorerProps() {
+        ObserverProperties props = new ObserverProperties();
+        props.getEncoder().setUrl("http://127.0.0.1:" + socket.getLocalPort());
+        props.getEncoder().setApiKey("k");
+        return props;
     }
 }

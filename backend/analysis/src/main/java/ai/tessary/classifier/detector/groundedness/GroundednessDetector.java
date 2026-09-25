@@ -8,6 +8,7 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.CallSiteShapeReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.hash.Sha256;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.tenant.Ids;
@@ -114,6 +115,8 @@ public final class GroundednessDetector implements BuiltInDetector {
 
     /** Groundedness scores only through {@link #sweepBatch}, which records each trial it scores. */
     @Override
+    @ExcludeFromJacocoGeneratedReport(
+            "a refusing stub the BuiltInDetector interface forces; the worker calls sweepBatch, which records trials")
     public Detection detect(SubstrateObservation obs, @Nullable String config) {
         throw new UnsupportedOperationException("groundedness scores only through sweepBatch");
     }

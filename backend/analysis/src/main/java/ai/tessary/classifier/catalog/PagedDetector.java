@@ -4,6 +4,7 @@ package ai.tessary.classifier.catalog;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -36,6 +37,8 @@ public interface PagedDetector<P extends PagedDetector.ScoredPage> extends Built
     int maxPageRetries();
 
     @Override
+    @ExcludeFromJacocoGeneratedReport(
+            "a refusing stub the BuiltInDetector interface forces; the worker routes paged detectors to score()")
     default Detection detect(SubstrateObservation obs, @Nullable String config) {
         throw new IllegalStateException(kind() + " scores whole pages through PagedDetector");
     }

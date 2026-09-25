@@ -66,14 +66,14 @@ public class GroundednessAnswerClearer {
         Map<String, Set<SpanKey>> answersByClassifier = new LinkedHashMap<>();
         for (Map.Entry<String, String> f : classifierByFinding.entrySet()) {
             for (FindingEvidenceRow row : rowsByFinding.getOrDefault(f.getKey(), List.of())) {
-                if (row.traceId() == null
-                        || row.spanId() == null
-                        || !FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
-                    continue;
+                // Only a witness at span grain is a flagged answer; members and trace witnesses are not.
+                if (row.traceId() != null
+                        && row.spanId() != null
+                        && FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
+                    answersByClassifier
+                            .computeIfAbsent(f.getValue(), k -> new LinkedHashSet<>())
+                            .add(new SpanKey(row.traceId(), row.spanId()));
                 }
-                answersByClassifier
-                        .computeIfAbsent(f.getValue(), k -> new LinkedHashSet<>())
-                        .add(new SpanKey(row.traceId(), row.spanId()));
             }
         }
 

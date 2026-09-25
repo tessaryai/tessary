@@ -19,6 +19,7 @@ import ai.tessary.llm.decisions.DecisionProviderResolver;
 import ai.tessary.llm.decisions.DecisionRequest;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -308,6 +309,18 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 }));
             }
         }
+        joinAll(futures);
+        return outcomes;
+    }
+
+    /**
+     * Surface a task's failure. The executor's close has already waited for every task, and each task catches
+     * its own call's failures, so neither checked exception {@link Future#get} declares can reach here.
+     */
+    @ExcludeFromJacocoGeneratedReport(
+            "close() has already waited for every task and each task catches its own failures, so the catches"
+                    + " Future.get forces cannot fire")
+    private static void joinAll(List<Future<?>> futures) {
         for (Future<?> f : futures) {
             try {
                 f.get();
@@ -317,7 +330,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 Thread.currentThread().interrupt();
             }
         }
-        return outcomes;
     }
 
     private Outcome call(String projectId, DecisionTarget target, EligibleTurn turn) {

@@ -11,6 +11,8 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.testsupport.ClassifierObservations;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Unit acceptance for {@link RegexDetector}: an NL phrase from {@code config_json}, compiled once to a
@@ -118,5 +120,24 @@ class RegexDetectorTest {
                 detector.detect(obs("q", "upstream exploded"), config).fired(),
                 "a foreign config key must not silently disable the phrases");
         assertFalse(detector.detect(obs("q", "all fine"), config).fired());
+    }
+
+    /**
+     * A field name this build does not know, a blank one, or none falls back to the detector's own field
+     * instead of throwing on the enum lookup; a blank phrase beside a real one is skipped rather than
+     * compiled into a pattern that matches everything.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"\"headers\"", "\"  \"", "null"})
+    void anUnknownOrBlankFieldFallsBackToTheDetectorsOwnField(String field) {
+        RegexDetector outputOnly = detector(ClassifierField.OUTPUT, true);
+        String config = "{\"phrases\":[\"leak\",\" \"],\"field\":" + field + "}";
+
+        assertFalse(
+                outputOnly
+                        .detect(obs("a leak in the input", "clean output"), config)
+                        .fired(),
+                "the detector's OUTPUT field still applies");
+        assertTrue(outputOnly.detect(obs("clean input", "a leak here"), config).fired());
     }
 }

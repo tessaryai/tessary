@@ -10,6 +10,7 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.RawFailure;
 import ai.tessary.classifier.toolerror.ToolErrorTrend.Spell;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
@@ -448,6 +449,13 @@ public class ToolErrorService {
 
     private @Nullable JsonNode parseJson(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
+        return readStoredJson(json);
+    }
+
+    @ExcludeFromJacocoGeneratedReport(
+            "tool_call.result is jsonb, so Postgres only hands back valid JSON and the catch the compiler requires"
+                    + " cannot fire")
+    private @Nullable JsonNode readStoredJson(String json) {
         try {
             return mapper.readTree(json);
         } catch (Exception e) {

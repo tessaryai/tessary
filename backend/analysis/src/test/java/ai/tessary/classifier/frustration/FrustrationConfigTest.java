@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.toolerror.ToolErrorConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class FrustrationConfigTest {
 
@@ -80,5 +82,16 @@ class FrustrationConfigTest {
                 d.stateEpoch(),
                 FrustrationConfig.of(MAPPER, "{\"min_baseline_conversations\":300}")
                         .stateEpoch());
+    }
+
+    /**
+     * A dial that is zero, negative or not finite takes its default rather than the clamp: {@code Math.max} and
+     * {@code Math.min} pass a NaN straight through, and a NaN floor or multiple would leave the rate test
+     * unable to arm. A threshold outside (0, 1) and a non-positive count take theirs too.
+     */
+    @ParameterizedTest
+    @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
+    void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
+        assertEquals(FrustrationConfig.defaults(), new FrustrationConfig(bad, 0L, bad, bad, bad, 0));
     }
 }
