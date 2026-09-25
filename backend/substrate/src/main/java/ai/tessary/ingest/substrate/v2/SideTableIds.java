@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.substrate.v2;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import ai.tessary.open.hash.Sha256;
 
 /**
  * Derived primary keys for the two side tables the v2 write path owns ({@code tool_call},
@@ -40,14 +38,7 @@ final class SideTableIds {
     }
 
     private static String digest(String material) {
-        MessageDigest sha256;
-        try {
-            sha256 = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the platform spec on every JVM this can run on.
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
-        byte[] hash = sha256.digest(material.getBytes(StandardCharsets.UTF_8));
+        byte[] hash = Sha256.digest(material);
         StringBuilder hex = new StringBuilder(ID_HEX_CHARS);
         for (int i = 0; i < ID_HEX_CHARS / 2; i++) {
             hex.append(Character.forDigit((hash[i] >> 4) & 0xF, 16));

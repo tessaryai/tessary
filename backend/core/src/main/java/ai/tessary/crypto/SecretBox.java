@@ -7,8 +7,8 @@ import static ai.tessary.crypto.CryptoConstants.TAG_BITS;
 import static ai.tessary.crypto.CryptoConstants.XFORM;
 
 import ai.tessary.config.TessaryProperties;
+import ai.tessary.open.hash.Sha256;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -61,12 +61,7 @@ public final class SecretBox {
 
     public String fingerprint() {
         if (key == null) return "(unset)";
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(key);
-            return HexFormat.of().formatHex(hash, 0, 4);
-        } catch (Exception e) {
-            return "(error)";
-        }
+        return HexFormat.of().formatHex(Sha256.digest(key), 0, 4);
     }
 
     public String seal(String plaintext) {

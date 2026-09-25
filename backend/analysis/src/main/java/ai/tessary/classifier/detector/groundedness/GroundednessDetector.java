@@ -8,12 +8,10 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.CallSiteShapeReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.open.hash.Sha256;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -137,12 +135,7 @@ public final class GroundednessDetector implements BuiltInDetector {
      */
     public static String scorerVersion(double threshold) {
         String material = MODEL + "|" + ENCODING + "|" + String.format(Locale.ROOT, "%.4f", threshold);
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8));
-            return "gnd-v1-" + HexFormat.of().formatHex(digest, 0, 6);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("cannot hash the groundedness scorer", e);
-        }
+        return "gnd-v1-" + HexFormat.of().formatHex(Sha256.digest(material), 0, 6);
     }
 
     /**
