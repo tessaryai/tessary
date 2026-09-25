@@ -325,7 +325,8 @@ class FrustrationAssessmentIntegrationTest {
                                 text("assistant", "first answer"),
                                 text("user", "second question"),
                                 text("assistant", "second answer")),
-                        text("user", CURRENT_PREFIX + traceId))));
+                        text("user", CURRENT_PREFIX + traceId),
+                        3)));
         return obs;
     }
 

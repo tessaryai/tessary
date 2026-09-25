@@ -3,13 +3,11 @@ package ai.tessary.classifier.frustration;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
-import ai.tessary.config.ClassifierProperties;
 import ai.tessary.model.ContentExtractor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,14 +18,14 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Reads the conversation a scored user turn belongs to, for the frustration decision model: the
- * turns sharing the scored turn's conversation, oldest first, up to the scored turn, as separate user
- * and assistant messages. System messages are excluded. Each turn contributes its dialogue once: the
- * substrate carries both an {@code agent} and an {@code llm} span per turn, and the {@code llm} span
- * wins. Tool spans and tool parts leave no text; an assistant turn only records whether it ended on a
- * tool call. Every assistant text part between two user messages is joined into one turn, reading the
- * output of every span of the bearer's kind in the turn, so an agentic turn's final answer is not lost
- * behind its first tool call.
+ * Reads the conversation a scored user turn belongs to, for the frustration decision model: the two
+ * turns before it ({@link SubstrateReadRepository#priorTurns}), oldest first, as separate user and
+ * assistant messages. A turn is one trace. System messages are excluded. Each turn contributes its
+ * dialogue once: the substrate carries both an {@code agent} and an {@code llm} span per turn, and the
+ * {@code llm} span wins. Tool spans and tool parts leave no text; an assistant turn only records whether
+ * it ended on a tool call. Every assistant text part between two user messages is joined into one turn,
+ * reading the output of every span of the bearer's kind in the turn, so an agentic turn's final answer
+ * is not lost behind its first tool call.
  */
 @Component
 class ConversationThreadAssembler {
@@ -47,13 +45,13 @@ class ConversationThreadAssembler {
     private static final Set<String> HIDDEN_PART_TYPES = Set.of("reasoning", "thinking", "redacted_thinking");
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    // The four messages before the scored one are two exchanges: two turns.
+    private static final int PRIOR_TURNS = 2;
 
     private final SubstrateReadRepository substrate;
-    private final ClassifierProperties props;
 
-    ConversationThreadAssembler(SubstrateReadRepository substrate, ClassifierProperties props) {
+    ConversationThreadAssembler(SubstrateReadRepository substrate) {
         this.substrate = substrate;
-        this.props = props;
     }
 
     /**
@@ -71,12 +69,11 @@ class ConversationThreadAssembler {
         if (scoredUser.isEmpty()) {
             return Optional.empty();
         }
-        List<SubstrateObservation> recentFirst = substrate.conversationObservationsUpTo(
-                scored.projectId(), scored.traceId(), scored.observationId(), props.getThreadMaxObservations());
-        List<SubstrateObservation> chronological = new ArrayList<>(recentFirst);
-        Collections.reverse(chronological);
+        SubstrateReadRepository.PriorTurns prior =
+                substrate.priorTurns(scored.projectId(), scored.traceId(), PRIOR_TURNS);
+        List<SubstrateObservation> chronological = prior.spans();
 
-        Map<String, String> dialogueBearer = chooseDialogueBearers(chronological, scored);
+        Map<String, String> dialogueBearer = chooseDialogueBearers(chronological);
         Map<String, String> bearerKind = new HashMap<>();
         for (SubstrateObservation obs : chronological) {
             if (obs.observationId().equals(dialogueBearer.get(turnKey(obs)))) {
@@ -86,19 +83,16 @@ class ConversationThreadAssembler {
 
         List<StructuredThread.Message> earlier = new ArrayList<>();
         for (SubstrateObservation obs : chronological) {
-            if (isScoredTurn(obs, scored)) {
-                continue;
-            }
             String turnKind = bearerKind.get(turnKey(obs));
             if (turnKind == null || !turnKind.equals(obs.kind())) {
-                continue; // tool spans, and the agent twin of a turn that has an llm span
+                continue; // the agent twin of a turn that has an llm span
             }
             if (obs.observationId().equals(dialogueBearer.get(turnKey(obs)))) {
                 appendMessages(earlier, obs.input(), "user", DIALOGUE_ROLES);
             }
             appendMessages(earlier, obs.output(), "assistant", DIALOGUE_ROLES);
         }
-        return Optional.of(new StructuredThread(earlier, joined(scoredUser)));
+        return Optional.of(new StructuredThread(earlier, joined(scoredUser), prior.count() + 1));
     }
 
     /**
@@ -227,15 +221,14 @@ class ConversationThreadAssembler {
      * user↔assistant delta ONCE even though the substrate carries both an {@code agent} and an {@code
      * llm} span for the same turn (same delta message). The {@code llm} span is preferred — it carries the
      * structured {@code gen_ai.input/output.messages} — so an {@code agent} twin only wins when a turn has
-     * no {@code llm} span. The scored turn is excluded (it supplies the trailing turn, not prior context).
+     * no {@code llm} span.
      */
-    private static Map<String, String> chooseDialogueBearers(
-            List<SubstrateObservation> chronological, SubstrateObservation scored) {
+    private static Map<String, String> chooseDialogueBearers(List<SubstrateObservation> chronological) {
         Map<String, String> bearer = new HashMap<>();
         Map<String, Boolean> bearerIsLlm = new HashMap<>();
         for (SubstrateObservation obs : chronological) {
             String k = obs.kind();
-            if (k == null || !CONVERSATIONAL_KINDS.contains(k) || isScoredTurn(obs, scored)) {
+            if (k == null || !CONVERSATIONAL_KINDS.contains(k)) {
                 continue;
             }
             String key = turnKey(obs);
@@ -255,11 +248,5 @@ class ConversationThreadAssembler {
      */
     private static String turnKey(SubstrateObservation obs) {
         return obs.traceId();
-    }
-
-    /** True when {@code obs} belongs to the scored turn — the same trace, or the scored span itself. */
-    private static boolean isScoredTurn(SubstrateObservation obs, SubstrateObservation scored) {
-        return obs.observationId().equals(scored.observationId())
-                || scored.traceId().equals(obs.traceId());
     }
 }

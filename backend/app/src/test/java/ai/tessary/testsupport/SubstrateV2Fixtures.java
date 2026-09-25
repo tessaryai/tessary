@@ -447,7 +447,7 @@ public final class SubstrateV2Fixtures {
      * dialogue. Returns the span's producer identity, which is what the reader surfaces address.
      *
      * <p>{@code sessionId} may be null — an anonymous turn is its own single-turn conversation, which is
-     * a real production state and a distinct code path in {@code conversationObservationsUpTo}.
+     * a real production state and a distinct code path in {@code priorTurns}.
      */
     public SpanRef turn(
             String projectId,

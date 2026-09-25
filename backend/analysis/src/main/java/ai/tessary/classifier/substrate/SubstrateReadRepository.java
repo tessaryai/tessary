@@ -334,8 +334,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * retrieves once and answers several follow-ups from that context without re-retrieving;
      * scoring a follow-up against its own bare trace produced near-universal false fires (measured
      * 88% on stale-context follow-ups against an 8.6% same-trace baseline). Grouping key is
-     * {@code COALESCE(trace.thread_id, trace.session_id)}, the same key {@link
-     * #conversationObservationsUpTo} uses.
+     * {@code COALESCE(trace.thread_id, trace.session_id)}, the same key {@link #priorTurns} uses.
      *
      * <p>Nearest-prior-retrieval, not a conversation-wide blend: a conversation's topic can shift
      * turn to turn, so ranking every candidate across the whole conversation risks stitching a
@@ -379,11 +378,10 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
-        // Grouping key mirrors conversationObservationsUpTo's
-        // COALESCE(parent_id, id) exactly. Deliberately not time-bounded here: a call site that
-        // reaches outside anywhere in the conversation, even later, still reads BLIND rather than
-        // GROUNDLESS. Only the evidence text below is time-bounded, so this never lets a future
-        // document become a premise.
+        // Grouping key mirrors priorTurns' COALESCE(thread_id, session_id) exactly. Deliberately not
+        // time-bounded here: a call site that reaches outside anywhere in the conversation, even later,
+        // still reads BLIND rather than GROUNDLESS. Only the evidence text below is time-bounded, so
+        // this never lets a future document become a premise.
         jdbc.sql("""
                 SELECT s.id AS span_id
                 FROM span s
@@ -564,72 +562,57 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     }
 
     /**
-     * The scored span's conversation thread: the most-recent {@code limit} spans sharing the scored
-     * span's conversation grain, at or before the scored span's keyset position, newest first. The
-     * frustration classifier's thread reader reverses this to chronological order and drops the scored
-     * turn.
+     * The turns before a scored turn, for the frustration classifier.
      *
-     * <p>Grouping grain is the pinned {@code COALESCE(trace.thread_id, trace.session_id)}: the
-     * producer's own thread id when it sent one, else the session.
-     *
-     * <p>A trace with neither a thread nor a session id has a null conversation key: the equality
-     * matches nothing when the scored key is null (SQL equality on null is unknown, not true), and the
-     * scored trace, always added, is then the whole conversation, so an anonymous turn is its own
-     * single-turn conversation. Writing it as {@code IS NOT DISTINCT FROM} instead would hand that
-     * turn the whole project's anonymous history as its thread.
-     *
-     * <p>Ordering is event time, {@code (started_at, created_at, trace_id, id)}, bounded at the scored
-     * span's own position in it. Not the sweep cursor's ingest-time keyset: spans that arrive out of
-     * order, or all at once from an upload or a batched exporter, would otherwise put later messages
-     * before the scored one. {@code created_at} only breaks ties within one start instant, where it keeps
-     * a turn's agent, llm and tool spans in the order they were written.
-     * Both conversational spans ({@code kind in (llm, agent)}) and tool/retrieval spans ({@code
-     * tool, mcp, retrieval, embedding, reranker}) are returned. Perf: one read per scored span on the
-     * async sweep (never the ingest hot path): the conversation's traces first, then their spans by
-     * primary-key prefix, then payloads for the {@code limit} rows kept only.
+     * @param spans the {@code llm} and {@code agent} spans of the {@code turns} turns just before the
+     *     scored one, with payloads, oldest first
+     * @param count how many turns the conversation had before the scored one, all of them
      */
-    public List<SubstrateObservation> conversationObservationsUpTo(
-            String projectId, String scoredTraceId, String scoredSpanId, int limit) {
-        // Each step is materialized so the plan never rests on the project's row estimates: a project
-        // that grew since span was last analyzed looked empty to the planner, which then re-scanned the
-        // whole project once per span (seconds per turn) instead of walking one conversation's traces.
-        return jdbc.sql("""
-                        WITH scored AS MATERIALIZED (
-                                 SELECT started_at, created_at, trace_id, id FROM span
-                                  WHERE project_id = :pid AND trace_id = :scoredTraceId AND id = :scoredSpanId),
-                             -- The scored trace's conversation, when it has one, else the scored trace alone.
-                             -- An anonymous turn is its own conversation: equality on a null key matches
-                             -- nothing, so only the scored trace is left, never the project's other
-                             -- session-less traces.
-                             conversation AS MATERIALIZED (
-                                 SELECT tr.id FROM trace tr
-                                  WHERE tr.project_id = :pid
-                                    AND COALESCE(tr.thread_id, tr.session_id) = (
-                                        SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
-                                         WHERE str.project_id = :pid AND str.id = :scoredTraceId)
-                                 UNION
-                                 SELECT :scoredTraceId),
-                             picked AS MATERIALIZED (
-                                 SELECT s.* FROM conversation c
-                                   JOIN span s ON s.project_id = :pid AND s.trace_id = c.id
-                                   CROSS JOIN scored sc
-                                  WHERE s.kind IN ('llm', 'agent', 'tool', 'mcp', 'retrieval', 'embedding', 'reranker')
-                                    AND (s.started_at, s.created_at, s.trace_id, s.id)
-                                        <= (sc.started_at, sc.created_at, sc.trace_id, sc.id)
-                                  ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC
-                                  LIMIT :limit)
+    public record PriorTurns(List<SubstrateObservation> spans, int count) {
+        public PriorTurns {
+            spans = List.copyOf(spans);
+        }
+    }
+
+    /**
+     * {@link PriorTurns} for the scored trace. A turn is a top-level trace ({@code parent_trace_id IS
+     * NULL}) of the scored trace's conversation, {@code COALESCE(thread_id, session_id)}, that started
+     * before it in event time, {@code (started_at, id)}: the definition the frustration finding page
+     * reads its earlier turns by, walked on {@code ix_trace_conversation}. A sub-agent trace is not a
+     * turn. A trace in no conversation has no earlier turns: equality on a null key matches nothing.
+     */
+    public PriorTurns priorTurns(String projectId, String scoredTraceId, int turns) {
+        String earlier = """
+                FROM trace f
+                  JOIN trace t
+                    ON t.project_id = f.project_id
+                   AND t.parent_trace_id IS NULL
+                   AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
+                   AND (t.started_at, t.id) < (f.started_at, f.id)
+                WHERE f.project_id = :pid AND f.id = :scoredTraceId""";
+        List<SubstrateObservation> spans = jdbc.sql("WITH turns AS MATERIALIZED (SELECT t.id " + earlier + """
+
+                          ORDER BY t.started_at DESC, t.id DESC
+                          LIMIT :turns)
                         """ + SPAN_COLUMNS + """
 
-                        FROM picked s
+                        FROM turns tu
+                          JOIN span s ON s.project_id = :pid AND s.trace_id = tu.id
                           LEFT JOIN span_payload pl
                             ON pl.project_id = s.project_id AND pl.trace_id = s.trace_id AND pl.span_id = s.id
-                        ORDER BY s.started_at DESC, s.created_at DESC, s.trace_id DESC, s.id DESC""")
+                        WHERE s.kind IN ('llm', 'agent')
+                        ORDER BY s.started_at, s.created_at, s.trace_id, s.id""")
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
-                .param("scoredSpanId", scoredSpanId)
-                .param("limit", limit)
+                .param("turns", turns)
                 .query((rs, n) -> map(rs))
                 .list();
+        int count = jdbc.sql("SELECT COUNT(*) " + earlier)
+                .param("pid", projectId)
+                .param("scoredTraceId", scoredTraceId)
+                .query(Integer.class)
+                .single();
+        return new PriorTurns(spans, count);
     }
 
     /** One span by its producer identity within a project (the correction loop labels a specific subject). */
