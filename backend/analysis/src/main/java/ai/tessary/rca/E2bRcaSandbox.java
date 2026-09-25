@@ -8,6 +8,7 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
@@ -312,6 +313,8 @@ public class E2bRcaSandbox implements RcaSandbox {
      * buildErrorBody} carries a {@code usage} object whenever rca.js's failure envelope reached it,
      * and {@code bookUsage} already no-ops on a body with nothing usable.
      */
+    @ExcludeFromJacocoGeneratedReport(
+            "parses the body this class serialized one call earlier, so the checked catch cannot fire")
     private boolean platformFunded(String bodyJson) {
         try {
             return mapper.readTree(bodyJson)

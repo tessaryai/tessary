@@ -3,7 +3,9 @@ package ai.tessary.classifier.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.config.TraceMdcBridge;
@@ -39,5 +41,30 @@ class ClassifierCatalogWorkerTest {
         assertDoesNotThrow(
                 () -> new ClassifierCatalogWorker(classifiers, unreadable, new TraceMdcBridge(Tracer.NOOP)).tick());
         verifyNoInteractions(classifiers);
+    }
+
+    /**
+     * One project whose resync throws is skipped, not fatal: the projects after it in the same tick are
+     * still reconciled, rather than every later project waiting on one broken catalog.
+     */
+    @Test
+    void aProjectWhoseResyncFailsDoesNotStopTheNextProject() {
+        Project broken = project("p-broken");
+        Project healthy = project("p-healthy");
+        ProjectRepository two = new ProjectRepository(mock(JdbcClient.class)) {
+            @Override
+            public List<Project> findActive() {
+                return List.of(broken, healthy);
+            }
+        };
+        when(classifiers.resyncBuiltIns(broken)).thenThrow(new IllegalStateException("catalog row locked"));
+        when(classifiers.resyncBuiltIns(healthy)).thenReturn(2);
+
+        assertDoesNotThrow(() -> new ClassifierCatalogWorker(classifiers, two, new TraceMdcBridge(Tracer.NOOP)).tick());
+        verify(classifiers).resyncBuiltIns(healthy);
+    }
+
+    private static Project project(String id) {
+        return new Project(id, "org-1", id, id, null, "2026-09-01T00:00:00Z", null, null, false, null);
     }
 }

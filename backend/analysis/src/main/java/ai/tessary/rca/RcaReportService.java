@@ -35,6 +35,11 @@ public class RcaReportService {
                 .orElseThrow(() -> new TessaryException(CommonError.NOT_FOUND, id));
     }
 
+    /** A row the caller already holds, rendered as the same view {@link #get} returns. */
+    public RcaReportView view(RcaReportRow row) {
+        return RcaReportView.of(row, mapper);
+    }
+
     /** The report for a job, if the job has one. */
     public RcaReportView getByJobId(String projectId, String jobId) {
         return reports.findByJobId(projectId, jobId)

@@ -108,4 +108,18 @@ class HomeTessaryClientTest {
         assertEquals(404, fetched.status());
         assertEquals(0, fetched.body().length);
     }
+
+    /** The bug: a body exactly at the limit is refused, or trimmed, instead of returned whole. */
+    @Test
+    void getBytesReturnsABodyExactlyAtTheLimitWhole() throws Exception {
+        when(http.send(any(HttpRequest.class), ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+                .thenReturn(streamed);
+        when(streamed.statusCode()).thenReturn(200);
+        when(streamed.body()).thenReturn(new ByteArrayInputStream("{\"a\"}".getBytes(StandardCharsets.UTF_8)));
+
+        HomeTessaryClient.Fetched fetched = new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", 5);
+
+        assertEquals(200, fetched.status());
+        assertEquals("{\"a\"}", new String(fetched.body(), StandardCharsets.UTF_8));
+    }
 }

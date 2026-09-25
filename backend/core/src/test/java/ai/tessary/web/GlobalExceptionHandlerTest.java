@@ -3,18 +3,22 @@ package ai.tessary.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.GitError;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -232,5 +236,40 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(status, response.getStatusCode().value(), bug);
         assertEquals(ApiResponse.failure(status, expected), response.getBody(), bug);
+    }
+
+    /**
+     * A refusal another build marks {@link Retryable} tells the client when to come back: without the
+     * header, a client has no delay to honour and either hammers the endpoint or gives up.
+     */
+    @Test
+    void aRetryableRefusalCarriesRetryAfterBesideTheUsualEnvelope() {
+        ResponseEntity<ApiResponse<Void>> response = new GlobalExceptionHandler()
+                .handleTessary(new RetryableRefusal(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, 30, "cold start"));
+
+        assertEquals(503, response.getStatusCode().value());
+        assertEquals(List.of("30"), response.getHeaders().get(HttpHeaders.RETRY_AFTER));
+        assertEquals(
+                ApiResponse.failure(
+                        503,
+                        new ErrorBody(
+                                "CLASSIFIER.TRIAGE_LAUNCHER_UNAVAILABLE",
+                                "The triage launcher is not answering: cold start",
+                                null)),
+                response.getBody());
+    }
+
+    private static final class RetryableRefusal extends TessaryException implements Retryable {
+        private final int retryAfterSeconds;
+
+        RetryableRefusal(ClassifierError error, int retryAfterSeconds, String arg) {
+            super(error, arg);
+            this.retryAfterSeconds = retryAfterSeconds;
+        }
+
+        @Override
+        public int retryAfterSeconds() {
+            return retryAfterSeconds;
+        }
     }
 }

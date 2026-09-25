@@ -251,17 +251,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
         long last = sweepClock.get();
         if (now - last < SWEEP_INTERVAL_NANOS || !sweepClock.compareAndSet(last, now)) return;
         pool.values().removeIf(b -> b.refilledBy(now));
-        int excess = pool.size() - (MAX_BUCKETS - EVICTION_HEADROOM);
-        if (excess <= 0) return;
+        // Sized from the same snapshot it indexes, so a pool shrinking concurrently cannot push the
+        // index past the array.
         long[] stamps =
                 pool.values().stream().mapToLong(Bucket::lastTouchedNanos).toArray();
-        if (excess >= stamps.length) {
-            pool.clear();
-        } else {
-            Arrays.sort(stamps);
-            long coldest = stamps[excess - 1];
-            pool.values().removeIf(b -> b.lastTouchedNanos() <= coldest);
-        }
+        int excess = stamps.length - (MAX_BUCKETS - EVICTION_HEADROOM);
+        if (excess <= 0) return;
+        Arrays.sort(stamps);
+        long coldest = stamps[excess - 1];
+        pool.values().removeIf(b -> b.lastTouchedNanos() <= coldest);
         // The one signal that separates "a pool full of real callers" from "someone is minting keys".
         log.warn("rate limiter pool was full of active buckets; evicted {} by age (cap {})", excess, MAX_BUCKETS);
     }
