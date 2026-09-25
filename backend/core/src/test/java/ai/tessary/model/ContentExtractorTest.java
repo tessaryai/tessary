@@ -61,11 +61,36 @@ class ContentExtractorTest {
                 messages);
     }
 
+    static Stream<Arguments> nonEnvelopeCases() {
+        return Stream.of(
+                Arguments.of(
+                        "a plain-text blob from a provider adapter is one message from the column's speaker",
+                        "  plain provider blob ",
+                        List.of(new RoleMessage("assistant", "plain provider blob"))),
+                Arguments.of(
+                        "a bare JSON part is flattened to one message",
+                        "{\"type\":\"text\",\"text\":\"hi\"}",
+                        List.of(new RoleMessage("assistant", "hi"))),
+                Arguments.of("an empty array adds no phantom turn", "[]", List.of()));
+    }
+
+    /** The bugs, one per row: a payload that is not a message envelope loses its text, or adds an empty turn. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonEnvelopeCases")
+    void columnMessages_readsAPayloadThatIsNotAnEnvelope(String bug, String raw, List<RoleMessage> expected) {
+        assertEquals(expected, ContentExtractor.columnMessages(raw, Set.of("user", "assistant"), "assistant"), bug);
+    }
+
     static Stream<Arguments> columnTextCases() {
         return Stream.of(
                 Arguments.of(
                         "a message with no content adds no blank line",
                         "[{\"role\":\"user\"},{\"role\":\"user\",\"content\":\"hi\"}]",
+                        "user",
+                        "hi"),
+                Arguments.of(
+                        "a bare parts array with no role is flattened, not read as an envelope",
+                        "[{\"type\":\"text\",\"text\":\"hi\"}]",
                         "user",
                         "hi"),
                 Arguments.of("a bare number payload renders as its text", "42", "user", "42"),
@@ -74,6 +99,11 @@ class ContentExtractorTest {
                         "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":{\"answer\":1}}]}]",
                         "assistant",
                         "{\"answer\":1}"),
+                Arguments.of(
+                        "structured content with no text field is kept as its JSON",
+                        "[{\"role\":\"user\",\"content\":{\"foo\":1}}]",
+                        "user",
+                        "{\"foo\":1}"),
                 Arguments.of(
                         "a numeric text field is skipped for the part's content",
                         "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":5,\"content\":\"five\"}]}]",

@@ -12,6 +12,8 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import java.util.Map;
+import java.util.stream.Collectors;
 import net.logstash.logback.encoder.LogstashEncoder;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -113,5 +115,26 @@ class StructuredLogFieldsTest {
         assertEquals("ingest.batch.failed", captured.event().getMessage());
         assertTrue(captured.json().contains("\"count\":3"));
         assertTrue(captured.json().contains("boom"), "the throwable must still be attached, got: " + captured.json());
+    }
+
+    /**
+     * The bug: the conditional {@code field(key, value, condition)} ignores its condition, so a field a
+     * caller meant only for its loud lines lands on every line, or on none; a null value is dropped
+     * either way.
+     */
+    @Test
+    void aConditionalFieldIsAttachedOnlyWhenItsConditionHoldsAndItHasAValue() {
+        String name = "test.structuredlog.conditional";
+        var captured = capture(
+                () -> StructuredLog.warn(LoggerFactory.getLogger(name), Markers.OPS, "spend.reported")
+                        .field("warnThresholdUsd", 50, true)
+                        .field("quietThresholdUsd", 10, false)
+                        .field("absent", null, true)
+                        .log(),
+                name);
+
+        assertEquals(
+                Map.of("event", "spend.reported", "warnThresholdUsd", 50),
+                captured.event().getKeyValuePairs().stream().collect(Collectors.toMap(kv -> kv.key, kv -> kv.value)));
     }
 }
