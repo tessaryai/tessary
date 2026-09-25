@@ -3,12 +3,14 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
@@ -37,6 +39,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
@@ -174,11 +178,148 @@ class ClassifierWorkerDrainTest {
                 "a lost lease is said out loud: " + appender.list);
     }
 
+    /**
+     * The tick is the only thing that moves every project's sweeps, so no one step's failure may stop the
+     * rest: a dead-letter sweep that fails (or that dead-lettered some jobs) still enqueues and claims, and
+     * one project whose enqueue throws still leaves the next project enqueued.
+     */
+    @Test
+    void aTickSurvivesAFailedDeadLetterSweepAndOneProjectsFailedEnqueue() {
+        ClassifierWorker worker = worker();
+        when(jobs.failExhausted(anyInt())).thenReturn(3).thenThrow(new IllegalStateException("db blip"));
+        when(substrate.projectsWithObservations()).thenReturn(List.of("proj-a", "proj-b"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("bad config"))
+                .when(signalService)
+                .enqueueEnabled("proj-a");
+        when(jobs.claimBatch(anyString(), anyInt(), anyLong(), anyInt())).thenReturn(List.of());
+
+        worker.tick();
+        worker.tick();
+
+        verify(signalService, times(2)).enqueueEnabled("proj-b");
+        verify(jobs, times(2)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
+    }
+
+    /** A project scan or a claim that fails ends the tick: no sweep runs off a list it could not read. */
+    @Test
+    void aFailedProjectScanOrClaimRunsNoSweep() {
+        when(substrate.projectsWithObservations()).thenThrow(new IllegalStateException("db down"));
+        worker().tick();
+        verify(jobs, never()).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
+
+        org.mockito.Mockito.reset(substrate);
+        when(substrate.projectsWithObservations()).thenReturn(List.of());
+        when(jobs.claimBatch(anyString(), anyInt(), anyLong(), anyInt()))
+                .thenThrow(new IllegalStateException("db down"));
+        worker().tick();
+
+        verifyNoInteractions(signals);
+    }
+
+    /**
+     * A job whose classifier was deleted or switched off finishes without moving its cursor. Leaving it
+     * claimed re-runs it every tick; moving the cursor would skip traffic if the classifier comes back.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void aJobForAMissingOrDisabledClassifierFinishesWithoutMovingItsCursor(boolean exists) {
+        when(signals.findById(PROJECT, CLASSIFIER))
+                .thenReturn(
+                        exists
+                                ? Optional.of(new ClassifierRow(
+                                        CLASSIFIER,
+                                        PROJECT,
+                                        BuiltInDetector.Kind.REGEX,
+                                        BuiltInDetector.Kind.REGEX,
+                                        null,
+                                        BuiltInDetector.Kind.REGEX,
+                                        null,
+                                        true,
+                                        1,
+                                        false,
+                                        ClassifierRow.Mode.DISCOVERY,
+                                        "now",
+                                        "now"))
+                                : Optional.empty());
+
+        worker().sweepForTest(job());
+
+        verify(jobs).markSwept("job-1", null, null);
+        verifyNoInteractions(substrate);
+    }
+
+    /**
+     * Everything after the detections are scored is fail-soft: a detection row that will not write, an
+     * arming gate that throws, a pre-deploy registration that throws and a catch-up that throws each cost
+     * only their own work. None may stop the cursor, or the sweep re-scores the same page forever. The other
+     * fired detection still writes.
+     */
+    @Test
+    void failuresAfterScoringNeverStopTheCursor() {
+        ClassifierWorker worker = worker(PAGE + 1);
+        String kind = BuiltInDetector.Kind.REGEX;
+        when(signals.findById(PROJECT, CLASSIFIER)).thenReturn(Optional.of(enabled(kind)));
+        when(catalog.grainFor(kind)).thenReturn(Grain.OBSERVATION);
+        when(detections.writesDetections(kind)).thenReturn(true);
+        when(catalog.detectorFor(kind)).thenReturn(detector);
+        when(catchUp.kinds()).thenReturn(java.util.Set.of(kind));
+        List<SubstrateObservation> tail = page(0, 2);
+        when(substrate.observationsAfter(PROJECT, null, null, PAGE + 1)).thenReturn(tail);
+        when(detector.sweepBatch(any(), any(), any()))
+                .thenReturn(List.of(Detection.fired("high", "{}"), Detection.fired("low", "{}")));
+        when(detections.insert(
+                        anyString(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        eq("trace-0"),
+                        any(),
+                        any(),
+                        any(),
+                        any()))
+                .thenThrow(new IllegalStateException("constraint"));
+        when(detections.insert(
+                        anyString(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        eq("trace-1"),
+                        any(),
+                        any(),
+                        any(),
+                        any()))
+                .thenReturn(true);
+        org.mockito.Mockito.doThrow(new IllegalStateException("arming"))
+                .when(arming)
+                .evaluate(any(), eq(PROJECT), any(), any());
+        when(preDeployChecks.isEnabled()).thenReturn(true);
+        when(preDeployChecks.registerForSignal(any())).thenThrow(new IllegalStateException("ci"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("rollup"))
+                .when(catchUp)
+                .caughtUp(any(), any(), any());
+
+        worker.sweepForTest(job());
+
+        verify(jobs).markSwept("job-1", createdAt(tail), handle(tail));
+        verify(catchUp).caughtUp(any(), any(), eq(createdAt(tail)));
+        verify(jobs, never()).markFailed(anyString(), any(), anyInt());
+    }
+
     // ---- fixtures ---------------------------------------------------------------------------------
 
     private ClassifierWorker worker() {
+        return worker(PAGE);
+    }
+
+    private ClassifierWorker worker(int pageSize) {
         ClassifierProperties props = new ClassifierProperties();
-        props.setBatchSize(PAGE);
+        props.setBatchSize(pageSize);
         return new ClassifierWorker(
                 signalService,
                 signals,
@@ -193,6 +334,23 @@ class ClassifierWorkerDrainTest {
                 props,
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor());
+    }
+
+    private static ClassifierRow enabled(String kind) {
+        return new ClassifierRow(
+                CLASSIFIER,
+                PROJECT,
+                kind,
+                kind,
+                null,
+                kind,
+                null,
+                true,
+                1,
+                true,
+                ClassifierRow.Mode.DISCOVERY,
+                "now",
+                "now");
     }
 
     /** An enabled classifier of {@code kind} at observation grain, whose detector fires on nothing. */

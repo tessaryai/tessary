@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The parse contract for a triage run. One load-bearing property: a verdict is recorded only for a run
@@ -107,5 +110,56 @@ class BehaviorTriageVerdictTest {
                 }) {
             assertNull(BehaviorTriageVerdict.parse(mapper, bad), "input: " + bad);
         }
+    }
+
+    /**
+     * The {@code --output-format json} envelope whose {@code result} carries the ruling, as JSON text wrapped
+     * in the agent's prose or as an object. Missing it records nothing for a run that did rule.
+     */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{\"result\": \"My ruling: {\\\"verdict\\\": \\\"positive\\\", \\\"summary\\\": \\\"s\\\","
+                        + " \\\"citations\\\": [{\\\"path\\\": \\\"a\\\", \\\"reason\\\": \\\"b\\\"}]} done.\"}",
+                "{\"result\": {\"verdict\": \"positive\", \"summary\": \"s\","
+                        + " \"citations\": [{\"path\": \"a\", \"reason\": \"b\"}]}}",
+            })
+    void unwrapsARulingCarriedInTheResultField(String envelope) {
+        assertEquals(
+                new BehaviorTriageVerdict(
+                        FindingRow.TriageVerdict.POSITIVE,
+                        "s",
+                        List.of(new BehaviorTriageVerdict.Citation("a", "b", null))),
+                BehaviorTriageVerdict.parse(mapper, envelope));
+    }
+
+    /** A {@code result} whose text holds no ruling is a run that said nothing, not a verdict. */
+    @Test
+    void aResultWithNoRulingInItIsNotARuling() {
+        assertNull(BehaviorTriageVerdict.parse(mapper, "{\"result\": \"I ran out of turns.\"}"));
+    }
+
+    /**
+     * A script's stdout is the receipt a person re-checks the ruling by, kept up to 4,000 characters and cut
+     * with a marker past that. An empty or non-text stdout is no receipt at all.
+     */
+    @Test
+    void aScriptsStdoutIsKeptUpToTheCapAndMarkedWhenCut() {
+        String atCap = "x".repeat(4_000);
+        BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(
+                mapper,
+                "{\"verdict\": \"negative\", \"summary\": \"s\", \"citations\": ["
+                        + "{\"path\": \"checks/a.py\", \"reason\": \"r\", \"stdout\": \"" + atCap + "\"},"
+                        + "{\"path\": \"checks/b.py\", \"reason\": \"r\", \"stdout\": \"" + atCap + "y\"},"
+                        + "{\"path\": \"checks/c.py\", \"reason\": \"r\", \"stdout\": \"\"},"
+                        + "{\"path\": \"checks/d.py\", \"reason\": \"r\", \"stdout\": 42}]}");
+
+        assertEquals(
+                List.of(
+                        new BehaviorTriageVerdict.Citation("checks/a.py", "r", atCap),
+                        new BehaviorTriageVerdict.Citation("checks/b.py", "r", atCap + "\n…truncated"),
+                        new BehaviorTriageVerdict.Citation("checks/c.py", "r", null),
+                        new BehaviorTriageVerdict.Citation("checks/d.py", "r", null)),
+                java.util.Objects.requireNonNull(v).citations());
     }
 }

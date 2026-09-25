@@ -7,11 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.cases.CaseRepository.PageKey;
 import ai.tessary.cases.CaseRepository.PageOrder;
+import ai.tessary.ingest.PreviewCursor;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The case cursor. Every test here is about a token the server should REFUSE to resume from, because that is
@@ -94,6 +97,44 @@ class CasePageCodecTest {
         assertNull(CasePageCodec.decode(
                 Base64.getUrlEncoder().withoutPadding().encodeToString("0\nv1".getBytes(StandardCharsets.UTF_8)),
                 PageOrder.LIVE_RANK));
+    }
+
+    /**
+     * A well-formed token for this order that names no point on it: a severity that is not a number, a
+     * live-ranked token with no severity (Postgres answers a null bound with nothing), or a missing stamp or
+     * id. Each restarts at page one rather than resuming from a key that returns an empty or wrong page.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "LIVE_RANK|high|2026-08-02T00:00:00Z|b",
+                "LIVE_RANK||2026-08-02T00:00:00Z|b",
+                "LIVE_RANK|0.5||b",
+                "RESOLVED_RECENT||2026-08-02T00:00:00Z|",
+            })
+    void aTokenThatNamesNoPointOnItsOrderStartsAgainAtPageOne(
+            PageOrder order, @Nullable String severity, @Nullable String at, @Nullable String id) {
+        assertNull(CasePageCodec.decode(token(order, severity, at, id), order));
+    }
+
+    /** The resolved order carries no severity, so a token without one is a real point on it, not a refusal. */
+    @Test
+    void aResolvedTokenWithoutASeverityResumes() {
+        assertEquals(
+                new PageKey(null, "2026-08-02T00:00:00Z", "b"),
+                CasePageCodec.decode(
+                        token(PageOrder.RESOLVED_RECENT, null, "2026-08-02T00:00:00Z", "b"),
+                        PageOrder.RESOLVED_RECENT));
+    }
+
+    private static String token(PageOrder order, @Nullable String severity, @Nullable String at, @Nullable String id) {
+        String sep = "\u001f";
+        return PreviewCursor.encode("v1" + sep + order.name() + sep + nz(severity) + sep + nz(at) + sep + nz(id), 0);
+    }
+
+    private static String nz(@Nullable String s) {
+        return s == null ? "" : s;
     }
 
     // ------------------------------------------------------------------ helpers

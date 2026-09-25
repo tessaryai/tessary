@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -198,6 +201,44 @@ class BehaviorTriagePromptTest {
         assertTrue(md.contains("score 0.991; flagged [0, 24) 0.991, [25, 40) 0.98"), md);
         assertTrue(md.contains("strongest: \"The refund window is 90 days.\""), md);
         assertTrue(md.contains("1 flagged answer(s), every one since onset."), md);
+    }
+
+    /**
+     * A flagged answer whose evidence is not JSON is listed with its evidence as written, one with none says
+     * so, and a finding whose last-seen time cannot be read still ships the file. Throwing on either loses
+     * the whole dossier and the run with it.
+     */
+    @Test
+    void aGroundednessDossierSurvivesUnreadableEvidenceAndAnUnreadableLastSeen() {
+        ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
+        when(detections.listWitnessDetections(
+                        eq(BuiltInDetector.Kind.GROUNDEDNESS), any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of(
+                        new ClassifierDetectionWriteRepository.DetectionInWindow(
+                                "tr-1", "sp-1", null, "warn", "high", "score=0.9 (legacy)", "2026-08-01T12:00:00Z"),
+                        new ClassifierDetectionWriteRepository.DetectionInWindow(
+                                "tr-2", "sp-2", null, "warn", "high", null, "2026-08-01T11:00:00Z")));
+        FindingRow row = FindingRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+                .callSiteId("rag-answer")
+                .lastSeenAt("2026-08-02 00:00:00+00")
+                .payload("{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}")
+                .build();
+
+        String md =
+                engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
+
+        assertEquals(
+                "# Flagged answers since onset\n\n"
+                        + "One line per answer the classifier flagged at this call site, newest first: trace and"
+                        + " span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's"
+                        + " score (P(unsupported) of its strongest sentence), and each flagged sentence as"
+                        + " `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The"
+                        + " strongest sentence's text follows in quotes. A flagged sentence is where the model"
+                        + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n"
+                        + "- trace `tr-1` span `sp-1` at 2026-08-01T12:00:00Z: score=0.9 (legacy)\n"
+                        + "- trace `tr-2` span `sp-2` at 2026-08-01T11:00:00Z: (no evidence recorded)\n"
+                        + "\n2 flagged answer(s), every one since onset.\n",
+                md);
     }
 
     /**

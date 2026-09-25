@@ -7,6 +7,7 @@ import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -477,9 +478,13 @@ public class BehaviorTriageEngine {
      * printed.
      */
     public @Nullable String citationsJson(BehaviorTriageVerdict verdict) {
-        if (verdict.citations().isEmpty()) return null;
+        return writeCitations(verdict.citations());
+    }
+
+    @ExcludeFromJacocoGeneratedReport("serializes a list of string-only records, so the checked catch cannot fire")
+    private @Nullable String writeCitations(List<BehaviorTriageVerdict.Citation> citations) {
         try {
-            return mapper.writeValueAsString(verdict.citations());
+            return mapper.writeValueAsString(citations);
         } catch (Exception e) {
             return null;
         }

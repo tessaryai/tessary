@@ -9,13 +9,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
+import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
+import ai.tessary.classifier.toolerror.CarriedState;
+import ai.tessary.classifier.toolerror.ToolErrorDetector;
+import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import ai.tessary.open.errors.CaseError;
+import ai.tessary.open.errors.ErrorCode;
+import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.jobqueue.JobRow;
+import ai.tessary.plan.Capability;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaJobRepository;
 import ai.tessary.rca.RcaReportRepository;
@@ -23,14 +32,19 @@ import ai.tessary.rca.RcaReportRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
 /** Case lifecycle as a human drives it: resolve, mute, unmute, how a case is looked up, and what
@@ -65,6 +79,18 @@ class CaseServiceTest {
 
     @Autowired
     TenantService tenants;
+
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    ToolErrorStateRepository toolErrorStates;
+
+    @Autowired
+    MalformedOutputRateRepository malformedOutputRates;
+
+    @Autowired
+    JdbcClient jdbc;
 
     @Test
     void resolvingRequiresAReasonAndKeepsIt() {
@@ -347,6 +373,182 @@ class CaseServiceTest {
         assertEquals(
                 FindingRow.Status.CLOSED,
                 findings.findById(p.id(), findingId).orElseThrow().status());
+    }
+
+    // ---- refusals and resets ----------------------------------------------------------------
+
+    /**
+     * Absorb moves a detector's reference, so it is refused where there is none to move (a malformed-output
+     * case) and where the org no longer has the classifier; either closing as absorbed would leave the
+     * detector's bar where it was and the case would reopen on the next window.
+     */
+    @Test
+    void absorbIsRefusedWithNoReferenceToMoveOrNoClassifierToMoveItFor() {
+        Project p = project("svc-absorb-refused");
+        CaseRow malformed = open(p, CaseRow.Detector.MALFORMED_OUTPUT);
+        CaseRow toolError = open(p, CaseRow.Detector.TOOL_ERROR);
+        capabilities.withhold(p.orgId(), Capability.TOOL_ERROR);
+
+        assertError(CaseError.NOT_ABSORBABLE, () -> service.absorb(p.id(), malformed.id(), "priya@example.com"));
+        assertError(CaseError.DETECTOR_UNAVAILABLE, () -> service.absorb(p.id(), toolError.id(), "priya@example.com"));
+        assertEquals(
+                CaseRow.State.OPEN,
+                cases.findById(p.id(), toolError.id()).orElseThrow().state());
+    }
+
+    /** RCA is anchored on a finding; a case holding none (a pre-link archived row) has nothing to analyse. */
+    @Test
+    void rcaOnACaseHoldingNoFindingIsRefused() {
+        Project p = project("svc-rca-no-finding");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        jdbc.sql("UPDATE finding SET case_id = NULL WHERE project_id = :pid")
+                .param("pid", p.id())
+                .update();
+
+        assertError(RcaError.SUBJECT_NOT_FOUND, () -> service.runRca(p.id(), row.id(), "priya@example.com"));
+        assertNull(cases.findById(p.id(), row.id()).orElseThrow().lockedAt(), "a refused press locks nothing");
+    }
+
+    /**
+     * Closing a tool-error or malformed-output case by hand clears the accumulator behind it. Left standing,
+     * an outage's accumulator would re-derive the pre-fix rate on the next sweep and reopen the case for
+     * weeks after the fix.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {CaseRow.Detector.TOOL_ERROR, CaseRow.Detector.MALFORMED_OUTPUT})
+    void resolvingARateCaseClearsItsAccumulator(String detector) {
+        Project p = project("svc-resolve-resets-" + detector);
+        CaseRow row = open(p, detector);
+        ToolErrorStateRepository states =
+                CaseRow.Detector.TOOL_ERROR.equals(detector) ? toolErrorStates : malformedOutputRates.states();
+        states.save(
+                p.id(),
+                new CarriedState(
+                        row.subjectId(),
+                        new ToolErrorDetector.State(7.5, 0, "2026-07-01T00:00:00Z", null, 40, 0),
+                        null,
+                        null,
+                        "epoch-1",
+                        null,
+                        null,
+                        null,
+                        null),
+                Instant.now().toString());
+
+        service.resolve(p.id(), row.id(), "shipped a fix", "priya@example.com", null);
+
+        CarriedState after = Objects.requireNonNull(states.byTool(p.id()).get(row.subjectId()));
+        assertEquals(ToolErrorDetector.State.EMPTY, after.state());
+        assertNotNull(after.resetAt());
+    }
+
+    /**
+     * A frustration or groundedness case closed with no disposition writes no disposition detail on its
+     * trail line, rather than a detail naming a disposition nobody gave.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {CaseRow.Detector.FRUSTRATION, CaseRow.Detector.GROUNDEDNESS})
+    void aCaseClosedWithoutADispositionRecordsNone(String detector) {
+        Project p = project("svc-resolve-no-disposition-" + detector);
+        CaseRow row = open(p, detector);
+
+        service.resolve(p.id(), row.id(), "fixed upstream", "priya@example.com", null);
+
+        CaseEventRow resolved = events.listByCase(p.id(), row.id()).stream()
+                .filter(e -> CaseEventRow.Kind.RESOLVED.equals(e.kind()))
+                .findFirst()
+                .orElseThrow();
+        assertNull(resolved.detail());
+        assertNull(cases.findById(p.id(), row.id()).orElseThrow().disposition());
+    }
+
+    /**
+     * The ruling a case shows is read off its finding: a person's ruling outranks any machine one and
+     * carries no citations, and a triage citations blob of the wrong shape shows as no citations rather
+     * than failing the case page.
+     */
+    @Test
+    void theCaseShowsWhoRuledAndSurvivesAMisshapenCitationBlob() {
+        Project p = project("svc-ruling");
+        CaseRow human = open(p, CaseRow.Detector.CLASSIFIER);
+        String humanFinding = Objects.requireNonNull(human.latestFindingId());
+        findings.recordHumanRuling(
+                p.id(), humanFinding, FindingRow.TriageVerdict.POSITIVE, "ruled", "2026-07-02T00:00:00Z");
+        CaseRow triaged = open(p, CaseRow.Detector.TOOL_ERROR);
+        String triagedFinding = Objects.requireNonNull(triaged.latestFindingId());
+        findings.recordTriage(
+                p.id(),
+                triagedFinding,
+                FindingRow.TriageVerdict.POSITIVE,
+                "the rise is real",
+                "{\"path\":\"window.n_cur\"}",
+                "2026-07-03T00:00:00Z");
+
+        assertEquals(
+                new CaseRulingView(
+                        humanFinding,
+                        "Human",
+                        "A person ruled this a real deviation.",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        "2026-07-02T00:00:00Z",
+                        true),
+                service.detail(p.id(), human.id()).ruling());
+        CaseRulingView machine =
+                Objects.requireNonNull(service.detail(p.id(), triaged.id()).ruling());
+        assertEquals("the rise is real", machine.summary());
+        assertEquals(List.of(), machine.citations());
+    }
+
+    /** A drift case's page carries the shift its finding measured, read off the finding's own evidence. */
+    @Test
+    void aDriftCaseShowsTheShiftItsFindingMeasured() {
+        Project p = project("svc-drift-detail");
+        String payload = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"turn_duration\","
+                + "\"bucket\":{\"kind\":\"call_site\",\"key\":\"summarize\"},\"reference\":\"pinned\","
+                + "\"direction\":\"up\",\"ratio\":2.4,\"w1_log\":1.2,\"n_ref\":800,\"n_cur\":650}";
+        String now = Instant.now().toString();
+        String findingId = Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-drift",
+                        "cause-drift",
+                        1,
+                        "cs-a",
+                        payload,
+                        now,
+                        now,
+                        now,
+                        now))
+                .findingId();
+        CaseRow row = cases.open(
+                        p.id(),
+                        new CaseDetection(
+                                new CaseKey(
+                                        CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "drift", "p50"),
+                                "summarize",
+                                null,
+                                findingId,
+                                "summarize got slower",
+                                "because",
+                                0.4,
+                                Instant.parse("2026-07-01T10:00:00Z"),
+                                null,
+                                null,
+                                null),
+                        Instant.now())
+                .orElseThrow();
+
+        var shift = Objects.requireNonNull(service.detail(p.id(), row.id()).metric());
+        assertEquals("summarize", shift.bucketKey());
+        assertEquals(2.4, shift.ratio());
+    }
+
+    private static void assertError(ErrorCode expected, Executable call) {
+        assertEquals(expected, assertThrows(TessaryException.class, call).error());
     }
 
     // ---- helpers -----------------------------------------------------------------------------

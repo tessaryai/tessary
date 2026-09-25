@@ -4,13 +4,17 @@ package ai.tessary.cases;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingRowBuilder;
 import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@link MetricDriftSource#shape}: what {@link CaseOpener} calls once a finding already qualifies for a
@@ -88,6 +92,23 @@ class MetricDriftCaseShapeTest {
         assertEquals("turn_duration", detection.key().metric());
         assertEquals(CAUSE_KEY, detection.key().subjectId());
         assertEquals(0.5, detection.severity(), "an unreadable blob is not evidence of a small move");
+    }
+
+    /**
+     * {@code onset_at} is a text column. An onset the parser cannot read (blank, or Postgres's own
+     * timestamp rendering) leaves the case unbracketed; throwing there fails the open of a confirmed
+     * regression.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"", "2026-07-30 00:00:00+00"})
+    void anOnsetThatIsNotAnInstantOpensTheCaseUnbracketed(String onsetAt) {
+        FindingRow finding = FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .causeKey("mbl_1:" + CAUSE_KEY)
+                .onsetAt(onsetAt)
+                .payload(withVocabulary(EVIDENCE))
+                .build();
+
+        assertNull(source.shape(finding).onsetAt());
     }
 
     // ---- fixtures --------------------------------------------------------------------------------

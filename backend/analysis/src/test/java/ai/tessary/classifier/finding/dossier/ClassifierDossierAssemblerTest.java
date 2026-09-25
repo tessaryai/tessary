@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Four assembler shapes, one test per shape, plus the token budget and the payload
@@ -235,5 +237,93 @@ class ClassifierDossierAssemblerTest {
     @Test
     void countFormattingUsesRootLocale() {
         assertEquals("50,000", String.format(Locale.ROOT, "%,d", 50_000));
+    }
+
+    /** A payload that is not JSON has no shape to assemble, so the caller falls back rather than failing the run. */
+    @Test
+    void anUnparseablePayloadFallsThroughToEmpty() {
+        assertEquals(
+                Optional.empty(),
+                ClassifierDossierAssembler.assemble(
+                        MAPPER,
+                        mock(FindingEvidenceRepository.class),
+                        PROJECT_ID,
+                        FINDING_ID,
+                        new EvidenceCounts(0, 0, 0, 0, 0),
+                        "{not json"));
+    }
+
+    /** Each role reads its own count, so the declared population never swaps one side for another. */
+    @ParameterizedTest
+    @CsvSource({"exemplar, 1", "member, 2", "baseline, 3", "witness, 4", "changepoint, 5", "sample, 0"})
+    void eachRoleReadsItsOwnCount(String role, long expected) {
+        assertEquals(expected, new EvidenceCounts(1, 2, 3, 4, 5).forRole(role));
+    }
+
+    private static final String TOOL_ERROR_HEAD = "# Tool error evidence\n\n"
+            + "- tool: `search_docs`\n"
+            + "- direction: up\n"
+            + "- rate: 2.00% → 18.00% (CUSUM 6.10 past a 5.00 decision interval)\n"
+            + "- population since onset: n=300, failures=54\n"
+            + "\n## Failure patterns, grouped by error signature\n\n";
+
+    private static final String TOOL_ERROR_BASE = "\"bucket\":{\"key\":\"search_docs\"},\"direction\":\"up\","
+            + "\"rate\":{\"ref\":0.02,\"cur\":0.18},\"statistic\":6.1,\"threshold\":5.0,\"n_cur\":300,"
+            + "\"failures\":{\"cur\":54}";
+
+    /**
+     * A cut pattern list says it was cut, so the agent does not read the kept patterns as the whole failure
+     * population; a payload with no patterns says there is no breakdown, so the agent does not invent one.
+     */
+    @Test
+    void theToolErrorDossierDeclaresACutPatternListAndAMissingOne() throws Exception {
+        assertEquals(
+                TOOL_ERROR_HEAD
+                        + "Every pattern the detector tracked for this tool, ranked in the detector's own order"
+                        + " (patterns.json's own array order — not re-sorted here). `cur` is the count"
+                        + " since onset; `ref` is the same signature's count in the prior window, so a"
+                        + " signature with ref=0 is new.\n\n"
+                        + "- `timeout` (provider): 40 now, 2 before\n"
+                        + "\n(patterns_truncated=true — the detector's own pattern list was cut; the counts"
+                        + " above cover only the patterns it kept, not the tool's whole failure"
+                        + " population. `failures.cur` above is still the true total.)\n",
+                ToolErrorDossier.build(MAPPER.readTree("{" + TOOL_ERROR_BASE
+                        + ",\"patterns\":[{\"signature\":\"timeout\",\"source\":\"provider\",\"ref\":2,\"cur\":40}],"
+                        + "\"patterns_truncated\":true}")));
+        assertEquals(
+                TOOL_ERROR_HEAD
+                        + "No per-signature breakdown in this payload — only the aggregate rate above. State"
+                        + " that plainly rather than inventing signatures; get_finding_evidence still"
+                        + " pages the raw failing calls.\n",
+                ToolErrorDossier.build(MAPPER.readTree("{" + TOOL_ERROR_BASE + "}")));
+    }
+
+    /**
+     * The rolling arm has no per-instance baseline rows, so its token pairs and the ring it was learned from
+     * are the only account of the reference side. Dropping either leaves the agent auditing a claim with no
+     * "before" to compare against.
+     */
+    @Test
+    void theMetricDriftDossierCarriesTheTokenPairsAndTheReferenceRing() throws Exception {
+        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
+                + "\"direction\":\"up\",\"w1_log\":0.5,\"ratio\":1.5,\"floor\":0.15,\"n_ref\":100,\"n_cur\":90,"
+                + "\"tokens\":{\"input_p50\":[500,800],\"output_p50\":[null,null]},"
+                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"}}";
+
+        assertEquals(
+                "# Metric drift evidence\n\n"
+                        + "- bucket: `summarize` (call_site)\n"
+                        + "- reference: previous\n"
+                        + "- direction: up\n"
+                        + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
+                        + "- population: n_ref=100, n_cur=90\n"
+                        + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
+                        + "- input_p50: 500 → 800\n"
+                        + "\nReference composition (rolling arm — no per-instance baseline rows exist for this arm,"
+                        + " only this ring): 6 day(s) used, 1 excluded as already-confirmed, oldest day 2026-08-01.\n"
+                        + "\n## Concentration: which sibling buckets this drift explains\n\n"
+                        + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
+                        + " suppress any other finding, so there is nothing to concentrate over.\n",
+                MetricDriftDossier.build(MAPPER.readTree(payload)));
     }
 }

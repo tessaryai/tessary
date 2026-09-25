@@ -19,6 +19,7 @@ import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.gate.PreDeployCheckService;
 import ai.tessary.gate.PreDeployCheckService.ClassifierDiscovery;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
@@ -875,6 +876,8 @@ public class ClassifierWorker {
         }
     }
 
+    @ExcludeFromJacocoGeneratedReport(
+            "asks the OS for the local host name; only a machine whose own name does not resolve reaches the catch")
     private static String shortHost() {
         try {
             return java.net.InetAddress.getLocalHost().getHostName();
