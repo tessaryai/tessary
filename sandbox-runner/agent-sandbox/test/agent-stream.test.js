@@ -532,3 +532,90 @@ test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeri
     assert.equal(typeof v, 'number', `usage.${k} must be numeric — server.js's HARD RULE forwards this verbatim`);
   }
 });
+
+test('describeError: a non-Error cause is serialised, scrubbed, and never "[object Object]"', () => {
+  const { describeError } = require('../agent-stream');
+  const body = { name: 'ConfigInvalidError', data: { path: 'https://x-access-token:ghs_1@github.com/a/b' } };
+  assert.equal(
+    describeError(new Error('Bad Request', { cause: { body, status: 400 } })),
+    'Bad Request <- caused by: {"body":{"name":"ConfigInvalidError","data":{"path":"https://x-access-token:***@github.com/a/b"}},"status":400}',
+  );
+  assert.equal(describeError(new Error('failed', { cause: 'tsy_a_secret-key rejected' })), 'failed <- caused by: tsy_*** rejected');
+  const circular = { status: 500 };
+  circular.self = circular;
+  assert.equal(describeError(new Error('failed', { cause: circular })), 'failed <- caused by: [object Object]', 'an unserialisable cause still describes, never throws');
+});
+
+test('the provider config the launcher passes down is merged into opencode\'s, not replaced', async (t) => {
+  const inherited = { provider: { 'bedrock-mantle-gpt': { npm: '@ai-sdk/amazon-bedrock/mantle', options: { baseURL: 'https://m.example' } } } };
+  process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify(inherited);
+  t.after(() => {
+    delete process.env.OPENCODE_CONFIG_CONTENT;
+    mock.reset();
+  });
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs } = mockSdk({ messagesById: () => [assistantMessage({ text: OK_REPLY })] });
+
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
+
+  const config = serverConfigs()[0];
+  assert.deepEqual(config.provider, inherited.provider, 'dropping it leaves the mantle lanes with no provider to resolve');
+  assert.ok(config.mcp['tessary-evals'], 'and runAgent\'s own keys still land beside it');
+});
+
+test('a brace-balanced aside before the JSON object does not hide the object', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { promptBodies } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'Checked {the evidence} first. {"verdict":"ok"}' })],
+  });
+
+  const run = await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
+
+  assert.equal(promptBodies.length, 1, 'no correction round for a reply that complied');
+  assert.deepEqual(JSON.parse(run.resultRaw).structured_output, { verdict: 'ok' });
+});
+
+test('JSON still missing a required key after the correction fails the run, naming the key both times', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const partial = assistantMessage({ text: '{"reason":"because"}', usage: { input_tokens: 5 } });
+  const { promptBodies } = mockSdk({ messagesById: (id, n) => Array.from({ length: n }, () => partial) });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.message, 'opencode returned JSON missing required verdict (2 attempts)');
+      assert.equal(err.turns.length, 2, 'the failure still carries both turns\' spend');
+      return true;
+    },
+  );
+  assert.match(promptBodies[1].parts[0].text, /^Your previous reply was missing verdict\./);
+});
+
+test('prose twice fails the run as no JSON object, rather than persisting the prose', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const prose = assistantMessage({ text: 'The verdict is positive.' });
+  mockSdk({ messagesById: (id, n) => Array.from({ length: n }, () => prose) });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    { message: 'opencode did not return a JSON object for the requested schema (2 attempts)' },
+  );
+});
+
+test('a session that never produced a turn fails as no result', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  mockSdk({ messagesById: () => [] });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.message, 'opencode produced no result');
+      assert.deepEqual(err.turns, []);
+      return true;
+    },
+  );
+});

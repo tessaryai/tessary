@@ -1001,12 +1001,10 @@ async function runAgent(spec) {
     // what stops a failed server start from hanging the process until the run's outer deadline.
     //
     // The server close is AWAITED: it resolves only once opencode is gone (see stopProcess), so
-    // runAgent never returns while the child and its pipes still hold the event loop. A close
-    // failure is logged, never thrown — a throw here would replace the run's own error.
+    // runAgent never returns while the child and its pipes still hold the event loop. stopProcess
+    // never rejects, so the close cannot replace the run's own error.
     try {
       if (server) await server.close();
-    } catch (e) {
-      console.error(`opencode server did not close cleanly: ${describeError(e)}`);
     } finally {
       if (relay) relay.close();
     }
