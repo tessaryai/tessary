@@ -478,7 +478,7 @@ class AuthFilterPostureTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(
             strings = {
-                "/auth/login;jsessionid=1",
+                "/v3/api-docs/;jsessionid=1",
                 "/v3/api-docs/../api/orgs",
                 "/v3/api-docs/..%2Fapi%2Forgs",
                 "/v3/api-docs/..%2fapi",
