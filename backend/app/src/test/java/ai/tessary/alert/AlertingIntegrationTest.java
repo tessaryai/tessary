@@ -75,6 +75,9 @@ class AlertingIntegrationTest {
     @Autowired
     AlertWorker worker;
 
+    @Autowired
+    AlertRuleRepository rules;
+
     // The three threshold tests that stood here are gone with the path they exercised. A classifier's
     // window no longer becomes an alert_event: it opens a FINDING inside the classifier's own sweep
     // (ClassifierArming), and a case_opened rule carries that to the same channels. What remains here is
@@ -108,6 +111,48 @@ class AlertingIntegrationTest {
         // The cron anchor advanced, so an immediate re-tick within the same second is not due again.
         worker.tick();
         assertEquals(1, alertEvents.listByProject(pid, 100).size(), "the anchor advanced — no duplicate digest");
+    }
+
+    /**
+     * A due period with nothing in it fires nothing (an empty digest is noise) but still advances the
+     * anchor, so the next digest covers the next period rather than re-reading this one forever.
+     */
+    @Test
+    void aDueDigestWithNoActivityAdvancesItsAnchorWithoutFiring() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "alert-digest-empty").project().id();
+        String created = Instant.now().minusSeconds(5).toString();
+        String ruleId = Ids.ulid();
+        rules.insert(new AlertRuleRow(
+                ruleId,
+                pid,
+                AlertRuleRow.RuleType.DIGEST,
+                "daily",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "* * * * * *",
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                "{}",
+                created,
+                created));
+
+        worker.tick();
+
+        assertEquals(List.of(), alertEvents.listByProject(pid, 100), "no activity, no digest");
+        assertTrue(
+                rules.findById(pid, ruleId).orElseThrow().lastDigestAt() != null,
+                "the empty period is consumed, not re-read next tick");
     }
 
     // ---- request builders -------------------------------------------------------------------------

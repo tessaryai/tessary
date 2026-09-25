@@ -80,6 +80,12 @@ class AlertChannelDeliveryTest {
     @Autowired
     ObjectMapper mapper;
 
+    @Autowired
+    ai.tessary.testsupport.CapabilityFixture capabilityFixture;
+
+    @Autowired
+    AlertChannelRepository channelRows;
+
     private final RecordingClient client = new RecordingClient();
 
     @BeforeEach
@@ -197,6 +203,76 @@ class AlertChannelDeliveryTest {
         fanOut.deliverAll(event);
         assertTrue(client.bodies.isEmpty(), "a re-fired event does not re-send (at-most-once)");
         assertEquals(3, attempts.listByProject(pid, 100).size(), "and records no new delivery attempt");
+    }
+
+    /**
+     * One channel's trouble never stops the others, and each kind of trouble leaves the right trace. A
+     * withheld Slack is skipped with no attempt row (nothing was attempted, so no permanent red line); a
+     * config missing its URL, or one that cannot be opened, is recorded as failed with a categorical reason
+     * and never the decrypted config; and the channels behind them still deliver.
+     */
+    @Test
+    void aWithheldOrBrokenChannelNeverStopsTheFanOutAndEachLeavesItsOwnTrace() {
+        var fixture = TenantFixture.bootstrap(tenants, "alert-channel-faults");
+        String pid = fixture.project().id();
+        capabilityFixture.withhold(fixture.org().id(), ai.tessary.plan.Capability.SLACK);
+        String slack = channelService
+                .create(
+                        pid,
+                        new UpsertChannelRequest("slack", "team", true, json("{\"url\":\"https://203.0.113.11/s\"}")))
+                .id();
+        String noUrl = channelService
+                .create(pid, new UpsertChannelRequest("webhook", "no-url", true, json("{\"secret\":\"sek\"}")))
+                .id();
+        String unopenable = Ids.ulid();
+        String now = Instant.now().toString();
+        channelRows.insert(new AlertChannelRow(
+                unopenable, pid, "webhook", "rotated-key", true, "bm90LXNlYWxlZA==", "{}", now, now));
+        String sentry = channelService
+                .create(
+                        pid,
+                        new UpsertChannelRequest(
+                                "sentry",
+                                "errors",
+                                true,
+                                json("{\"store_url\":\"https://203.0.113.13/api/1/store/\",\"public_key\":\"pk\"}")))
+                .id();
+        String linear = channelService
+                .create(
+                        pid,
+                        new UpsertChannelRequest(
+                                "linear",
+                                "issues",
+                                true,
+                                json(
+                                        "{\"api_key\":\"lin\",\"team_id\":\"t\",\"url\":\"https://203.0.113.14/graphql\"}")))
+                .id();
+        AlertEventRow event = persistFiredEvent(pid);
+
+        AlertDeliveryDispatcher fanOut = AopTestUtils.getUltimateTargetObject(dispatcher);
+        fanOut.deliverAll(event);
+
+        Map<String, List<Object>> outcomes = new java.util.HashMap<>();
+        for (DeliveryAttemptRow a : attempts.listByProject(pid, 100)) {
+            outcomes.put(a.channelId(), java.util.Arrays.asList(a.status(), a.httpStatus(), a.error()));
+        }
+        assertEquals(
+                Map.of(
+                        noUrl,
+                        java.util.Arrays.asList(
+                                "failed",
+                                null,
+                                ai.tessary.open.errors.AlertError.INVALID_CHANNEL_CONFIG.render(
+                                        "webhook requires a 'url'")),
+                        unopenable,
+                        java.util.Arrays.asList("failed", null, "could not open channel config"),
+                        sentry,
+                        java.util.Arrays.asList("delivered", 202, null),
+                        linear,
+                        java.util.Arrays.asList("failed", 202, "linear issueCreate did not succeed")),
+                outcomes,
+                "no attempt row for the withheld slack channel " + slack);
+        assertTrue(client.bodies.containsKey("/api/1/store/"), "sentry was reached behind the broken channels");
     }
 
     /** Polls the delivery-attempt log until {@code expected} attempts have resolved (not pending). */
