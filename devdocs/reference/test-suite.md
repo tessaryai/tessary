@@ -64,8 +64,8 @@ loop; use the full gate before merging.
 
 **CI runs the same gate on every pull request.** There is still no pre-commit hook, but
 `.github/workflows/check.yml` calls `scripts/check.sh` — the same manifest `task check` runs — on
-`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) and
-`boot-checks.yml` (the Docker-backed boot checks) also run on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
+`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) also
+runs on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
 so a red check has to be respected rather than enforced.
 
 One gate is deliberately not on that per-PR path and lives in the dispatch-only
