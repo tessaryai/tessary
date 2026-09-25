@@ -7,10 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.github.GithubInstallStateService.SelectionPayload;
+import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GithubInstallStateServiceTest {
 
@@ -64,5 +68,50 @@ class GithubInstallStateServiceTest {
         for (int i = 0; i < key.length; i++) key[i] = (byte) (0xFF - i);
         p.setSecretKey(Base64.getEncoder().encodeToString(key));
         return new SecretBox(p);
+    }
+
+    /**
+     * Both tokens carry a ten-minute expiry, and one past it must not open: a state lifted from an old
+     * install link would otherwise bind whatever GitHub returns to the project it names, for ever.
+     */
+    @Test
+    void expiredTokens_areRejectedEvenThoughTheySealCorrectly() {
+        SecretBox box = secretBox();
+        String state = box.seal("{\"orgSlug\":\"acme\",\"projectSlug\":\"web\",\"projectId\":\"p1\",\"exp\":1}");
+        String selection = box.seal("{\"orgSlug\":\"acme\",\"projectSlug\":\"web\",\"projectId\":\"p1\","
+                + "\"installationIds\":[10],\"exp\":1}");
+
+        assertEquals(
+                GitError.INSTALL_STATE_INVALID,
+                assertThrows(TessaryException.class, () -> svc.verify(state)).error());
+        assertEquals(
+                GitError.INSTALL_STATE_INVALID,
+                assertThrows(TessaryException.class, () -> svc.verifySelection(selection))
+                        .error());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  ", "not-a-real-state"})
+    void plainState_rejectsBlankAndGarbage(String state) {
+        assertEquals(
+                GitError.INSTALL_STATE_INVALID,
+                assertThrows(TessaryException.class, () -> svc.verify(state)).error());
+    }
+
+    /** With no server key nothing can be sealed, and that is a typed state failure rather than a raw 500. */
+    @Test
+    void minting_withoutASecretKeyIsInstallStateInvalid() {
+        GithubInstallStateService unkeyed = new GithubInstallStateService(
+                new SecretBox(new TessaryProperties()), new com.fasterxml.jackson.databind.ObjectMapper());
+
+        assertEquals(
+                GitError.INSTALL_STATE_INVALID,
+                assertThrows(TessaryException.class, () -> unkeyed.mint("acme", "web", "p1"))
+                        .error());
+        assertEquals(
+                GitError.INSTALL_STATE_INVALID,
+                assertThrows(TessaryException.class, () -> unkeyed.mintSelection("acme", "web", "p1", List.of(10L)))
+                        .error());
     }
 }

@@ -125,4 +125,40 @@ class GithubAppConfigServiceTest {
             throw new RuntimeException(e);
         }
     }
+
+    /** A captured row this deployment has no key for is ignored at boot, not a reason to refuse to start. */
+    @Test
+    void storedRow_withoutASecretKey_leavesEnvBoundPropertiesUntouched() {
+        props.setAppId("env-app-id");
+        when(repo.findCredentialsEnc()).thenReturn(Optional.of(seal("byo", "pem", "hook", "slug", "cid", "sec")));
+        GithubAppConfigService unkeyed =
+                new GithubAppConfigService(repo, props, new SecretBox(new TessaryProperties()), mapper);
+
+        unkeyed.loadOnStartup();
+
+        assertEquals("env-app-id", props.getAppId());
+    }
+
+    @Test
+    void storedRow_thatDoesNotOpen_isMissingAppConfig() {
+        when(repo.findCredentialsEnc()).thenReturn(Optional.of("sealed-by-another-key"));
+
+        ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
+                ai.tessary.open.errors.TessaryException.class, () -> service.loadOnStartup());
+        assertEquals(ai.tessary.open.errors.GitError.MISSING_APP_CONFIG, e.error());
+    }
+
+    /** Without a key the captured private key would have to be stored in the clear, so nothing is stored. */
+    @Test
+    void persist_withoutASecretKey_storesNothing() {
+        GithubAppConfigService unkeyed =
+                new GithubAppConfigService(repo, props, new SecretBox(new TessaryProperties()), mapper);
+
+        ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
+                ai.tessary.open.errors.TessaryException.class,
+                () -> unkeyed.persist("new-id", "new-pem", "new-slug", "new-client", "new-secret"));
+        assertEquals(ai.tessary.open.errors.GitError.MISSING_APP_CONFIG, e.error());
+        verify(repo, never()).upsert(anyString());
+        assertEquals(false, props.isConfigured());
+    }
 }

@@ -3,12 +3,14 @@ package ai.tessary.redaction;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.redaction.GitleaksCorpus.Finding;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The vendored credential corpus: that every rule survives the move to Java, that it finds credentials the way
@@ -181,5 +185,58 @@ class GitleaksCorpusTest {
         assertEquals(1, found.size(), message + " -> " + found);
         assertEquals(rule, found.get(0).ruleId(), message);
         assertEquals(anchored, found.get(0).anchored(), message);
+    }
+
+    /**
+     * Every POSIX bracket class keeps its POSIX meaning in Java: one character the class must admit and one
+     * it must not, as code points. A class translated to its neighbour ({@code print} to {@code graph} drops
+     * the space, {@code word} to {@code alnum} drops the underscore) would silently change what a rule finds.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "alnum, 55, 95",
+        "alpha, 113, 49",
+        "digit, 55, 97",
+        "lower, 97, 65",
+        "upper, 65, 97",
+        "space, 9, 120",
+        "punct, 33, 97",
+        "xdigit, 102, 103",
+        "word, 95, 45",
+        "blank, 9, 10",
+        "cntrl, 7, 97",
+        "graph, 126, 32",
+        "print, 32, 7"
+    })
+    void posixClassesKeepTheirMeaning(String posix, int inside, int outside) {
+        Pattern p = Pattern.compile(GitleaksCorpus.toJava("[[:" + posix + ":]]"));
+        assertTrue(p.matcher(Character.toString(inside)).matches(), posix + " admits " + inside);
+        assertFalse(p.matcher(Character.toString(outside)).matches(), posix + " refuses " + outside);
+    }
+
+    /**
+     * Loading a corpus drops what Java cannot compile without dropping the rule around it: a rule whose regex
+     * does not compile is left out, and an allowlist regex that does not compile allows nothing, so the rule
+     * it guards still runs. The keyword-context rule's vendor name here carries an escaped paren, which the
+     * name scan has to step over rather than count as a group opening.
+     */
+    @Test
+    void loadSkipsWhatWillNotCompileButKeepsTheRuleAnUnusableAllowlistGuards() {
+        ObjectMapper json = new ObjectMapper();
+        ObjectNode rule = json.createObjectNode()
+                .put("id", "acme-token")
+                .put(
+                        "regex",
+                        "(?i)[\\w.-]{0,50}?(?:ac\\(me)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|:)[\\s'\"]{0,5}([a-z0-9]{16})\\b");
+        rule.putArray("keywords").add("ac(me");
+        rule.putArray("allowlists").addObject().putArray("regexes").add("(bad");
+        ObjectNode doc = json.createObjectNode().put("version", "test");
+        doc.putArray("rules")
+                .add(json.createObjectNode().put("id", "broken").put("regex", "(unclosed"))
+                .add(rule);
+
+        GitleaksCorpus corpus = GitleaksCorpus.load(doc);
+
+        assertEquals(List.of(new Finding("acme-token", false, 12, 28)), corpus.find("ac(me_key = 0123456789abcdef"));
     }
 }
