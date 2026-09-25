@@ -172,7 +172,11 @@ is enforced anywhere, and nothing fails the build on a coverage number. The poin
 number before further module extractions continue, so a module being pulled out of the reactor can be
 checked against what it actually exercised rather than what its tests merely claim to.
 
-Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Refresh them locally
+Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Each one credits only
+that module's own tests, so code the `app` module's `@SpringBootTest` suite runs shows as uncovered
+in the module that owns it. The aggregate report at `backend/app/target/site/jacoco-aggregate/`
+merges every module's exec data against every open module's classes; read that one for a module's
+real number. Refresh them locally
 with `task backend:coverage` (equivalent to `task backend:check:open` — same reactor, same
 profile — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
 CI's cadence). CI additionally uploads the reports as a build artifact

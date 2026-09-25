@@ -57,6 +57,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
+frontend/coverage/
 # A separate frontend build's outputs. The four rules above are PATH-SPECIFIC to frontend/, so none
 # of them reaches it — the same reason the target/ rule above exists separately from the backend
 # glob. node_modules here is a SYMLINK to frontend/node_modules, created by a build script
@@ -103,3 +104,6 @@ sandbox-runner/agent-sandbox/vendor/
 # The load harness mints live write-scoped tokens and writes its runs beside itself.
 scripts/bench/tokens.txt
 scripts/bench/results/
+
+# Coverage outputs (frontend/coverage/ sits with the frontend rules above).
+.coverage

@@ -35,6 +35,39 @@
             <artifactId>shared</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Already on the classpath through `surfaces`; declared only because jacoco's
+             report-aggregate (below) reads direct dependencies and does not walk transitive ones.
+             Drop one and its module silently falls out of the aggregate coverage report. -->
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>tenancy</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>substrate</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>product</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>llm-runtime</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>analysis</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -268,10 +301,25 @@
             </plugin>
             <!-- Coverage baseline: bare-activates jacoco-maven-plugin
                  from the aggregator's pluginManagement (prepare-agent + report), same
-                 no-configuration pattern as every other plugin above. No coverage gate. -->
+                 no-configuration pattern as every other plugin above. No coverage gate.
+                 The aggregate report is the one to read for a module's real number: a per-module
+                 report only credits that module's own tests, so code exercised by the
+                 @SpringBootTest suite here shows as uncovered in the module that owns it. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-report-aggregate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report-aggregate</goal>
+                        </goals>
+                        <configuration>
+                            <includeCurrentProject>true</includeCurrentProject>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

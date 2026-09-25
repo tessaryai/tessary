@@ -277,5 +277,5 @@ jobs:
         if: always()
         with:
           name: backend-jacoco-coverage
-          path: backend/*/target/site/jacoco/**
+          path: backend/*/target/site/jacoco*/**
           if-no-files-found: warn
