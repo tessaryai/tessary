@@ -18,7 +18,7 @@
  * that one reads the session's traces, this one draws the flagged-answer payload the finding carries, which
  * is what was scored rather than what the trace page would show.
  */
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { infiniteQueryOptions, keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,15 +27,11 @@ import type { FlaggedAnswer, FlaggedAnswerPage } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, Skeleton, cn } from "../../ui";
 import { dateTime } from "./groundedness";
+import { useListPaging } from "./useListPaging";
+import { useSkeletonFlag } from "./useSkeletonFlag";
 
 /** Answers read per page past the first. */
 const PAGE_SIZE = 50;
-
-/** How long a filter switch waits before swapping the last list for the skeleton, in ms. */
-const SKELETON_DELAY = 200;
-
-/** The shortest time the skeleton stays once drawn, in ms. */
-const SKELETON_HOLD = 400;
 
 /** The list and the answer side by side, at a fixed height so the page never moves as they load. */
 const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
@@ -55,22 +51,6 @@ function answersQuery(api: ProjectApi, findingId: string, filter: AnswerFilter |
     getNextPageParam: (last: FlaggedAnswerPage) => last.nextCursor ?? undefined,
     staleTime: Infinity,
   });
-}
-
-/** True once `active` has held for `delay` ms, and then for at least `hold` ms. */
-function useSettledFlag(active: boolean, delay: number, hold: number) {
-  const [shown, setShown] = useState(false);
-  const shownAt = useRef(0);
-  useEffect(() => {
-    if (active === shown) return;
-    const wait = active ? delay : Math.max(0, hold - (Date.now() - shownAt.current));
-    const timer = setTimeout(() => {
-      shownAt.current = Date.now();
-      setShown(active);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [active, shown, delay, hold]);
-  return shown;
 }
 
 /** The highest-scoring flagged sentence's text, cut from the answer at its offsets. */
@@ -109,7 +89,7 @@ export function FlaggedAnswers({
       : { pages: [{ rows: first.rows, nextCursor: first.nextCursor, total: first.rows.length }], pageParams: [null] },
     placeholderData: keepPreviousData,
   });
-  const skeleton = useSettledFlag(pages.isPlaceholderData, SKELETON_DELAY, SKELETON_HOLD);
+  const skeleton = useSkeletonFlag(pages.isPlaceholderData);
 
   const queryClient = useQueryClient();
   const readAheadKey = readAhead.map((f) => `${f.rcaReport}:${f.index}`).join(",");
@@ -124,26 +104,8 @@ export function FlaggedAnswers({
   const selected = answers.find((a) => a.spanId === pickedId) ?? answers[0];
 
   // Read the next page when the end of the list scrolls into view.
-  const list = useRef<HTMLUListElement>(null);
-  const end = useRef<HTMLLIElement>(null);
   const { isFetchingNextPage, fetchNextPage } = pages;
-  const hasNextPage = pages.hasNextPage && !pages.isPlaceholderData;
-  useEffect(() => {
-    if (list.current) list.current.scrollTop = 0;
-  }, [filterKey]);
-  useEffect(() => {
-    const root = list.current;
-    const target = end.current;
-    if (!root || !target || !hasNextPage) return;
-    const seen = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) void fetchNextPage();
-      },
-      { root, rootMargin: "200px" },
-    );
-    seen.observe(target);
-    return () => seen.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const { list, end, hasNextPage } = useListPaging(filterKey, pages);
 
   if (pages.isLoading || skeleton) {
     return <AnswersSkeleton />;

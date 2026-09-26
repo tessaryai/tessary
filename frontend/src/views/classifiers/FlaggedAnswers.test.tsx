@@ -189,6 +189,17 @@ describe("FlaggedAnswers", () => {
     expect(screen.getByText("Document 2")).toBeTruthy();
   });
 
+  it("shows the answer picked from the list, and marks its row", () => {
+    renderList([answer(), answer({ spanId: "span-2", question: "Do you ship to Canada?" })]);
+    expect(screen.getByText("Can I get a refund after 30 days?", { selector: "p, div, span" })).toBeTruthy();
+
+    const rows = screen.getAllByRole("button", { pressed: false });
+    fireEvent.click(rows[0]);
+
+    expect(screen.getByText("Do you ship to Canada?", { selector: "p, div, span" })).toBeTruthy();
+    expect(rows[0].getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("draws the prompt, not retrieved documents, when the answer was checked against the prompt", () => {
     renderList([answer({ premiseHadEvidence: false })]);
 
