@@ -21,20 +21,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * What the {@link TriageSource} merge must not change, held without a database.
- *
- * <p>{@code FindingService.findings()}, the busiest read path in the product, iterates over adapters
- * rather than knowing both tables itself. Everything that could plausibly get wrong in that iteration
- * is invisible to the compiler and to the boundary enforcer: a filter dropped, two filters reordered, a
- * page limit applied once instead of per source, a row order decided by bean name instead of by
- * {@code @Order}. The Testcontainers suite would catch some of it and does not run on every machine, so
- * the properties are pinned here instead, plain JUnit, hand-written stubs, no Spring, no Docker.
+ * What the {@link TriageSource} merge must not change, without a database. {@code FindingService.findings()} iterates
+ * adapters, and a dropped or reordered filter, a limit applied once instead of per source, or an order by bean name
+ * instead of {@code @Order} is invisible to the compiler.
  */
 class FindingServiceMergeTest {
 
     private static final String PROJECT = "prj_1";
 
-    // ---- (a) the merged row order is the injected list's order ----------------------------------
+    // The merged order is the injected list's.
 
     @Test
     @DisplayName("the page is the sources concatenated in injected order, first source first")
@@ -50,7 +45,7 @@ class FindingServiceMergeTest {
                 "the shared table's rows come first and the second source's after them");
     }
 
-    // ---- (b) the filter still excludes what it excluded -----------------------------------------
+    // The filter still excludes what it did.
 
     @Test
     @DisplayName("the flag layer's filter drops a withheld classifier's rows")
@@ -65,10 +60,6 @@ class FindingServiceMergeTest {
                 "a finding belongs to the classifier that wrote it, so a withheld classifier hides its leads");
     }
 
-    // ---- (c) the page limit and the withheld count ----------------------------------------------
-
-    // ---- (d) the transaction boundary -----------------------------------------------------------
-
     @Test
     @DisplayName("@Transactional stays on the ENTRY point, not on the adapters")
     void resolve_is_transactional_at_the_entry_point() throws Exception {
@@ -81,15 +72,11 @@ class FindingServiceMergeTest {
                         + "until a mid-write error resolves a finding with no allowlist row behind it");
     }
 
-    // ---- fixtures --------------------------------------------------------------------------------
-
     /**
-     * A service with no repositories. Every method exercised here routes through the source list before
-     * it can reach one, which is precisely the property under test: {@code FindingService} knows no
-     * table. A constructor that could not take these nulls would mean the routing had leaked back into
-     * the service.
+     * No repositories: every method here routes through the sources first, which is the property ({@code
+     * FindingService} knows no table).
      */
-    @SuppressWarnings("NullAway") // deliberate: the injected repositories are unreachable on these paths
+    @SuppressWarnings("NullAway") // the repositories are unreachable here
     private static FindingService service(List<TriageSource> sources) {
         return new FindingService(null, null, null, null, sources, null, null, null); // detail services unreached
     }
@@ -149,7 +136,7 @@ class FindingServiceMergeTest {
                 "2026-08-02T00:00:00Z");
     }
 
-    /** A hand-written adapter: a stub that answers by construction reads better here than a mock script. */
+    /** A hand-written adapter reads better than a mock script. */
     private static final class StubSource implements TriageSource {
         private final String kind;
         private final List<BehaviorFindingView> rows;
@@ -208,7 +195,7 @@ class FindingServiceMergeTest {
                 BehaviorTriageVerdict verdict,
                 @Nullable String citationsJson,
                 String now) {
-            // no-op: the recording half is exercised by the integration suite, not here
+            // the recording half is the integration suite's
             assertNotNull(Instant.parse(now));
         }
     }

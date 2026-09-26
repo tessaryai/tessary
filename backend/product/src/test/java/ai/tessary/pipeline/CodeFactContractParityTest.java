@@ -20,23 +20,12 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
- * Contract parity for the code-tracked facts, read straight out of the vendored plugin contract.
+ * Parity for the code-tracked facts, read from the vendored plugin contract. {@link BundleAssembler} drops unknown
+ * YAML keys so a newer plugin cannot break import, which also hides a misspelled key from both sides.
  *
- * <p>The two repos ship independently and the {@code .tessary/} bundle is the only thing between
- * them. {@link BundleAssembler} drops unknown YAML keys by design so a newer plugin can't break
- * import — which is also exactly what makes a misspelled key invisible from both sides: a field the
- * plugin writes and the platform silently ignores looks, from either end, like a field nobody wrote.
- *
- * <p>This test parses the {@code parity-anchor} blocks out of {@code contract/output_format.md} — the
- * vendored copy of the plugin's own documentation — and asserts every documented key binds to a field
- * the platform actually consumes. Reading the document rather than holding a copy of it is the point:
- * a hand-copied fixture is one more thing that can drift, and its "copied verbatim" comment is a
- * promise no one checks. Here the promise is the mechanism.
- *
- * <p>The plugins repo is public and deliberately runs no PR CI, so the plugin side cannot enforce this
- * itself. Enforcement lives here, in the private repo, at vendoring time — see
- * {@code scripts/check-vendored-plugin.sh} for the companion freshness check that catches a vendored
- * copy falling behind the plugin's {@code main}.
+ * <p>Parses the {@code parity-anchor} blocks in {@code contract/output_format.md} and asserts every documented key
+ * binds to a consumed field. Reading the document, not a copy, is the point. The public plugins repo runs no PR CI,
+ * so enforcement lives here; {@code scripts/check-vendored-plugin.sh} checks the copy is current.
  */
 class CodeFactContractParityTest {
 
@@ -59,11 +48,7 @@ class CodeFactContractParityTest {
         return m.group(1);
     }
 
-    /**
-     * The repo-root {@code contract/} directory. Walks up from the working directory rather than
-     * hardcoding a relative depth, so this resolves the same whether the module is run from the repo
-     * root, from {@code backend/}, or from {@code backend/app/}.
-     */
+    /** The repo-root {@code contract/} directory, found by walking up so it resolves from any module directory. */
     private static Path vendoredContract() {
         for (Path dir = Paths.get("").toAbsolutePath(); dir != null; dir = dir.getParent()) {
             Path candidate = dir.resolve("contract/output_format.md");

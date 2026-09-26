@@ -9,13 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 /**
- * Coverage for {@link ClassifierMethodCard}, which is the enforcement its own javadoc promises.
- *
- * <p>The cards deliberately do NOT live on {@code ClassifierModelModule}, so the compiler cannot make a
- * new classifier supply one. This does instead: add a module without a card and the first test fails,
- * naming the key. Without it, a new detector would ship findings whose evidence roles no agent has been
- * told how to read — and the failure mode of that is silent, because a missing card looks exactly like a
- * classifier whose card simply was not needed.
+ * {@link ClassifierMethodCard}'s enforcement. Cards do not live on {@code ClassifierModelModule}, so the compiler
+ * cannot require one; add a module without a card and the first test fails, naming it. A missing card looks exactly
+ * like an unneeded one.
  */
 class ClassifierMethodCardTest {
 
@@ -34,10 +30,7 @@ class ClassifierMethodCardTest {
         }
     }
 
-    /**
-     * A user-authored classifier has no card and must not be given a fabricated one: its method is
-     * whatever its author configured, and inventing a description of it would be worse than silence.
-     */
+    /** A user-authored classifier gets no fabricated card. */
     @Test
     void anUnknownClassifierGetsNoCard() {
         assertNull(ClassifierMethodCard.forClassifier("some-user-authored-thing"));
@@ -46,10 +39,8 @@ class ClassifierMethodCardTest {
     }
 
     /**
-     * A card never sends the reader to another classifier's card. Exactly one card is delivered per run,
-     * as {@code dossier/method.md}, so "for the same reason as tool_error" points at prose the agent does
-     * not have and cannot get. Duration and cost drift are the one legitimate pair: they share a card,
-     * and it names both.
+     * A card never points at another card: one is delivered per run as {@code dossier/method.md}. Duration and cost
+     * drift share one card that names both.
      */
     @Test
     void noCardPointsAtAnotherClassifiersCard() {
@@ -67,9 +58,8 @@ class ClassifierMethodCardTest {
     }
 
     /**
-     * Every card says where the claim's numbers are, including the two whose answer is that there is no
-     * block to read. The system prompt requires a ruling to cite the {@code get_finding} fields it rests
-     * on, so a card that never names them asks for a citation it has not made possible.
+     * Every card says where the claim's numbers are, since a ruling must cite the {@code get_finding} fields it rests
+     * on.
      */
     @Test
     void everyCardSaysWhereTheClaimsNumbersAre() {

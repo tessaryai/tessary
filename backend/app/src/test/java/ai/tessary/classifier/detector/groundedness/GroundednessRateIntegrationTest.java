@@ -52,11 +52,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * A call site whose answers became less grounded, end to end against Postgres: the replay files one unruled
- * finding for the spell, with every scored trace as a member and every flagged one as a trace and span witness
- * pair; the same onset refreshes it; triage's positive opens a case under detector {@code groundedness}; a
- * false-alarm resolve clears the cited flags, past the first statement's worth too, and re-learns; an absorb
- * re-learns; and a call site still learning files nothing.
+ * A call site whose answers became less grounded, against Postgres: one unruled finding per spell with scored traces
+ * as members and flagged ones as witnesses; the same onset refreshes it; triage's positive opens a {@code
+ * groundedness} case; a false-alarm resolve clears every cited flag and re-learns; an absorb re-learns; a learning
+ * call site files nothing.
  */
 @SpringBootTest
 class GroundednessRateIntegrationTest {
@@ -130,7 +129,7 @@ class GroundednessRateIntegrationTest {
         String pid = project("gr-rise");
         ClassifierRow signal = groundedness(pid);
         Instant start = start();
-        seedHours(pid, signal, CALL_SITE, start, 0, 7, 30, 0.05); // 210 traces of reference at 5%
+        seedHours(pid, signal, CALL_SITE, start, 0, 7, 30, 0.05); // 210 reference traces at 5%
         seedHours(pid, signal, CALL_SITE, start, 7, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
 
@@ -147,8 +146,8 @@ class GroundednessRateIntegrationTest {
         assertNull(finding.caseId(), "no case until a ruling");
         assertEquals("Answers on cs-rag became less grounded", FindingTitle.of(finding));
 
-        // From the seed plan: every cs-rag hour from the onset on, 30 traces each, of which 2 flagged in a
-        // reference hour (0-6) and 12 in a spell hour (7-12). cs-calm is another call site and counts nowhere.
+        // Every cs-rag hour from onset, 30 traces: 2 flagged per reference hour, 12 per spell hour. cs-calm counts
+        // nowhere.
         Instant onset = Instant.parse(Objects.requireNonNull(finding.onsetAt()));
         assertEquals(onset.truncatedTo(ChronoUnit.HOURS), onset, "the onset is an hour bucket");
         long onsetHour = Duration.between(start, onset).toHours();
@@ -197,7 +196,7 @@ class GroundednessRateIntegrationTest {
         String pid = project("gr-trace");
         ClassifierRow signal = groundedness(pid);
         Instant start = start();
-        seedHours(pid, signal, CALL_SITE, start, 0, 1, 30, 0.40); // 12 flagged traces, 6 with two flags
+        seedHours(pid, signal, CALL_SITE, start, 0, 1, 30, 0.40); // 12 flagged, 6 with two flags
 
         List<HourlyToolTally> tallies =
                 rateRows.hourlyTallies(pid, signal.id(), VERSION, start.minus(Duration.ofHours(1)));
@@ -225,11 +224,11 @@ class GroundednessRateIntegrationTest {
                                 + finding.payload().path("traces_since_onset").asLong() + " traces since"),
                 opened.basis());
 
-        // Two flagged answers whose spans are stored at the call site, and one stored at another call site.
+        // Two flagged answers at the call site, one at another.
         SubstrateV2Fixtures fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
         List<FindingEvidenceRow> answers = evidence.listByFinding(pid, finding.id()).stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
-                .filter(r -> !doubled(r.traceId())) // one answer per trace, so each span seeds its own trace
+                .filter(r -> !doubled(r.traceId())) // one answer per trace
                 .toList();
         for (int i = 0; i < 3; i++) {
             FindingEvidenceRow a = answers.get(i);
@@ -292,7 +291,7 @@ class GroundednessRateIntegrationTest {
         long citedByReplay = evidence.listByFinding(pid, finding.id()).stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
                 .count();
-        // Top the cited answers up to one past a statement's chunk, each with its standing detection row.
+        // One past a statement's chunk of cited answers.
         int cited = GroundednessAnswerClearer.CLEAR_CHUNK + 1;
         Instant at = Instant.parse(finding.onsetAt()).plusSeconds(60);
         List<FindingEvidenceRepository.Ref> extra = new ArrayList<>();
@@ -339,16 +338,11 @@ class GroundednessRateIntegrationTest {
                 "the absorbed hours are fenced off");
     }
 
-    // ---- fixtures
-
     private static Instant start() {
         return Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
     }
 
-    /**
-     * A page past the last cited answer still carries how many the finding cites: the count rides on the rows,
-     * and a page with no rows reporting zero would tell the reader the finding cites nothing.
-     */
+    /** A page past the last cited answer still carries the count; zero would say the finding cites nothing. */
     @Test
     void aPagePastTheLastAnswerStillCarriesTheTotal() {
         String pid = project("gr-past-end");
@@ -450,10 +444,7 @@ class GroundednessRateIntegrationTest {
         return ClassifierRows.byKey(classifiers, pid, "groundedness").orElseThrow();
     }
 
-    /**
-     * {@code perHour} traces an hour, each with one scored answer; the first {@code rate} of each hour flagged,
-     * and every even-numbered flagged trace flagged on a second answer too.
-     */
+    /** {@code perHour} traces an hour; the first {@code rate} flagged, even-numbered ones on a second answer too. */
     private void seedHours(
             String pid,
             ClassifierRow signal,

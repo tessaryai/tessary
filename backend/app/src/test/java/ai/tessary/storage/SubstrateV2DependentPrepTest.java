@@ -12,20 +12,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The dependent side of the substrate: producer-key columns on the tables that point at spans, and the
- * additively widened subject/grain vocabulary the v2 writers use.
- *
- * <p><b>Post-teardown, this asserts the destination rather than the preparation.</b> The producer keys
- * were added beside the surrogates under {@code v2_*} names, because both had to be readable at once
- * while the sweep translated between them; the swap finished later: the surrogates are gone and the
- * producer keys carry the canonical names. What is asserted here is that end state.
- *
- * <p>{@code dataset_item} was a third table in both lists, and its {@code source_session_id} the one
- * deliberate surviving pointer. The table was dropped, so neither has anything left to assert.
- *
- * <p><b>Why the widening is asserted as constraint text.</b> The vocabulary widening is a property of the
- * constraint, not of any row: a CHECK that still rejects {@code 'span'} is broken whether or not a test
- * happens to insert one. {@code attribute_key} gets the real insert because it is cheap there.
+ * The dependent side of the substrate: producer-key columns on tables that point at spans, and the widened
+ * subject/grain vocabulary. Asserts the post-teardown end state: surrogates gone, producer keys under canonical
+ * names. The widening is asserted as constraint text, since a CHECK rejecting {@code 'span'} is broken whether or not
+ * a row inserts one.
  */
 @SpringBootTest
 class SubstrateV2DependentPrepTest {
@@ -33,16 +23,8 @@ class SubstrateV2DependentPrepTest {
     @Autowired
     JdbcClient jdbc;
 
-    // ---- the v1 substrate itself -------------------------------------------------------------------
-
-    // ---- producer-key columns ----------------------------------------------------------------------
-
-    // ---- vocabulary widening -----------------------------------------------------------------------
-
-    // A @ParameterizedTest over ck_verdict_grain / ck_annotation_grain / ck_annotation_queue_item_grain
-    // / ck_label_grain used to sit here. All four went with their tables, and the
-    // claim they encoded — a span-grain subject must carry its trace id, because span identity is
-    // (project_id, trace_id, id) — now has exactly one carrier left. The next test is its only guard.
+    // The four grain CHECKs went with their tables; a span-grain subject carrying its trace id now has one guard, the
+    // next test.
 
     @Test
     @DisplayName("failure_mode_instance's span branch demands both of its subject columns")
@@ -52,8 +34,6 @@ class SubstrateV2DependentPrepTest {
         assertTrue(def.contains("subject_span_id IS NOT NULL"));
         assertTrue(def.contains("'span'"));
     }
-
-    // ---- the v2 indexes ----------------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0} carries its resolver terminal-state predicate")
     @CsvSource({
@@ -68,8 +48,6 @@ class SubstrateV2DependentPrepTest {
                         + " shipped, or anonymous session-less traffic — never leaves this index and"
                         + " eventually crowds real work out of every LIMITed batch: " + def);
     }
-
-    // ---- helpers -----------------------------------------------------------------------------------
 
     private int columns(String table, String column) {
         return jdbc.sql("SELECT count(*) FROM information_schema.columns"

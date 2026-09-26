@@ -35,20 +35,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The sessions read API (substrate-model.md §7.5).
- *
- * <p>Two contracts are under test, and the second is the unusual one:
- *
- * <ol>
- *   <li>A session's totals are the SUM of its traces' already-materialized rollup columns, and the
- *       response reports how many of those traces are still unsettled — because a sum over moving
- *       addends is a lower bound and has to say so.
- *   <li><b>There is no way to sort sessions by cost or tokens, and there is a test for its absence.</b>
- *       That is not an oversight waiting to be filled in: serving it would mean summing every session in
- *       the project before a page could be chosen. A future parameter would need a session
- *       materialization with its own staleness contract behind it, and this assertion is what makes
- *       adding one an explicit decision rather than a small convenience.
- * </ol>
+ * The sessions read API (substrate-model.md §7.5). A session's totals sum its traces' rollups and report how many are
+ * unsettled, since that sum is a lower bound. And there is no cost or token sort, with a test for its absence: it
+ * would sum every session before a page could be chosen, so adding one must be an explicit decision.
  */
 @SpringBootTest(
         properties = {
@@ -176,7 +165,7 @@ class SessionsControllerTest {
         Instant t0 = Instant.parse("2026-08-12T11:00:00Z");
         String sessionId = SubstrateV2Fixtures.sessionId();
 
-        // Two traces at "cyrano", one at "otto" — cyrano is dominant by count.
+        // cyrano is dominant by count.
         String t1 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t1, sessionId, t0);
         fx.withUsage(
@@ -383,7 +372,7 @@ class SessionsControllerTest {
     @Test
     @DisplayName("a session over the trace and span caps returns the first slice of each and says it was cut")
     void sessionReadsCapTracesAndSpansAndSayTheyDid() {
-        // Recent, so the retention sweep ticking in this shared context has nothing here to age out.
+        // Recent, so the shared context's retention sweep leaves it.
         Instant t0 =
                 Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(7200);
         String sessionId = SubstrateV2Fixtures.sessionId();
@@ -391,15 +380,13 @@ class SessionsControllerTest {
         int cap = SessionReadService.SESSION_TRACE_CAP;
         List<TraceV2Row> traceRows = new ArrayList<>();
         List<SpanRow> spanRows = new ArrayList<>();
-        // Ids minted here rather than by the fixture: its counter-derived ids repeat within a few thousand
-        // draws, and a repeated id would quietly merge two of these rows into one.
+        // Minted here: the fixture's counter ids repeat within a few thousand draws.
         for (int i = 0; i <= cap; i++) {
             String traceId = java.util.UUID.randomUUID().toString().replace("-", "");
             String startedAt = t0.plusSeconds(i).toString();
             traceRows.add(TraceV2Row.of(pid, traceId, sessionId, null, null, null, null, startedAt, startedAt));
-            // Five spans for each of the first thousand traces is exactly the span cap; one more on the
-            // oldest pushes the capped traces over it. The trimmed newest trace's one span starts before
-            // all of them, so a span read that was not narrowed to the capped traces would put it first.
+            // Five spans each for the first thousand traces hits the span cap; one more pushes them over. The trimmed
+            // trace's span starts first, so an unnarrowed read would put it first.
             int spansHere = i == cap ? 1 : i == 0 ? 6 : 5;
             for (int k = 0; k < spansHere; k++) {
                 String spanAt =
