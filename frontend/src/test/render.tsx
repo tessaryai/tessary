@@ -24,16 +24,10 @@ export function renderRoute(ui: ReactElement, { route = "/", path = "*" }: { rou
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
         <Routes>
-          <Route
-            path={path}
-            element={
-              <>
-                {ui}
-                <LocationProbe />
-              </>
-            }
-          />
+          <Route path={path} element={ui} />
         </Routes>
+        {/* Outside the routes, so it still reads the location after the page navigates off its own. */}
+        <LocationProbe />
         </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
