@@ -45,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -261,6 +262,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
      * Send the eligible turns, at most {@code concurrency} calls at once, returning outcomes in page order.
      * One conversation's turns go one at a time, earliest first, and stop at its first flag or refused
      * key: a turn after that is never sent and its outcome is null. Conversations run side by side.
+     * Once the sweep is interrupted no further turn is sent, even by a task that wins the permit an
+     * interrupted call just released before its own interrupt arrives.
      */
     private List<@Nullable Outcome> send(
             String projectId,
@@ -277,6 +280,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         }
         List<@Nullable Outcome> outcomes = new ArrayList<>(Collections.nCopies(eligible.size(), null));
         Semaphore permits = new Semaphore(Math.max(1, props.getConcurrency()));
+        // Set before an interrupted call releases its permit, so the release carries it to the next holder.
+        AtomicBoolean stopped = new AtomicBoolean();
         List<Future<?>> futures = new ArrayList<>(byConversation.size());
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             for (List<Integer> indexes : byConversation.values()) {
@@ -287,7 +292,13 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                         try {
                             permits.acquire();
                         } catch (InterruptedException e) {
+                            stopped.set(true);
                             Thread.currentThread().interrupt();
+                            return;
+                        }
+                        if (Thread.currentThread().isInterrupted()) stopped.set(true);
+                        if (stopped.get()) {
+                            permits.release();
                             return;
                         }
                         try {
@@ -295,6 +306,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                         } catch (RuntimeException e) {
                             outcome = new Outcome(null, Outcome.FAILED);
                         } finally {
+                            if (Thread.currentThread().isInterrupted()) stopped.set(true);
                             permits.release();
                         }
                         synchronized (outcomes) {
