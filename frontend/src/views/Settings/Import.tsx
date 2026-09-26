@@ -330,13 +330,7 @@ function PickerLabel({
         {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
         multiple
         className="hidden"
-        onChange={(e) => {
-          const list = e.target.files;
-          if (!list) return;
-          const next: File[] = [];
-          for (let i = 0; i < list.length; i++) next.push(list[i]);
-          onChange(next);
-        }}
+        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
       />
       {children}
     </label>
@@ -415,8 +409,6 @@ function summariseDirSelection(files: File[]): DirSummary {
       hasPipelineMeta = true;
     } else if (path.includes("/pipeline/call_sites/")) {
       callSiteCount++;
-    } else if (path.includes("/pipeline/failure_modes/")) {
-      // Not counted, but kept out of the /graders/ bucket below.
     } else if (path.includes("/pipeline/quality_dimensions/")) {
       qualityDimensionShardCount++;
     } else if (path.includes("/graders/")) {
