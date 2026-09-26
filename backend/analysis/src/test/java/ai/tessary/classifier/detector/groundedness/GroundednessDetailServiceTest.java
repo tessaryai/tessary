@@ -35,9 +35,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link GroundednessDetailService}: the rate is read off the finding's payload, each cited answer is read back
- * as it was scored so its flagged sentences slice to their text, an answer whose trace is gone says so, and the
- * witnesses page by offset. The repositories are fakes over a mocked {@link JdbcClient}.
+ * {@link GroundednessDetailService}: the rate comes off the payload, each cited answer is read back as scored so its
+ * flagged sentences slice to text, a gone trace says so, and witnesses page by offset. Fakes over a mocked {@link
+ * JdbcClient}.
  */
 class GroundednessDetailServiceTest {
 
@@ -54,7 +54,7 @@ class GroundednessDetailServiceTest {
     /** One read of the finding's cited answers, by every argument. */
     private record PageKey(@Nullable CauseRef cause, int limit, int offset) {}
 
-    /** The finding's cited answers: each page by the arguments that read it; any other read is a test error. */
+    /** The cited answers by page; any other read is a test error. */
     private static final class CitedPages extends GroundednessRateRepository {
         final Map<PageKey, AnswerPage> pages = new HashMap<>();
 
@@ -82,10 +82,7 @@ class GroundednessDetailServiceTest {
         }
     }
 
-    /**
-     * The stored spans, their call site's shape and their retrieved documents. A read by ids answers in the
-     * reverse of the order asked, which the repository's contract ("in no order") allows.
-     */
+    /** Stored spans, shapes, and documents; a read by ids answers in reverse, which "in no order" allows. */
     private static final class StoredSpans extends SubstrateReadRepository {
         final List<SubstrateObservation> spans = new ArrayList<>();
         final Map<String, GroundingEvidenceReads.Evidence> evidence = new HashMap<>();
@@ -159,7 +156,7 @@ class GroundednessDetailServiceTest {
         assertTrue(block.withoutIds().answers().isEmpty());
     }
 
-    /** The substrate answers in reverse; each answer still carries its own text, question and documents. */
+    /** Answered in reverse, each answer still carries its own text, question, and documents. */
     @Test
     void twoCitedAnswersEachCarryTheirOwnSpan() {
         String otherQuestion = "Can I change my delivery address?";
@@ -214,7 +211,7 @@ class GroundednessDetailServiceTest {
                 page.rows());
     }
 
-    /** An RCA cause filter reaches the read as it was asked for, so the page is that cause's share. */
+    /** An RCA cause filter reaches the read, so the page is that cause's share. */
     @Test
     void aCauseFilterNarrowsTheRead() {
         FindingRow finding = finding(payload());
@@ -230,10 +227,7 @@ class GroundednessDetailServiceTest {
         assertNull(page.nextCursor());
     }
 
-    /**
-     * A cursor that is not an offset starts over at the first page instead of failing the request or reading a
-     * negative offset, and an answer whose stored score will not parse is still listed, unscored.
-     */
+    /** A non-offset cursor restarts at page one, and an unparseable score lists the answer unscored. */
     @ParameterizedTest
     @ValueSource(strings = {"abc", "-4"})
     void anUnreadableCursorStartsOverAndAnUnreadableScoreIsUnscored(String cursor) {

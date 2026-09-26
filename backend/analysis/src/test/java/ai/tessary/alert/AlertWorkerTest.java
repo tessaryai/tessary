@@ -33,11 +33,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * The heartbeat's decisions, driven through fakes so a scan can fail and a rule can be held. One heartbeat
- * serves every project, so the first bugs are one failure silencing the rest: a failed roll-up scan
- * skipping case notifications, a failed case scan throwing out of the tick, one rule's corrupt anchor
- * stopping every later rule, and an unparseable cron firing instead of being skipped. The others are an
- * anchor that moves when nothing was delivered, and a roll-up published twice or on the wrong cron.
+ * The heartbeat's decisions, through fakes. One heartbeat serves every project, so one failure must not silence the
+ * rest: a failed roll-up scan skipping case notifications, a failed case scan throwing, a corrupt anchor stopping
+ * later rules, or a bad cron firing. Also: an anchor moving with nothing delivered, and a roll-up published twice or
+ * on the wrong cron.
  */
 @ExtendWith(MockitoExtension.class)
 class AlertWorkerTest {
@@ -108,9 +107,8 @@ class AlertWorkerTest {
     }
 
     /**
-     * Quiet hours, cadence and snooze defer; they never drop. A held tick delivers nothing and leaves the
-     * anchor where it was, so what opened while held goes out once the hold lifts. Advancing the anchor on
-     * a held tick would lose every case that opened during it.
+     * Quiet hours, cadence, and snooze defer, never drop: a held tick leaves the anchor, so what opened meanwhile
+     * goes out once the hold lifts.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("holds")
@@ -166,9 +164,8 @@ class AlertWorkerTest {
     }
 
     /**
-     * The roll-up paths beyond the plain digest: a digest with no cron of its own runs on the server's
-     * default, a brief runs on its own cron, a brief with none is never scheduled, a snoozed roll-up is
-     * consumed without being assembled, and a period another backend already wrote is not published twice.
+     * A digest with no cron runs on the server default, a brief on its own cron and never without one, a snoozed
+     * roll-up is consumed unassembled, and a period another backend wrote is not published twice.
      */
     @Test
     void rollupsFollowTheirOwnCronsSnoozeAndTheFirstWriteWins() {

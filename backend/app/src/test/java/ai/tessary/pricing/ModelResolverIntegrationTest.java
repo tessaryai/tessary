@@ -13,13 +13,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Resolution precedence, against the imported books rather than an in-memory map. These are the cases the
- * read-time price book was carrying: each one is a rule that was paid for by a mis-priced project, and the
- * point of asserting them here is that moving the lookup into the database changed none of them.
+ * Resolution precedence against the imported books. Each case is a rule a mis-priced project paid for; moving the
+ * lookup into the database changed none of them.
  */
 @SpringBootTest
-// Own context on purpose: it resolves against the boot-imported books, which a model row written by any other class
-// would change.
+// Own context: a model row written by another class would change the books.
 @TestPropertySource(properties = "test.context-group=model-resolver")
 class ModelResolverIntegrationTest {
 
@@ -33,9 +31,9 @@ class ModelResolverIntegrationTest {
     @DisplayName("an id the snapshot carries verbatim resolves to itself")
     void resolve_exactMatchWins() {
         assertEquals(Optional.of("claude-sonnet-5"), resolver.resolve("claude-sonnet-5"));
-        // Case and surrounding whitespace are producer noise, not identity.
+        // Case and whitespace are producer noise.
         assertEquals(Optional.of("claude-sonnet-5"), resolver.resolve("  Claude-Sonnet-5 "));
-        // Both regional profiles are carried verbatim, so neither takes a fallback.
+        // Both regional profiles are carried verbatim.
         assertEquals(
                 Optional.of("global.anthropic.claude-sonnet-5"), resolver.resolve("global.anthropic.claude-sonnet-5"));
         assertEquals(Optional.of("us.anthropic.claude-sonnet-5"), resolver.resolve("us.anthropic.claude-sonnet-5"));
@@ -44,21 +42,17 @@ class ModelResolverIntegrationTest {
     @Test
     @DisplayName("an undated Bedrock id falls back through the vendor prefix")
     void resolve_vendorPrefixStripped() {
-        // The snapshot carries `claude-haiku-4-5` and the dated `anthropic.claude-haiku-4-5-20251001-v1:0`
-        // but NOT this spelling, which a real producer emits: before the vendor strip an entire project's
-        // spend read as unpriced.
+        // The snapshot lacks this real producer spelling; before the vendor strip, a whole project's spend read as
+        // unpriced.
         assertEquals(Optional.of("claude-haiku-4-5"), resolver.resolve("anthropic.claude-haiku-4-5"));
     }
 
     @Test
     @DisplayName("a region-prefixed id is never resolved to the cheaper non-regional model")
     void resolve_regionPrefixStopsTheFallback() {
-        // Bedrock charges a regional premium: us./eu./au./jp. are +10% and us-gov. +20% over the bare
-        // model. `us.anthropic.claude-haiku-4-5` is absent verbatim, and stripping BOTH prefixes would land
-        // on claude-haiku-4-5 at 1.00 per 1M when the regional rate is 1.10, a silent 10% under-report,
-        // worse than the unpriced-and-counted it would replace.
+        // Bedrock regional prefixes cost +10% (us-gov +20%). Stripping both prefixes would price at 1.00 instead of
+        // 1.10, a silent under-report worse than unpriced.
         assertEquals(Optional.empty(), resolver.resolve("us.anthropic.claude-haiku-4-5"));
-        // The exact regional id still resolves, from its own entry.
         assertEquals(
                 Optional.of("us.anthropic.claude-haiku-4-5-20251001-v1:0"),
                 resolver.resolve("us.anthropic.claude-haiku-4-5-20251001-v1:0"));

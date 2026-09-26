@@ -15,10 +15,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Unit acceptance for {@link RegexDetector}: an NL phrase from {@code config_json}, compiled once to a
- * regex, fires over the selected observation field with no model call; {@code config_json} also
- * overrides the field and word-boundary. Evidence is bounded JSON. Literal keyword matching stays per-observation and
- * field-restricted.
+ * {@link RegexDetector}: an NL phrase from {@code config_json}, compiled once, fires over the selected field with no
+ * model call; {@code config_json} also overrides the field and word boundary. Evidence is bounded JSON.
  */
 class RegexDetectorTest {
 
@@ -31,8 +29,7 @@ class RegexDetectorTest {
     }
 
     private SubstrateObservation obs(String input, String output) {
-        // Stored as ingest writes it — the gen_ai role envelope — so the detector scores the
-        // flattened text the ClassifierField view yields, not clean strings production never emits.
+        // Stored as ingest writes it (the gen_ai role envelope), so the flattened ClassifierField text is scored.
         return new SubstrateObservation(
                 "obs1",
                 "proj1",
@@ -78,11 +75,9 @@ class RegexDetectorTest {
 
     @Test
     void configKeysOwnedByOtherFeaturesDoNotDisableTheDetector() {
-        // `config_json` is one blob shared across features — the pre-deploy loop keys off `surfaces`
-        // in the same object. The platform mapper is a bare `new ObjectMapper()`, so
-        // FAIL_ON_UNKNOWN_PROPERTIES is ON; before ConfigShape ignored unknowns, one foreign key made
-        // the parse throw, the catch returned null, and the detector had no phrases. The signal then
-        // matched nothing at all, silently and with nothing logged.
+        // `config_json` is shared across features (the pre-deploy loop reads `surfaces`), and the mapper fails on
+        // unknown properties: before ConfigShape ignored them, one foreign key made the detector silently match
+        // nothing.
         RegexDetector detector = detector(ClassifierField.BOTH, false);
         String config = "{\"surfaces\":[\"tool_definition\"],\"phrases\":[\"upstream exploded\"]}";
 
@@ -93,9 +88,8 @@ class RegexDetectorTest {
     }
 
     /**
-     * A field name this build does not know, a blank one, or none falls back to the detector's own field
-     * instead of throwing on the enum lookup; a blank phrase beside a real one is skipped rather than
-     * compiled into a pattern that matches everything.
+     * An unknown, blank, or missing field falls back to the detector's own; a blank phrase is skipped, not compiled
+     * to match everything.
      */
     @ParameterizedTest
     @ValueSource(strings = {"\"headers\"", "\"  \"", "null"})

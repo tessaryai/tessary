@@ -16,17 +16,16 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The case-opened rule's notification policy. Every misreading here fails in the same invisible way: a
- * partner who is not paged and does not know it, so each row names the input that would do that.
+ * The case-opened rule's notification policy. Every misreading fails as a partner not paged and unaware, so each row
+ * names such an input.
  */
 class AlertPolicyTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
-     * Quiet windows in the rule's own zone. The bugs: a window wrapping midnight read as its complement, an
-     * end bound treated as inclusive, equal ends read as 24 hours of silence, and the times read in UTC
-     * rather than the zone the partner gave.
+     * Quiet windows in the rule's zone: a midnight-wrapping window read as its complement, an inclusive end, equal
+     * ends as 24 hours of silence, or UTC instead of the partner's zone.
      */
     @ParameterizedTest(name = "{0}-{1} {2} at {3} -> quiet={4}")
     @CsvSource({
@@ -39,7 +38,7 @@ class AlertPolicyTest {
         "22:00, 08:00, UTC, 2026-01-15T08:00:00Z, false",
         "22:00, 08:00, UTC, 2026-01-15T12:00:00Z, false",
         "09:00, 09:00, UTC, 2026-01-15T09:00:00Z, false",
-        // 02:00Z is 21:00 the evening before in New York: inside 20:00-23:00 there, outside it in UTC.
+        // 02:00Z is 21:00 the evening before in New York.
         "20:00, 23:00, America/New_York, 2026-01-16T02:00:00Z, true",
         "20:00, 23:00, America/New_York, 2026-01-15T21:00:00Z, false",
     })
@@ -50,9 +49,8 @@ class AlertPolicyTest {
     }
 
     /**
-     * The lenient parser both the API and the stored blob go through. Every unreadable part degrades to the
-     * permissive default: a half window, an unparseable time, or an unknown zone must never produce a rule
-     * that is quiet forever or one that throws on the heartbeat.
+     * The lenient parser for API and stored blob: an unreadable part degrades to permissive, never quiet forever or
+     * throwing on the heartbeat.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("rawPolicies")
@@ -108,13 +106,13 @@ class AlertPolicyTest {
                         "a blank zone reads as UTC", 60L, "22:00", "08:00", " ", new AlertPolicy(60, ten, eight, utc)));
     }
 
-    /** A corrupt attributes blob fails open to notifying on every tick, never to staying quiet or throwing. */
+    /** A corrupt blob fails open to notifying every tick. */
     @Test
     void anUnreadableAttributesBlobReadsAsImmediate() {
         assertEquals(AlertPolicy.IMMEDIATE, AlertPolicy.of(mapper, "{not json"));
     }
 
-    /** The cadence is a minimum spacing: exactly one cadence after the last delivery is due, one second less is not. */
+    /** Cadence is minimum spacing: exactly one cadence later is due, a second less is not. */
     @ParameterizedTest(name = "cadence {0}s, {1}s after last -> {2}")
     @CsvSource({"0, 0, true", "300, 299, false", "300, 300, true"})
     void cadenceElapsedAtExactlyOneCadence(long cadence, long secondsSince, boolean elapsed) {

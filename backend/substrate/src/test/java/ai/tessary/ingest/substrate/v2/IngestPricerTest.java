@@ -27,8 +27,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * Ingest-time pricing of one span. The resolver and the book are database reads, so they are fed canned
- * answers here; everything asserted is the arithmetic and bookkeeping this class does with them.
+ * Ingest-time pricing of one span, with canned resolver and book answers; the arithmetic and bookkeeping are
+ * asserted.
  */
 @ExtendWith(MockitoExtension.class)
 class IngestPricerTest {
@@ -44,8 +44,8 @@ class IngestPricerTest {
     }
 
     /**
-     * Cached tokens come off a cache-inclusive input count before it is priced, a count sent as text is read
-     * like a number, and a bucket the model is never billed for costs exactly zero rather than nothing.
+     * Cached tokens come off a cache-inclusive input count, text counts read as numbers, and a never-billed bucket
+     * costs zero, not nothing.
      */
     @Test
     void inferredCostPricesEachBucketAndABucketWithNoRateCostsZero() {
@@ -63,7 +63,7 @@ class IngestPricerTest {
 
         IngestPricer.Priced priced = pricer().price(raw("claude-x", attrs), KindNormalizer.LLM);
 
-        // 1500 reported - (200 + 300) cached = 1000 fresh: 1000 x $3/MTok, 100 x $15/MTok, 200 x $0.3/MTok.
+        // 1500 - (200 + 300) cached = 1000 fresh.
         assertEquals(
                 new IngestPricer.Priced(
                         1000L,
@@ -86,8 +86,8 @@ class IngestPricerTest {
     }
 
     /**
-     * A producer's per-bucket costs are taken verbatim over any total, an unreadable one is left empty
-     * rather than guessed, and the usage receipt keeps a flag as a flag and drops an absent value.
+     * Producer per-bucket costs win over any total, an unreadable one stays empty, and the receipt keeps flags and
+     * drops absent values.
      */
     @Test
     void providedPerBucketCostsAreTakenVerbatim() {
@@ -121,10 +121,7 @@ class IngestPricerTest {
                 priced);
     }
 
-    /**
-     * The name-to-model cache is bounded: a producer stamping a fresh model string on every span cannot grow
-     * it without limit, and once it overflows it is dropped, so a name resolves against the book again.
-     */
+    /** The name-to-model cache is bounded: a fresh model string per span cannot grow it, and overflow drops it. */
     @Test
     void theModelCacheIsDroppedOnceItOverflowsAndNamesResolveAfresh() {
         AtomicInteger generation = new AtomicInteger();
