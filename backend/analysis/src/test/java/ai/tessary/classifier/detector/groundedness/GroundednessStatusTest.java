@@ -20,13 +20,9 @@ class GroundednessStatusTest {
     void devFollowsTheModelAndTheCursor() {
         assertEquals(State.ON, state(true, Mode.DEV, true, false, null));
         assertEquals(State.ON, state(true, Mode.DEV, true, true, null));
+        assertEquals(State.ON, state(true, Mode.DEV, true, true, NOW.minus(Duration.ofDays(2))), "a stale catch-up");
         assertEquals(State.NOT_SCORING, state(true, Mode.DEV, false, true, null));
         assertEquals(State.NOT_SET_UP, state(true, Mode.DEV, false, false, null));
-    }
-
-    @Test
-    void devIgnoresHowLongAgoTheLastCatchUpWas() {
-        assertEquals(State.ON, state(true, Mode.DEV, true, true, NOW.minus(Duration.ofDays(2))));
     }
 
     @Test

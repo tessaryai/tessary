@@ -267,27 +267,6 @@ class MetricSourceTest {
     }
 
     @Test
-    @DisplayName("a bucket the provider never reported is absent; a reported zero is a value")
-    void unreportedCacheWriteIsAbsentAndAReportedZeroIsNot() {
-        String pid = project("metric-src-buckets");
-        String traceId = seedTurn(pid);
-        String rootId = insertObs(pid, traceId, null, "agent", "loop", "cs-a", T0, T0.plusMillis(800))
-                .spanId();
-        // No write charge means no write count (null), while a present zero cache-read count is the prompt-prefix
-        // regression itself.
-        insertLlmLeaf(pid, traceId, rootId, "gpt-4o", 1000L, 50L, 0L, null, null);
-
-        TurnMetrics turn = onlyTurn(pid, new Tally());
-
-        assertEquals(0.0, present(turn.measurement(Measure.TOK_CACHE_READ)).value(), 0.0, "reported zero is a value");
-        assertEquals(
-                Absence.BUCKET_NOT_REPORTED,
-                assertInstanceOf(Measurement.Absent.class, turn.measurement(Measure.TOK_CACHE_WRITE))
-                        .reason(),
-                "'not reported' must not be laundered into 'no writes'");
-    }
-
-    @Test
     @DisplayName("a reported zero cache-write counts only where the model is billed for cache creation")
     void aZeroCacheWriteIsAMeasurementOnlyWhereCreationIsBilled() {
         String pid = project("metric-src-cache-write-family");
@@ -296,13 +275,14 @@ class MetricSourceTest {
                 .spanId();
         // An SDK stamping every attribute writes 0 for uncounted automatic caching; reading it as zero writes
         // fabricates a measurement.
-        insertLlmLeaf(pid, traceId, rootId, "gpt-4o", 1000L, 50L, null, 0L, null);
+        // A reported zero cache read is the prompt-prefix regression itself, so it stays a value.
+        insertLlmLeaf(pid, traceId, rootId, "gpt-4o", 1000L, 50L, 0L, 0L, null);
 
+        TurnMetrics turn = onlyTurn(pid, new Tally());
+        assertEquals(0.0, present(turn.measurement(Measure.TOK_CACHE_READ)).value(), 0.0, "reported zero is a value");
         assertEquals(
                 Absence.BUCKET_NOT_REPORTED,
-                assertInstanceOf(
-                                Measurement.Absent.class,
-                                onlyTurn(pid, new Tally()).measurement(Measure.TOK_CACHE_WRITE))
+                assertInstanceOf(Measurement.Absent.class, turn.measurement(Measure.TOK_CACHE_WRITE))
                         .reason(),
                 "gpt-4o carries no cache-creation rate, so a 0 there is bookkeeping rather than a count");
 

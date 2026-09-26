@@ -110,7 +110,7 @@ class MetricDriftDetectorTest {
     }
 
     @Test
-    @DisplayName("a window under min_sample is silent whatever it shows — it waits, it is not skipped")
+    @DisplayName("a window or reference under min_sample is silent whatever it shows — it waits, it is not skipped")
     void silentBelowTheSampleFloor() {
         MetricSketch ref = durations(1.0);
         // A doubling on 40 samples is not reported: the window is still filling, so the floor makes it wait (metric-
@@ -122,17 +122,12 @@ class MetricDriftDetectorTest {
         assertFalse(d.fired());
         assertEquals(Silence.BELOW_MIN_SAMPLE, d.silence());
         assertEquals(40, d.nCur());
-    }
 
-    @Test
-    @DisplayName("a thin REFERENCE silences the comparison too")
-    void silentWhenTheReferenceIsThin() {
-        // A reference of 40 samples would report its own noise as a regression.
-        Decision d = MetricDriftDetector.decide(
+        // A thin reference silences it too: 40 samples would report their own noise as a regression.
+        Decision thinRef = MetricDriftDetector.decide(
                 Measure.TURN_DURATION, Reference.PREVIOUS, durations(1.0, 40), durations(1.4), CONFIG);
-
-        assertFalse(d.fired());
-        assertEquals(Silence.BELOW_MIN_SAMPLE, d.silence());
+        assertFalse(thinRef.fired());
+        assertEquals(Silence.BELOW_MIN_SAMPLE, thinRef.silence());
     }
 
     @Test
