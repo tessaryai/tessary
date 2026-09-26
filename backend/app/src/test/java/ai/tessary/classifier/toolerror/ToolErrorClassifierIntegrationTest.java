@@ -37,41 +37,23 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The tool-error classifier (launch segment C) against a real database, end to end: ingested rows in,
- * a persisted finding out, and both arms of the correction loop working on it.
+ * The tool-error classifier against a real database: ingested rows in, a persisted finding out, and both arms of the
+ * correction loop.
  *
- * <p><b>Why this test exists, stated plainly.</b> Segment C shipped with three unit-test files and no
- * test that executed a single one of its queries. It merged in a state where the classifier could not
- * run at all — {@code ToolFailure.SQL_PREDICATE} contains jsonb's {@code ?} operator, which Spring reads
- * as a positional JDBC placeholder and refuses to mix with named ones, so every read threw before
- * reaching Postgres — and behind that sat a text-block concatenation emitting {@code ANDCOALESCE}, a
- * {@code NOT NULL} on {@code call_site_id} that no tool-error finding could satisfy, and two paths in
- * the case gate that a {@code rate_shift} finding could not pass. Five faults, all runtime, all in code
- * that {@code task check} covered and never ran. Everything asserted below would have failed on the
- * first execution of any of them, which is the whole point.
+ * <p>It exists because segment C merged with no test that ran its queries, and five runtime faults hid there: jsonb's
+ * {@code ?} read as a JDBC placeholder, an {@code ANDCOALESCE} concatenation, an unsatisfiable {@code NOT NULL} on
+ * {@code call_site_id}, and two case-gate paths a {@code rate_shift} finding could not pass.
  *
- * <p>The four claims:
- *
- * <ol>
- *   <li><b>C1</b> — the definition is broader than the recorded error type. A framework that catches an
- *       exception, hands {@code {"error": …}} back to the model and closes the span cleanly is a failure,
- *       and the old span-status rule cannot see it.
- *   <li><b>C2/C3</b> — a sustained rise earns a persisted finding carrying the spell's calls as evidence,
- *       the failing ones as {@code witness} and the whole population as {@code member}, and that finding
- *       reaches Layer 2 rather than being refused for want of readable evidence.
- *   <li><b>C3, human arm</b> — <em>Real deviation</em> marks the finding confirmed, which is what the
- *       shared case gate reads.
- *   <li><b>Absorb</b> — <em>Legitimate — absorb</em> pins the tool's accepted reference, and the next
- *       recompute stays quiet against it. Without the pinned row the replay re-learns the old reference
- *       and re-alarms within minutes, so this is what makes the button mean anything.
- * </ol>
+ * <p>Claims: a caught {@code {"error": …}} on a cleanly closed span is a failure (C1); a sustained rise files a
+ * finding with failing calls as witness and the population as member, which reaches Layer 2 (C2/C3); a positive
+ * ruling confirms it; and absorb pins the new reference so the next recompute stays quiet.
  */
 @SpringBootTest
 class ToolErrorClassifierIntegrationTest {
 
     private static final String TOOL = "search_docs";
 
-    /** Comfortably past {@code minBaselineCalls} (500) so the reference is thick before the rise. */
+    /** Past {@code minBaselineCalls} (500), so the reference is thick before the rise. */
     private static final int QUIET_HOURS = 40;
 
     private static final int CALLS_PER_HOUR = 20;
@@ -131,8 +113,7 @@ class ToolErrorClassifierIntegrationTest {
         seedCall(pid, hour, Failure.RESULT_IS_ERROR);
         seedCall(pid, hour, Failure.ERROR_TYPE_ATTRIBUTE);
 
-        // The read runs at all — which it did not before, because of the `?` operator. Everything
-        // below this line is unreachable until that is true.
+        // The read runs at all, which the {@code ?} operator once prevented.
         List<HourlyToolTally> tallies = repo.hourlyTallies(pid, hour.minus(1, ChronoUnit.HOURS));
         HourlyToolTally tally = tallies.stream()
                 .filter(t -> t.toolKey().endsWith(TOOL))
@@ -158,7 +139,6 @@ class ToolErrorClassifierIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "toolerr-rise").project().id();
         Instant start = Instant.now().minus(60, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
 
-        // Forty quiet hours to pin the reference, then twenty at a rate nobody could call noise.
         seedHours(pid, start, QUIET_HOURS, 1);
         seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
 
@@ -195,9 +175,8 @@ class ToolErrorClassifierIntegrationTest {
                 finding.payloadJson() != null && finding.payloadJson().contains("failing_traces"),
                 "the evidence names traces the failures happened in, for a human and for the dossier");
 
-        // Idempotence: the replay is recomputed from source on every read, so running it again must
-        // leave the same row rather than a second one. That property is what stands in for the cursor
-        // and watermark this classifier deliberately does not have.
+        // The replay recomputes from source, so a second run must leave the same row; that stands in for the cursor
+        // this classifier does not have.
         service.refresh(pid);
         assertEquals(
                 1,
@@ -206,8 +185,7 @@ class ToolErrorClassifierIntegrationTest {
                         .count(),
                 "a recompute must not deposit a second finding for a cause that already has one");
 
-        // The human arm of the case gate: a positive ruling stays open, which is what the case source
-        // now reads as confirmed.
+        // A positive ruling stays open, which the case source reads as confirmed.
         var resolved = drift.resolve(pid, finding.id(), "not_expected", null);
         assertEquals(
                 FindingRow.Status.OPEN,
@@ -223,8 +201,7 @@ class ToolErrorClassifierIntegrationTest {
     void aBackfillOlderThanTheReplayWindowStillFires() {
         String pid =
                 TenantFixture.bootstrap(tenants, "toolerr-backfill").project().id();
-        // Ninety days old: well outside a `now - 28d` window, but the whole seeded span (sixty hours)
-        // sits comfortably inside 28 days of the LAST call this project ever made.
+        // Ninety days old: outside a {@code now - 28d} window, but inside 28 days of this project's last call.
         Instant start = Instant.now().minus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
         seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
@@ -254,9 +231,8 @@ class ToolErrorClassifierIntegrationTest {
         String onset = first.onsetAt();
         assertNotNull(onset);
 
-        // Twenty hours with NOTHING for this tool at all — no upload, not a recovery: an hour with zero
-        // calls contributes no bucket to the replay, so the accumulator that is still broken has nothing
-        // to cool it in the gap. Still broken on the other side.
+        // Twenty hours with no calls for this tool: an empty hour adds no bucket, so the broken accumulator never
+        // cools across the gap.
         seedHours(pid, start.plus(QUIET_HOURS + 30L, ChronoUnit.HOURS), 10, 8);
 
         assertEquals(1, service.refresh(pid), "still one tool in a spell, not a second one");
@@ -281,13 +257,12 @@ class ToolErrorClassifierIntegrationTest {
     void memberAndWitnessStopAtTheLastFoldedHour() {
         String pid =
                 TenantFixture.bootstrap(tenants, "toolerr-bounded").project().id();
-        // Ten days old — well inside a pre-fix `now - 28d` window too, so this isolates the event clock
-        // (last_seen_at, and the evidence bound it drives) from the anchor the backfill test above covers.
+        // Ten days old, inside a {@code now - 28d} window too, so this isolates the event clock from the anchor the
+        // backfill test covers.
         Instant start = Instant.now().minus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
         seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
-        // The detector's own last folded bucket, read back independently rather than hand-computed from
-        // the seeding parameters, so this asserts against what the replay actually saw.
+        // The replay's own last folded bucket, read back rather than computed from the seed.
         String lastFoldedBucket = repo.hourlyTallies(pid, start).stream()
                 .filter(t -> t.toolKey().endsWith(TOOL))
                 .map(HourlyToolTally::bucket)
@@ -325,18 +300,11 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * A closed ruling hands the window back to the detector: the arm clears, and what it fired over
-     * becomes part of normal.
+     * A closed ruling hands the window back to the detector: the arm clears and the window folds into normal. Before,
+     * the arm kept its above-threshold value and the next sweep re-filed a dismissed cause; one arm sat at 7.331
+     * against 6.0 for thirteen failure-free days.
      *
-     * <p><b>The state this replaces.</b> Closing the finding alone does not touch the accumulator, so it
-     * kept the value it fired at — above its own threshold — and the very next sweep would open a fresh
-     * finding for a cause a human just dismissed, off nothing new. On the websearch finding that prompted
-     * this the arm sat at 7.331 against a threshold of 6.0 for thirteen failure-free days.
-     *
-     * <p><b>Folded, not replaced.</b> Absorb replaces the reference, because a human pressing
-     * "legitimate" is saying this run IS the normal. A close is weaker — nobody said the old normal was
-     * wrong — so the judged counts are ADDED to it, which is what both assertions below check: more
-     * calls than the reference alone had, and the arm back at zero.
+     * <p>Folded, not replaced: absorb replaces the reference, while a close only adds the judged counts to it.
      */
     @Test
     @DisplayName("a closed ruling folds the judged window into the reference and clears the arm")
@@ -375,9 +343,8 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * A negative ruling the fold cannot account for moves only what it can. An unreadable payload or a tool
-     * with no state moves nothing. A payload written before the onset rework counts the tool's whole history,
-     * so adding it to the reference would count that history twice: the arm clears, the reference stays.
+     * A fold that cannot trust the ruling's counts moves only what it can: an unreadable payload or stateless tool
+     * moves nothing, and a pre-onset-rework payload would double count history, so only the arm clears.
      */
     @Test
     @DisplayName("a fold that cannot trust the ruling's counts clears the arm at most, never the reference")
@@ -409,14 +376,8 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * Which verdicts may move detector state, held directly rather than inferred.
-     *
-     * <p>{@code negative} is the only verdict that establishes the traffic was ordinary — a claim
-     * folding asserts by adding the window to the reference — so it is the only one that may fold.
-     *
-     * <p>{@code positive} opens a case. Moving the bar there would be the platform quietly agreeing to
-     * a rate a human is about to be asked about, and clearing the arm would drop the evidence out from
-     * under the case.
+     * Only {@code negative} establishes the traffic was ordinary, so only it may fold. {@code positive} opens a case,
+     * and moving the bar or clearing the arm there would undercut the case.
      */
     @Test
     @DisplayName("only a negative ruling may move detector state")
@@ -430,10 +391,8 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * A positive ruling keeps the finding open but takes it out of {@code ux_finding_live}, and the
-     * recompute re-derives the same spell every minute. The pass after the ruling used to INSERT a second,
-     * unruled finding with the same onset for the window just ruled on. Only traffic in a later hour may
-     * file a new one.
+     * A positive ruling leaves {@code ux_finding_live}, and the recompute re-derives the same spell every minute; the
+     * next pass used to insert a duplicate unruled finding. Only a later hour of traffic may file a new one.
      */
     @Test
     @DisplayName("a recompute after a positive ruling files nothing until a later hour of traffic arrives")
@@ -473,14 +432,10 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * Absorbing says "this rate is the new normal", so the reference it installs has to be measured over
-     * the run since onset — the only stretch that describes the new normal. A burst alarms in a couple of
-     * dozen calls, so at the moment of the press there is usually nowhere near {@code minBaselineCalls} of
-     * it, and pinning what there is would hand the tool an 80% baseline and go permanently deaf.
-     *
-     * <p>So the decision is recorded and installs itself once the run is thick enough. Both halves are
-     * asserted, because either alone is a mechanism that looks like it works and does not: a pin that
-     * never lands is the button doing nothing, and one that lands early is worse than nothing.
+     * Absorb pins a reference measured over the run since onset. At the press there is usually far less than {@code
+     * minBaselineCalls} of it, and pinning that would leave an 80% baseline and a deaf detector, so the decision
+     * waits until the run is thick enough. Both halves are asserted: a pin that never lands and one that lands early
+     * both look like they work.
      */
     @Test
     @DisplayName("absorbing waits for enough of the new rate, then pins it and goes quiet")
@@ -497,28 +452,21 @@ class ToolErrorClassifierIntegrationTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no rate_shift finding was written"));
 
-        // The invariant, asserted rather than a call count derived from the fixture: however few calls of
-        // the new rate exist when the human presses, what lands is never a reference thinner than the
-        // minimum. Below it the decision waits; at or above it, it installs. A fixture whose run happens
-        // to clear 500 on the first press exercises the second branch and must still hold this.
+        // However few new-rate calls exist at the press, the pinned reference is never thinner than the minimum.
         drift.resolve(pid, finding.id(), "expected", null);
         assertTrue(
                 references.byTool(pid).values().stream().allMatch(r -> r.calls() >= 500),
                 "no reference may be pinned from fewer calls than a reference needs: "
                         + describe(references.byTool(pid)));
 
-        // The deferral window itself, which ToolErrorSweep now runs inside on a schedule rather than only
-        // when somebody loads Triage. `resolve` set the finding ALLOWLISTED and `ux_finding_live` covers
-        // only ('open','blocked'), so the recompute's ON CONFLICT cannot see that row: every pass here
-        // used to INSERT a second, fresh, open finding for a cause the human had already settled, and
-        // nothing closed it. The press looked like it had done nothing.
+        // The deferral window, which ToolErrorSweep runs on a schedule. The allowlisted finding is outside {@code
+        // ux_finding_live}, so every pass used to insert a fresh open finding for a settled cause.
         service.refresh(pid);
         assertTrue(
                 findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
                         .noneMatch(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind())),
                 "a pass inside the deferral window must not re-file a cause the human already absorbed");
 
-        // More of the same rate arrives, and now there is enough of it to call it the new normal.
         seedHours(pid, start.plus(QUIET_HOURS + 20L, ChronoUnit.HOURS), 20, 8);
         service.refresh(pid);
 
@@ -532,8 +480,7 @@ class ToolErrorClassifierIntegrationTest {
                 accepted.failures() > 0,
                 "absorbing an elevated rate must pin the elevated counts, not an empty window");
 
-        // The point of the whole mechanism: without the pinned row the replay re-learns the original
-        // reference off the leading buckets and writes the same finding straight back.
+        // Without the pinned row the replay re-learns the old reference and re-files the same finding.
         assertEquals(0, service.refresh(pid), "the absorbed tool must not re-alarm against its own new reference");
 
         assertTrue(
@@ -556,7 +503,6 @@ class ToolErrorClassifierIntegrationTest {
         RESULT_IS_ERROR
     }
 
-    /** Pinned references with their counts, so a failure says what landed rather than only that it did. */
     private static String describe(Map<String, ToolErrorReferenceRepository.AcceptedReference> pinned) {
         return pinned.values().stream()
                 .map(r -> r.toolKey() + "(calls=" + r.calls() + ",failures=" + r.failures() + ")")
@@ -564,7 +510,6 @@ class ToolErrorClassifierIntegrationTest {
                 .toString();
     }
 
-    /** The one rate_shift finding the fixture fires, or a failure that says the fixture stopped working. */
     private FindingRow firedFinding(String projectId) {
         return findings.listByProject(projectId, FindingRow.Status.OPEN, null, null, false, 50).stream()
                 .filter(f -> FindingRow.Cause.RATE_SHIFT.equals(f.causeKind()))
@@ -579,7 +524,7 @@ class ToolErrorClassifierIntegrationTest {
                 .single();
     }
 
-    /** The up arm, read from the row rather than from the payload's frozen copy of it. */
+    /** The up arm, read from the row, not the payload's frozen copy. */
     private double armOf(String projectId) {
         return jdbc.sql("SELECT max(s_up) FROM tool_error_state WHERE project_id = :pid")
                 .param("pid", projectId)
@@ -606,8 +551,7 @@ class ToolErrorClassifierIntegrationTest {
         for (int h = 0; h < hours; h++) {
             Instant hour = from.plus(h, ChronoUnit.HOURS);
             for (int c = 0; c < CALLS_PER_HOUR; c++) {
-                // Alternate the two invisible-to-the-old-rule shapes so the rise is not carried by
-                // span status alone — a regression the narrow rule could see is not the interesting case.
+                // Alternate the two shapes the old rule cannot see, so the rise is not carried by span status alone.
                 Failure mode = c >= failuresPerHour
                         ? Failure.NONE
                         : (c % 2 == 0 ? Failure.RESULT_ERROR_OBJECT : Failure.SPAN_STATUS);
@@ -617,13 +561,8 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     /**
-     * One tool call, as a whole turn: a trace with an {@code agent} root and the {@code tool} span the
-     * call hangs off, then the call itself, then the REAL rollup.
-     *
-     * <p>The rollup is not fixture ceremony. {@code hourlyTallies} counts only calls whose trace
-     * {@code is_settled}, because a turn's calls arrive across several exporter flushes and half a turn is
-     * not a rate. A seeder that skipped it would seed rows the reader is right to ignore, and every
-     * assertion below would read zero for a reason that has nothing to do with what is being tested.
+     * One tool call as a whole turn, then the real rollup: {@code hourlyTallies} counts only settled traces, so
+     * skipping it would make every assertion read zero.
      */
     private void seedCall(String projectId, Instant at, Failure failure) {
         String traceId = SubstrateV2Fixtures.traceId();
@@ -638,8 +577,7 @@ class ToolErrorClassifierIntegrationTest {
                 .at(at)
                 .write();
 
-        // Rule 2's attribute lives in span_payload now, not in a jsonb column on the span row — which is
-        // exactly what ToolFailure.SQL_PREDICATE's `pl` join reads.
+        // Rule 2's attribute lives in span_payload, which the predicate's {@code pl} join reads.
         SpanRef span = fx.spanSeed(projectId)
                 .traceId(traceId)
                 .parentSpanId(rootId)
@@ -665,7 +603,7 @@ class ToolErrorClassifierIntegrationTest {
         fx.rollup(projectId, traceId);
     }
 
-    /** How many calls the pre-segment-C rule — span status alone — would have called failures. */
+    /** Failures under the old span-status-only rule. */
     private long narrowFailures(String projectId) {
         return jdbc.sql("SELECT count(*) FROM tool_call WHERE project_id = :pid"
                         + " AND (error_type IS NOT NULL OR is_error IS TRUE)")

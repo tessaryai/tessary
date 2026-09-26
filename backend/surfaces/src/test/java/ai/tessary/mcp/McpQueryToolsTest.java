@@ -44,12 +44,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Unit-level behaviour of the aggregation-first query MCP tools: the four tools delegate to
- * {@link QueryService} scoped to the token's project, shape results like the HTTP Query API, and turn
- * {@link QueryService}'s {@link TessaryException} (bad dataset / range / search mode) into a clean tool
- * error rather than a {@code -32603} internal error. The {@link QueryService} is mocked — correctness
- * of the query SQL itself is covered by {@code QueryApiIntegrationTest}; this test pins the MCP wrapper
- * contract (project scoping, arg mapping, view shaping, error mapping).
+ * The query MCP tools at the wrapper: project scoping, argument mapping, HTTP-parity view shaping, and {@link
+ * TessaryException} as a clean tool error rather than {@code -32603}. The SQL is covered by {@code
+ * QueryApiIntegrationTest}.
  */
 class McpQueryToolsTest {
 
@@ -66,7 +63,7 @@ class McpQueryToolsTest {
         Project project =
                 new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-06-13T00:00:00Z", null, null, true, null);
         when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // The query tools never use these, but the registry needs them to register the other tools.
+        // Unused by the query tools, but the registry needs them.
         PipelineService pipeline = mock(PipelineService.class);
         SpanRepository spans = mock(SpanRepository.class);
         SpanPayloadRepository payloads = mock(SpanPayloadRepository.class);
@@ -85,7 +82,6 @@ class McpQueryToolsTest {
         this.dispatcher = new McpDispatcher(registry, mapper);
     }
 
-    /** A project-scoped MCP-token context, as AuthFilter mints for an {@code tsy_}. */
     private TenantContext ctx() {
         return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
     }
@@ -103,11 +99,7 @@ class McpQueryToolsTest {
         return (Map<String, Object>) Objects.requireNonNull(r.result());
     }
 
-    /**
-     * The {@code structuredContent} payload is the typed {@code *View} record; re-serialize it through
-     * Jackson to assert the on-the-wire JSON an MCP client actually sees (snake_case shape parity with
-     * the HTTP Query API).
-     */
+    /** Re-serialized through Jackson to assert the wire JSON a client sees. */
     private JsonNode structured(Map<String, Object> result) {
         assertEquals(Boolean.FALSE, result.get("isError"));
         return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
@@ -123,20 +115,9 @@ class McpQueryToolsTest {
     // ---- registration --------------------------------------------------------------------------
 
     /**
-     * Every dataset {@link QueryDataset} declares must be reachable, and the enum must be DERIVED from it
-     * rather than restated.
-     *
-     * <p>This is the regression this test exists for. The enum was a hand-written three-element list shared by
-     * all four tools; {@code QueryDataset} grew {@code metric_rollups} (the pre-aggregated usage/cost rollups,
-     * served by {@code QueryService} and exposed over REST) and the literal here did not move. Because the
-     * schema publishes the list as an {@code enum} beside {@code additionalProperties: false}, no agent could
-     * even attempt it — "what did this project spend per day" was unanswerable over MCP with the rows sitting
-     * in the table. Asserting containment against a hard-coded name would reproduce exactly the bug, so this
-     * walks the enum: a fifth dataset added to {@code QueryDataset} passes with no edit here, and one dropped
-     * from the schema fails.
-     *
-     * <p>{@code query_search} is the deliberate exception and gets its own test below: its enum is narrower
-     * than "every dataset" on two different grounds and asserting both here would blur them.
+     * The regression this test exists for: the dataset enum was a hand-written list, {@code QueryDataset} grew {@code
+     * metric_rollups}, and the schema's {@code enum} beside {@code additionalProperties: false} made per-day spend
+     * unanswerable over MCP. Walking the enum means a new dataset passes with no edit here and a dropped one fails.
      */
     @Test
     void datasetEnumIsDerivedFromQueryDataset() throws Exception {
@@ -153,19 +134,9 @@ class McpQueryToolsTest {
     }
 
     /**
-     * {@code query_search}'s enum is narrowed on two independent grounds, and the distinction matters because
-     * only one of them is a capability.
-     *
-     * <p>{@code metric_rollups} is out because it cannot be searched at all — {@link
-     * QueryDataset#supportsSearch()} is false, a rollup row has no text to match and no page to keyset. {@code
-     * spans} is out by decision: {@code list_spans} searches the same rows with more filters, and
-     * two tools answering one question means the model picks between them arbitrarily. So the expectation is
-     * derived from the enum rather than hard-coded — a fifth searchable dataset reaches {@code query_search}
-     * with no edit here — and the spans exclusion is then pinned on its own, because it is the one the next
-     * reader will mistake for a bug.
-     *
-     * <p>What the service accepts is deliberately NOT asserted here: {@code QueryService} still searches spans
-     * for REST. This is a schema narrowing only.
+     * {@code query_search} excludes {@code metric_rollups} because it cannot be searched, and {@code spans} by
+     * decision, because {@code list_spans} searches the same rows with more filters. The spans exclusion is pinned on
+     * its own because the next reader will mistake it for a bug. The service still searches spans for REST.
      */
     @Test
     void searchDatasetEnumExcludesSpansAndUnsearchableDatasets() throws Exception {
@@ -183,7 +154,6 @@ class McpQueryToolsTest {
         assertEquals(List.of("tool_calls", "classifier_events"), searchable, "the whole narrowed contract");
     }
 
-    /** The concrete case the above generalises: spans is searchable, and the tool for it is not query_search. */
     @Test
     void describeDatasetPointsSpansSearchAtListSpans() throws Exception {
         JsonNode described = structured(callTool("describe_dataset", "{\"dataset\":\"spans\"}"))
@@ -197,14 +167,8 @@ class McpQueryToolsTest {
     // ---- describe_dataset ----------------------------------------------------------------------
 
     /**
-     * {@code describe_dataset} must describe every dataset {@link QueryDataset} declares, and every field of
-     * every entry must equal what the enum's own accessors say.
-     *
-     * <p>Written by walking the enum on purpose, for the same reason the tool exists. The four query tools
-     * used to recite each dataset's facet/filter fields in their descriptions, and the recitation drifted from
-     * the enum — a hand-written expectation here would be a fourth copy of the same vocabulary and would drift
-     * the same way, passing while the tool lied. Walking means a fifth dataset added to {@code QueryDataset}
-     * is covered with no edit to this test, and a hand-written list smuggled into the handler fails it.
+     * Every dataset and every field must equal the enum's accessors. Walked, not hand-written: the tools' recited
+     * field lists once drifted from the enum, and a hand-written expectation would drift the same way.
      */
     @Test
     void describeDatasetCoversEveryQueryDatasetDerivedFromTheEnum() throws Exception {
@@ -232,11 +196,8 @@ class McpQueryToolsTest {
     }
 
     /**
-     * The one hand-written expectation, and it is the regression: {@code call_site_id} is facetable on
-     * {@code spans}. Faceting it under an {@code environment_id} filter is the coverage read ("which call
-     * sites have telemetry, and how much") that grader synthesis grounds on, so an agent that cannot learn
-     * the field exists cannot ask the question. Pinned by name here precisely because the derived test above
-     * would still pass if the field disappeared from both the enum and the tool together.
+     * The regression: {@code call_site_id} is facetable on {@code spans}, the coverage read synthesis grounds on.
+     * Pinned by name because the derived test passes if the field vanishes from both enum and tool.
      */
     @Test
     void describeDatasetNamesCallSiteIdFacetableOnSpans() throws Exception {
@@ -251,10 +212,8 @@ class McpQueryToolsTest {
     }
 
     /**
-     * The regression decisions 8 and 8b fix: {@code spans} and {@code tool_calls} range, page and bucket
-     * on {@code started_at} (the producer's own timing), and {@code classifier_events} on
-     * {@code subject_started_at} (migration {@code 0012}, the span or trace it judged) — a late-arriving
-     * backfill no longer lands in the wrong bucket on any of the three.
+     * Decisions 8 and 8b: {@code spans} and {@code tool_calls} use {@code started_at}, {@code classifier_events} uses
+     * {@code subject_started_at} (0012), so a late backfill lands in the right bucket.
      */
     @Test
     void describeDatasetReportsStartedAtAsTheEventClockForSpansAndToolCalls() throws Exception {
@@ -319,7 +278,6 @@ class McpQueryToolsTest {
                         "{\"dataset\":\"spans\",\"interval\":\"hour\",\"range\":{\"from\":\"2026-06-10T00:00:00Z\",\"to\":\"2026-06-11T00:00:00Z\"}}"));
         JsonNode buckets = structured.get("buckets");
         assertEquals(1, buckets.size());
-        // snake_case wire parity with the HTTP Query API (TimeseriesBucket.bucket_start).
         assertEquals("2026-06-10T00:00:00Z", buckets.get(0).get("bucket_start").asText());
         assertEquals(3, buckets.get(0).get("count").asLong());
     }
@@ -348,8 +306,7 @@ class McpQueryToolsTest {
         JsonNode rows = structured.get("rows");
         assertEquals(1, rows.size());
         assertEquals("obs-1", rows.get(0).get("id").asText());
-        // snake_case wire parity (SearchView.next_cursor); the versioned e1| cursor is opaque and passes
-        // through the MCP wrapper untouched.
+        // The versioned e1| cursor passes through untouched.
         assertEquals(
                 "e1|2026-06-10T00:00:00Z|obs-1", structured.get("next_cursor").asText());
     }
@@ -375,9 +332,7 @@ class McpQueryToolsTest {
 
     @Test
     void searchSemanticModeYieldsCleanToolError() throws Exception {
-        // The service rejects any mode other than 'keyword' with UNKNOWN_SEARCH_MODE (production behavior,
-        // since QueryService no longer has a semantic branch to fall into) — the mock here
-        // stands in for that, and the tool surface still turns it into a clean error mentioning the mode.
+        // The service rejects any mode but 'keyword'; the tool still returns a clean error naming it.
         when(queryService.search(eq(PROJECT_ID), any(SearchRequest.class)))
                 .thenThrow(new TessaryException(QueryError.UNKNOWN_SEARCH_MODE, "semantic"));
         String text = errorText(callTool("query_search", "{\"dataset\":\"tool_calls\",\"mode\":\"semantic\"}"));
@@ -399,9 +354,8 @@ class McpQueryToolsTest {
     }
 
     /**
-     * Every argument-shape check names the argument and the shape it wanted. A wrongly-typed argument that
-     * slipped through would reach the service as a {@code ClassCastException} (a -32603 the agent cannot act on)
-     * or, worse, be silently dropped so the call answers a different question than the one asked.
+     * Each shape check names the argument and the shape wanted; a mistyped argument would otherwise surface as a
+     * {@code ClassCastException} or be dropped, answering a different question.
      */
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource(
@@ -424,10 +378,7 @@ class McpQueryToolsTest {
         assertEquals(expected, errorText(callTool(tool, argsJson)));
     }
 
-    /**
-     * A JSON number with a fraction ({@code 10.0}, which a model often emits) is accepted as the integer it
-     * denotes rather than refused or dropped: the facet read still asks for the top ten.
-     */
+    /** A fractional JSON number such as {@code 10.0}, common from models, reads as its integer value. */
     @Test
     void aNonIntegerJsonNumberIsReadAsItsIntegerValue() throws Exception {
         when(queryService.facets(PROJECT_ID, new FacetsRequest("spans", "kind", null, Map.of(), 10)))
@@ -439,10 +390,7 @@ class McpQueryToolsTest {
         assertEquals(1, structured.get("facets").size(), "top_n=10.0 must reach the service as 10");
     }
 
-    /**
-     * {@code describe_dataset} names an unknown dataset as a tool error carrying the query API's own message,
-     * not a -32603, so the agent can correct the name.
-     */
+    /** An unknown dataset is a tool error carrying the query API's message, so the agent can correct it. */
     @Test
     void describeDatasetOfAnUnknownDatasetIsACleanToolError() throws Exception {
         String expected = new TessaryException(QueryError.UNKNOWN_DATASET, "nope").getMessage();
@@ -450,7 +398,7 @@ class McpQueryToolsTest {
         assertEquals(expected, errorText(callTool("describe_dataset", "{\"dataset\":\"nope\"}")));
     }
 
-    /** A facet over a field the dataset does not allow is the service's message as a tool error, not a -32603. */
+    /** An unallowed facet field is the service's message as a tool error. */
     @Test
     void facetsOverAnUnknownFieldIsACleanToolError() throws Exception {
         TessaryException refused = new TessaryException(QueryError.UNKNOWN_FIELD, "input", "spans");

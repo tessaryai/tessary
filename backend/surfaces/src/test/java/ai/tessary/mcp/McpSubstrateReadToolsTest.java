@@ -50,26 +50,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * The plural substrate readers — {@code list_traces}, {@code list_spans}, {@code list_sessions},
- * {@code get_session} — pinned at the dispatcher, with the repositories, {@link QueryService} and
- * {@link SessionReadService} mocked. What is under test is the MCP wrapper: project scoping, argument mapping
- * onto the existing seams, the paging convention, the payload-scope rule, and verbatim rendering. The SQL
- * behind them is the REST controllers' and the query layer's own, and is tested there.
+ * The plural substrate readers ({@code list_traces}, {@code list_spans}, {@code list_sessions}, {@code get_session})
+ * at the dispatcher, with the repositories and services mocked: project scoping, argument mapping, paging, the
+ * payload-scope rule, and verbatim rendering. The SQL is tested with the REST controllers.
  *
- * <p><b>Three contracts here are worth more than the rest of the file.</b>
- *
- * <ol>
- *   <li>{@link #listTraces_rowsAreRollupRowsAndCarryNoPayload()} — a list row carries the stored previews and
- *       never the conversation. A reader that got full payloads for fifty traces would have spent its context
- *       before deciding which trace it cared about, which is the whole reason lists and gets are different
- *       tools.
- *   <li>{@link #listSpans_unscopedPayloadRequestIsAnErrorNamingTheRule()} — the one place a list DOES return
- *       payloads, it refuses loudly when the page is not scoped. Returning previews instead would hand an
- *       agent a truncation it has no way to detect.
- *   <li>{@link #listTraces_cursorResumesTheKeysetWhereThePageEnded()} — the cursor is minted by the same
- *       {@code TracePageCodec} the REST list uses. If the two ever drift, a token one surface issues resumes
- *       the other from the wrong row while looking perfectly valid, and nothing errors.
- * </ol>
+ * <p>Three contracts matter most: list rows carry previews and never payloads; an unscoped payload request is an
+ * error, never a silent page of previews; and the cursor comes from the same {@code TracePageCodec} as REST, so a
+ * token from one surface cannot resume the other from the wrong row.
  */
 class McpSubstrateReadToolsTest {
 
@@ -111,10 +98,8 @@ class McpSubstrateReadToolsTest {
     // ---- registration --------------------------------------------------------------------------
 
     /**
-     * The §7.5 contract, carried onto the new surface: sessions carry no rollup, so there is nothing to order
-     * them by but recency. A {@code sort} argument here would mean summing every session in the project
-     * before this page could be chosen — the read shape the v2 substrate exists to make impossible — so its
-     * absence is asserted rather than described, exactly as {@code SessionsControllerTest} asserts it for REST.
+     * Sessions carry no rollup, so recency is the only order (§7.5); a {@code sort} argument would mean summing every
+     * session first.
      */
     @Test
     void listSessions_offersNoSortArgument() {
@@ -127,10 +112,8 @@ class McpSubstrateReadToolsTest {
     // ---- list_traces ---------------------------------------------------------------------------
 
     /**
-     * The snake_case wire names map onto {@link TraceV2Repository.TraceQuery}'s fields, and {@code range}
-     * becomes its two bounds. {@code call_site_id} is the rename worth pinning: the query field is
-     * {@code callSite}, and an agent that learned {@code call_site_id} everywhere else must not have to
-     * discover a different spelling here.
+     * Wire names map onto {@link TraceV2Repository.TraceQuery}; {@code call_site_id} becomes {@code callSite}, the
+     * rename worth pinning.
      */
     @Test
     void listTraces_typedFiltersMapOntoTheRepositoryQuery() throws Exception {
@@ -151,8 +134,7 @@ class McpSubstrateReadToolsTest {
         assertEquals("broken", q.q());
         assertEquals("2026-08-10T00:00:00Z", q.from());
         assertEquals("2026-08-17T00:00:00Z", q.to());
-        // No sort argument is offered, so none is passed: newest-first is the one ordering whose keyset needs
-        // no NULLS-LAST branch in the cursor. "Which traces cost the most" is a query_* question.
+        // Newest-first is the one order whose keyset needs no NULLS-LAST branch.
         assertNull(sort.getValue(), "list_traces must not ask the repository for a rollup sort");
     }
 
@@ -186,10 +168,7 @@ class McpSubstrateReadToolsTest {
         assertTrue(body.get("next_cursor").isNull(), "exactly a page's worth means the page was the last one");
     }
 
-    /**
-     * The cursor is opaque to the caller and meaningful to the keyset: page two resumes from the LAST ROW OF
-     * PAGE ONE, not from the over-fetched row, which is page two's first row and would skip itself.
-     */
+    /** Page two resumes from page one's last row, not the over-fetched row, which would skip itself. */
     @Test
     void listTraces_cursorResumesTheKeysetWhereThePageEnded() throws Exception {
         when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
@@ -217,15 +196,13 @@ class McpSubstrateReadToolsTest {
                         beforeId.capture());
         assertEquals("t-2", beforeId.getAllValues().get(1), "resumes after the last rendered row, not after t-3");
         assertEquals("2026-08-17T09:00:00Z", beforeStartedAt.getAllValues().get(1));
-        // Nothing was sorted, so the sort slot of the cursor is empty and must decode to "no value" — not to
-        // the string "", which the keyset would try to cast to numeric.
+        // An empty sort slot decodes to "no value", not "", which the keyset would cast to numeric.
         assertNull(beforeSort.getAllValues().get(1));
     }
 
     /**
-     * A token this server cannot read is not an error. Degrading to the newest page is the only failure mode a
-     * feed can absorb quietly — the posture {@code QueryRepository} already takes — and the alternative is a
-     * tool call that fails for a reason the caller cannot act on.
+     * An unreadable token restarts at the newest page, as {@code QueryRepository} does; an error would be one the
+     * caller cannot act on.
      */
     @Test
     void listTraces_unreadableCursorSilentlyRestartsAtPageOne() throws Exception {
@@ -239,13 +216,7 @@ class McpSubstrateReadToolsTest {
         assertNull(beforeId.getValue());
     }
 
-    /**
-     * A row is the rollup the worker already wrote, plus the stored previews — and nothing else.
-     *
-     * <p>The absent fields are the assertion. {@code input} / {@code output} / {@code attributes} are what
-     * {@code get_span} and {@code get_trace} exist for; a list that carried them would hand a caller fifty
-     * whole conversations for a question it has not asked yet.
-     */
+    /** A row is the stored rollup plus previews; the absent payload fields are the assertion. */
     @Test
     void listTraces_rowsAreRollupRowsAndCarryNoPayload() throws Exception {
         when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
@@ -258,8 +229,7 @@ class McpSubstrateReadToolsTest {
         assertEquals(2, row.get("error_count").asInt());
         assertEquals("error", row.get("status").asText(), "a non-zero error count reads as error, not as ok");
         assertEquals(120, row.get("total_tokens").asInt());
-        // Load-bearing beside the total: some span ran a model we hold no rate for, so a small figure is not a
-        // cheap turn.
+        // Beside the total: a model with no rate ran, so a small figure is not a cheap turn.
         assertEquals(1, row.get("unpriced_spans").asInt());
         assertTrue(row.get("is_settled").asBoolean());
         assertEquals("user: this is broken again", row.get("input_preview").asText());
@@ -269,8 +239,8 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * A trace that has never rolled up has no error count, so it is neither ok nor errored. Saying "ok" would
-     * be an invention, and this is the row shape most likely to be "helpfully" coalesced by a later edit.
+     * A never-rolled-up trace has no error count, so it is neither ok nor errored; this is the shape a later edit
+     * might "helpfully" coalesce.
      */
     @Test
     void listTraces_anUnrolledTraceHasNoStatusRatherThanAHealthyOne() throws Exception {
@@ -286,11 +256,8 @@ class McpSubstrateReadToolsTest {
     // ---- list_spans ----------------------------------------------------------------------------
 
     /**
-     * Every typed filter {@code list_spans} advertises must be a field the spans dataset already allow-lists.
-     *
-     * <p>Read off {@link QueryDataset#filterFields()} rather than restated, so this fails the moment someone
-     * adds a convenience argument the query firewall will reject — which would otherwise reach a caller as a
-     * {@code 400 unknown field} from a tool whose own schema promised the argument.
+     * Every typed filter must be allow-listed on the spans dataset, read off {@link QueryDataset#filterFields()}, or
+     * callers get a {@code 400 unknown field} for an argument the schema promised.
      */
     @Test
     void listSpans_everyTypedFilterIsAllowListedOnTheSpansDataset() {
@@ -312,9 +279,8 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * The typed arguments become the spans dataset's own filter keys, and the page bound is this surface's,
-     * not the query API's: {@link QueryService} defaults to 100 and permits 1000 because a REST page lands in
-     * a table, whereas these rows land in a context window.
+     * Typed arguments become the dataset's filter keys; the page cap is this surface's, because rows land in a
+     * context window.
      */
     @Test
     void listSpans_mapsTypedArgsOntoTheSearchRequestAndClampsToTheMcpCap() throws Exception {
@@ -359,22 +325,18 @@ class McpSubstrateReadToolsTest {
         var req = ArgumentCaptor.forClass(QueryDtos.SearchRequest.class);
         verify(queries).search(eq(PROJECT_ID), req.capture());
         assertEquals(50, Objects.requireNonNull(req.getValue().limit()).intValue());
-        // The keyset and its token are QueryRepository's; this tool must pass the page's cursor through rather
-        // than mint one of its own, or a token from here would not resume the same scan.
+        // The cursor is QueryRepository's, passed through, so it resumes the same scan.
         assertEquals("next-page", body.get("next_cursor").asText());
     }
 
     /**
-     * A default row is the typed columns, the stored previews, and {@code payload_available} — and the payload
-     * fields are ABSENT, not null. Absent says "not requested"; a null {@code input} beside
-     * {@code payload_available: true} would say the call had no input, which would be a lie about a row whose
-     * text is one {@code get_span} away.
+     * Payload fields are absent, not null: a null {@code input} beside {@code payload_available: true} would claim
+     * the call had no input.
      */
     @Test
     void listSpans_defaultRowsCarryPreviewsAndAvailabilityButNoPayloadKeys() throws Exception {
         when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage(null, key("t-1", "s-1"), key("t-1", "s-2")));
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1"), span("t-1", "s-2")));
-        // s-1 still has its payload; s-2's has aged out.
         when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of(new SpanKey("t-1", "s-1")));
 
         JsonNode rows = structured(callTool("list_spans", "{}")).get("spans");
@@ -391,16 +353,14 @@ class McpSubstrateReadToolsTest {
         for (String payloadField : List.of("input", "output", "attributes", "provided_usage")) {
             assertNull(rows.get(0).get(payloadField), "an un-asked-for page must not carry " + payloadField);
         }
-        // The cheap existence probe, once for the page — never the payload text a caller did not ask for.
+        // One existence probe per page, never the payload text.
         verify(payloads).existingKeys(eq(PROJECT_ID), any());
         verify(payloads, org.mockito.Mockito.never()).listByKeys(any(), any());
     }
 
     /**
-     * <b>The rule this phase exists for.</b> A payload request the scope rule refuses is an ERROR, never a
-     * compact page: an agent that asked for full text and silently received 200-character previews reasons
-     * over a truncated prompt believing it has the whole one, and nothing in the response says otherwise. The
-     * message has to carry the rule and the fix, because the caller's only move is to re-ask.
+     * The rule this phase exists for: a refused payload request is an error, never a compact page, because an agent
+     * handed previews would reason over a truncated prompt. The message carries the rule and the fix.
      */
     @Test
     void listSpans_unscopedPayloadRequestIsAnErrorNamingTheRule() throws Exception {
@@ -409,7 +369,7 @@ class McpSubstrateReadToolsTest {
         assertTrue(text.contains("trace_id"), text);
         assertTrue(text.contains("24h"), text);
         assertTrue(text.contains("payload_available"), text);
-        // Nothing was read: the rule is checked before the page is chosen, so a refused call costs no query.
+        // Checked before the page is chosen, so a refused call costs no query.
         verify(queries, org.mockito.Mockito.never()).search(any(), any());
     }
 
@@ -428,7 +388,7 @@ class McpSubstrateReadToolsTest {
                 row.get("input").asText());
         assertEquals("ok, here is the whole completion", row.get("output").asText());
         assertTrue(row.get("payload_available").asBoolean());
-        // ONE keyed read for the whole page, the shape get_trace uses — never a query per row.
+        // One keyed read per page, never one per row.
         verify(payloads).listByKeys(eq(PROJECT_ID), any());
     }
 
@@ -458,9 +418,7 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * A half-open range looks scoped and is not: {@code from} with no {@code to} means "everything since",
-     * which grows without bound. Reading the open end as "now" would make the same call allowed or refused
-     * depending on the server clock, so the rule stays decidable from the arguments the caller can see.
+     * A half-open range is unbounded. Reading the open end as "now" would make the rule depend on the server clock.
      */
     @Test
     void listSpans_payloadRequestWithAnOpenEndedRangeIsRefused() throws Exception {
@@ -470,11 +428,7 @@ class McpSubstrateReadToolsTest {
         assertTrue(text.contains("open at one end"), text);
     }
 
-    /**
-     * A payload request whose window cannot be measured says which bound is unreadable. The query layer never
-     * parses these bounds — it binds the string and casts in SQL — so this rule is the first thing that has to
-     * read them, and "invalid range" alone would leave the caller guessing which end it meant.
-     */
+    /** Names which bound is unreadable; the query layer never parses them, so this rule is the first reader. */
     @Test
     void listSpans_payloadRequestWithAnUnparseableBoundNamesTheBound() throws Exception {
         String text = errorText(callTool(
@@ -492,15 +446,13 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * Rows come back in the order the RETRIEVAL chose, not the order the span table returned them. For
-     * semantic mode that order is the answer — it is the cosine ranking — and SQL has no inherent order over
-     * an id set, so a hydration that rendered rows as they arrived would silently re-sort a similarity search.
+     * Rows keep the retrieval's order: for semantic mode that order is the cosine ranking, and SQL returns an id set
+     * in no order.
      */
     @Test
     void listSpans_rowsFollowTheRetrievalRankingNotTheHydrationOrder() throws Exception {
         when(queries.search(eq(PROJECT_ID), any()))
                 .thenReturn(searchPage(null, key("t-1", "s-1"), key("t-2", "s-2"), key("t-3", "s-3")));
-        // The database answered in a different order, as it is entitled to.
         when(spans.listByKeys(eq(PROJECT_ID), any()))
                 .thenReturn(List.of(span("t-3", "s-3"), span("t-1", "s-1"), span("t-2", "s-2")));
 
@@ -512,11 +464,7 @@ class McpSubstrateReadToolsTest {
         assertEquals("s-3", rows.get(2).get("span_id").asText());
     }
 
-    /**
-     * A span the retention sweep removed between the search and the hydration is dropped, not rendered from
-     * the search row's few projected columns. A half-populated row would read as a span with no model, no
-     * status and no preview — an invention — where a shorter page is simply the truth.
-     */
+    /** A span removed between search and hydration is dropped, not rendered half-populated. */
     @Test
     void listSpans_aSpanThatVanishedBetweenTheTwoReadsIsDropped() throws Exception {
         when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage(null, key("t-1", "s-1"), key("t-1", "gone")));
@@ -572,7 +520,7 @@ class McpSubstrateReadToolsTest {
 
         JsonNode body = structured(callTool("list_sessions", "{\"limit\":500}"));
 
-        // The service is handed an already-clamped page size: the cap is the tool's policy, not the service's.
+        // The page size is clamped by the tool, not the service.
         verify(sessions).page(PROJECT_ID, 100, null, false);
         assertEquals("sess-1", body.get("sessions").get(0).get("id").asText());
         assertEquals("user-9", body.get("sessions").get(0).get("user_id").asText());
@@ -586,10 +534,8 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * The detail is rendered exactly as {@link SessionReadService} assembled it, and the two honesty devices
-     * survive the wire: {@code unsettled_traces} says how many addends of the totals are still moving, and
-     * {@code traces_truncated} says the trace list is not all of them. A surface that drops either reports a
-     * lower bound as a final figure.
+     * Rendered verbatim, with both honesty flags: {@code unsettled_traces} and {@code traces_truncated}. Dropping
+     * either reports a lower bound as final.
      */
     @Test
     void getSession_rendersTheDetailVerbatimIncludingBothHonestyFlags() throws Exception {
@@ -618,7 +564,7 @@ class McpSubstrateReadToolsTest {
         assertEquals(2, body.get("unpriced_spans").asInt());
         assertTrue(body.get("traces_truncated").asBoolean());
         assertEquals("t-1", body.get("traces").get(0).get("id").asText());
-        // The session's traces are the same rollup rows list_traces returns — previews, never payloads.
+        // The session's traces are rollup rows: previews, never payloads.
         assertEquals(
                 "user: this is broken again",
                 body.get("traces").get(0).get("input_preview").asText());
@@ -640,10 +586,7 @@ class McpSubstrateReadToolsTest {
         return new SpanKey(traceId, spanId);
     }
 
-    /**
-     * A search page over the spans dataset, shaped as {@link QueryRepository} returns it: the composite handle
-     * plus the projection, whose {@code trace_id} / {@code span_id} are what the hydration reads.
-     */
+    /** A spans search page as {@link QueryRepository} returns it. */
     private static QueryRepository.SearchPage searchPage(@Nullable String nextCursor, SpanKey... keys) {
         List<QueryRepository.SearchRow> rows = new ArrayList<>(keys.length);
         for (SpanKey k : keys) {

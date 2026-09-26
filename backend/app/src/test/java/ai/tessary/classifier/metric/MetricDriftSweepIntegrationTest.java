@@ -47,47 +47,32 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * {@link MetricDriftSweep} end to end against the real Postgres, for the two things a sweep has to get
- * right before anything it computes can be believed.
+ * {@link MetricDriftSweep} against real Postgres, for the two things a sweep must get right first.
  *
- * <p>The cursor advances: a sweep that scores traffic and leaves its cursor behind re-reads the same
- * page every heartbeat forever, and one that advances past traffic it could not read loses that
- * traffic permanently. Both are invisible in a unit test.
+ * <p>The cursor advances: left behind, it re-reads one page forever; advanced past unreadable traffic, it loses that
+ * traffic. A replayed page is not counted twice: a rewind re-offers history, and the {@code counted_through_*}
+ * watermark, not a shrinking query, stops the double count.
  *
- * <p>A replayed page is not counted twice. The keyset cursor lives on the job row and the counters
- * live on the baseline, and those two have different lifetimes: clearing a stuck queue, or a
- * call-site fact arriving late, rewinds the cursor to null and re-offers the whole history. The
- * {@code counted_through_*} watermark is what makes that safe. The replay test below asserts that the
- * page really was re-read: the watermark, not a shrinking query, is what stops the double count.
- *
- * <p>The signal is the seeded {@code duration_drift} row wearing a config blob shrunk to fixture sizes.
- * The sweep is invoked directly rather than through {@link ClassifierWorker}'s {@code Grain.WINDOW}
- * branch, so nothing here depends on the classifier being enabled, which it is not until
- * a null run against real traffic sets a measured {@code w1_floor}.
+ * <p>The sweep is called directly rather than through {@link ClassifierWorker}, so nothing depends on the classifier
+ * being enabled.
  */
 @SpringBootTest
 class MetricDriftSweepIntegrationTest {
 
     /**
-     * The shipped shape at the smallest sizes the clamps allow, so a window closes within a fixture
-     * rather than within a production week. Everything else — {@code w1_floor}, the settle horizon, the
-     * bin count — is left at its default, because those are what the sweep is supposed to be reading.
+     * The shipped shape at the smallest sizes the clamps allow, so a window closes within a fixture; everything else
+     * stays default, because that is what the sweep reads.
      */
     private static final String CONFIG = """
             {"measures": ["turn_duration"], "window_target_count": 50, "min_sample": 30}""";
 
-    /**
-     * The shipped measure list at the same fixture sizes — both grains of one switch. The two suppression
-     * tests below need it because the whole point of §6.1 is what happens when a page closes a window at
-     * each grain in the same pass.
-     */
+    /** Both grains of one switch, for the two §6.1 suppression tests. */
     private static final String CONFIG_BOTH_GRAINS = """
             {"measures": ["turn_duration", "tool_duration"], "window_target_count": 50, "min_sample": 30}""";
 
     /**
-     * The {@code cost_drift} shape at fixture sizes. One measure, because {@code cost} is the only measure
-     * under that switch that can open a finding at all — the four token buckets ride on the finding as
-     * evidence and are not nameable here (metric-drift.md §6.1).
+     * {@code cost} is the only measure under this switch that can open a finding; the token buckets ride along as
+     * evidence (metric-drift.md §6.1).
      */
     private static final String CONFIG_COST = """
             {"measures": ["cost"], "window_target_count": 50, "min_sample": 30}""";
@@ -97,10 +82,10 @@ class MetricDriftSweepIntegrationTest {
     /** In the price book with a cache-creation rate, so a reported cache write there is a measurement. */
     private static final String ANTHROPIC_MODEL = "claude-sonnet-5";
 
-    /** In the price book with NO cache-creation rate: automatic caching, no write charge, no write count. */
+    /** In the price book with no cache-creation rate: automatic caching, no write charge or count. */
     private static final String OPENAI_MODEL = "gpt-4o";
 
-    /** The one tool these fixtures call, as {@code ActionSymbol} mints it — drift's alphabet, verbatim. */
+    /** The one tool these fixtures call, as {@code ActionSymbol} mints it. */
     private static final String TOOL_BUCKET = "tool:search_docs";
 
     /** Old enough that the head read's settle window has passed for every seeded trace. */
@@ -163,8 +148,7 @@ class MetricDriftSweepIntegrationTest {
     void aReplayedPageIsNotFoldedInTwice() {
         String pid = project("metric-sweep-replay");
         ClassifierRow signal = signal(pid);
-        // Under the window target on purpose: this test is about the counters, and a rotation mid-way
-        // would make "did the count change" ambiguous.
+        // Under the window target, so a rotation cannot make "did the count change" ambiguous.
         String lastTraceId = seedTurns(pid, 40);
 
         assertEquals(40, sweep.sweepMetrics(claim(pid, signal), signal).scanned());
@@ -172,8 +156,7 @@ class MetricDriftSweepIntegrationTest {
         assertEquals(40, first.currentCount());
         assertNull(first.controlJson(), "40 is under the 50-sample target, so no window closed into the control");
 
-        // Exactly what ClassifierService#rewindForCallSiteFact does when a fact lands late, and what
-        // clearing a stuck queue does by hand: the cursor goes back to the beginning of history.
+        // What a late call-site fact or a cleared queue does: the cursor goes back to the start.
         jobs.rewindCursor(pid, signal.id());
         MetricDriftSweep.MetricSweepOutcome replay = sweep.sweepMetrics(claim(pid, signal), signal);
 
@@ -191,39 +174,31 @@ class MetricDriftSweepIntegrationTest {
         String pid = project("metric-sweep-backfill-replay");
         ClassifierRow signal = signal(pid);
 
-        // Three windows whose EVENT time is months behind the moment this test actually runs — the
-        // shape a backfill import has. If the sweep threaded its own wall-clock day into MetricControl
-        // instead of each window's own event day, all three would fold into the ONE slot keyed to
-        // today, and the ring assertion below would find one slot instead of three.
+        // Three windows months behind wall-clock time, like a backfill. Keying MetricControl by the sweep's own day
+        // would fold all three into one slot.
         Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
         Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
         Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
 
-        // Window 1: nothing to compare against yet, so it becomes the bootstrap PIN.
+        // Window 1 becomes the bootstrap pin.
         seedTurnsAt(pid, lateJune, 50, 2_000, null);
         assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed());
 
-        // Window 2: breaks from the pin just established. Fires on the PINNED arm — a separate cause
-        // from the one this test is about — and folds an 8s day into the ring alongside the 2s one.
+        // Window 2 breaks from the pin, fires on the pinned arm, and folds an 8s day into the ring.
         seedTurnsAt(pid, earlyJuly, 50, 8_000, null);
         MetricDriftSweep.MetricSweepOutcome regression = sweep.sweepMetrics(claim(pid, signal), signal);
         assertEquals(1, regression.windowsClosed());
         assertEquals(1, regression.fired(), "still the same pin (2s), so an 8s window breaks from it");
 
-        // Window 3: back to the pin's own 2s level, so the PINNED arm falls silent (ratio 1, no
-        // shift) — which is what lets the ROLLING CONTROL arm be the one that fires here. That
-        // control is a blend of the two prior event-days, weighted by how far back each one actually
-        // was (late June at age 14, early July at age 7): if the sweep had threaded the wrong day into
-        // either fold or resolve, this window would either compare against nothing (every day aged out
-        // past real wall-clock retention) or against the two days merged as if same-day, and the
-        // control arm below would not read as it does.
+        // Window 3 returns to the pin's 2s, so only the rolling control arm can fire. That control weighs the two
+        // prior event days by age (14 and 7); the wrong day in fold or resolve would compare against nothing or
+        // against the days merged.
         seedTurnsAt(pid, judgedJuly, 50, 2_000, null);
         MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
         assertEquals(1, outcome.windowsClosed());
         assertEquals(1, outcome.fired(), "recovered against the pin, but still a shift against the rolling control");
 
-        // The ring itself: three slots keyed by the EVENT day of each closing sample, never by the day
-        // the sweep actually ran on — which is over two months later than any of them.
+        // Three slots keyed by each window's event day, never by the day the sweep ran.
         MetricBaselineRow row = baseline(pid, signal);
         List<String> ringDays = new ArrayList<>();
         for (JsonNode day : MAPPER.readTree(row.controlJson()).path("days")) {
@@ -231,9 +206,7 @@ class MetricDriftSweepIntegrationTest {
         }
         assertEquals(List.of("2026-06-24", "2026-07-01", "2026-07-08"), ringDays);
 
-        // And the control-arm finding names the reference it was actually judged against: both prior
-        // event-days, oldest first — late June AND early July, weighted rather than merged — exactly
-        // what a human reading a backfilled regression needs to see.
+        // The control finding names both prior event days, oldest first, weighted rather than merged.
         FindingRow controlFinding = findings.listByProject(pid, null, null, null, false, 100).stream()
                 .filter(f -> f.nativeCauseKey().endsWith(":previous"))
                 .findFirst()
@@ -252,9 +225,7 @@ class MetricDriftSweepIntegrationTest {
         String pid = project("metric-sweep-confirmed-exclusion");
         ClassifierRow signal = signal(pid);
 
-        // The exact same three-window shape as the backfill replay above — a bootstrap pin, an 8s
-        // window that breaks from it, and a recovery back to the pin's own 2s level — so the only
-        // variable this test adds is whether a human confirmed the middle window before the third ran.
+        // The same three windows as the backfill test; the only variable is a human confirming the middle one.
         Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
         Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
         Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
@@ -268,9 +239,8 @@ class MetricDriftSweepIntegrationTest {
                 sweep.sweepMetrics(claim(pid, signal), signal).fired(),
                 "breaks from the pin, same as the unconfirmed backfill replay above");
 
-        // A human confirms it as a real regression. `recordShift` writes onset_at/last_seen_at as the
-        // window's own EVENT time [R11] — checked here by reading them straight back off the row
-        // `confirmedSpansBySubject` hands the sweep, rather than trusting the write in isolation.
+        // recordShift writes onset and last_seen as the window's event time [R11]; read back through
+        // confirmedSpansBySubject.
         FindingRow toConfirm = findings.listByProject(pid, null, null, null, false, 100).stream()
                 .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
                 .findFirst()
@@ -292,18 +262,15 @@ class MetricDriftSweepIntegrationTest {
                 MetricControl.dayOf(Instant.parse(span.toAt())),
                 "one window's worth of traffic is one event day, start and end alike");
 
-        // Window 3: left in, early July (8s) would pollute the reference exactly as it does in the
-        // unconfirmed backfill-replay test above, and this 2s recovery would misread as a shift off a
-        // reference the confirmed regression itself had inflated. Excluded correctly, the reference is
-        // late June alone — which this window matches exactly — so nothing should fire.
+        // Early July, left in, would inflate the reference and make this 2s recovery read as a shift. Excluded, the
+        // reference is late June, which this window matches, so nothing fires.
         seedTurnsAt(pid, judgedJuly, 50, 2_000, null);
         assertEquals(
                 0,
                 sweep.sweepMetrics(claim(pid, signal), signal).fired(),
                 "the confirmed day is excluded from the reference, so the recovery reads as a recovery");
 
-        // Across all three windows, the only finding on the books is the one a human already confirmed —
-        // nothing the (correctly excluded) confirmed day should have produced downstream.
+        // The only finding is the one a human confirmed.
         assertEquals(
                 1, findings.listByProject(pid, null, null, null, false, 100).size());
     }
@@ -314,8 +281,7 @@ class MetricDriftSweepIntegrationTest {
         String pid = project("metric-sweep-refs-across-pages");
         ClassifierRow signal = signal(pid);
 
-        // Page one: 30 turns, which is the minimum sample and still under the 50 target, so the window
-        // stays open and its refs have to outlive this pass to be worth anything.
+        // 30 turns: the minimum sample, under the target, so the window stays open across passes.
         seedTurns(pid, 0, 30, 2_000, null);
         assertEquals(30, sweep.sweepMetrics(claim(pid, signal), signal).scanned());
         MetricBaselineRow afterFirst = baseline(pid, signal);
@@ -331,9 +297,8 @@ class MetricDriftSweepIntegrationTest {
 
         MetricBaselineRow row = baseline(pid, signal);
         assertEquals(50, sketch(row.pinnedSketchJson()).count(), "the bootstrap pin is the window that closed");
-        // The regression this test exists for. windowRefs used to be a per-pass local while the sketch
-        // and count were persisted, so a window spanning two pages pinned only the 20 refs folded in the
-        // pass its close landed in — a contiguous TAIL of 50 samples, written down as the population.
+        // The regression: windowRefs was a per-pass local, so a window spanning two pages pinned only its last pass's
+        // refs.
         assertEquals(
                 50,
                 MetricEvidenceRefs.fromJson(row.pinnedRefsJson()).size(),
@@ -350,22 +315,17 @@ class MetricDriftSweepIntegrationTest {
         String pid = project("metric-sweep-late-root");
         ClassifierRow signal = signal(pid);
         String lastComplete = seedTurns(pid, 40);
-        // The shape a batch exporter produces mid-flight: the trace row exists because a CHILD landed,
-        // and the root — which outlives every child, so it flushes in a later request — has not. It is
-        // stamped `now`, so it is inside the backstop and its root may still be coming.
+        // A batch exporter mid-flight: a child landed, the root has not, and it is inside the backstop.
         String pending = seedRootlessTurn(pid, Instant.now());
 
         MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
 
-        // The whole point. Advancing over it would lose the turn permanently — the cursor is forward-only
-        // — and the loss is length-biased, because the gap between the trace row and its root IS the
-        // turn's duration: the longer the turn, the likelier it is dropped, so the sketch fits on a
-        // fast-biased sample and a regression that lengthens turns pushes traffic OUT of the population.
+        // Advancing would lose the turn for good, and the loss is length-biased: the longer the turn, the likelier it
+        // drops, so a regression that lengthens turns pushes traffic out of the population.
         assertEquals(40, outcome.scanned(), "the page stopped at the trace that is still arriving");
         ClassifierJobRow swept = job(pid, signal);
         assertEquals(lastComplete, swept.cursorId(), "the cursor did not step past the pending trace");
 
-        // Once the root lands, the next pass reads it normally — nothing about it was consumed.
         landRoot(pid, pending, Instant.now().minusMillis(2_000), 2_000);
         assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).scanned());
         assertEquals(pending, job(pid, signal).cursorId());
@@ -377,9 +337,8 @@ class MetricDriftSweepIntegrationTest {
         String pid = project("metric-sweep-no-root-ever");
         ClassifierRow signal = signal(pid);
         seedTurns(pid, 40);
-        // Two hours old, and last in the keyset. A producer that emits no parentless span at all, or a
-        // root lost in transit — either way it is not in flight, and holding for it would park a
-        // forward-only cursor for good.
+        // Two hours old and last in the keyset: its root is lost, not in flight, and holding would park the cursor
+        // for good.
         String orphaned = seedRootlessTurn(pid, T0.plusSeconds(100));
 
         MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
@@ -394,9 +353,7 @@ class MetricDriftSweepIntegrationTest {
     void aToolShiftSuppressesTheTurnItExplains() {
         String pid = project("metric-sweep-suppress");
         ClassifierRow signal = signal(pid, CONFIG_BOTH_GRAINS);
-        // Two windows per grain, closing in the same pass: 50 turns of 2.0s each containing one 1.5s
-        // tool call, then 50 turns of 5.0s each containing one 4.5s call. Both grains moved, and they
-        // moved by the same 3 seconds, because they are the same event seen at two depths.
+        // Two windows per grain in one pass: turn and tool both move by 3s, the same event seen at two depths.
         seedTurns(pid, 0, 50, 2_000, 1_500L);
         seedTurns(pid, 50, 50, 5_000, 4_500L);
 
@@ -408,13 +365,11 @@ class MetricDriftSweepIntegrationTest {
         List<FindingRow> written = findings.listByProject(pid, null, null, null, false, 100);
         assertEquals(1, written.size());
         FindingRow tool = written.get(0);
-        // The TOOL row survives, because it is the one that names a fix. "This call site got slower"
-        // sends someone to read traces; "and 3 of the extra seconds were search_docs" ends the search.
+        // The tool row survives because it names the fix.
         assertTrue(tool.nativeCauseKey().startsWith(Measure.TOOL_DURATION + ":" + TOOL_BUCKET), tool.nativeCauseKey());
         assertEquals(CALL_SITE, tool.callSiteId(), "a tool bucket is not scoped per call site; its FINDING is");
 
-        // Suppressing loses nothing, and this is what makes that true: the turn shift a human would
-        // otherwise have gone looking for is right here, with its own reference and its own ratio.
+        // Suppression loses nothing: the turn shift rides along with its own reference and ratio.
         JsonNode explains = evidence(tool).path("explains");
         assertEquals(1, explains.size(), "the turn shift rode along rather than being dropped");
         assertEquals(Measure.TURN_DURATION, explains.get(0).path("measure").asText());
@@ -427,10 +382,8 @@ class MetricDriftSweepIntegrationTest {
     void aTurnShiftNothingExplainsStillFires() {
         String pid = project("metric-sweep-unexplained");
         ClassifierRow signal = signal(pid, CONFIG_BOTH_GRAINS);
-        // The turn went from 2.0s to 5.0s while every tool call stayed at exactly 400ms. Nothing about
-        // this is visible at tool grain — the tool's distribution is bit-for-bit what it was — and it is
-        // the whole reason turn duration is measured at all. A suppression rule that swallowed this
-        // would leave duration_drift able to see only slower tools, never a busier agent.
+        // The turn slows from 2s to 5s while every tool call stays at 400ms: invisible at tool grain, and the reason
+        // turn duration is measured at all.
         seedTurns(pid, 0, 50, 2_000, 400L);
         seedTurns(pid, 50, 50, 5_000, 400L);
 
@@ -447,11 +400,7 @@ class MetricDriftSweepIntegrationTest {
                 evidence(turn).path("explains").isMissingNode(),
                 "a finding that suppressed nothing says so by carrying no such block");
 
-        // BOTH windows, enumerated. The first 50 turns were the window this bucket pinned; the second 50
-        // are the window that shifted against it. A claim that "it used to be 2s and now it is 5s" is not
-        // auditable from the shifted side alone, so the pinned side's rows are carried on the baseline
-        // row and written here — this is what pinned_refs_json exists for, and the only end-to-end proof
-        // that a reference summarized into a sketch can still be pointed at.
+        // Both windows enumerated: the shifted one and the pinned one it is judged against, via pinned_refs_json.
         assertEquals(50, turn.evidenceCount(FindingEvidenceRow.Role.MEMBER), "the shifted window, every row");
         assertEquals(50, turn.evidenceCount(FindingEvidenceRow.Role.BASELINE), "and the window it was pinned against");
         assertEquals(
@@ -459,13 +408,10 @@ class MetricDriftSweepIntegrationTest {
                 turn.evidenceCount(FindingEvidenceRow.Role.EXEMPLAR),
                 "and no entry point: naming one trace as the way in biases the run that reads it");
 
-        // The tool baseline exists and is armed regardless — it was measured, it simply did not move.
-        // Without this the test would pass just as well if tool_duration had never been folded at all.
+        // The tool baseline is armed anyway; without this the test would pass if tool_duration were never folded.
         MetricBaselineRow toolBaseline = baselineFor(pid, signal, Measure.TOOL_DURATION, BucketKind.TOOL, TOOL_BUCKET);
         assertEquals(State.ARMED, toolBaseline.state());
-        // 100, not 50: this page closed TWO windows for the tool and both landed on the same UTC day,
-        // which is one control slot. That is the difference from the retired prev slot, which held only
-        // the last of them and threw the earlier one away.
+        // 100, not 50: two tool windows closed on one UTC day share one control slot.
         assertEquals(100, controlDay(toolBaseline).count());
     }
 
@@ -474,10 +420,8 @@ class MetricDriftSweepIntegrationTest {
     void aCacheCollapseIsOneFindingThatExplainsItself() {
         String pid = project("metric-sweep-cache-collapse");
         ClassifierRow signal = signal(pid, BuiltInDetector.Kind.COST_DRIFT, CONFIG_COST);
-        // The regression this classifier exists to catch, and the reason its measures are not five
-        // switches: somebody edited the prompt prefix. 50 turns whose prompt was 90% cache-read, then 50
-        // of the same size where none of it hits. Cost quadruples, input tokens jump 10×, cache reads go
-        // to zero — three measures moving because ONE thing changed.
+        // The regression this classifier exists for: an edited prompt prefix. Cache reads drop from 90% to none, so
+        // cost, input tokens and cache reads all move because one thing changed.
         seedCostTurns(pid, 0, 50, ANTHROPIC_MODEL, usage(2_000, 18_000, 200, 500L), true);
         seedCostTurns(pid, 50, 50, ANTHROPIC_MODEL, usage(20_000, 0, 200, 500L), true);
 
@@ -491,13 +435,11 @@ class MetricDriftSweepIntegrationTest {
         FindingRow cost = written.get(0);
         assertTrue(cost.nativeCauseKey().startsWith(Measure.COST + ":" + CALL_SITE + ":dearer"), cost.nativeCauseKey());
 
-        // And the row explains itself. "3× dearer" alone sends someone to go and read spend by model;
-        // the cache-read share collapsing from ~90% to ~0% beside flat output tokens names the change.
+        // The row explains itself: the cache-read share collapsing beside flat output names the change.
         JsonNode tokens = evidence(cost).path("tokens");
         assertTrue(tokens.isObject(), "a cost finding carries its decomposition");
         assertTrue(tokens.path("cache_read_pct_p50").get(0).asDouble() > 80.0, tokens.toString());
         assertTrue(tokens.path("cache_read_pct_p50").get(1).asDouble() < 1.0, tokens.toString());
-        // The buckets themselves, [then, now] like every other pair in the blob.
         assertEquals(18_000.0, tokens.path("tok_cache_read_p50").get(0).asDouble(), 900.0);
         assertEquals(0.0, tokens.path("tok_cache_read_p50").get(1).asDouble(), 0.05);
         assertEquals(200.0, tokens.path("tok_output_p50").get(0).asDouble(), 10.0, "output held flat");
@@ -509,12 +451,9 @@ class MetricDriftSweepIntegrationTest {
     void anOpenAiFamilyWindowLeavesCacheWriteAbsent() {
         String pid = project("metric-sweep-cache-write-absent");
         ClassifierRow signal = signal(pid, BuiltInDetector.Kind.COST_DRIFT, CONFIG_COST);
-        // gpt-4o's automatic caching has no write charge, and the price book carries no cache-creation
-        // rate for it — yet these spans carry a stored 0, which is what an SDK that stamps every usage
-        // attribute it knows about produces. Reading that as "no writes" would put a number nobody
-        // measured into the distribution, and the collapse it would show on a later provider switch would
-        // be pure bookkeeping. The input counts are the DISJOINT ones ingest stored after carving
-        // OpenAI's cache-inclusive convention down: 20,000 reported, 18,000 of it from cache.
+        // gpt-4o has no cache-write charge, yet these spans store 0, as an SDK stamping every attribute does. Reading
+        // that as "no writes" would put an unmeasured number into the distribution. Input counts are ingest's
+        // disjoint ones: 20,000 reported, 18,000 from cache.
         seedCostTurns(pid, 0, 50, OPENAI_MODEL, usage(2_000, 18_000, 200, 0L), true);
         seedCostTurns(pid, 50, 50, OPENAI_MODEL, usage(20_000, 0, 200, 0L), true);
 
@@ -527,10 +466,8 @@ class MetricDriftSweepIntegrationTest {
         assertTrue(
                 tokens.path("tok_cache_write_p50").get(1).isNull(),
                 "'nobody counts writes here' must not be laundered into 'zero writes': " + tokens);
-        // The buckets that ARE reported still carry numbers, so the assertion above is about the write
-        // bucket rather than about an empty block. Input is 2,000 in the first window because the
-        // cache-read carve-out already happened at ingest, which is the other half of getting OpenAI's
-        // convention right.
+        // The reported buckets still carry numbers, so the assertion above is about the write bucket; input is 2,000
+        // because ingest already carved out cache reads.
         assertEquals(2_000.0, tokens.path("tok_input_p50").get(0).asDouble(), 100.0);
         assertEquals(20_000.0, tokens.path("tok_input_p50").get(1).asDouble(), 1_000.0);
     }
@@ -546,7 +483,7 @@ class MetricDriftSweepIntegrationTest {
 
         MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
 
-        // Advancing here would lose those turns for good once a config edit names a measure again.
+        // Advancing would lose these turns once a config names a measure again.
         assertEquals(0, outcome.scanned());
         assertNull(job(pid, signal).cursorId(), "nothing measured, so nothing stepped over");
         assertTrue(baselines.listByClassifier(pid, signal.id()).isEmpty());
@@ -584,8 +521,7 @@ class MetricDriftSweepIntegrationTest {
         seedTurns(pid, 40, 10, 2_000, null);
         sweep.sweepMetrics(claim(pid, regridded), regridded);
 
-        // The 40 samples on the old layout cannot join the new one, so the window, its count and its
-        // population start over together: a count of 50 would close a window holding 10 samples.
+        // The 40 samples on the old layout cannot join the new one, so window, count and population restart together.
         MetricBaselineRow row = baseline(pid, regridded);
         assertEquals(10, row.currentCount());
         MetricSketch current = sketch(row.currentSketchJson());
@@ -624,8 +560,7 @@ class MetricDriftSweepIntegrationTest {
         seedTurns(pid, 0, 40, 2_000, null);
         sweep.sweepMetrics(claim(pid, signal), signal);
         String baselineId = baseline(pid, signal).id();
-        // Blobs a newer or broken build could leave behind. Each one throwing would fail the sweep on this
-        // bucket every tick until the job dead-lettered, and the bucket would stop being watched.
+        // Blobs a newer or broken build could leave; throwing would dead-letter the job and stop watching the bucket.
         jdbc.sql("""
                         UPDATE metric_baseline
                         SET current_workload_json = '{not json', current_tokens_json = '{not json',
@@ -653,9 +588,8 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * The seeded {@code duration_drift} row, wearing a config blob shrunk so a window closes inside a
-     * fixture rather than inside a production week. Read from the catalog rather than hand-built so the
-     * FKs from {@code metric_baseline} and the job row point at a signal that really exists.
+     * The seeded {@code duration_drift} row with a fixture-sized config, read from the catalog so the FKs point at a
+     * real signal.
      */
     private ClassifierRow signal(String projectId) {
         return signal(projectId, CONFIG);
@@ -684,7 +618,6 @@ class MetricDriftSweepIntegrationTest {
                 base.updatedAt());
     }
 
-    /** The signal's own job row, freshly read so its cursor is whatever the last write left. */
     private ClassifierJobRow claim(String projectId, ClassifierRow signal) {
         jobs.enqueue(projectId, signal.id(), 0);
         return job(projectId, signal);
@@ -698,35 +631,22 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * {@code count} turns under one session and one call site, each a trace with a root span of the same
-     * 2s duration and no tool spans. Started one second apart so the {@code (started_at, id)} keyset has a
-     * strict order and "the last trace" is unambiguous.
-     *
-     * @return the id of the last trace by event order, which is where the cursor must land
+     * {@code count} 2s turns, one second apart so the keyset order is strict. Returns the last trace, where the
+     * cursor must land.
      */
     private String seedTurns(String projectId, int count) {
         return seedTurns(projectId, 0, count, 2_000, null);
     }
 
     /**
-     * {@code count} turns of {@code turnMillis} each, optionally containing one tool call of
-     * {@code toolMillis}, started from second {@code fromIndex} of the fixture's timeline.
-     *
-     * <p>{@code fromIndex} is what makes a two-window story tellable: successive calls have to land
-     * strictly LATER on the event clock, or the fast half and the slow half interleave in the keyset and
-     * every window ends up holding a mixture of both. The cursor and the per-baseline watermark both walk
-     * {@code (trace.started_at, trace.id)}, so that ordering is not cosmetic.
+     * Turns of {@code turnMillis}, optionally with one tool call, from second {@code fromIndex}. Successive calls
+     * must land later on the event clock, or both halves interleave in the keyset.
      */
     private String seedTurns(String projectId, int fromIndex, int count, long turnMillis, @Nullable Long toolMillis) {
         return seedTurnsAt(projectId, T0.plusSeconds(fromIndex), count, turnMillis, toolMillis);
     }
 
-    /**
-     * {@code count} turns of {@code turnMillis} each, optionally containing one tool call of
-     * {@code toolMillis}, started from the absolute instant {@code start} rather than an offset from
-     * {@link #T0} — what a backfill replay needs, since its event times are months behind the sweep's
-     * own wall clock rather than a couple of hours behind it.
-     */
+    /** Like {@link #seedTurns} but from an absolute instant, for backfill replays months behind the wall clock. */
     private String seedTurnsAt(String projectId, Instant start, int count, long turnMillis, @Nullable Long toolMillis) {
         String sessionId = SubstrateV2Fixtures.sessionId();
         fx.session(projectId, sessionId, start);
@@ -738,8 +658,7 @@ class MetricDriftSweepIntegrationTest {
             fx.trace(projectId, traceId, sessionId, startedAt);
             String rootId = insertSpan(projectId, traceId, null, "agent", "loop", startedAt, turnMillis);
             if (toolMillis != null) {
-                // A child of the root, the shape a dispatched call really has. Its own start and end are
-                // what tool_duration reads; MEASURED_KINDS is what admits it.
+                // A child of the root, as a dispatched call really is.
                 insertSpan(projectId, traceId, rootId, "tool", "search_docs", startedAt, toolMillis);
             }
             settle(projectId, traceId);
@@ -749,16 +668,8 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * One trace whose spans have landed but whose ROOT has not: a single span naming a parent nothing
-     * resolves to, which is what a trace looks like between a batch exporter's flushes.
-     *
-     * <p>{@code parent_span_id} is the producer's own word, stored verbatim and never repaired, so a
-     * span naming an absent parent cannot be mistaken for a root.
-     *
-     * <p>Started at {@code at}. The trace's own {@code started_at} is what the sweep reads to decide
-     * whether the root may still be in flight, so this is the knob the two tests differ on.
-     *
-     * @return the trace id, so a caller can land its root later
+     * A trace whose root has not landed: one span naming an absent parent, as between a batch exporter's flushes. Its
+     * {@code started_at} is what decides whether the root may still arrive.
      */
     private String seedRootlessTurn(String projectId, Instant at) {
         String sessionId = SubstrateV2Fixtures.sessionId();
@@ -779,39 +690,29 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * The root landing after the fact, and the re-rollup its arrival triggers in production.
-     *
-     * <p>Both halves matter: the sweep reads settled traces, and a span arriving on a settled trace
-     * un-settles it until the worker has folded it in. Seeding the span without the recompute would leave
-     * a trace the sweep is right to skip and the assertion below would read as a lost turn.
+     * The root landing late, plus the re-rollup its arrival triggers: without the recompute the trace stays unsettled
+     * and reads as a lost turn.
      */
     private void landRoot(String projectId, String traceId, Instant startedAt, long millis) {
         insertSpan(projectId, traceId, null, "agent", "loop", startedAt, millis);
         settle(projectId, traceId);
     }
 
-    /** The real rollup, which is what {@code trace.is_settled} — the sweep's admission gate — means. */
     private void settle(String projectId, String traceId) {
         fx.rollup(projectId, traceId);
     }
 
     /**
-     * The token buckets as they are stored: disjoint, with a null meaning the producer reported
-     * nothing. OpenAI's cache-inclusive input count is carved down at ingest, so a fixture must seed
-     * the already-corrected value; a still-inclusive one would be seeding a row ingest never produces.
+     * Disjoint token buckets as stored, null meaning unreported; OpenAI's cache-inclusive input is already carved
+     * down.
      */
     private static TokenUsage usage(long input, long cacheRead, long output, @Nullable Long cacheCreation) {
         return new TokenUsage(input, output, cacheRead, cacheCreation == null ? 0 : cacheCreation);
     }
 
     /**
-     * {@code count} turns under one call site, each an agent root span with one llm leaf carrying
-     * {@code usage} on {@code model} — the shape cost is summed from.
-     *
-     * <p>The llm leaf carries the price stamped at arrival, because that is what {@code IngestPricer}
-     * writes and a recorded price is the only source of dollars the sweep reads. The MODEL is on the leaf
-     * and never on the root, because root spans carry none — bucketing cost by a model read off the root
-     * is the bug {@code VitalsRepository} documents.
+     * {@code count} turns, each an agent root with one priced llm leaf. The model sits on the leaf, never the root:
+     * bucketing cost by the root's model is the bug {@code VitalsRepository} documents.
      */
     private void seedCostTurns(
             String projectId, int fromIndex, int count, String model, TokenUsage usage, boolean reportsCacheWrite) {
@@ -841,12 +742,7 @@ class MetricDriftSweepIntegrationTest {
     }
 
     /**
-     * One span with its own interval. {@code latency_ms} is left null — it is a producer-reported column
-     * and these producers do not report it — so every duration here comes off the interval, which is the
-     * live path in production.
-     *
-     * @param parentId null for the turn's entry point, the root's id for a span it dispatched
-     * @return the span's id
+     * One span with its own interval and no {@code latency_ms}, so durations come off the interval as in production.
      */
     private String insertSpan(
             String projectId,
@@ -868,11 +764,7 @@ class MetricDriftSweepIntegrationTest {
                 .id();
     }
 
-    /**
-     * What ingest would have stamped on this generation: the book's price for that usage, or null where
-     * the book carries no rate — the same null {@code IngestPricer} writes, and the one the sweep
-     * abstains on.
-     */
+    /** The price ingest would have stamped, or null where the book has no rate. */
     private @Nullable String priceOf(String model, TokenUsage usage) {
         return prices.price(
                         model,
@@ -890,18 +782,13 @@ class MetricDriftSweepIntegrationTest {
         return finding.payload();
     }
 
-    /**
-     * The one day the control ring holds after a single close. Asserted through the ring rather than
-     * through a resolved control because the resolved view is weighted — a same-day slot weighs 1 and a
-     * test asserting exact counts should not depend on that staying true tomorrow.
-     */
+    /** The ring's single day after one close, read raw because the resolved view is weighted. */
     private static MetricSketch controlDay(MetricBaselineRow row) {
         MetricControl.Day day = MetricControl.fromJson(row.controlJson()).newest();
         assertNotNull(day, "a closed window writes a control day");
         return sketch(day.sketchJson());
     }
 
-    /** Parse a persisted sketch, failing the test rather than the null check when the column is empty. */
     private static MetricSketch sketch(@Nullable String json) {
         assertNotNull(json, "expected a persisted sketch, found none");
         return MetricSketch.fromJson(json);
