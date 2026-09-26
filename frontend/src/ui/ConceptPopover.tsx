@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { HelpCircle } from "lucide-react";
 import { useTenant } from "../tenant/TenantContext";
 import { CONCEPTS, type ConceptId } from "../concepts";
 import { cn } from "./cn";
+import { useDropdown } from "./useDropdown";
 
 export function ConceptPopover({
   concept,
@@ -17,25 +17,8 @@ export function ConceptPopover({
   className?: string;
 }) {
   const c = CONCEPTS[concept];
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
+  const { open, setOpen, ref } = useDropdown<HTMLSpanElement>();
   const { orgSlug, projectSlug } = useTenant();
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   return (
     <span ref={ref} className={cn("relative inline-flex items-center gap-1", className)}>

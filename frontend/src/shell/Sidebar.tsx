@@ -23,7 +23,7 @@ import { cn } from "../ui";
 import { SETTINGS_ICON } from "./nav";
 import type { NavItem } from "./nav";
 import { useNavigation } from "./useNavigation";
-import { useDropdown } from "./useDropdown";
+import { useDropdown } from "../ui/useDropdown";
 import { useShellActions } from "./ShellActions";
 import { usePalette } from "./PaletteContext";
 import { useCaseCounts } from "./useCases";
