@@ -23,31 +23,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The query plans behind the frustration tables at volume: 1,000,000 assessments across 200,000 conversations
- * and 10,000,000 traces, then {@code EXPLAIN (ANALYZE, BUFFERS)} on the two reads that scale with them.
+ * The frustration query plans at volume: 1,000,000 assessments over 200,000 conversations and 10,000,000 traces, then
+ * {@code EXPLAIN (ANALYZE, BUFFERS)} on the two reads that scale.
  *
- * <ul>
- *   <li>Frustrated turns in a time range joined to {@code trace} (the shape the finding's evidence and the
- *       substrate filters read): the {@code WHERE frustrated} partial index plus {@code trace} key lookups, no
- *       sequential scan on either table, and {@code request}/{@code response} never selected.
- *   <li>The 28-day replay aggregate ({@link FrustrationRateRepository#HOURLY_TALLIES}) against the real
- *       {@code frustration_detection}: the whole plan finishes inside {@link #REPLAY_BUDGET_MS}. Its scan choice is
- *       logged, not asserted: when the window holds most of the table, as it does here with one project, a
- *       sequential scan is the planner's right answer, and the turn-time index only wins once a project's window
- *       is a small share of a multi-tenant table.
- * </ul>
+ * <p>Frustrated turns in a range joined to {@code trace} use the {@code WHERE frustrated} partial index and key
+ * lookups, with no sequential scan and no {@code request}/{@code response} read. The 28-day replay ({@link
+ * FrustrationRateRepository#HOURLY_TALLIES}) finishes inside {@link #REPLAY_BUDGET_MS}; its scan choice is logged,
+ * not asserted, since one project's window is most of the table.
  *
- * <p>Manual, like the {@code *LiveIT} tests: seeding takes minutes, so it runs only when asked, on the
- * Testcontainers Postgres every integration test uses:
- *
- * <pre>
- *   FRUSTRATION_PLAN_IT=1 mvn -f backend/pom.xml -pl app -am test \
- *     -Dtest=FrustrationAssessmentQueryPlanIT -Dsurefire.failIfNoSpecifiedTests=false
- * </pre>
- *
- * The full volume needs several GB free in Docker's disk; {@code FRUSTRATION_PLAN_SCALE=10} divides it.
- *
- * A conversation table or materialized view is added only if this or production shows the replay is slow.
+ * <p>Manual, like the {@code *LiveIT} tests: {@code FRUSTRATION_PLAN_IT=1 mvn -f backend/pom.xml -pl app -am test
+ * -Dtest=FrustrationAssessmentQueryPlanIT -Dsurefire.failIfNoSpecifiedTests=false}. {@code FRUSTRATION_PLAN_SCALE=10}
+ * divides the volume for a small Docker disk.
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "FRUSTRATION_PLAN_IT", matches = ".+")
@@ -55,11 +41,7 @@ class FrustrationAssessmentQueryPlanIT {
 
     private static final Logger log = LoggerFactory.getLogger(FrustrationAssessmentQueryPlanIT.class);
 
-    /**
-     * The replay over 1,000,000 assessments, cold, on a laptop's Testcontainers Postgres. The first run, at a
-     * tenth of the volume, took 0.3 s; this allows the full volume ten times that plus headroom. A regression
-     * past it is the reason to add the conversation view.
-     */
+    /** The cold replay budget. A tenth of the volume took 0.3 s; this allows ten times that plus headroom. */
     static final long REPLAY_BUDGET_MS = 5_000;
 
     private static final String VERSION = "plan-it-v1";
@@ -117,8 +99,8 @@ class FrustrationAssessmentQueryPlanIT {
     }
 
     /**
-     * 10,000,000 traces; every tenth is a scored turn, so 1,000,000 assessments over 200,000 conversations of five
-     * turns each, spread over 23 days across 50 call sites; one conversation in twenty is flagged on its last turn.
+     * Every tenth trace is a scored turn: five-turn conversations over 23 days and 50 call sites, one in twenty
+     * flagged on its last turn.
      */
     private void seed(String pid, String cid) {
         long scale = scale();
@@ -169,10 +151,7 @@ class FrustrationAssessmentQueryPlanIT {
         }
     }
 
-    /**
-     * {@code FRUSTRATION_PLAN_SCALE} divides every volume, for a Docker disk too small for 10,000,000 traces. The
-     * plan-shape assertions hold at any scale; the budget is stated for the full one.
-     */
+    /** Divides every volume. The plan shapes hold at any scale; the budget is for the full one. */
     private static long scale() {
         String raw = System.getenv("FRUSTRATION_PLAN_SCALE");
         return raw == null || raw.isBlank() ? 1 : Math.max(1, Long.parseLong(raw.trim()));

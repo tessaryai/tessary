@@ -17,12 +17,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * {@link MetricDriftSource#shape}: what {@link CaseOpener} calls once a finding already qualifies for a
- * case (a triage positive, or a human's "Real deviation") — this class has no gate of its own any more,
- * so there is nothing here to assert about which findings reach it. What these tests pin is that the
- * shape it produces is correct: the case key doesn't collide across causes, the numbers come straight
- * off the finding's own evidence rather than being invented, and the basis names whichever authority
- * ruled.
+ * {@link MetricDriftSource#shape}, called by {@link CaseOpener} once a finding qualifies: the case key does not
+ * collide across causes, the numbers come off the finding's evidence, and the basis names whoever ruled.
  */
 class MetricDriftCaseShapeTest {
 
@@ -47,7 +43,7 @@ class MetricDriftCaseShapeTest {
         assertEquals(CaseRow.SubjectKind.METRIC_BASELINE, detection.key().subjectKind());
         assertEquals(CAUSE_KEY, detection.key().subjectId());
         assertEquals("turn_duration", detection.key().metric());
-        // A sentence, not a metric. 0.34 in log units is e^0.34 = 1.40x.
+        // A sentence, not a metric: e^0.34 = 1.40x.
         assertEquals(BUCKET + " turns are 1.40× slower", detection.title());
         assertTrue(
                 detection.basis().contains("pinned at the last deploy"),
@@ -55,18 +51,14 @@ class MetricDriftCaseShapeTest {
         assertTrue(
                 detection.basis().contains("W₁ 0.34"),
                 "the basis must cite this detector's own bar, unnormalized: " + detection.basis());
-        // The medians in raw milliseconds, [then, now] — never a percentage.
+        // Raw millisecond medians, [then, now], never a percentage.
         assertEquals(2940.0, detection.currentValue());
         assertEquals(2100.0, detection.baselineValue());
         assertEquals(840.0, detection.delta());
         assertNotNull(detection.onsetAt());
     }
 
-    /**
-     * <b>Launch requirement B7.</b> A case says who confirmed it, so nobody reads a machine ruling as a
-     * human one. Two authorities now, not three lanes: a person pressed <em>Real deviation</em>, or a
-     * triage run audited the claim and found it sound.
-     */
+    /** Launch requirement B7: a case says who confirmed it, a person or a triage run. */
     @Test
     void theCaseNamesWhoConfirmedIt() {
         String machineBasis =
@@ -78,26 +70,20 @@ class MetricDriftCaseShapeTest {
         assertTrue(humanBasis.startsWith("A human ruled this a real deviation."), humanBasis);
     }
 
-    /**
-     * A confirmed regression whose evidence blob cannot be parsed still reaches Triage. Dropping it would
-     * be the worst available outcome — it is the one finding a human has already said is real — so the
-     * case opens and says the numbers are unavailable instead of showing invented ones.
-     */
+    /** A confirmed regression with an unparseable blob still opens its case, saying the numbers are unavailable. */
     @Test
     void anUnreadableEvidenceBlobDegradesRatherThanDroppingTheCase() {
         CaseDetection detection = source.shape(row(FindingRow.TriageVerdict.POSITIVE, false, "{not json"));
 
-        // The key still comes off the cause key, so a bad blob cannot make this open a SECOND case for a
-        // regression that already had one.
+        // The key still comes off the cause key, so a bad blob cannot open a second case.
         assertEquals("turn_duration", detection.key().metric());
         assertEquals(CAUSE_KEY, detection.key().subjectId());
         assertEquals(0.5, detection.severity(), "an unreadable blob is not evidence of a small move");
     }
 
     /**
-     * {@code onset_at} is a text column. An onset the parser cannot read (blank, or Postgres's own
-     * timestamp rendering) leaves the case unbracketed; throwing there fails the open of a confirmed
-     * regression.
+     * An unreadable {@code onset_at} (blank, or Postgres's rendering) leaves the case unbracketed rather than failing
+     * the open.
      */
     @ParameterizedTest
     @ValueSource(strings = {"", "2026-07-30 00:00:00+00"})
@@ -110,8 +96,6 @@ class MetricDriftCaseShapeTest {
 
         assertNull(source.shape(finding).onsetAt());
     }
-
-    // ---- fixtures --------------------------------------------------------------------------------
 
     private static FindingRow finding(@Nullable String verdict, boolean human) {
         return row(verdict, human, EVIDENCE);
@@ -162,16 +146,14 @@ class MetricDriftCaseShapeTest {
     }
 
     /**
-     * The detector's blob with the native vocabulary merged in, exactly as {@code FindingRepository}
-     * writes it. Spelled here rather than assumed, because {@code causeKind()} reads out of the payload
-     * now and a fixture that skipped it would exercise a shape the writer never produces.
+     * The blob with the native vocabulary merged in as {@code FindingRepository} writes it; {@code causeKind()} reads
+     * from it.
      */
     private static String withVocabulary(String evidence) {
         String vocab = "{\"cause_kind\":\"" + FindingRow.Cause.DISTRIBUTION_SHIFT
                 + "\",\"workflow_key\":\"__global__\",\"native_cause_key\":\"" + CAUSE_KEY + "\"}";
         String trimmed = evidence.trim();
-        // The same splice FindingRepository#mergeVocabulary does, INCLUDING its refusal to splice a blob
-        // that is not an object: an unreadable blob still leaves a finding that knows its own cause.
+        // The same splice as mergeVocabulary, including refusing a non-object blob.
         if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return vocab;
         String body = trimmed.substring(1, trimmed.length() - 1).trim();
         if (body.isEmpty()) return vocab;

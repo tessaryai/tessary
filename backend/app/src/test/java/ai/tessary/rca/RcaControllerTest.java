@@ -32,24 +32,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Web-layer acceptance for the RCA surface, driven against a real bootstrapped tenant
- * ({@code requireProject} exercised for real).
- *
- * <p><b>The press is on the CASE</b> — {@code POST /cases/{id}/rca} — and this test presses it there,
- * because the trigger this class used to call no longer exists. What it pins: the press resolves the
- * finding behind the case and NOTHING else crosses into the lane; re-presses coalesce onto one report
- * (the dedupe grain); a case whose finding has gone is a 404 rather than a fabricated report; and
- * reports are project-scoped on the way back out.
+ * The RCA surface against a real tenant. The press is on the case ({@code POST /cases/{id}/rca}): it resolves the
+ * finding behind the case and nothing else crosses into the lane, re-presses coalesce onto one report, a case whose
+ * finding is gone is a 404, and reports are project-scoped.
  */
-// Parks the scheduled drain, exactly as RcaWorkerTest does and for the same reason: scheduling is
-// live in @SpringBootTest, so the worker can claim the job this test just enqueued before the
-// `pending` assertion reads it back, turning the status into `claimed`. batch-size=0 is what parks
-// it (claimBatch's LIMIT 0 returns nothing); the long heartbeat cannot park it alone, because
-// @Scheduled(fixedDelay) has no initial delay and the first tick fires at context startup.
-//
-// Static @TestPropertySource, not @DynamicPropertySource: a dynamic registration keys the context
-// cache on the declaring Method rather than on the value, which forks a context per class instead of
-// letting this one and RcaWorkerTest share the one parked context they both want.
+// batch-size=0 parks the drain, as in RcaWorkerTest: the worker would otherwise claim the job before the `pending`
+// read, and @Scheduled(fixedDelay) fires at startup. Static @TestPropertySource so both classes share one cached
+// context.
 @SpringBootTest
 @TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
 class RcaControllerTest {
@@ -84,7 +73,7 @@ class RcaControllerTest {
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** One open classifier finding — the subject an RCA is about. */
+    /** One open classifier finding, the RCA's subject. */
     private String seedFinding(String projectId, String causeKey) {
         String now = Instant.now().toString();
         return Objects.requireNonNull(findings.recordArmedWindow(
@@ -103,7 +92,7 @@ class RcaControllerTest {
                 .findingId();
     }
 
-    /** The case a person reads before pressing — opened on the finding, exactly as triage opens it. */
+    /** The case a person reads before pressing, opened as triage opens it. */
     private String seedCase(String projectId, String findingId) {
         return caseRows.open(
                         projectId,
@@ -140,8 +129,7 @@ class RcaControllerTest {
         assertEquals("pending", first.status());
         assertEquals("cs_extract", first.callSiteId());
 
-        // The press records who pressed — the principal the lane's ephemeral MCP key is issued to —
-        // and the finding id, which is the whole of what crosses into it.
+        // The press records who pressed and the finding id, the whole of what crosses into the lane.
         var job = jdbc.sql("SELECT payload->>'created_by' AS created_by, payload->>'finding_id' AS finding_id"
                         + " FROM job WHERE project_id = :pid AND id = :id")
                 .param("pid", projectId)
@@ -151,12 +139,11 @@ class RcaControllerTest {
         assertEquals(fix.user().id(), job.get("created_by"));
         assertEquals(findingId, job.get("finding_id"));
 
-        // Same case, second press — must resolve to the SAME report, not a duplicate analysis.
+        // A second press resolves to the same report.
         RcaReportView second = cases.runRca(projectId, caseId, fix.user().id());
         assertEquals(first.id(), second.id());
         assertEquals(first.jobId(), second.jobId());
 
-        // The report reads back by id, and the list surfaces it.
         assertEquals(
                 first.id(),
                 controller
@@ -171,8 +158,7 @@ class RcaControllerTest {
                         .size());
     }
 
-    /** Neither half of the press may invent a subject: an unknown case is a case 404, and a finding id
-     *  that resolves to nothing is an RCA 404 — never an enqueued job with nothing to analyse. */
+    /** An unknown case is a case 404, and a finding id resolving to nothing an RCA 404; never an enqueued job. */
     @Test
     void anUnknownCaseOrFindingIsRejected() {
         var fix = TenantFixture.bootstrap(tenants, "rca-api-nofinding");
@@ -191,9 +177,8 @@ class RcaControllerTest {
     }
 
     /**
-     * Re-running a report. Catches a re-run while the first analysis is still queued starting a duplicate, a
-     * re-run of a finished (here failed) report coalescing back onto it instead of snapshotting the finding
-     * afresh, and a report whose finding link is gone being re-run against nothing.
+     * A re-run while queued does not duplicate, a re-run of a finished report snapshots afresh, and a report whose
+     * finding is gone is not re-run.
      */
     @Test
     void aRerunWaitsOnARunningReportAndSnapshotsAFinishedOneAfresh() {
@@ -230,9 +215,8 @@ class RcaControllerTest {
     }
 
     /**
-     * What the Triage queue captions a case with. Catches a running analysis being read as a conclusion, a
-     * finished one whose verdict or leading hypothesis is not carried back to its case, and an empty page
-     * reaching Postgres as {@code IN ()}, a syntax error that fails the whole queue read.
+     * Triage queue captions: a running analysis is not a conclusion, a finished verdict reaches its case, and an
+     * empty page never reaches Postgres as {@code IN ()}.
      */
     @Test
     void aCasesLeadIsItsFinishedAnalysis() {
@@ -272,7 +256,6 @@ class RcaControllerTest {
 
         RcaReportView report = cases.runRca(a.project().id(), caseId, a.user().id());
 
-        // Project B cannot read project A's report through its own tenant path.
         assertThrows(
                 TessaryException.class,
                 () -> controller.get(ctxB, b.org().slug(), b.project().slug(), report.id()));

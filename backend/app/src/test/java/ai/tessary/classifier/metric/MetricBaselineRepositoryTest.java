@@ -23,24 +23,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@code metric_baseline} and its repository against the real Postgres, because the two things most
- * likely to be wrong here are both invisible to a mock.
+ * {@code metric_baseline} against real Postgres, since the likely faults are invisible to a mock.
  *
- * <p><b>The scope key is an expression, and expressions have to match by text.</b> Postgres infers the
- * arbiter for an {@code ON CONFLICT} from the expression it is given, so
- * {@link MetricBaselineRepository}'s {@code SCOPE_KEY} and {@code ux_metric_baseline_scope} must agree
- * character for character. A paraphrase compiles, passes review and then fails at runtime with "no
- * unique or exclusion constraint matching the ON CONFLICT specification" — on the very first sweep pass,
- * for every bucket.
- *
- * <p><b>NULL is a real scope.</b> An untagged environment is the common case, and NULL is distinct from
- * itself in a unique index: without the {@code COALESCE(environment_id, '')} the constraint would never
- * fire for those rows, so every sweep pass would insert another baseline and one bucket's traffic would
- * split across a growing pile of rows that each look perfectly stable.
- *
- * <p>The window mechanics get the same treatment for the same reason — {@code counted_through_*} is the
- * guard behaviour drift added after logging {@code trace_count} 565 for a project holding 443 distinct
- * traces, and a guard nothing exercises is a guard nobody knows is broken.
+ * <p>The scope key is an expression, and Postgres infers the {@code ON CONFLICT} arbiter by its text, so {@code
+ * SCOPE_KEY} and {@code ux_metric_baseline_scope} must match exactly or the first sweep fails for every bucket. NULL
+ * is a real scope: without {@code COALESCE(environment_id, '')} the index never fires for untagged rows and each pass
+ * inserts another baseline. The {@code counted_through_*} guard was added after {@code trace_count} 565 was logged
+ * for 443 distinct traces.
  */
 @SpringBootTest
 class MetricBaselineRepositoryTest {
@@ -66,15 +55,13 @@ class MetricBaselineRepositoryTest {
         Scope scope = scope("baseline-ensure");
 
         MetricBaselineRow first = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a"));
-        // A second sweep pass over the same page mints a fresh id and asks again. It must get the row
-        // that already exists — the sweep discovers buckets from traffic, so "insert or read" is the only
-        // shape it ever needs and a duplicate-key failure here would be a perfectly ordinary event.
+        // A second pass mints a fresh id and must get the existing row: the sweep discovers buckets from traffic, so
+        // "insert or read" is its only shape.
         MetricBaselineRow replayed = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a"));
 
         assertEquals(first.id(), replayed.id(), "the second ensure must return the FIRST row, not its own seed");
         assertEquals(1, countIn(scope), "one scope, one baseline");
-        // DO UPDATE rather than DO NOTHING: the latter suppresses RETURNING on the conflicting row, which
-        // would send the common path back for a second round trip.
+        // DO UPDATE, not DO NOTHING, which suppresses RETURNING and costs a second round trip.
         assertEquals(State.LEARNING, replayed.state());
     }
 
@@ -110,8 +97,7 @@ class MetricBaselineRepositoryTest {
 
         MetricBaselineRow row = baselines.findById(scope.projectId, id).orElseThrow();
         assertEquals(200, row.currentCount());
-        // The window's open time is the event time of its FIRST sample, so the second batch must not move
-        // it — a window that re-opened on every page would never satisfy an elapsed-time close criterion.
+        // Opened at the first sample's event time; a window reopening every page would never close on elapsed time.
         assertEquals("2026-07-20T10:00:00Z", row.currentOpenedAt());
         assertEquals("2026-07-20T12:30:00Z", row.lastEventAt());
         assertEquals("obs-2", row.countedThroughId(), "the guard advanced with the count it guards");
@@ -123,10 +109,8 @@ class MetricBaselineRepositoryTest {
         Scope scope = scope("baseline-clock");
         String id = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a")).id();
 
-        // These columns are text and Instant.toString() elides trailing zeros, so the stored forms are
-        // variable-length. Compared as TEXT, '...:37Z' sorts after '...:37.400Z' under any collation that
-        // ranks 'Z' above '.', and the earlier event would win — quietly freezing the clock a thin
-        // bucket's window close depends on. Compared as timestamptz, the later one wins.
+        // Text columns, and Instant.toString() elides trailing zeros, so as TEXT '...:37Z' sorts after '...:37.400Z'
+        // and freezes a thin bucket's clock. Compared as timestamptz, the later one wins.
         baselines.advanceWindow(id, 1, now(), null, "2026-07-20T10:00:37.400Z", null, null);
         baselines.advanceWindow(id, 1, now(), null, "2026-07-20T10:00:37Z", null, null);
 
@@ -151,29 +135,20 @@ class MetricBaselineRepositoryTest {
         MetricBaselineRow row = baselines.findById(scope.projectId, id).orElseThrow();
         assertEquals(CONTROL_RING, row.controlJson(), "the closed window went into the control ring");
         assertNull(row.currentSketchJson());
-        // The refs rotate with the sketch they belong to. Leaving the closed window's list behind would
-        // open a window already holding a population it never measured.
+        // Refs rotate with their sketch, or the new window opens holding a population it never measured.
         assertNull(row.currentRefsJson(), "the closed window's refs go with it");
         assertNull(row.currentOpenedAt(), "the next batch's earliest sample opens the new window");
         assertEquals(0, row.currentCount(), "current_count is per WINDOW, so it resets");
-        // counted_through_* is per ROW, not per window. Resetting it here would re-admit the tail of the
-        // window just closed into the window just opened — the double count the watermark exists to stop.
+        // counted_through_* is per row: resetting it re-admits the closed window's tail, the double count it exists
+        // to stop.
         assertEquals("obs-500", row.countedThroughId());
         assertEquals("2026-07-20T18:00:09Z", row.countedThroughAt());
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
-
-    /** One project and one signal row to hang baselines off — the two foreign keys the table carries. */
+    /** One project and one signal row, the table's two foreign keys. */
     private record Scope(String projectId, String classifierId) {}
 
-    /**
-     * The real {@code duration_drift} signal row, which the catalog now carries. Nothing here reads the
-     * signal's detector — the FK is the only thing under test, and pointing it at a real row is what
-     * makes the ON DELETE CASCADE meaningful.
-     */
+    /** The real {@code duration_drift} row, so the ON DELETE CASCADE is meaningful; its detector is never read. */
     private Scope scope(String slug) {
         String projectId = TenantFixture.bootstrap(tenants, slug).project().id();
         classifiers.seedBuiltIns(projectId);
@@ -184,7 +159,7 @@ class MetricBaselineRepositoryTest {
                         .id());
     }
 
-    /** A ring as MetricControl serializes one — opaque to this repository, which only has to store it. */
+    /** A ring as MetricControl serializes one, opaque to this repository. */
     private static final String CONTROL_RING =
             "{\"kind\":\"control\",\"half_life_days\":7.0,\"days\":[{\"d\":\"2026-07-20\",\"m\":{\"kind\":\"hist\",\"n\":500}}]}";
 

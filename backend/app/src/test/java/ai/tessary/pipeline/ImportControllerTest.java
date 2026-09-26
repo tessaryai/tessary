@@ -41,23 +41,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Covers the sharded {@code .tessary/} import surface (v0.4+ layout).
- *
- * <p>Each upload is a multipart bundle containing the shards
- * {@code pipeline/meta.yaml}, {@code pipeline/call_sites/*.yaml},
- * {@code pipeline/failure_modes/*.yaml}, {@code graders/*.yaml}, plus optional
- * sidecars (packs, taxonomy, product_profile, datasets, report.md, etc.).
- *
- * <p>The cases below pin:
- * <ul>
- *   <li>default mode = upsert, fresh project, full diff exposed</li>
- *   <li>repeat upload counts as updated, not added</li>
- *   <li>replace removes absent graders + marks curation entries orphan</li>
- *   <li>upsert keeps absent graders</li>
- *   <li>missing {@code pipeline/meta.yaml} → 400 (meta is required)</li>
- *   <li>sidecar files (.synth-lock.yaml, datasets/*.jsonl, report.md) ignored</li>
- *   <li>{@code .tessary/} root prefix and root-relative paths both accepted</li>
- * </ul>
+ * The sharded {@code .tessary/} import surface (v0.4+): default upsert with a full diff, repeat uploads count as
+ * updated, replace removes absent graders and orphans curation entries, missing {@code pipeline/meta.yaml} is a 400,
+ * sidecars are ignored, and both the {@code .tessary/} prefix and root-relative paths are accepted.
  */
 @SpringBootTest
 class ImportControllerTest {
@@ -102,8 +88,6 @@ class ImportControllerTest {
         this.mvc =
                 MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
     }
-
-    // ================================================================== shard fixtures
 
     private static final String META_YAML = """
         version: "0.8.0"
@@ -173,10 +157,8 @@ class ImportControllerTest {
         """;
 
     /**
-     * A full minimal bundle: one call site, one failure mode — and a grader shard that must be IGNORED.
-     * The grader file is deliberately still here even though this repo synthesises, runs or scores no
-     * grader: every repo written by a current plugin ships one, so "the import skips it rather than
-     * failing" is exactly what these tests have to keep proving.
+     * A minimal bundle with one call site, one failure mode, and a grader shard the import must skip: current plugins
+     * still ship one.
      */
     private MockMultipartFile[] bundle(String prefix, MockMultipartFile... extra) {
         var base = new MockMultipartFile[] {
@@ -191,8 +173,6 @@ class ImportControllerTest {
         System.arraycopy(extra, 0, combined, base.length, extra.length);
         return combined;
     }
-
-    // ================================================================== happy paths
 
     @Test
     void importDirectory_defaultMode_isUpsertAndPopulatesDiff() throws Exception {
@@ -228,13 +208,9 @@ class ImportControllerTest {
         assertEquals(0, again.get("callSites").get("removed").asInt());
     }
 
-    // ================================================================== ignored siblings
-
     /**
-     * Regression — the v0.4 bundle ships sidecars (.synth-lock.yaml, report.md,
-     * index.html, datasets/*.jsonl, .tessary/packs/) alongside the
-     * shards. The classifier must drop them silently instead of routing to the
-     * grader/shard parsers and choking on the wrong shape.
+     * Regression: v0.4 bundles ship sidecars (.synth-lock.yaml, report.md, index.html, datasets/*.jsonl,
+     * .tessary/packs/) that must be dropped, not parsed as shards.
      */
     @Test
     void importDirectory_ignoresKnownSidecars() throws Exception {
@@ -265,8 +241,6 @@ class ImportControllerTest {
         assertEquals(1, back.callSites().size(), "only the real shard should land in the DB");
     }
 
-    // ================================================================== error cases
-
     @Test
     void importDirectory_missingMeta_400() throws Exception {
         var fix = TenantFixture.bootstrap(tenants, "import-no-meta");
@@ -283,8 +257,7 @@ class ImportControllerTest {
         var fix = TenantFixture.bootstrap(tenants, "import-dir-empty");
         String token =
                 mcpTokens.issue(fix.project().id(), fix.user().id(), "empty").plaintext();
-        // Need at least one part for multipart to be recognised; send a noise
-        // file that the classifier will drop.
+        // Multipart needs at least one part; send a noise file the import drops.
         mvc.perform(multipart(url(fix))
                         .file(new MockMultipartFile(
                                 "files", "README.md", "text/markdown", "# noise\n".getBytes(StandardCharsets.UTF_8)))
@@ -393,8 +366,6 @@ class ImportControllerTest {
         assertEquals(PipelineError.FILE_READ_FAILED, e.error());
         assertEquals(PipelineError.FILE_READ_FAILED.render(".tessary/pipeline/meta.yaml"), e.getMessage());
     }
-
-    // ================================================================== helpers
 
     private JsonNode okMultipart(
             TenantFixture.Setup fix, String token, @Nullable String mode, MockMultipartFile... files) throws Exception {

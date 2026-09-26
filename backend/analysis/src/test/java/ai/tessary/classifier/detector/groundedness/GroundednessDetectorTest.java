@@ -30,21 +30,14 @@ import org.mockito.Mockito;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Unit coverage for the Groundedness built-in under the v5 "unsupported" contract: fires when the
- * token head finds the answer unsupported by its evidence, only on call sites gated in by shape, and
- * skips (never scores clean) blank fields, call sites with no/ungrounded shape, answers that assert
- * nothing checkable, and rag_answer turns whose conversation reached outside but captured nothing
- * readable. The encoder is faked at {@link EncoderScorer#scoreResponses}: what the detector SENDS
- * (passages as a list, the question, the whole answer) is asserted as carefully as what it does with
- * the score, because the head's input layout is part of the model.
+ * The Groundedness built-in under the v5 "unsupported" contract: fires when the token head finds the answer
+ * unsupported, only on shape-gated call sites, and skips (never scores clean) blank fields, ungated shapes, answers
+ * asserting nothing checkable, and rag_answer turns that reached outside but captured nothing. The encoder is faked
+ * at {@link EncoderScorer#scoreResponses}, and what the detector sends is asserted as carefully as what it does with
+ * the score.
  *
- * <p>Since v7 there is one threshold, and the sweep path ({@link GroundednessDetector#sweepBatch})
- * writes one assessment per scored answer, flagged or not; the assessments are recorded in memory
- * here and written for real in {@code GroundednessAssessmentIntegrationTest}.
- *
- * <p>{@code ai.tessary.testsupport.ClassifierObservations}'s two envelope builders are inlined below
- * as {@link #userInput} / {@link #assistantOutput}: this module's tests do not depend on {@code app},
- * and two one-line JSON builders are no reason to start.
+ * <p>Since v7, {@link GroundednessDetector#sweepBatch} writes one assessment per scored answer; the envelope builders
+ * are inlined because this module does not depend on {@code app}.
  */
 class GroundednessDetectorTest {
 
@@ -67,7 +60,6 @@ class GroundednessDetectorTest {
             "2026-01-01T00:00:00Z",
             "2026-01-01T00:00:00Z");
 
-    /** The assessments a sweep wrote, in order. */
     private static final class RecordingAssessments extends GroundednessAssessmentRepository {
         final List<Assessment> rows = new ArrayList<>();
 
@@ -96,7 +88,6 @@ class GroundednessDetectorTest {
         return "[{\"role\":\"" + role + "\",\"content\":" + quote(text) + "}]";
     }
 
-    /** Minimal JSON string escaping for the fixture (quotes and backslashes). */
     private static String quote(String s) {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
@@ -197,8 +188,8 @@ class GroundednessDetectorTest {
         assertTrue(detection.fired());
         assertEquals(Detection.Severity.WARN, detection.severity());
         assertEquals(Detection.Confidence.HIGH, detection.confidence(), "0.99 is past the 0.975 high bar");
-        // The fake head's conflict is half its unsupported, and its one span is the whole answer. An extract
-        // call site with no retrieved documents is checked against its prompt.
+        // Conflict is half of unsupported; the span is the whole answer. An extract call site with no documents is
+        // checked against its prompt.
         assertEquals(
                 mapper.readTree("{\"head\":\"groundedness\",\"unsupported\":0.99,\"conflict\":0.495,"
                         + "\"premise_had_evidence\":false,"
@@ -260,10 +251,7 @@ class GroundednessDetectorTest {
                 .fired());
     }
 
-    /**
-     * The skipped row comes first, so the flagged row's place among the scored ones (0) differs from its place in
-     * the batch (1): a firing written at the scored index would land on the skipped observation.
-     */
+    /** The skipped row first, so a firing written at the scored index would land on it. */
     @Test
     void batchStaysIndexAlignedAndOnlyGatedRowsAreScored() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "draft"), List.of(0.99, 0.05));
@@ -303,8 +291,7 @@ class GroundednessDetectorTest {
                 "2026-01-01T00:00:00Z",
                 null);
         Detection got = d.sweepBatch(SIGNAL, List.of(o), null).get(0);
-        // One passage, the system and user text in message order a line apart; no separate question, since
-        // the prompt already carries it.
+        // One passage: system and user text a line apart; the prompt already carries the question.
         assertEquals(
                 List.of(new Response(
                         List.of("here is the document: refunds take 5-7 days\nhow long do refunds take?"),
@@ -407,7 +394,7 @@ class GroundednessDetectorTest {
         EncoderScorer threeSentences = new EncoderScorer() {
             @Override
             public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                // Out of order on purpose: the evidence lists them by start.
+                // Out of order: the evidence lists them by start.
                 return List.of(new ResponseScore(
                         0.99,
                         0.2,
@@ -571,8 +558,8 @@ class GroundednessDetectorTest {
     }
 
     /**
-     * The bug: a caller scoring one observation at a time gets a detection while no assessment row is written,
-     * so the rate test counts a flag without its trial. Only sweepBatch records trials; detect refuses.
+     * A caller scoring one observation at a time got a detection with no assessment row, a flag without its trial.
+     * Only sweepBatch records trials.
      */
     @Test
     void scoringOneObservationOutsideTheSweepIsRefused() {

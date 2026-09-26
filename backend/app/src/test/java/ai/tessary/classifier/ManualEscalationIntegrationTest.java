@@ -39,24 +39,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Layer-2 is a hand-pressed button, and this is the surface behind it.
+ * Layer 2 is a hand-pressed button. First property: nothing escalates on its own; a regression here silently starts
+ * billing, so {@code escalated_at} stays null until somebody asks.
  *
- * <p>The property under test is a negative one first: nothing escalates on its own. A regression
- * here is silent and expensive: it does not fail a request or corrupt a row, it just quietly
- * starts billing, so the guard is that {@code escalated_at} stays null until somebody asks.
- *
- * <p>Against Postgres because both halves are: the escalate-once marker is a conditional update,
- * and the detector filter is a SQL predicate that has to run before the row limit, so a rail asking
- * for one classifier's leads must not have them pushed off the page by a noisy sibling.
+ * <p>Against Postgres: the escalate-once marker is a conditional update, and the detector filter runs before the row
+ * limit so a noisy sibling cannot push leads off the page.
  */
 @SpringBootTest
 class ManualEscalationIntegrationTest {
 
-    /**
-     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as
-     * one spell still running rather than as a recovery and a re-fire, the production behaviour these
-     * tests are about. A test that wants the other arm passes its own.
-     */
+    /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
 
     @Autowired
@@ -93,7 +85,7 @@ class ManualEscalationIntegrationTest {
             + "\"direction\":\"up\",\"n_ref\":4210,\"n_cur\":1180,"
             + "\"quantiles\":{\"p50\":[2100,2940],\"p95\":[9000,21400]}}";
 
-    /** A tool-error blob, so the fixture's classifier and the payload it carries are the same detector. */
+    /** A tool-error blob, matching the fixture's classifier. */
     private static final String TOOL_ERROR_EVIDENCE = "{\"measure\":\"tool_error_rate\","
             + "\"bucket\":{\"kind\":\"tool\",\"key\":\"tool:write\"},\"cause_kind\":\"rate_shift\","
             + "\"rate\":{\"ref\":0.0547,\"cur\":0.0047},\"n_ref\":502,\"n_cur\":632,"
@@ -116,16 +108,13 @@ class ManualEscalationIntegrationTest {
         BehaviorAnalysisView second = behavior.analyze(p.projectId(), id, null);
         assertTrue(second.alreadyEscalated(), "a second press must say so rather than report a fresh run");
         assertEquals(first.jobId(), second.jobId(), "and must land on the SAME job");
-        // The load-bearing assertion: a cause is triaged once. Two presses buying two repo clones
-        // is the exact cost the automatic path was removed for.
+        // A cause is triaged once: two presses buying two repo clones is the cost the automatic path was removed for.
         assertEquals(1, triageJobs(p.projectId()), "one cause, one microVM, however many presses");
     }
 
     /**
-     * A finding with no exemplar, only members and witnesses, still escalates. The job carries no
-     * trace at all: naming one would decide which instance the agent investigates, and it cannot
-     * tell our pick from a draw it made itself, so the payload carries the finding id and the
-     * population is paged through MCP.
+     * A finding with only members and witnesses still escalates. The job names no trace: picking one would decide
+     * which instance the agent investigates; the population is paged through MCP.
      */
     @Test
     @DisplayName("a finding citing witnesses and members escalates, and the job names no trace")
@@ -146,7 +135,7 @@ class ManualEscalationIntegrationTest {
                         Instant.now().toString())
                 .findingId();
         String now = Instant.now().toString();
-        // Members first, so a reader taking the first row inserted would take one of these.
+        // Members first, so a reader taking the first inserted row would take one.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -179,11 +168,7 @@ class ManualEscalationIntegrationTest {
                 "the payload names the finding and nothing that points at one row of it");
     }
 
-    /**
-     * The refusal that survives, and the only state that should still produce one: a finding citing no
-     * trace at all. There is nothing for the agent to page and nothing to resolve a deploy from, so this
-     * is a 409 rather than a microVM that would boot, find an empty evidence set and rule on nothing.
-     */
+    /** A finding citing no trace at all is a 409, not a microVM that would rule on nothing. */
     @Test
     @DisplayName("a finding citing no population at all is refused rather than booting a microVM")
     void analyzeRefusesAFindingCitingNoEvidence() {
@@ -230,17 +215,13 @@ class ManualEscalationIntegrationTest {
                 "cost is the only measure that opens a cost_drift finding — the token measures ride as evidence");
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
-
     private Set<String> causeKeys(Project p, String detector) {
         return behavior.findings(p.projectId(), null, null, detector, false).findings().stream()
                 .map(f -> f.causeKey())
                 .collect(Collectors.toSet());
     }
 
-    /** Queued Layer-2 runs for this project: the thing an accidental automatic escalation would bill. */
+    /** Queued Layer-2 runs: what an accidental escalation would bill. */
     private long triageJobs(String projectId) {
         return jdbc.sql("SELECT count(*) FROM job WHERE project_id = :pid AND kind = 'triage'")
                 .param("pid", projectId)
@@ -309,9 +290,7 @@ class ManualEscalationIntegrationTest {
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
-        // What the metric sweep actually writes: a span-grain `member`, and no exemplar. The role was
-        // dropped for both drift measures because a member of a shifted population is not an anomaly
-        // in it.
+        // What the metric sweep writes: a span-grain member, no exemplar.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -321,10 +300,7 @@ class ManualEscalationIntegrationTest {
         return id;
     }
 
-    /**
-     * Which classifier a measure files under. The sweep spells the same mapping; a test that hardcoded
-     * one key would make the detector filter pass by construction.
-     */
+    /** Mirrors the sweep's mapping; hardcoding one key would make the detector filter pass by construction. */
     private static String classifierFor(String causeKey) {
         return causeKey.startsWith("cost:") ? BuiltInDetector.Kind.COST_DRIFT : BuiltInDetector.Kind.DURATION_DRIFT;
     }
