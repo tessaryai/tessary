@@ -152,8 +152,9 @@ export function CasePage() {
   // for anything a reader acts on. `analysing` covers the whole in-flight span — the mutation, the
   // gap before the case read carries an id, and the queued/claimed statuses — and `analysed` is the
   // only state in which this page knows anything it did not know before the press.
-  const analysing =
-    rcaM.isPending || stillRunning || (report != null && rcaRunning(report.status));
+  // Once the polled report is in hand its own status decides: the case read that started the poll still
+  // carries no report, so `stillRunning` alone would hold "Analyzing" after the run has finished.
+  const analysing = rcaM.isPending || (report != null ? rcaRunning(report.status) : stillRunning);
   const analysed = report != null && !analysing;
 
   if (detailQ.isLoading) {
@@ -341,9 +342,11 @@ export function CasePage() {
       {/* ----------------------------------------------------------------- why */}
       {(rcaEnabled || detail.rca_report_id != null) && (
         frustration && report?.report_kind === "frustration_causes" && !analysing && report.status !== "failed" ? (
-          <FrustrationCauses
+          <RankedCauses
             report={report}
-            frustration={frustration}
+            population={`${frustration.rate.failuresCur.toLocaleString()} frustrated sessions`}
+            count={causeSessionCount}
+            unit={["session", "sessions"]}
             basePath={basePath}
             onShow={(i) => {
               setCauseFilter(String(i));
@@ -354,9 +357,13 @@ export function CasePage() {
           report?.report_kind === "groundedness_causes" &&
           !analysing &&
           report.status !== "failed" ? (
-          <GroundednessCauses
+          <RankedCauses
             report={report}
-            groundedness={groundedness}
+            population={`${groundedness.rate.failuresCur.toLocaleString()} flagged ${
+              groundedness.rate.failuresCur === 1 ? "answer" : "answers"
+            }`}
+            count={causeTraceCount}
+            unit={["answer", "answers"]}
             basePath={basePath}
             onShow={(i) => {
               setCauseFilter(String(i));
@@ -377,9 +384,7 @@ export function CasePage() {
           <HowOutputsBroke
             findingId={detail.latest_finding_id}
             detail={detail.malformed_output}
-            linkToTrace={(traceId, spanId) =>
-              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
-            }
+            linkToTrace={traceLink(basePath)}
           />
         </Block>
       )}
@@ -493,6 +498,12 @@ export function CasePage() {
 
 /* ------------------------------------------------------------------ pieces */
 
+/** Where a trace, and the span within it when there is one, opens. */
+function traceLink(basePath: string) {
+  return (traceId: string, spanId?: string | null) =>
+    `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`;
+}
+
 function Block({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
   return (
     <section className="mt-8.5">
@@ -574,9 +585,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
           <LeakTimeline secretLeak={secretLeak} />
           <LeakPins
             secretLeak={secretLeak}
-            linkToTrace={(traceId, spanId) =>
-              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
-            }
+            linkToTrace={traceLink(basePath)}
           />
         </>
       ) : malformedOutput ? (
@@ -927,10 +936,7 @@ function Failures({ detail, basePath }: { detail: CaseDetail; basePath: string }
 
 /** One failing call: when, what it was, and what it returned. */
 function ErrorSpanRow({ span, basePath }: { span: EvidenceSpan; basePath: string }) {
-  const to =
-    span.traceId != null
-      ? `${basePath}/traces/${encodeURIComponent(span.traceId)}${span.spanId ? `#${encodeURIComponent(span.spanId)}` : ""}`
-      : null;
+  const to = span.traceId != null ? traceLink(basePath)(span.traceId, span.spanId) : null;
 
   const body = (
     <>
@@ -1037,18 +1043,24 @@ function RcaErrorNote({ error }: { error: unknown }) {
 }
 
 /**
- * A frustration report's answer: one card, every cause the run ranked, each with what the agent did, where
- * in the repository it comes from when a repository was read, and the fix. The conversations behind a
- * cause are one press away, filtered in the list below rather than on another page.
+ * A frustration or groundedness report's answer: one card, every cause the run ranked, each with what the
+ * agent did, where in the repository it comes from when a repository was read, and the fix. What a cause
+ * names (sessions or answers) is one press away, filtered in the list below rather than on another page.
  */
-function FrustrationCauses({
+function RankedCauses({
   report,
-  frustration,
+  population,
+  count,
+  unit,
   basePath,
   onShow,
 }: {
   report: RcaReport;
-  frustration: FrustrationDetail;
+  /** What the run read the causes off, counted: "58 frustrated sessions". */
+  population: string;
+  /** How many of the population a cause names. */
+  count: (cause: RcaCause) => number;
+  unit: [singular: string, plural: string];
   basePath: string;
   onShow: (index: number) => void;
 }) {
@@ -1065,16 +1077,16 @@ function FrustrationCauses({
       </Block>
     ) : null;
   }
-  const n = frustration.rate.failuresCur;
   return (
     <Block label="Likely cause">
       <Card className="border border-border p-0">
         <p className="m-0 border-b border-border py-4 px-5 text-body text-fg-secondary">
           Tessary identified {causes.length} likely {causes.length === 1 ? "cause" : "causes"} from the{" "}
-          {n.toLocaleString()} frustrated sessions{withRepo ? " and the agent's repository" : ""}.
+          {population}
+          {withRepo ? " and the agent's repository" : ""}.
         </p>
         {causes.map((k, i) => {
-          const shown = causeSessionCount(k);
+          const shown = count(k);
           const where = withRepo && k.attribution && k.attribution.kind !== "unknown" ? k.attribution : null;
           return (
             <div key={k.title} className={cn("flex flex-col gap-2.5 py-4 px-5", i > 0 && "border-t border-border")}>
@@ -1109,7 +1121,7 @@ function FrustrationCauses({
               {shown > 0 && (
                 <div>
                   <Button size="sm" variant="secondary" onClick={() => onShow(i)}>
-                    Show {shown} {shown === 1 ? "session" : "sessions"}
+                    Show {shown} {shown === 1 ? unit[0] : unit[1]}
                   </Button>
                 </div>
               )}
@@ -1187,102 +1199,6 @@ function FrustrationList({
         />
       </Block>
     </div>
-  );
-}
-
-/**
- * A groundedness report's answer: {@link FrustrationCauses}'s card, counted in flagged answers. The answers
- * behind a cause are one press away, filtered in the list below.
- */
-function GroundednessCauses({
-  report,
-  groundedness,
-  basePath,
-  onShow,
-}: {
-  report: RcaReport;
-  groundedness: GroundednessDetail;
-  basePath: string;
-  onShow: (index: number) => void;
-}) {
-  const causes = report.causes;
-  const withRepo = report.repo_available === true;
-  if (causes.length === 0) {
-    return report.summary ? (
-      <Block label="Likely cause" note={report.verdict ? RCA_VERDICT_LABEL[report.verdict] : undefined}>
-        <Card className="border border-border p-5">
-          <p className="text-fg m-0 text-body" style={{ maxWidth: 700 }}>
-            {report.summary}
-          </p>
-        </Card>
-      </Block>
-    ) : null;
-  }
-  const n = groundedness.rate.failuresCur;
-  return (
-    <Block label="Likely cause">
-      <Card className="border border-border p-0">
-        <p className="m-0 border-b border-border py-4 px-5 text-body text-fg-secondary">
-          Tessary identified {causes.length} likely {causes.length === 1 ? "cause" : "causes"} from the{" "}
-          {n.toLocaleString()} flagged {n === 1 ? "answer" : "answers"}
-          {withRepo ? " and the agent's repository" : ""}.
-        </p>
-        {causes.map((k, i) => {
-          const shown = causeTraceCount(k);
-          const where = withRepo && k.attribution && k.attribution.kind !== "unknown" ? k.attribution : null;
-          return (
-            <div key={k.title} className={cn("flex flex-col gap-2.5 py-4 px-5", i > 0 && "border-t border-border")}>
-              <p className="m-0 flex flex-wrap items-center gap-2.25">
-                <span className="font-mono text-small text-muted">{i + 1}</span>
-                <span className="text-body font-medium text-fg">{k.title}</span>
-                <Confidence level={k.confidence} />
-              </p>
-              <p className="m-0 text-body text-fg-secondary">{k.what_the_agent_did}</p>
-              {where && (
-                <div className="rounded-control border border-border overflow-hidden">
-                  <div className="flex items-center gap-2.5 bg-raised py-1.75 px-3 font-mono text-small">
-                    <span className="text-muted capitalize">{where.kind}</span>
-                    {where.path && (
-                      <span className="text-fg truncate" title={where.path}>
-                        {where.path}
-                      </span>
-                    )}
-                    {where.commit && <span className="ml-auto text-muted">{truncateId(where.commit)}</span>}
-                  </div>
-                  {where.excerpt && (
-                    <pre className="m-0 bg-surface py-2.5 px-3 font-mono text-code text-fg-secondary whitespace-pre-wrap wrap-anywhere">
-                      {where.excerpt}
-                    </pre>
-                  )}
-                </div>
-              )}
-              <p className="m-0 text-body text-fg-secondary">
-                <span className="text-muted">Suggested fix: </span>
-                {k.fix_suggestion}
-              </p>
-              {shown > 0 && (
-                <div>
-                  <Button size="sm" variant="secondary" onClick={() => onShow(i)}>
-                    Show {shown} {shown === 1 ? "answer" : "answers"}
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {!withRepo && (
-          <p className="m-0 border-t border-border py-3 px-5 text-small text-muted">
-            These causes describe what the agent did. They aren't linked to a prompt or code because no
-            repository was connected. Connect a repository and run RCA again to find them.
-          </p>
-        )}
-      </Card>
-      <p className="mt-2.5 mb-0 text-small">
-        <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
-          View the full report
-        </Link>
-      </p>
-    </Block>
   );
 }
 

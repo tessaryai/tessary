@@ -196,6 +196,7 @@ describe("CasePage, groundedness", () => {
     renderPage();
 
     await screen.findByText(NO_REPO);
+    expect(screen.queryByText("support-agent/retrieval/index.yaml")).toBeNull();
     expect(screen.getByText("Tessary identified 2 likely causes from the 58 flagged answers.")).toBeTruthy();
   });
 
