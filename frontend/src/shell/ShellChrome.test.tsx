@@ -54,7 +54,8 @@ describe("ShellChrome", () => {
   it.each([
     ["the project root", "/orgs/acme/projects/default/"],
     ["the bare project path", "/orgs/acme/projects/default"],
-    ["another project", "/orgs/acme/projects/other/traces"],
+    // Seven characters, like "default", so its path lines up with a surface name past this project's base.
+    ["another project", "/orgs/acme/projects/staging/traces"],
     ["a page that is not a surface", "/orgs/acme/projects/default/not-a-surface"],
   ])("records nothing for %s", (_what, route) => {
     shell(route);
