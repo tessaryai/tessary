@@ -271,7 +271,7 @@ public class CaseService {
         FindingRow finding = findingBehind(projectId, row);
         boolean detectorAvailable = detectorAvailable(projectId, row);
         RcaReportRow report = latestRcaReport(projectId, finding);
-        RcaReportView rca = inlinedRcaReport(projectId, report);
+        RcaReportView rca = inlinedRcaReport(report);
         return new CaseDetailView(
                 // The report is already in hand, so the caption comes off it directly: no second lookup,
                 // and the header cannot disagree with the analysis rendered below it.
@@ -674,7 +674,7 @@ public class CaseService {
      * <p>Rendered through {@link RcaReportService} rather than mapped here, so a case page and the RCA surface
      * render one report shape.
      */
-    private @Nullable RcaReportView inlinedRcaReport(String projectId, @Nullable RcaReportRow report) {
+    private @Nullable RcaReportView inlinedRcaReport(@Nullable RcaReportRow report) {
         if (report == null
                 || JobRow.Status.PENDING.equals(report.status())
                 || JobRow.Status.CLAIMED.equals(report.status())) {

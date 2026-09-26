@@ -972,6 +972,8 @@ describe("app entry redirects", () => {
     const { container } = renderApp("/");
 
     await waitFor(() => expect(container.textContent).toContain("not a member of any organization"));
+    // Signing in again mints a personal organization, so an invitation is not what they need.
+    expect(container.textContent).toContain("Sign out and sign in again to get your own organization.");
     expect(mockedAuth.mode).not.toHaveBeenCalled();
 
     vi.mocked(mockedAuth.logout).mockResolvedValueOnce({ frontendUrl: "about:blank" });

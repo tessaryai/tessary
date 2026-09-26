@@ -30,13 +30,13 @@ export function ErrorNote({ error, className }: { error: unknown; className?: st
   // `ApiError.detail` rather than `.message`: the latter is already prefixed with the code, and the
   // code is rendered separately below.
   const message =
-    error instanceof ApiError
+    (error instanceof ApiError
       ? error.detail
       : error instanceof Error
         ? error.message
         : typeof error === "string"
           ? error
-          : "The request failed. Try again.";
+          : "") || "The request failed. Try again.";
   return (
     <p role="alert" className={cn("text-small text-error", className)}>
       {code && <code className="font-mono">{code}</code>}

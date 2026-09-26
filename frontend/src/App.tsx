@@ -119,8 +119,9 @@ function RootRedirect() {
   // component to own).
   //
   // TenantService#ensureDefaultOrg runs only at signup and login, so `orgs` can be empty: a user
-  // who leaves their only org (Members → Leave organization) keeps the session with no org. That
-  // cannot go to `/login`, which sends a signed-in visitor straight back here, so it says so instead.
+  // who leaves their only org (Members → Leave organization) keeps the session with no org until
+  // they sign in again, when it gives them one. That cannot go to `/login`, which sends a signed-in
+  // visitor straight back here, so it says so instead.
   const { user } = useAuth();
   const first = user?.orgs[0];
   if (!first) return <NoOrganization />;
@@ -133,8 +134,8 @@ function NoOrganization() {
       <div className="max-w-md">
         <h1 className="text-h1 text-fg">No organization</h1>
         <p className="text-body text-muted mt-2">
-          This account is not a member of any organization. Ask an administrator for an invitation, then
-          sign in again.
+          This account is not a member of any organization. Sign out and sign in again to get your own
+          organization. To join someone else's, ask one of its admins for an invitation.
         </p>
         <Button className="mt-6" variant="secondary" onClick={() => void signOut()}>
           Sign out

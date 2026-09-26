@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.llmspi.LaneGroup;
@@ -12,8 +11,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Amazon Nova 2 Lite (the {@code NOVA} constant below) was removed from {@link
  * BedrockModelProfile#PROFILES} — Amazon is not one of the six supported makers. The constant
- * survives here as a known-removed-model probe: {@code isAgentic(NOVA)} must fail closed for a model
- * with no profile.
+ * survives here as a known-removed-model probe: {@code find(NOVA)} must find no profile, so nothing
+ * can treat it as agentic.
  */
 class BedrockModelProfileTest {
 
@@ -24,9 +23,9 @@ class BedrockModelProfileTest {
     void onlyAnthropicModelsCanDriveTheSandboxLanes() {
         // The sandbox lanes need a model that can hold a long tool loop. Nova is a fine grading model and
         // an unrunnable sandbox, so this is a lane pairing rule, not a quality judgement.
-        assertTrue(BedrockModelProfile.isAgentic(HAIKU));
-        assertFalse(BedrockModelProfile.isAgentic(NOVA));
-        assertFalse(BedrockModelProfile.isAgentic("some.unknown-model"), "unknown fails closed");
+        assertTrue(BedrockModelProfile.find(HAIKU).orElseThrow().agentic());
+        assertEquals(Optional.empty(), BedrockModelProfile.find(NOVA));
+        assertEquals(Optional.empty(), BedrockModelProfile.find("some.unknown-model"), "unknown fails closed");
     }
 
     /**
@@ -51,6 +50,5 @@ class BedrockModelProfileTest {
     void noKeyFindsNoProfile() {
         // A lane with no stored choice asks with a null key; that is "no model", not a crash.
         assertEquals(Optional.empty(), BedrockModelProfile.find(null));
-        assertFalse(BedrockModelProfile.isAgentic(null));
     }
 }

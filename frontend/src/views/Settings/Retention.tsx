@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { ApiError } from "../../api/types";
 import type { RetentionClassView } from "../../api/types";
-import { Button, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
+import { Button, ErrorNote, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
 
 /**
  * Settings → Data retention. How long this project keeps traces and classifier detections.
@@ -94,9 +94,7 @@ export function Retention() {
             Loading retention…
           </div>
         ) : view.isError ? (
-          <p className="text-small text-error">
-            {(view.error as ApiError)?.message ?? "Could not load retention. Try again."}
-          </p>
+          <ErrorNote error={view.error} />
         ) : (
           <div className="rounded-card border border-border divide-y divide-border">
             {classes.map((c) => {

@@ -8,6 +8,7 @@ import type { AlertChannel, AlertRule } from "../../api/types";
 import {
   Badge,
   Button,
+  ErrorNote,
   Field,
   Input,
   PageBody,
@@ -165,7 +166,7 @@ export function Notifications() {
         {rulesQ.isLoading ? (
           <Loading />
         ) : rulesQ.isError ? (
-          <LoadError error={rulesQ.error} what="the notification rule" />
+          <ErrorNote error={rulesQ.error} />
         ) : !rule ? (
           <p className="text-small text-muted">
             This project has no case-opened rule yet. It is created with the project; if this persists,
@@ -245,7 +246,7 @@ export function Notifications() {
         {channelsQ.isLoading ? (
           <Loading />
         ) : channelsQ.isError ? (
-          <LoadError error={channelsQ.error} what="the delivery channels" />
+          <ErrorNote error={channelsQ.error} />
         ) : (
           <>
             {channels.length > 0 && (
@@ -326,16 +327,6 @@ function Loading() {
       <Spinner size="sm" />
       Loading…
     </div>
-  );
-}
-
-/**
- * A failed read says so. Rendering the empty case instead would tell the partner the rule is missing or
- * that nothing is configured to receive it, when neither is known.
- */
-function LoadError({ error, what }: { error: unknown; what: string }) {
-  return (
-    <p className="text-small text-error">{(error as ApiError)?.message || `Could not load ${what}. Try again.`}</p>
   );
 }
 

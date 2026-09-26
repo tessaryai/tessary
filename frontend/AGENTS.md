@@ -43,16 +43,17 @@ Two consequences worth knowing before you reach for a workaround:
 
 - `api/` — `client.ts` (fetch layer), `types.ts` (+ `ApiError`), `types-auth.ts`,
   `generated/schema.d.ts` (OpenAPI-generated — see *Types* below).
-- `auth/` — `AuthContext.tsx` (/auth/me poller), `ProtectedRoute.tsx`.
+- `auth/` — `AuthContext.tsx` (/auth/me poller), `ProtectedRoute.tsx`, `signOut.ts` (the one sign-out path).
 - `tenant/` — `TenantContext.tsx`: `TenantProvider`, `useTenant`, `useProjectApi`.
 - `shell/` — navigation shell: `nav.tsx` (**the IA source of truth**), `Sidebar.tsx`,
   `ShellChrome.tsx` (layers the project-scoped providers), `CommandPalette.tsx` +
   `PaletteContext.tsx` + `commands.tsx` (⌘K), `ShellActions.tsx`,
-  `useCases.ts` (the Triage badge count), `recents.ts`, `useSidebarCollapsed.ts`, `useDropdown.ts`. Import the IA from `shell/nav.tsx`
+  `useCases.ts` (the Triage badge count), `recents.ts`, `useSidebarCollapsed.ts`. Import the IA from `shell/nav.tsx`
   and its capability-filtered view from `shell/useNavigation.ts`.
 - `ui/` — design-system primitives barrel (`import { Button, Card, Table } from "../ui"`),
   `ThemeContext.tsx`, `density.tsx`, `escStack.ts` (the shared overlay ESC stack — a rail
-  under a modal must not also close on the same keypress).
+  under a modal must not also close on the same keypress), `useDropdown.ts` (menu open/close,
+  outside click and ESC).
 - `capabilities/` — `useCapabilities()` / `CapabilityGate`. ONE gating axis:
   the backend resolves every capability per session and the SPA reads the answer. **Fail-closed**
   on the client while the read is in flight (the browser has no defaults of its own). There is no
@@ -60,10 +61,13 @@ Two consequences worth knowing before you reach for a workaround:
 - `views/` — surfaces, mostly one directory per IA surface (`triage/`, `traces/`,
   `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
   `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are
-  `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. Surface-specific shared widgets go in `views/components/`
+  `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. `views/traceLinker.ts` builds
+  trace and span hrefs; `views/classifiers/useListPaging.ts` (infinite scroll across filter switches)
+  and `useSkeletonFlag.ts` (delayed, held list skeleton) serve the classifier lists. Surface-specific shared widgets go in `views/components/`
   (`PayloadViewer`, `ConnectRepositoryDialog`, `SourceConnect`, …). Generic primitives belong in
   `src/ui/`, not here.
-- `lib/` — `relativeTime.ts`, `routePreload.ts`.
+- `lib/` — `relativeTime.ts`, `ledgerTime.ts` (credential created/last-used times), `usd.ts`
+  (spend formatting), `routePreload.ts`.
 
 ## API + data conventions
 
