@@ -48,6 +48,58 @@ function request(port, method, urlPath, { body, auth } = {}) {
 
 const E2B_ENV = { SANDBOX_BACKEND: 'e2b', E2B_API_KEY: 'fake-e2b-key', SANDBOX_API_KEY: 'testkey' };
 
+/** A POST with a raw body, resolving to the response or to the error that cut the connection. */
+function rawPost(port, urlPath, raw) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { host: '127.0.0.1', port, path: urlPath, method: 'POST', headers: { Authorization: 'Bearer testkey' } },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+      },
+    );
+    req.on('error', (error) => resolve({ error }));
+    req.end(raw);
+  });
+}
+
+test('answers its health check', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    assert.deepEqual(await request(port, 'GET', '/healthz'), { status: 200, body: { ok: true } });
+  } finally {
+    child.kill();
+  }
+});
+
+test('refuses a body that is not JSON, reads an empty one as no fields, and without echoing the input', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    const garbled = await rawPost(port, '/rca', '{"credential": tsy_secret');
+    assert.equal(garbled.status, 502);
+    assert.equal(garbled.body.kind, 'bad_request');
+    assert.equal(garbled.body.detail, 'invalid json body');
+
+    const empty = await rawPost(port, '/rca', '');
+    assert.equal(empty.body.kind, 'bad_request');
+    assert.match(empty.body.detail, /no credential object on the request/);
+  } finally {
+    child.kill();
+  }
+});
+
+test('cuts off a body over the size limit rather than reading it all, and keeps serving', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    const res = await rawPost(port, '/rca', Buffer.alloc(9 * 1024 * 1024, 'a'));
+    assert.ok(res.error || res.body.detail === 'body too large', JSON.stringify(res.body ?? String(res.error)));
+    assert.deepEqual(await request(port, 'GET', '/healthz'), { status: 200, body: { ok: true } });
+  } finally {
+    child.kill();
+  }
+});
+
 test('only POST /rca and POST /triage reach the analyzers; every other route is 404', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
@@ -84,7 +136,9 @@ const BAD_CREDENTIALS = [
   [{ provider: 'NOPE', api_key: 'k' }, "unknown provider 'NOPE'"],
   [{ provider: 'BEDROCK', aws_access_key: 'a', aws_secret_key: 's' }, 'BEDROCK/BEDROCK_MANTLE credential is missing aws_region'],
   [{ provider: 'BEDROCK_MANTLE', aws_region: 'us-east-1' }, 'BEDROCK/BEDROCK_MANTLE credential is missing aws_access_key/aws_secret_key'],
+  [{ provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'a' }, 'BEDROCK/BEDROCK_MANTLE credential is missing aws_access_key/aws_secret_key'],
   [{ provider: 'GEMINI', api_key: '  ' }, 'GEMINI credential is missing api_key'],
+  [{ provider: 'GEMINI' }, 'GEMINI credential is missing api_key'],
   [{ provider: 'CUSTOM', api_key: 'k' }, 'CUSTOM credential is missing base_url'],
 ];
 
