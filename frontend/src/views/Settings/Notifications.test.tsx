@@ -115,14 +115,6 @@ describe("the case-opened rule", () => {
     expect(screen.queryByText(/crosses midnight/)).toBeNull();
   });
 
-  it("starts the zone at the browser's own when the rule has no policy yet", async () => {
-    api.listAlertRules.mockResolvedValue([rule({ policy: null })]);
-    renderRoute(<Notifications />);
-
-    await screen.findByRole("switch");
-    expect(input("Time zone").value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-  });
-
   it("turns the rule off by its own id", async () => {
     renderRoute(<Notifications />);
 

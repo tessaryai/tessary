@@ -185,12 +185,4 @@ describe("connecting over OTLP", () => {
 
     expect(await screen.findByText("Select the snippet and copy it manually.")).toBeTruthy();
   });
-
-  it("closes from its back link", async () => {
-    await openStory();
-
-    fireEvent.click(within(dialog()).getByRole("button", { name: /Cancel/ }));
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
 });

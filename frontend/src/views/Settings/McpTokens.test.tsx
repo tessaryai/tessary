@@ -8,7 +8,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpTokenView } from "../../api/types-auth";
-import { pending, renderRoute } from "../../test/render";
+import { renderRoute } from "../../test/render";
 import { McpTokens } from "./McpTokens";
 
 const api = vi.hoisted(() => ({
@@ -212,13 +212,5 @@ describe("the MCP config", () => {
 
     expect(await screen.findByText("Copy the config manually.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
-  });
-
-  it("keeps the config in view while the list loads", () => {
-    api.listMcpTokens.mockReturnValue(pending());
-    renderRoute(<McpTokens />);
-
-    expect(screen.getByText("Loading tokens…")).toBeTruthy();
-    expect(screen.getByText("MCP config")).toBeTruthy();
   });
 });

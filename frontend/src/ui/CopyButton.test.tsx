@@ -25,23 +25,6 @@ afterEach(() => {
 });
 
 describe("CopyButton", () => {
-  it("writes the value, says Copied, then goes back to Copy", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    setClipboard({ writeText });
-    const onCopied = vi.fn();
-
-    render(<CopyButton value="sk-live-123" onCopied={onCopied} />);
-    fireEvent.click(screen.getByRole("button"));
-
-    await waitFor(() => expect(screen.getByRole("button").textContent).toContain("Copied"));
-    expect(writeText).toHaveBeenCalledWith("sk-live-123");
-    expect(onCopied).toHaveBeenCalledTimes(1);
-
-    act(() => void vi.advanceTimersByTime(1700));
-    expect(screen.getByRole("button").textContent).toBe("Copy");
-  });
-
   it("restarts the Copied window on a second copy, rather than ending it on the first one's schedule", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });

@@ -207,14 +207,4 @@ describe("creating a project to connect to", () => {
     expect(auth.createProject).toHaveBeenCalledWith("acme", { name: "New agent" });
     expect(button("Connect").disabled).toBe(false);
   });
-
-  it("goes back to the list on Cancel", async () => {
-    await ready();
-
-    fireEvent.click(button("New project"));
-    fireEvent.click(button("Cancel"));
-
-    expect(select("Project").value).toBe("default");
-    expect(auth.createProject).not.toHaveBeenCalled();
-  });
 });

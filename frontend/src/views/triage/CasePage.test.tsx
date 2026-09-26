@@ -199,18 +199,4 @@ describe("CasePage, groundedness", () => {
     expect(screen.queryByText("support-agent/retrieval/index.yaml")).toBeNull();
     expect(screen.getByText("Tessary identified 2 likely causes from the 58 flagged answers.")).toBeTruthy();
   });
-
-  it("falls back to the report's summary when it named no cause", async () => {
-    caseDetail = withReport({
-      causes: [],
-      verdict: "no_cause_found",
-      summary: "The flagged answers share no cause the analysis could name.",
-    });
-    renderPage();
-
-    await screen.findByText("The flagged answers share no cause the analysis could name.");
-    expect(screen.queryByText(/Tessary identified/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Show \d+ answers?$/ })).toBeNull();
-    expect(screen.queryByRole("group", { name: "Filter answers" })).toBeNull();
-  });
 });

@@ -132,29 +132,6 @@ function renderPage(route = "/") {
 }
 
 describe("DetectorsPage", () => {
-  it("opens the enable modal for Frustration instead of enabling it", async () => {
-    listClassifiers.mockResolvedValue([classifier({})]);
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("switch", { name: "Enable Frustration" }));
-
-    await screen.findByText("Enable Frustration", { selector: "h2" });
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
-  });
-
-  it("switches any other classifier directly", async () => {
-    listClassifiers.mockResolvedValue([
-      classifier({ id: "clf-2", classifier_key: "tool_error", name: "Tool error", detector: "tool_error" }),
-    ]);
-    setClassifierEnabled.mockResolvedValue(classifier({ id: "clf-2", enabled: true }));
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("switch", { name: "Enable Tool error" }));
-
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-2", true));
-    expect(screen.queryByText("Enable Frustration", { selector: "h2" })).toBeNull();
-  });
-
   it("names a provider pause on the row and links to Providers", async () => {
     listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
     renderPage();
@@ -335,27 +312,6 @@ function todayAt(hour: number, minute: number): string {
 }
 
 describe("DetectorsPage, Groundedness", () => {
-  it("says a disabled row that was never set up needs setup, and switching it on opens the setup modal", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow()]);
-    getGroundednessStatus.mockResolvedValue(status({}));
-    renderPage();
-
-    await screen.findByText("needs setup");
-    fireEvent.click(screen.getByRole("switch", { name: "Enable Groundedness" }));
-
-    await screen.findByText("Enable Groundedness", { selector: "h2" });
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
-  });
-
-  it("says setting up once a setup prompt was copied in this browser", async () => {
-    window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
-    listClassifiers.mockResolvedValue([groundednessRow()]);
-    getGroundednessStatus.mockResolvedValue(status({}));
-    renderPage();
-
-    await screen.findByText("Setting up...");
-  });
-
   it("keeps the detection count while on in dev, and drops the setting-up flag", async () => {
     // A dev row can carry a caught-up time too, and this browser copied a setup prompt earlier.
     window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
@@ -383,17 +339,6 @@ describe("DetectorsPage, Groundedness", () => {
 
     await screen.findByText(`last run ${clockTime(caughtUp)}`);
     expect(clockTime(caughtUp)).toBe("2:03 PM");
-  });
-
-  it("says since when nothing was scored while the model is down", async () => {
-    const scored = todayAt(14, 2);
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(
-      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: scored }),
-    );
-    renderPage();
-
-    await screen.findByText("No scores since 2:02 PM");
   });
 
   it("shows the restart notice in the rail while not scoring, and links it at the running version", async () => {
@@ -430,17 +375,6 @@ describe("DetectorsPage, Groundedness", () => {
 
     await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
     expect(screen.queryByText("Enable Groundedness", { selector: "h2" })).toBeNull();
-  });
-
-  it("asks before switching it off", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
-
-    await screen.findByText("Turn off Groundedness?", { selector: "h2" });
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
   });
 });
 

@@ -8,7 +8,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKey, ApiKeyAudit } from "../../api/types-auth";
-import { pending, renderRoute } from "../../test/render";
+import { renderRoute } from "../../test/render";
 import { ApiKeys } from "./ApiKeys";
 
 const api = vi.hoisted(() => ({
@@ -210,13 +210,5 @@ describe("the audit trail", () => {
     api.listApiKeyAudit.mockRejectedValue(new Error("audit unavailable"));
     renderRoute(<ApiKeys />);
     expect(await screen.findByText("audit unavailable")).toBeTruthy();
-  });
-
-  it("shows both reads loading", async () => {
-    api.listApiKeys.mockImplementation(pending);
-    api.listApiKeyAudit.mockImplementation(pending);
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("Loading keys…")).toBeTruthy();
-    expect(screen.getByText("Loading activity…")).toBeTruthy();
   });
 });

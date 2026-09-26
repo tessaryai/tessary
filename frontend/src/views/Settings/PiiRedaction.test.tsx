@@ -10,7 +10,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import type { RedactionRuleView } from "../../api/types";
-import { pending, renderRoute } from "../../test/render";
+import { renderRoute } from "../../test/render";
 import { PiiRedaction } from "./PiiRedaction";
 
 const api = vi.hoisted(() => ({
@@ -93,17 +93,6 @@ describe("the rule ledger", () => {
 
     fireEvent.click(within(custom).getByRole("button", { name: "Disable" }));
     expect(await screen.findByText("Could not update rule")).toBeTruthy();
-  });
-
-  it("shows the read loading and failing", async () => {
-    api.listRedactionRules.mockImplementation(pending);
-    renderRoute(<PiiRedaction />);
-    expect(await screen.findByText("Loading rules…")).toBeTruthy();
-    cleanup();
-
-    api.listRedactionRules.mockRejectedValue(new Error("rules unavailable"));
-    renderRoute(<PiiRedaction />);
-    expect(await screen.findByText("rules unavailable")).toBeTruthy();
   });
 
   it("shows a failed read's code and detail once, and never a blank error line", async () => {

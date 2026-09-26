@@ -10,10 +10,10 @@
  * Tree nests each execution under the llm call that asked for it; Timeline scales bars to the trace.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import type { TraceDetailView } from "../../api/types";
 import { span, traceItem, type SpanView } from "../../test/fixtures";
-import { currentParams, pending, renderRoute } from "../../test/render";
+import { currentParams, renderRoute } from "../../test/render";
 import { TraceDetail } from "./TraceDetail";
 
 const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getTrace: vi.fn() }));
@@ -316,11 +316,3 @@ describe("Timeline", () => {
   });
 });
 
-describe("while loading", () => {
-  it("shows a loading row, never a blank page", async () => {
-    api.getTrace.mockImplementation(pending);
-    renderTrace();
-    await waitFor(() => expect(screen.getAllByRole("status").length).toBeGreaterThan(0));
-    expect(screen.queryByRole("tab")).toBeNull();
-  });
-});

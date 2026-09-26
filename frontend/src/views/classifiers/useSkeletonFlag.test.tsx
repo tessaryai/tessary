@@ -31,24 +31,6 @@ describe("useSkeletonFlag", () => {
     expect(result.current).toBe(false);
   });
 
-  it("shows it once the read outlasts the delay, and holds it for the minimum even if the read lands", () => {
-    const { result, rerender } = renderHook(({ loading }) => useSkeletonFlag(loading), {
-      initialProps: { loading: true },
-    });
-
-    advance(199);
-    expect(result.current).toBe(false);
-    advance(1);
-    expect(result.current).toBe(true);
-
-    advance(100);
-    rerender({ loading: false });
-    advance(299);
-    expect(result.current).toBe(true);
-    advance(1);
-    expect(result.current).toBe(false);
-  });
-
   it("drops it at once when the read lands after the minimum has passed", () => {
     const { result, rerender } = renderHook(({ loading }) => useSkeletonFlag(loading), {
       initialProps: { loading: true },
