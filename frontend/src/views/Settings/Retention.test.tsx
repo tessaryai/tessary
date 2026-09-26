@@ -7,6 +7,7 @@
  */
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/types";
 import type { RetentionClassView, RetentionView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Retention } from "./Retention";
@@ -69,6 +70,13 @@ describe("reading", () => {
     renderRoute(<Retention />);
 
     expect(await screen.findByText("retention unavailable")).toBeTruthy();
+  });
+
+  it("shows a failed read's code and detail once", async () => {
+    api.getRetention.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "retention unavailable" }));
+    renderRoute(<Retention />);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("UNAVAILABLE: retention unavailable");
   });
 
   it("gives a reader who cannot manage retention no working control", async () => {

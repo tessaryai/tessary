@@ -8,6 +8,7 @@
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/types";
 import type { RedactionRuleView } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { PiiRedaction } from "./PiiRedaction";
@@ -103,6 +104,17 @@ describe("the rule ledger", () => {
     api.listRedactionRules.mockRejectedValue(new Error("rules unavailable"));
     renderRoute(<PiiRedaction />);
     expect(await screen.findByText("rules unavailable")).toBeTruthy();
+  });
+
+  it("shows a failed read's code and detail once, and never a blank error line", async () => {
+    api.listRedactionRules.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "rules unavailable" }));
+    renderRoute(<PiiRedaction />);
+    expect((await screen.findByRole("alert")).textContent).toBe("UNAVAILABLE: rules unavailable");
+    cleanup();
+
+    api.listRedactionRules.mockRejectedValue(new Error(""));
+    renderRoute(<PiiRedaction />);
+    expect((await screen.findByRole("alert")).textContent).toBe("The request failed. Try again.");
   });
 });
 

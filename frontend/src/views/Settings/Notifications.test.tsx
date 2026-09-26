@@ -6,6 +6,7 @@
  */
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/types";
 import type { AlertChannel, AlertRule } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Notifications } from "./Notifications";
@@ -76,6 +77,18 @@ describe("the reads", () => {
     expect(await screen.findByText("channels unavailable")).toBeTruthy();
     expect(screen.queryByText(/no case-opened rule yet/)).toBeNull();
     expect(screen.queryByLabelText("Webhook URL")).toBeNull();
+  });
+
+  it("shows each failed read's code and detail once", async () => {
+    api.listAlertRules.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "rules unavailable" }));
+    api.listAlertChannels.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "channels unavailable" }));
+    renderRoute(<Notifications />);
+
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual([
+      "UNAVAILABLE: rules unavailable",
+      "UNAVAILABLE: channels unavailable",
+    ]);
   });
 
   it("says when the project has no case-opened rule", async () => {

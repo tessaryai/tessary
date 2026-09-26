@@ -107,10 +107,15 @@ describe("TuningSection", () => {
     await waitFor(() => expect(field("Max hours").value).toBe("24"));
 
     fireEvent.change(field("Max hours"), { target: { value: "" } });
+    expect(screen.queryByRole("alert")).toBeNull();
     save();
     await settle();
 
     expect(api.setClassifierTuning).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Fill in Max hours before closing anyway to save.");
+
+    fireEvent.change(field("Max hours"), { target: { value: "48" } });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("names a refused save, and shows the loading and failed reads", async () => {

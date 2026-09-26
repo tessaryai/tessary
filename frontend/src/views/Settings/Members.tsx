@@ -10,6 +10,7 @@ import type { OrgRole, OrgMember, SignupPolicyMode } from "../../api/types-auth"
 import {
   Badge,
   Button,
+  ErrorNote,
   Field,
   Input,
   Modal,
@@ -226,12 +227,14 @@ export function Members() {
         <div className="flex items-center gap-2 py-10 text-small text-muted">
           <Spinner size="sm" /> Loading members…
         </div>
+      ) : members.isError ? (
+        <ErrorNote error={members.error} />
       ) : roster.length === 0 ? (
         <div className="py-12 text-center">
-          <p className="text-body text-fg">No members yet</p>
           {/* Never "invite someone": whoever is reading this is a member, so an empty roster is a
               failed read, and the permission to invite is itself read off the roster. */}
-          <p className="text-small text-muted mt-1">Members did not load. Reload the page to try again.</p>
+          <p className="text-body text-fg">Members did not load</p>
+          <p className="text-small text-muted mt-1">Reload the page to try again.</p>
         </div>
       ) : (
         <div className="rounded-card border border-border overflow-hidden">

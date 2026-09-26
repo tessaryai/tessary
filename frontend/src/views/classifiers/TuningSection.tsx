@@ -38,6 +38,7 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
   });
 
   const [form, setForm] = useState<FormState | null>(null);
+  const [triedBlank, setTriedBlank] = useState(false);
 
   // Seed the form once from the fetched value; a later refetch (e.g. after save) doesn't clobber
   // whatever the user is mid-typing.
@@ -65,19 +66,22 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
   if (tuningQ.isError) return <ErrorNote error={tuningQ.error} />;
   if (!form) return null;
 
+  const blank = FIELDS.filter((f) => form[f.key].trim() === "").map((f) => f.label);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     // A number input reports anything it cannot parse as "", and Number("") is 0: a cleared field would
     // save as 0 and be clamped to the floor. Blank is no value, so nothing saves until every field has one.
-    const num = (s: string) => (s.trim() === "" ? Number.NaN : Number(s));
-    const parsed = {
-      window_target_count: num(form.windowTargetCount),
-      window_max_hours: num(form.windowMaxHours),
-      min_sample: num(form.minSample),
-      w1_floor: num(form.w1Floor),
-    };
-    if (Object.values(parsed).some((v) => !Number.isFinite(v))) return;
-    saveM.mutate(parsed);
+    if (blank.length > 0) {
+      setTriedBlank(true);
+      return;
+    }
+    saveM.mutate({
+      window_target_count: Number(form.windowTargetCount),
+      window_max_hours: Number(form.windowMaxHours),
+      min_sample: Number(form.minSample),
+      w1_floor: Number(form.w1Floor),
+    });
   };
 
   return (
@@ -86,32 +90,22 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
         Clamped server-side to a safe range, so what saves may differ slightly from what you type. Changes
         apply from the next window this classifier closes, not retroactively.
       </p>
-      <TuningField
-        label="Target samples to close a window"
-        hint="50–100,000 · default 500"
-        value={form.windowTargetCount}
-        onChange={(v) => setForm({ ...form, windowTargetCount: v })}
-      />
-      <TuningField
-        label="Max hours before closing anyway"
-        hint="1–2,160 (90d) · default 24"
-        value={form.windowMaxHours}
-        onChange={(v) => setForm({ ...form, windowMaxHours: v })}
-      />
-      <TuningField
-        label="Min samples before comparing at all"
-        hint="30–target · default 100"
-        value={form.minSample}
-        onChange={(v) => setForm({ ...form, minSample: v })}
-      />
-      <TuningField
-        label="Smallest shift worth reporting (log W1)"
-        hint="0.01–3.0 · default 0.139 ≈ a 15% move. A thinner window is held to more, because it cannot measure that reliably."
-        value={form.w1Floor}
-        onChange={(v) => setForm({ ...form, w1Floor: v })}
-        step="0.01"
-      />
+      {FIELDS.map((f) => (
+        <TuningField
+          key={f.key}
+          label={f.label}
+          hint={f.hint}
+          value={form[f.key]}
+          onChange={(v) => setForm({ ...form, [f.key]: v })}
+          step={f.step}
+        />
+      ))}
       <ImpliedRate rate={tuningQ.data?.implied_false_alarm_rate ?? null} />
+      {triedBlank && blank.length > 0 && (
+        <p role="alert" className="text-small text-error m-0">
+          Fill in {blank.join(", ")} to save.
+        </p>
+      )}
       {saveM.isError && <ErrorNote error={saveM.error} />}
       <div>
         <Button type="submit" variant="primary" size="sm" loading={saveM.isPending}>
@@ -121,6 +115,18 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
     </form>
   );
 }
+
+const FIELDS: { key: keyof FormState; label: string; hint: string; step?: string }[] = [
+  { key: "windowTargetCount", label: "Target samples to close a window", hint: "50–100,000 · default 500" },
+  { key: "windowMaxHours", label: "Max hours before closing anyway", hint: "1–2,160 (90d) · default 24" },
+  { key: "minSample", label: "Min samples before comparing at all", hint: "30–target · default 100" },
+  {
+    key: "w1Floor",
+    label: "Smallest shift worth reporting (log W1)",
+    hint: "0.01–3.0 · default 0.139 ≈ a 15% move. A thinner window is held to more, because it cannot measure that reliably.",
+    step: "0.01",
+  },
+];
 
 function fromTuning(t: { window_target_count: number; window_max_hours: number; min_sample: number; w1_floor: number }): FormState {
   return {

@@ -158,10 +158,20 @@ describe("as a member", () => {
   it("says the list did not load rather than implying the org is empty", async () => {
     auth.listMembers.mockResolvedValue([]);
     renderRoute(<Members />);
-    expect(await screen.findByText("Members did not load. Reload the page to try again.")).toBeTruthy();
+    expect(await screen.findByText("Members did not load")).toBeTruthy();
+    expect(screen.getByText("Reload the page to try again.")).toBeTruthy();
+    expect(screen.queryByText("No members yet")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Leave organization" }));
     expect(auth.removeMember).not.toHaveBeenCalled();
+  });
+
+  it("shows why a failed roster read failed", async () => {
+    auth.listMembers.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "members unavailable" }));
+    renderRoute(<Members />);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("UNAVAILABLE: members unavailable");
+    expect(screen.queryByText("Members did not load")).toBeNull();
   });
 });
 

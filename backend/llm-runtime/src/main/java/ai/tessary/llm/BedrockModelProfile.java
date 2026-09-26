@@ -124,8 +124,9 @@ public final class BedrockModelProfile {
      * Which of the profiles above each {@link LaneGroup} may actually be pointed at, in the order a
      * dropdown should list them.
      *
-     * <p>Narrower than "what the model can do" on purpose: {@link #isAgentic} answers whether a model
-     * could drive a sandbox agent, this answers whether we offer it for that kind of work.
+     * <p>Narrower than "what the model can do" on purpose: {@link ModelDescriptor#agentic()} answers
+     * whether a model could drive a sandbox agent, this answers whether we offer it for that kind of
+     * work.
      *
      * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside Sonnet 5 and Terra as
      * deliberate exceptions, not a rule that any agentic model may go here: Luna because triage is a
@@ -171,13 +172,5 @@ public final class BedrockModelProfile {
         if (modelKey == null) return Optional.empty();
         String key = modelKey.trim();
         return PROFILES.stream().filter(p -> p.modelKey().equals(key)).findFirst();
-    }
-
-    /**
-     * Whether {@code modelKey} can drive the agent in a sandbox lane. False for an unknown model,
-     * so a dangling setting fails closed rather than pinning the sandbox to something unrunnable.
-     */
-    public static boolean isAgentic(String modelKey) {
-        return find(modelKey).map(ModelDescriptor::agentic).orElse(false);
     }
 }
