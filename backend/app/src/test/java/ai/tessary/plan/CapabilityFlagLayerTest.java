@@ -65,6 +65,21 @@ class CapabilityFlagLayerTest {
     OrgMembershipRepository memberships;
 
     @Test
+    void withNoOverrides_everythingIsOnExceptAutomaticTriage() {
+        var fix = TenantFixture.bootstrap(tenants, "cap-default");
+        String orgId = fix.org().id();
+
+        var resolved = capabilities.resolve(orgId);
+        for (Capability capability : Capability.values()) {
+            boolean expected = !OFF_BY_DEFAULT.contains(capability);
+            assertEquals(
+                    expected,
+                    resolved.isEnabled(capability),
+                    capability.wire() + " should default " + (expected ? "on" : "off") + " in an open build");
+        }
+    }
+
+    @Test
     void anOrgOverrideWinsInBothDirections() {
         var fix = TenantFixture.bootstrap(tenants, "cap-override");
         String orgId = fix.org().id();
@@ -78,6 +93,20 @@ class CapabilityFlagLayerTest {
         assertFalse(capabilities.isEnabled(orgId, Capability.TRIAGE_AUTOMATIC), "off by default");
         set(orgId, Capability.TRIAGE_AUTOMATIC, true);
         assertTrue(capabilities.isEnabled(orgId, Capability.TRIAGE_AUTOMATIC), "the row turns it on");
+    }
+
+    @Test
+    void clearingAnOverrideReturnsTheCapabilityToTheDefault() {
+        var fix = TenantFixture.bootstrap(tenants, "cap-clear");
+        String orgId = fix.org().id();
+
+        set(orgId, Capability.API_ACCESS, false);
+        assertFalse(capabilities.isEnabled(orgId, Capability.API_ACCESS));
+
+        overrides.delete(orgId, Capability.API_ACCESS.wire());
+        flags.invalidate(orgId);
+        // Not "off, because false was the last thing written": "on, because nobody has an opinion".
+        assertTrue(capabilities.isEnabled(orgId, Capability.API_ACCESS), "back to the open-edition default");
     }
 
     @Test

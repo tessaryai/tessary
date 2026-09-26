@@ -172,6 +172,24 @@ class ClassifierTurnGrainIntegrationTest {
                 "the surviving detection is the FIRST turn that earned it, not the last one seen");
     }
 
+    @Test
+    void aBareLlmRootWithNoAgentWrapperIsStillScored() {
+        String pid = bootstrapGranted("turn-grain-bare");
+        Instant now = Instant.now();
+
+        // The no-agent-wrapper shape: one llm call per turn, emitted as the trace's root span. Its root
+        // is the user-facing turn, which is why the filter tests structure (root trace + root span) and
+        // only requires kind to be dialogue-bearing, rather than requiring kind='agent'.
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
+        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, "llm", "chat", now);
+
+        List<ClassifierEventView> events = sweepUntilDetected(pid);
+
+        assertEquals(1, events.size(), "a bare llm root is a user-facing turn and must still be scored");
+        assertEquals(only.traceId(), events.get(0).subjectId());
+    }
+
     /** A frustrated user turn in the shape ingest really stores (role-tagged gen_ai envelope). */
     private SpanRef seedSpan(
             String pid,

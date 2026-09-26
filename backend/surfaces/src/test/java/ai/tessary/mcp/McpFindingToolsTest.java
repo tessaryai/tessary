@@ -251,6 +251,20 @@ class McpFindingToolsTest {
     }
 
     @Test
+    void getFinding_readsByIdProjectScoped() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(sampleFinding());
+
+        JsonNode structured = structured(callTool("get_finding", "{\"id\":\"find-1\"}"));
+
+        assertEquals("find-1", structured.get("finding").get("id").asText());
+        assertEquals("cs-1", structured.get("finding").get("callSiteId").asText());
+        assertEquals(
+                FindingRow.Cause.MALFORMED_RATE,
+                structured.get("finding").get("causeKind").asText());
+        verify(behaviorDrift).finding(PROJECT_ID, "find-1");
+    }
+
+    @Test
     void getFinding_notFoundIsCleanToolError() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "nope"))
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "nope"));

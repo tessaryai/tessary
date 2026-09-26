@@ -80,6 +80,13 @@ class GroundednessRateReplayTest {
     }
 
     @Test
+    void aCallSiteStillBelow200TracesIsNotJudged() {
+        Sweep sweep = sweep(series(new ArrayList<>(), 0, 9, 0.50));
+        assertTrue(sweep.advanced().isEmpty(), "180 traces is still learning");
+        assertTrue(sweep.spells().isEmpty());
+    }
+
+    @Test
     void aDoublingFromFivePercentAlarms() {
         List<HourlyToolTally> s = series(new ArrayList<>(), 0, 50, 0.05); // a frozen reference of 1,000
         int hours = 0;

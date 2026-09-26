@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
  * {@link ClassifierService#health} must surface a failing sweep (status, attempts, last error)
  * without touching the DB, and must report a healthy row for a signal that has never been
  * enqueued. All collaborators are mocked: this is the read-model logic, not the sweep itself
- * (covered by {@link ClassifierJobRepositoryTest} / {@code ClassifierWorkerIntegrationTest}).
+ * (covered by {@link ClassifierJobRepositoryTest}).
  */
 class ClassifierHealthTest {
 

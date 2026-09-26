@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
  * seven disagreements on ten models. A hand-maintained {@code manual-overrides.json} carried those
  * corrections forward until it was retired: five were stale carryovers upstream had since
  * corrected, the mantle GPT-5.6 rows are now resolved by {@code BedrockModelProfile.MANTLE_ROUTE_PREFIX}
- * reporting the id LiteLLM actually prices (see {@link #mantleIdsResolveToTheirOwnRoute}), and Nova's
+ * reporting the id LiteLLM actually prices (the {@code bedrock_mantle/} rows below), and Nova's
  * cache-write bucket — which the snapshot has never carried, for any generation — is now unpriced rather
  * than an unverified guess. This test states the answers directly: a snapshot refresh that moves a
  * platform rate fails here and gets read by a human, instead of restating last month's bill.
@@ -53,7 +53,7 @@ class PlatformLaneRatesTest {
         m.put("global.anthropic.claude-sonnet-4-6", new String[] {"3", "15", "0.3", "3.75"});
         m.put("global.amazon.nova-2-lite-v1:0", new String[] {"0.3", "2.5", "0.075", "-"});
         // The route-prefixed spelling BedrockModelProfile now reports for mantle — see
-        // BedrockModelProfile.MANTLE_ROUTE_PREFIX and mantleIdsResolveToTheirOwnRoute below.
+        // BedrockModelProfile.MANTLE_ROUTE_PREFIX.
         m.put("bedrock_mantle/openai.gpt-5.6-luna", new String[] {"0.22", "1.32", "0.022", "0.275"});
         m.put("bedrock_mantle/openai.gpt-5.6-terra", new String[] {"2.2", "13.2", "0.22", "2.75"});
         m.put("anthropic.claude-sonnet-5", new String[] {"2", "10", "0.2", "2.5"});

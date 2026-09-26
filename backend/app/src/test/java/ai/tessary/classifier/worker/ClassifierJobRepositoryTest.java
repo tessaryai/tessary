@@ -234,6 +234,15 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
+    void rewindCursor_isANoOpForASignalThatHasNeverSwept() {
+        String pid = project("signal-rewind-nojob");
+        assertEquals(
+                0,
+                jobs.rewindCursor(pid, Ids.ulid()),
+                "no job row means no history to re-read — the first sweep already starts from a null cursor");
+    }
+
+    @Test
     void releaseWithoutAttempt_byAWorkerWhoseLeaseExpired_leavesTheNewHoldersJobAlone() {
         String pid = project("signal-release-stale-owner");
         String classifierId = Ids.ulid();

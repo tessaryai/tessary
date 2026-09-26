@@ -247,12 +247,13 @@ So there are two distinct endings and only one of them writes:
 | This edition does not ship the classifier | the flag/capability layer; `withheldBuiltInKeys` | nothing |
 | The classifier left the catalog | `retireDroppedBuiltIns` | permanent disable |
 
-`ClassifierSweepRegistry` never touches the catalog, and `ClassifierSweepRegistryTest` pins it.
+`ClassifierSweepRegistry` never touches the catalog. `SweepCatalogCoverageTest` pins the other side:
+every fitting-tier catalog kind has exactly one sweep.
 
 **An absent adapter degrades; it does not fail to wire.** Spring treats a required collection
 parameter with no candidates as an *unsatisfied dependency* rather than an empty list. `TriageSource`
 is safe as a `List<T>` because its own built-in implementation, `BehaviorTriageSource`, never left the
-open package. `AbsentAdapterContextTest` holds it.
+open package. `ContextLoadsTest` boots the open edition, which ships no adapter, and holds it.
 
 ---
 

@@ -76,6 +76,47 @@ class FrustrationRateServiceTest {
     }
 
     @Test
+    void aNewOnsetFilesANewFindingBesideTheOldOne() {
+        Spell spell = firstSpell();
+        String earlier = Instant.parse(spell.decision().onsetAt())
+                .minus(Duration.ofDays(1))
+                .toString();
+        when(findings.findOpenByCause(PROJECT, "frustration", CAUSE)).thenReturn(Optional.of(ruled("f0", earlier)));
+        when(findings.recordRecomputedRate(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyLong(),
+                        any(),
+                        any(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString()))
+                .thenReturn(new FindingRepository.Recorded("f2", true, 0, null));
+
+        service.refresh(PROJECT, signal(), at);
+
+        verify(findings)
+                .recordTriage(
+                        PROJECT,
+                        "f2",
+                        FindingRow.TriageVerdict.POSITIVE,
+                        FrustrationEvidence.SUMMARY,
+                        null,
+                        at.toString());
+        verify(caseOpener).ensureCaseFor(PROJECT, "f2", null);
+        verify(findings, never())
+                .refreshRuledObservation(eq(PROJECT), eq("f0"), anyLong(), anyString(), anyString(), anyString());
+    }
+
+    @Test
     void aSpellARulingAlreadyCoversRefreshesTheOpenFindingRatherThanForkingOne() {
         Spell spell = firstSpell();
         String moved = Instant.parse(spell.decision().onsetAt())

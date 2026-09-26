@@ -56,6 +56,22 @@ class GlobalSearchServiceIntegrationTest {
     TenantService tenants;
 
     @Test
+    void resultsAreRankedBestFirst() {
+        String pid = TenantFixture.bootstrap(tenants, "search-rank").project().id();
+        // Two spans: one whose payload repeats the term (higher ts_rank), one with a single mention.
+        seedSpan(pid, "latency latency latency", "latency latency in the response", "latency budget blown");
+        seedSpan(pid, "tone", "a passing aside", "mentions latency once");
+
+        List<SearchHit> hits = service.search(pid, "latency");
+
+        assertFalse(hits.isEmpty(), "the term matches at least one span");
+        for (int i = 1; i < hits.size(); i++) {
+            assertTrue(
+                    hits.get(i - 1).score() >= hits.get(i).score(), "hits are sorted by descending score (best-first)");
+        }
+    }
+
+    @Test
     void searchIsScopedToProject() {
         String pidA = TenantFixture.bootstrap(tenants, "search-a").project().id();
         String pidB = TenantFixture.bootstrap(tenants, "search-b").project().id();

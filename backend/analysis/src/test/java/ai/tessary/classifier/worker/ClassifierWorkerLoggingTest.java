@@ -121,6 +121,39 @@ class ClassifierWorkerLoggingTest {
         logbackLogger.detachAppender(appender);
     }
 
+    @Test
+    void repeatedBelowCapFailuresStayWarnAndDedupToOneStacktracePerStreak() {
+        ClassifierWorker worker = new ClassifierWorker(
+                signalService,
+                signals,
+                jobs,
+                detections,
+                arming,
+                substrate,
+                catalog,
+                preDeployChecks,
+                sweeps,
+                TestObjectProvider.of(),
+                new ClassifierProperties(),
+                new TraceMdcBridge(tracer),
+                new SyncTaskExecutor());
+
+        ClassifierJobRow job = new ClassifierJobRow(
+                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
+        when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
+        when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(false); // still inside the budget
+
+        worker.sweepForTest(job);
+        worker.sweepForTest(job);
+        worker.sweepForTest(job);
+
+        long errorCount =
+                appender.list.stream().filter(e -> e.getLevel() == Level.ERROR).count();
+        long warnCount =
+                appender.list.stream().filter(e -> e.getLevel() == Level.WARN).count();
+        assertTrue(errorCount == 0, "a below-cap unit failure never logs ERROR (that's the dead-letter's)");
+        assertTrue(warnCount == 1, "retries of the same failing job dedup to a single WARN, not one per tick");
+    }
     /**
      * A streak that runs past the summary interval must say it is still failing, with its count: after the
      * first stacktrace the job is otherwise silent, and a sweep failing every tick for an hour would look

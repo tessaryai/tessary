@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Base64 image content is externalized to a {@code media_object} ref at ingest — the persisted
@@ -39,6 +40,33 @@ class MediaExternalizerTest {
         media = mock(MediaStore.class);
         when(media.put(anyString(), any(), anyString())).thenReturn(new MediaRef("media-1"));
         externalizer = new MediaExternalizer(media, M);
+    }
+
+    @Test
+    void anthropicBase64Image_becomesImageRef_bytesStored() throws Exception {
+        byte[] bytes = {1, 2, 3, 4};
+        String b64 = Base64.getEncoder().encodeToString(bytes);
+        String json = "[{\"type\":\"text\",\"text\":\"look\"},"
+                + "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\""
+                + b64 + "\"}}]";
+
+        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
+        String out = java.util.Objects.requireNonNull(result.payload());
+
+        var arr = M.readTree(out);
+        assertEquals("image_ref", arr.get(1).path("type").asText());
+        assertEquals("media-1", arr.get(1).path("data").asText());
+        assertEquals("image/jpeg", arr.get(1).path("mediaType").asText());
+        assertFalse(out.contains(b64), "no base64 may survive into the persisted payload");
+        assertEquals(
+                List.of("media-1"),
+                result.mediaIds(),
+                "the caller must learn the id, or the media_ref row that makes the bytes reachable"
+                        + " and collectable is never written");
+
+        ArgumentCaptor<byte[]> stored = ArgumentCaptor.forClass(byte[].class);
+        verify(media).put(eq("p1"), stored.capture(), eq("image/jpeg"));
+        assertEquals(4, stored.getValue().length);
     }
 
     @Test

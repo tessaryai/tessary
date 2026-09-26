@@ -71,6 +71,14 @@ class FrustrationRateReplayTest {
     }
 
     @Test
+    void aCallSiteStillLearningIsNotJudged() {
+        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 9, 0.50);
+        Sweep sweep = sweep(s);
+        assertTrue(sweep.advanced().isEmpty(), "180 conversations is still learning");
+        assertTrue(sweep.spells().isEmpty());
+    }
+
+    @Test
     void aDoublingFromFivePercentAlarmsWithinAFewHundredConversations() {
         List<HourlyToolTally> s = series(new ArrayList<>(), 0, 10, 0.05);
         int hours = 0;
