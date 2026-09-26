@@ -59,4 +59,41 @@ describe("redactMediaData", () => {
     const linked = { type: "input_image", image_url: "https://cdn.example/b.png" };
     expect(redactMediaData(linked)).toBe(linked);
   });
+
+  it("elides an image_url given as a bare data URI string, and one given only on the part's url", () => {
+    const dataUri = `data:image/png;base64,${"A".repeat(2048)}`;
+
+    expect(redactMediaData({ type: "image_url", image_url: dataUri })).toEqual({
+      type: "image_url",
+      image_url: "<image data elided, 2.0 KB>",
+    });
+    expect(redactMediaData({ type: "image_url", url: dataUri })).toEqual({
+      type: "image_url",
+      url: "<image data elided, 2.0 KB>",
+    });
+  });
+
+  it("elides a file part's inline data under each field it may carry, and leaves a linked file alone", () => {
+    const dataUri = `data:application/pdf;base64,${"A".repeat(1024)}`;
+    const elided = "<document data elided, 1.0 KB>";
+
+    expect(redactMediaData({ type: "file", url: dataUri, file_url: dataUri, name: "a.pdf" })).toEqual({
+      type: "file",
+      url: elided,
+      file_url: elided,
+      name: "a.pdf",
+    });
+    expect(redactMediaData({ type: "input_file", file_data: dataUri })).toEqual({ type: "input_file", file_data: elided });
+    const linked = { type: "input_file", file_url: "https://cdn.example/a.pdf" };
+    expect(redactMediaData(linked)).toBe(linked);
+  });
+
+  it("elides a data URI in an Anthropic block's source url", () => {
+    const dataUri = `data:image/png;base64,${"A".repeat(1024)}`;
+
+    expect(redactMediaData({ type: "image", source: { type: "url", url: dataUri } })).toEqual({
+      type: "image",
+      source: { type: "url", url: "<image data elided, 1.0 KB>" },
+    });
+  });
 });
