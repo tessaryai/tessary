@@ -37,6 +37,8 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The token-head client under encoder pushback, against a loopback {@link ServerSocket} responder (forbidden-apis
@@ -213,13 +215,16 @@ class LauncherEncoderScorerBackpressureTest {
         return new Response(List.of("passage"), "q?", answer);
     }
 
+    /** A numeric Retry-After is waited instead of the backoff. */
     @Test
     void aThrottledRequestIsRetriedAndThenScored() {
         throttleFirst = 2;
+        retryAfter = "3";
         List<ResponseScore> out = scorer.scoreResponses("groundedness", List.of(r("a"), r("b")));
         assertEquals(2, out.size());
         assertTrue(out.stream().allMatch(ResponseScore::scored));
         assertEquals(3, requests.get(), "two 429s, then the one that answered");
+        assertEquals(List.of(3_000L, 3_000L), waits);
     }
 
     /**
@@ -238,18 +243,6 @@ class LauncherEncoderScorerBackpressureTest {
         assertFalse(e instanceof EncoderUnreachableException, "a throttled encoder is up, and failing the sweep");
         assertEquals(List.of(2_000L, 4_000L, 8_000L, 16_000L), waits);
         assertEquals(5, requests.get(), "the first send and four retries");
-    }
-
-    @Test
-    void aNumericRetryAfterIsWaitedInsteadOfTheBackoff() {
-        throttleFirst = 1;
-        retryAfter = "3";
-
-        List<ResponseScore> out = scorer.scoreResponses("groundedness", List.of(r("a")));
-
-        assertEquals(List.of(3_000L), waits);
-        assertEquals(1, out.size());
-        assertTrue(out.getFirst().scored());
     }
 
     /** Node serialises a NaN score as null; read as 0.0 it would record the answer as clean. */
@@ -297,25 +290,16 @@ class LauncherEncoderScorerBackpressureTest {
         assertTrue(unreachable.getFirst().startsWith("unreachable: "), unreachable.getFirst());
     }
 
-    @Test
-    void aServerErrorIsAFaultNotUnreachable() {
-        failWith = 500;
+    /** A model answering 500 is broken, not asleep, and a wrong key (401) is a fault the attempts should count. */
+    @ParameterizedTest
+    @ValueSource(ints = {500, 401})
+    void aServerErrorIsAFaultNotUnreachable(int status) {
+        failWith = status;
 
         IllegalStateException e =
                 assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
 
-        assertFalse(e instanceof EncoderUnreachableException, "a model that answers 500 is broken, not asleep");
-        assertTrue(unreachable.isEmpty());
-    }
-
-    @Test
-    void anUnauthorisedAnswerIsAFaultNotUnreachable() {
-        failWith = 401;
-
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
-
-        assertFalse(e instanceof EncoderUnreachableException, "a wrong key is a fault the attempts should count");
+        assertFalse(e instanceof EncoderUnreachableException);
         assertTrue(unreachable.isEmpty());
     }
 

@@ -4,8 +4,12 @@ package ai.tessary.classifier.detector.groundedness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * The abstain decision in front of the entailment head. Every "nothing to check" case here is a real
@@ -13,123 +17,73 @@ import org.junit.jupiter.api.Test;
  */
 class VerifiableClaimsTest {
 
-    @Test
-    @DisplayName("first-person narration without an anchor is not a claim")
-    void unanchoredMetaYieldsNothing() {
-        assertEquals(List.of(), VerifiableClaims.of("I can help with that."));
-        assertEquals(List.of(), VerifiableClaims.of("Let me take a look for you."));
+    private static final String REFUND_CONFIRMED = "All set — return RMA-00000 is confirmed and I've processed your "
+            + "refund of $999.00 back to your Visa ending 4242.";
+    private static final String DENIAL_AFTER_SORRY =
+            "Sorry, that item is non-refundable and your order shipped on 3 March.";
+    private static final String SHIPPED_AFTER_OPENER =
+            "I'm sorry, but your order was already shipped and cannot be cancelled.";
+
+    static Stream<Arguments> answers() {
+        return Stream.of(
+                // First-person narration without an anchor asserts nothing.
+                Arguments.of("I can help with that.", List.of()),
+                Arguments.of("Let me take a look for you.", List.of()),
+                // With an anchor it is a claim: this is where fabrication hides.
+                Arguments.of(REFUND_CONFIRMED, List.of(REFUND_CONFIRMED)),
+                Arguments.of(
+                        "Happy to help! Refunds take 5–7 business days. Anything else?",
+                        List.of("Refunds take 5–7 business days.")),
+                Arguments.of("", List.of()),
+                Arguments.of("   ", List.of()),
+                Arguments.of(
+                        "Refunds are issued within 5 business days\nStore credit is offered as an alternative",
+                        List.of(
+                                "Refunds are issued within 5 business days",
+                                "Store credit is offered as an alternative")),
+                // `sorry\b.*` under matches() once dropped the denial after the apology; a bare apology still drops.
+                Arguments.of(DENIAL_AFTER_SORRY, List.of(DENIAL_AFTER_SORRY)),
+                Arguments.of("Sorry!", List.of()),
+                Arguments.of("I'm sorry.", List.of()),
+                // A self-report about the agent's own actions: no document can entail it.
+                Arguments.of("I've escalated this to our returns team.", List.of()),
+                Arguments.of("I have cancelled your subscription.", List.of()),
+                Arguments.of("I'm looking into that for you.", List.of()),
+                Arguments.of("I'm not finding any orders on your account.", List.of()),
+                // META is a prefix match, so an opener once swallowed the assertion after it...
+                Arguments.of(SHIPPED_AFTER_OPENER, List.of(SHIPPED_AFTER_OPENER)),
+                // ...but a hedge introducing another hedge still drops.
+                Arguments.of("I'm looking into that, please hold.", List.of()),
+                Arguments.of("I can check, one moment.", List.of()),
+                // An honest refusal: `i can ` does not match `I can't`, which let the clause-break rule admit these.
+                Arguments.of(
+                        "I'm sorry, but I don't have information about that in the provided documents.", List.of()),
+                Arguments.of("I'm sorry, but I can't help with that request.", List.of()),
+                Arguments.of("I'm sorry, but I cannot process that refund.", List.of()),
+                Arguments.of("I'm afraid I won't be able to do that.", List.of()),
+                // KNOWN GAP: contradicts the policy outright, but has no digit or proper noun. Pinned so the gap
+                // stays visible; it is the case that would justify a learned decomposer.
+                Arguments.of("Damaged items are non-refundable.", List.of()));
+    }
+
+    @ParameterizedTest
+    @MethodSource("answers")
+    void keepsOnlyTheSentencesAnEntailmentCheckCanJudge(String answer, List<String> claims) {
+        assertEquals(claims, VerifiableClaims.of(answer));
     }
 
     @Test
-    @DisplayName("first-person narration WITH an anchor is a claim — this is where fabrication hides")
-    void anchoredMetaIsAClaim() {
-        String sentence = "All set — return RMA-00000 is confirmed and I've processed your refund of $999.00 "
-                + "back to your Visa ending 4242.";
-        assertEquals(List.of(sentence), VerifiableClaims.of(sentence), "the whole sentence, as written");
-    }
-
-    @Test
-    @DisplayName("a mixed answer keeps only the checkable sentence")
-    void mixedAnswerKeepsOnlyTheAssertion() {
-        List<String> claims = VerifiableClaims.of("Happy to help! Refunds take 5–7 business days. Anything else?");
-        assertEquals(List.of("Refunds take 5–7 business days."), claims);
-    }
-
-    @Test
-    @DisplayName("blank and null answers yield nothing rather than throwing")
-    void blankIsEmpty() {
-        assertEquals(List.of(), VerifiableClaims.of(""));
-        assertEquals(List.of(), VerifiableClaims.of("   "));
+    void aNullAnswerYieldsNothingRatherThanThrowing() {
         assertEquals(List.of(), VerifiableClaims.of(null));
-    }
-
-    @Test
-    @DisplayName("newlines separate sentences even without terminating punctuation")
-    void newlinesSplit() {
-        List<String> claims = VerifiableClaims.of(
-                "Refunds are issued within 5 business days\nStore credit is offered as an alternative");
-        assertEquals(
-                List.of("Refunds are issued within 5 business days", "Store credit is offered as an alternative"),
-                claims);
-    }
-
-    @Test
-    @DisplayName("an apology is a common PREFIX to a factual denial, and the denial survives it")
-    void apologyPrefixDoesNotSwallowTheAssertion() {
-        // `sorry\b.*` under matches() dropped the whole sentence after the word, silencing exactly the
-        // assertions worth checking — a denial is usually delivered with an apology in front of it.
-        String sentence = "Sorry, that item is non-refundable and your order shipped on 3 March.";
-        assertEquals(List.of(sentence), VerifiableClaims.of(sentence));
-        // a bare apology still asserts nothing
-        assertEquals(List.of(), VerifiableClaims.of("Sorry!"));
-        assertEquals(List.of(), VerifiableClaims.of("I'm sorry."));
-    }
-
-    @Test
-    @DisplayName("a self-report about the agent's own actions is out of scope, not a claim")
-    void selfReportedActionIsNotAClaim() {
-        // No retrieved document can entail "I've escalated this" — the sentence is about the agent, not
-        // about the source material. Admitting it does not catch fabricated actions; it fires
-        // groundedness on every honest one. Same argument that put tool results out of scope.
-        assertEquals(List.of(), VerifiableClaims.of("I've escalated this to our returns team."));
-        assertEquals(List.of(), VerifiableClaims.of("I have cancelled your subscription."));
-        assertEquals(List.of(), VerifiableClaims.of("I'm looking into that for you."));
-        assertEquals(List.of(), VerifiableClaims.of("I can help with that."));
-        assertEquals(List.of(), VerifiableClaims.of("I'm not finding any orders on your account."));
-    }
-
-    @Test
-    @DisplayName("a first-person opener does not swallow the assertion that follows it")
-    void firstPersonOpenerDoesNotSwallowTheClause() {
-        // The sibling of the `sorry\b.*` swallow, one pattern over: META is a prefix match, so an
-        // apology or hedge in front of a real assertion took the whole sentence with it.
-        String sentence = "I'm sorry, but your order was already shipped and cannot be cancelled.";
-        assertEquals(
-                List.of(sentence),
-                VerifiableClaims.of(sentence),
-                "the assertion about the order survives the apology in front of it");
-
-        // ...but only when what follows stands on its own. A hedge introducing another hedge still drops.
-        assertEquals(List.of(), VerifiableClaims.of("I'm looking into that, please hold."));
-        assertEquals(List.of(), VerifiableClaims.of("I can check, one moment."));
-    }
-
-    @Test
-    @DisplayName("an honest refusal is not a claim, contracted or not")
-    void refusalsAreNotClaims() {
-        // The canonical grounded abstention. No retrieved passage can entail it, so scoring it is the
-        // exact false positive this class exists to remove — and `i can ` does not match `I can't`,
-        // which let the clause-break rule admit these.
-        assertEquals(
-                List.of(),
-                VerifiableClaims.of("I'm sorry, but I don't have information about that in the provided documents."));
-        assertEquals(List.of(), VerifiableClaims.of("I'm sorry, but I can't help with that request."));
-        assertEquals(List.of(), VerifiableClaims.of("I'm sorry, but I cannot process that refund."));
-        assertEquals(List.of(), VerifiableClaims.of("I'm afraid I won't be able to do that."));
-        // and the assertion-bearing sibling still survives its apology
-        String shipped = "I'm sorry, but your order was already shipped and cannot be cancelled.";
-        assertEquals(List.of(shipped), VerifiableClaims.of(shipped));
     }
 
     @Test
     @DisplayName("a hedge chain cannot exhaust the stack — model output is uncapped")
     void longHedgeChainIsBoundedAndStillDrops() {
-        // The clause recursion terminated but its depth was the sentence's clause count, and the
-        // sentence is model output: 50,000 repetitions raised StackOverflowError. ClassifierWorker
-        // catches Exception, not Error, so that killed the whole sweep.
+        // 50,000 repetitions once raised StackOverflowError, and ClassifierWorker catches Exception, not Error,
+        // so it killed the whole sweep.
         String chain = "I'm sorry, ".repeat(50_000) + "please hold.";
 
         assertEquals(List.of(), VerifiableClaims.of(chain), "a hedge chain still asserts nothing, however long");
-    }
-
-    @Test
-    @DisplayName("KNOWN GAP: a short flat assertion with no anchor is dropped")
-    void shortFlatAssertionIsDropped() {
-        // "Damaged items are non-refundable." contradicts the retrieved policy outright, and this
-        // deterministic tier cannot see it: no digit, no proper noun, three long words. It is caught
-        // today only because the answer's NEXT sentence survives. Pinned so the gap is visible rather
-        // than discovered again from a missed finding — this is the case that justifies a learned
-        // decomposer if one is ever built.
-        assertEquals(List.of(), VerifiableClaims.of("Damaged items are non-refundable."));
     }
 }

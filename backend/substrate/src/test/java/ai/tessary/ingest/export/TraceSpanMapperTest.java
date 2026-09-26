@@ -12,12 +12,16 @@ import ai.tessary.open.media.MediaStore.StoredMedia;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Verifies the exporter produces OTel GenAI spans the evals plugin's Path A can
@@ -57,6 +61,7 @@ class TraceSpanMapperTest {
                 "You are a planner",
                 in.get(0).get("parts").get(0).get("content").asText());
         assertEquals("user", in.get(1).get("role").asText());
+        assertFalse(in.get(1).has("has_media"), "a text-only message carries no has_media flag");
 
         JsonNode out = parseAttr(span, "gen_ai.output.messages");
         assertEquals(1, out.size());
@@ -135,96 +140,49 @@ class TraceSpanMapperTest {
         assertTrue(all.toString().contains("[image: https://e/x.png]"), "a real URL becomes a labeled placeholder");
     }
 
-    @Test
-    void imageRef_mediaStoreHit_inlinesRealBytes() throws Exception {
+    static Stream<Arguments> mediaParts() {
         byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
-        MediaStore store = fakeStore(Map.of("m1", new StoredMedia(new MediaRef("m1"), "image/png", png)));
-        ObjectNode span = TraceSpanMapper.toSpan(
-                raw(
-                        "[{\"role\":\"user\",\"content\":[{\"type\":\"image_ref\",\"data\":\"m1\",\"mediaType\":\"image/png\"}]}]",
-                        "ok",
-                        "gpt-4o"),
-                "svc",
-                store,
-                "p1");
-        JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        String content = in.get(0).get("parts").get(0).get("content").asText();
-        assertEquals("data:image/png;base64," + Base64.getEncoder().encodeToString(png), content);
+        byte[] pdf = "real pdf bytes".getBytes(StandardCharsets.UTF_8);
+        MediaStore store = fakeStore(Map.of(
+                "m1", new StoredMedia(new MediaRef("m1"), "image/png", png),
+                "d1", new StoredMedia(new MediaRef("d1"), "application/pdf", pdf)));
+        Base64.Encoder b64 = Base64.getEncoder();
+        return Stream.of(
+                Arguments.of(
+                        store,
+                        "{\"type\":\"image_ref\",\"data\":\"m1\",\"mediaType\":\"image/png\"}",
+                        "data:image/png;base64," + b64.encodeToString(png)),
+                // Export ships the real bytes, not the extracted text.
+                Arguments.of(
+                        store,
+                        "{\"type\":\"document_ref\",\"data\":\"d1\",\"mediaType\":\"application/pdf\","
+                                + "\"text\":\"extracted text (ignored for export)\"}",
+                        "data:application/pdf;base64," + b64.encodeToString(pdf)),
+                // An unresolvable ref falls back to the honest label, never a silent drop.
+                Arguments.of(
+                        store,
+                        "{\"type\":\"image_ref\",\"data\":\"gone\",\"mediaType\":\"image/png\"}",
+                        "[image omitted: image/png]"),
+                Arguments.of(
+                        store,
+                        "{\"type\":\"document_ref\",\"data\":\"gone\",\"mediaType\":\"application/pdf\"}",
+                        "[document omitted: application/pdf]"),
+                // The ingest-time failure marker is not real text and must not ship as if it were.
+                Arguments.of(
+                        store,
+                        "{\"type\":\"document_ref\",\"data\":\"gone\",\"mediaType\":\"application/pdf\","
+                                + "\"text\":\"[document text unavailable]\"}",
+                        "[document omitted: application/pdf]"));
     }
 
-    @Test
-    void imageRef_mediaStoreMiss_fallsBackToOmittedLabel_stillLossless() throws Exception {
-        MediaStore empty = fakeStore(Map.of());
+    @ParameterizedTest
+    @MethodSource("mediaParts")
+    void aMediaRefExportsItsStoredBytesOrAnOmittedLabel(MediaStore store, String part, String exported)
+            throws Exception {
         ObjectNode span = TraceSpanMapper.toSpan(
-                raw(
-                        "[{\"role\":\"user\",\"content\":[{\"type\":\"image_ref\",\"data\":\"gone\",\"mediaType\":\"image/png\"}]}]",
-                        "ok",
-                        "gpt-4o"),
-                "svc",
-                empty,
-                "p1");
+                raw("[{\"role\":\"user\",\"content\":[" + part + "]}]", "ok", "gpt-4o"), "svc", store, "p1");
         JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        assertEquals(
-                "[image omitted: image/png]",
-                in.get(0).get("parts").get(0).get("content").asText(),
-                "an unresolvable ref falls back to the honest label, never a silent drop");
-    }
-
-    @Test
-    void documentRef_mediaStoreHit_inlinesRealBytes() throws Exception {
-        byte[] pdf = "real pdf bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        MediaStore store = fakeStore(Map.of("d1", new StoredMedia(new MediaRef("d1"), "application/pdf", pdf)));
-        ObjectNode span = TraceSpanMapper.toSpan(
-                raw(
-                        "[{\"role\":\"user\",\"content\":[{\"type\":\"document_ref\",\"data\":\"d1\","
-                                + "\"mediaType\":\"application/pdf\",\"text\":\"extracted text (ignored for export)\"}]}]",
-                        "ok",
-                        "gpt-4o"),
-                "svc",
-                store,
-                "p1");
-        JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        assertEquals(
-                "data:application/pdf;base64," + Base64.getEncoder().encodeToString(pdf),
-                in.get(0).get("parts").get(0).get("content").asText(),
-                "export preserves the real bytes, not the extracted text");
-    }
-
-    @Test
-    void documentRef_mediaStoreMiss_fallsBackToOmittedLabel() throws Exception {
-        MediaStore empty = fakeStore(Map.of());
-        ObjectNode span = TraceSpanMapper.toSpan(
-                raw(
-                        "[{\"role\":\"user\",\"content\":[{\"type\":\"document_ref\",\"data\":\"gone\","
-                                + "\"mediaType\":\"application/pdf\"}]}]",
-                        "ok",
-                        "gpt-4o"),
-                "svc",
-                empty,
-                "p1");
-        JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        assertEquals(
-                "[document omitted: application/pdf]",
-                in.get(0).get("parts").get(0).get("content").asText());
-    }
-
-    @Test
-    void documentRef_mediaStoreMiss_fallsBackToOmittedLabel_whenTextIsUnavailableMarker() throws Exception {
-        MediaStore empty = fakeStore(Map.of());
-        ObjectNode span = TraceSpanMapper.toSpan(
-                raw(
-                        "[{\"role\":\"user\",\"content\":[{\"type\":\"document_ref\",\"data\":\"gone\","
-                                + "\"mediaType\":\"application/pdf\",\"text\":\"[document text unavailable]\"}]}]",
-                        "ok",
-                        "gpt-4o"),
-                "svc",
-                empty,
-                "p1");
-        JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        assertEquals(
-                "[document omitted: application/pdf]",
-                in.get(0).get("parts").get(0).get("content").asText(),
-                "the ingest-time failure marker is not real text and must not be shipped as if it were");
+        assertEquals(exported, in.get(0).get("parts").get(0).get("content").asText());
     }
 
     @Test
@@ -242,16 +200,6 @@ class TraceSpanMapperTest {
         assertEquals(
                 "[document: https://e/report.pdf]",
                 in.get(0).get("parts").get(0).get("content").asText());
-    }
-
-    @Test
-    void textOnlyMessage_unchanged_noHasMediaFlag() throws Exception {
-        ObjectNode span = TraceSpanMapper.toSpan(
-                raw("[{\"role\":\"user\",\"content\":\"plain question\"}]", "answer", "gpt-4o"), "svc", null, null);
-        JsonNode in = parseAttr(span, "gen_ai.input.messages");
-        assertEquals(
-                "plain question", in.get(0).get("parts").get(0).get("content").asText());
-        assertFalse(in.get(0).has("has_media"), "a text-only message carries no has_media flag");
     }
 
     /** In-memory MediaStore keyed by ref id. */

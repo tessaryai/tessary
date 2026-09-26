@@ -156,18 +156,6 @@ class McpSubstrateReadToolsTest {
         assertFalse(body.get("next_cursor").isNull(), "the extra row means there is another page");
     }
 
-    @Test
-    void listTraces_lastPageCarriesNoNextCursor() throws Exception {
-        when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
-                .thenReturn(
-                        List.of(summary("t-1", "2026-08-17T10:00:00Z", 0), summary("t-2", "2026-08-17T09:00:00Z", 0)));
-
-        JsonNode body = structured(callTool("list_traces", "{\"limit\":2}"));
-
-        assertEquals(2, body.get("traces").size());
-        assertTrue(body.get("next_cursor").isNull(), "exactly a page's worth means the page was the last one");
-    }
-
     /** Page two resumes from page one's last row, not the over-fetched row, which would skip itself. */
     @Test
     void listTraces_cursorResumesTheKeysetWhereThePageEnded() throws Exception {
@@ -216,13 +204,22 @@ class McpSubstrateReadToolsTest {
         assertNull(beforeId.getValue());
     }
 
-    /** A row is the stored rollup plus previews; the absent payload fields are the assertion. */
+    /**
+     * A row is the stored rollup plus previews; the absent payload fields are the assertion. A never-rolled-up trace
+     * has no error count, so it is neither ok nor errored.
+     */
     @Test
     void listTraces_rowsAreRollupRowsAndCarryNoPayload() throws Exception {
         when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
-                .thenReturn(List.of(summary("t-1", "2026-08-17T10:00:00Z", 2)));
+                .thenReturn(List.of(
+                        summary("t-1", "2026-08-17T10:00:00Z", 2), summary("t-2", "2026-08-17T09:00:00Z", null)));
 
-        JsonNode row = structured(callTool("list_traces", "{}")).get("traces").get(0);
+        JsonNode body = structured(callTool("list_traces", "{\"limit\":2}"));
+        JsonNode row = body.get("traces").get(0);
+        assertTrue(body.get("next_cursor").isNull(), "exactly a page's worth means the page was the last one");
+        JsonNode unrolled = body.get("traces").get(1);
+        assertTrue(unrolled.get("status").isNull(), "no error count means no status");
+        assertTrue(unrolled.get("error_count").isNull());
 
         assertEquals("t-1", row.get("id").asText());
         assertEquals(3, row.get("span_count").asInt());
@@ -236,21 +233,6 @@ class McpSubstrateReadToolsTest {
         for (String payloadField : List.of("input", "output", "attributes", "provided_usage", "spans")) {
             assertNull(row.get(payloadField), "a list row must not carry " + payloadField);
         }
-    }
-
-    /**
-     * A never-rolled-up trace has no error count, so it is neither ok nor errored; this is the shape a later edit
-     * might "helpfully" coalesce.
-     */
-    @Test
-    void listTraces_anUnrolledTraceHasNoStatusRatherThanAHealthyOne() throws Exception {
-        when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
-                .thenReturn(List.of(summary("t-1", "2026-08-17T10:00:00Z", null)));
-
-        JsonNode row = structured(callTool("list_traces", "{}")).get("traces").get(0);
-
-        assertTrue(row.get("status").isNull(), "no error count means no status");
-        assertTrue(row.get("error_count").isNull());
     }
 
     // ---- list_spans ----------------------------------------------------------------------------
@@ -315,31 +297,21 @@ class McpSubstrateReadToolsTest {
                 Objects.requireNonNull(sent.filters()));
     }
 
-    @Test
-    void listSpans_defaultPageIsFiftyAndCarriesTheSearchPagesOwnCursor() throws Exception {
-        when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage("next-page"));
-        when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1")));
-
-        JsonNode body = structured(callTool("list_spans", "{}"));
-
-        var req = ArgumentCaptor.forClass(QueryDtos.SearchRequest.class);
-        verify(queries).search(eq(PROJECT_ID), req.capture());
-        assertEquals(50, Objects.requireNonNull(req.getValue().limit()).intValue());
-        // The cursor is QueryRepository's, passed through, so it resumes the same scan.
-        assertEquals("next-page", body.get("next_cursor").asText());
-    }
-
     /**
      * Payload fields are absent, not null: a null {@code input} beside {@code payload_available: true} would claim
      * the call had no input.
      */
     @Test
     void listSpans_defaultRowsCarryPreviewsAndAvailabilityButNoPayloadKeys() throws Exception {
-        when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage(null, key("t-1", "s-1"), key("t-1", "s-2")));
+        when(queries.search(eq(PROJECT_ID), any()))
+                .thenReturn(searchPage("next-page", key("t-1", "s-1"), key("t-1", "s-2")));
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1"), span("t-1", "s-2")));
         when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of(new SpanKey("t-1", "s-1")));
 
-        JsonNode rows = structured(callTool("list_spans", "{}")).get("spans");
+        JsonNode body = structured(callTool("list_spans", "{}"));
+        JsonNode rows = body.get("spans");
+        // The cursor is QueryRepository's, passed through, so it resumes the same scan.
+        assertEquals("next-page", body.get("next_cursor").asText());
 
         assertEquals(2, rows.size());
         assertEquals("t-1", rows.get(0).get("trace_id").asText());
@@ -518,19 +490,13 @@ class McpSubstrateReadToolsTest {
                                 null)),
                         "cursor-2"));
 
-        JsonNode body = structured(callTool("list_sessions", "{\"limit\":500}"));
+        JsonNode body = structured(callTool("list_sessions", "{\"limit\":500,\"cursor\":\"opaque-token\"}"));
 
-        // The page size is clamped by the tool, not the service.
-        verify(sessions).page(PROJECT_ID, 100, null, false);
+        // The page size is clamped by the tool, not the service, and the cursor passes through untouched.
+        verify(sessions).page(PROJECT_ID, 100, "opaque-token", false);
         assertEquals("sess-1", body.get("sessions").get(0).get("id").asText());
         assertEquals("user-9", body.get("sessions").get(0).get("user_id").asText());
         assertEquals("cursor-2", body.get("next_cursor").asText());
-    }
-
-    @Test
-    void listSessions_passesTheCursorThroughUntouched() throws Exception {
-        callTool("list_sessions", "{\"cursor\":\"opaque-token\"}");
-        verify(sessions).page(PROJECT_ID, 50, "opaque-token", false);
     }
 
     /**

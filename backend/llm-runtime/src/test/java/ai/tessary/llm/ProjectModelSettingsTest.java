@@ -33,9 +33,6 @@ class ProjectModelSettingsTest {
     private static final String PID = "p1";
     private static final String ORG = "org1";
     private static final String HAIKU = "anthropic.claude-haiku-4-5";
-    /** Removed (Amazon is not a supported maker); kept as a dotted Bedrock-shaped key that resolves nowhere. */
-    private static final String NOVA = "amazon.nova-2-lite";
-
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String SONNET_5 = "anthropic.claude-sonnet-5";
 
@@ -94,26 +91,17 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void theFirstProviderConfiguredDecidesEveryUnsetLane() {
-        configured(ModelProvider.BEDROCK);
-
-        var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(SONNET_5, rca.modelKey(), "Bedrock's default model on RCA");
-        assertTrue(rca.automatic());
-        assertEquals(ServiceTier.STANDARD, rca.serviceTier());
-
-        var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
-        assertEquals(SONNET_5, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
-        assertTrue(triage.automatic());
-    }
-
-    @Test
     void providerIsChosenBeforeModel() {
         // Bedrock's flagship would outrank on a flat by-model ranking, but provider order decides: Bedrock is
         // configured, so RCA runs Bedrock's default.
         configured(ModelProvider.BEDROCK, ModelProvider.GEMINI);
-        assertEquals(
-                SONNET_5, settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey());
+        var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
+        assertEquals(SONNET_5, rca.modelKey());
+        assertTrue(rca.automatic());
+        assertEquals(ServiceTier.STANDARD, rca.serviceTier());
+        var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
+        assertEquals(SONNET_5, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
+        assertTrue(triage.automatic());
 
         configured(ModelProvider.GEMINI);
         assertEquals(
@@ -234,10 +222,20 @@ class ProjectModelSettingsTest {
         assertEquals(1, settings.list(PID).size(), "the row is still reported to the settings UI");
     }
 
-    @Test
-    void rejectsAModelThatIsNotOnePlatformModel() {
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "gpt-5.5"));
+    /**
+     * A bare name, a key naming no provider, and a missing catalog entry are unknown. The Nova key is dotted like a
+     * Bedrock id but resolves nowhere, so it fails as unknown, not non-agentic.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "RCA, gpt-5.5",
+        "RCA, amazon.nova-2-lite",
+        "TRIAGE, amazon.nova-2-lite",
+        "RCA, NOPE:some-model",
+        "RCA, GEMINI:no-such-model"
+    })
+    void rejectsAModelThatIsNotOnePlatformModel(ModelLane lane, String key) {
+        TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, key));
         assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
@@ -247,25 +245,6 @@ class ProjectModelSettingsTest {
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "GROK:grok-4.6"));
         assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, ex.error());
-    }
-
-    /**
-     * No non-agentic Bedrock model is left, so this key fails as unknown. {@code
-     * aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane} covers {@code MODEL_NOT_AGENTIC} via the catalog.
-     */
-    @Test
-    void aNovaShapedKeyFailsAsUnknownRatherThanNonAgentic() {
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
-            TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, NOVA));
-            assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error(), "lane " + lane);
-        }
-    }
-
-    @Test
-    void aStoredRowForARemovedModelFallsBackToTheOrder() {
-        // A row from before the validator must not pin a sandbox to a model that resolves nowhere.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, NOVA, ServiceTier.STANDARD)));
-        assertTrue(settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic());
     }
 
     @Test
@@ -310,7 +289,9 @@ class ProjectModelSettingsTest {
     @CsvSource({
         "RCA, OPENAI:gpt-5.5, anthropic.claude-sonnet-5",
         "FRUSTRATION, OPENAI:gpt-5.5, TYPESAFE:jev-latest",
-        "RCA, NOPE:some-model, anthropic.claude-sonnet-5"
+        "RCA, NOPE:some-model, anthropic.claude-sonnet-5",
+        // A row from before Nova was removed must not pin a sandbox to a model that resolves nowhere.
+        "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5"
     })
     void aStoredRowTheLaneCannotRunFallsBackToTheOrder(ModelLane lane, String stored, String fallback) {
         when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored, ServiceTier.STANDARD)));
@@ -322,23 +303,9 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void aCatalogKeyNamingNoProviderIsRejectedAsUnknown() {
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "NOPE:some-model"));
-        assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
-    }
-
-    @Test
     void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {
         settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
         verify(repo).upsert(PID, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD, null);
-    }
-
-    @Test
-    void aCatalogKeyForAnUnknownCatalogEntry_isRejectedAsUnknownPlatformModel() {
-        TessaryException ex = assertThrows(
-                TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "GEMINI:no-such-model"));
-        assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
     @Test

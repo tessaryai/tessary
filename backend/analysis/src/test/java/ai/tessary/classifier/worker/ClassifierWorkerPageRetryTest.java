@@ -38,6 +38,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
@@ -105,37 +107,24 @@ class ClassifierWorkerPageRetryTest {
         logbackLogger.detachAppender(appender);
     }
 
-    // ---- the rule ---------------------------------------------------------------------------------
-
-    @Test
-    void decide_holdsAPageWhereMoreThanHalfOfTheSentTurnsWereUnavailable() {
-        assertEquals(PageAction.HOLD, PageRetryRule.decide(page(Status.SCORED, 4, 3), 0, MAX_HOLDS));
-        assertEquals(PageAction.HOLD, PageRetryRule.decide(page(Status.SCORED, 3, 2), 2, MAX_HOLDS));
+    /** More than half the sent turns unavailable holds the page; a page held {@code maxHolds} times is skipped. */
+    @ParameterizedTest
+    @CsvSource({
+        "SCORED,  4, 3, 0, 3, HOLD",
+        "SCORED,  3, 2, 2, 3, HOLD",
+        "SCORED,  4, 2, 0, 3, PERSIST",
+        "SCORED,  4, 0, 0, 3, PERSIST",
+        // Nothing eligible is written, which advances past it.
+        "SCORED,  0, 0, 0, 3, PERSIST",
+        "SCORED,  4, 4, 3, 3, SKIP",
+        "SCORED,  4, 4, 0, 0, SKIP",
+        "ABORTED, 4, 0, 0, 3, ABORT",
+        "PAUSED,  0, 0, 0, 3, PASS"
+    })
+    void decideHoldsPersistsSkipsAbortsOrPasses(
+            Status status, int sent, int unavailable, int holds, int maxHolds, PageAction expected) {
+        assertEquals(expected, PageRetryRule.decide(page(status, sent, unavailable), holds, maxHolds));
     }
-
-    @Test
-    void decide_persistsAPageAtOrUnderHalf() {
-        assertEquals(PageAction.PERSIST, PageRetryRule.decide(page(Status.SCORED, 4, 2), 0, MAX_HOLDS));
-        assertEquals(PageAction.PERSIST, PageRetryRule.decide(page(Status.SCORED, 4, 0), 0, MAX_HOLDS));
-        assertEquals(
-                PageAction.PERSIST,
-                PageRetryRule.decide(page(Status.SCORED, 0, 0), 0, MAX_HOLDS),
-                "a page with nothing eligible is written, which advances past it");
-    }
-
-    @Test
-    void decide_skipsThePageOnceItWasHeldAsOftenAsAllowed() {
-        assertEquals(PageAction.SKIP, PageRetryRule.decide(page(Status.SCORED, 4, 4), MAX_HOLDS, MAX_HOLDS));
-        assertEquals(PageAction.SKIP, PageRetryRule.decide(page(Status.SCORED, 4, 4), 0, 0));
-    }
-
-    @Test
-    void decide_abortsOnAPauseMidPageAndPassesWhenAlreadyPaused() {
-        assertEquals(PageAction.ABORT, PageRetryRule.decide(page(Status.ABORTED, 4, 0), 0, MAX_HOLDS));
-        assertEquals(PageAction.PASS, PageRetryRule.decide(page(Status.PAUSED, 0, 0), 0, MAX_HOLDS));
-    }
-
-    // ---- the worker applying it -------------------------------------------------------------------
 
     @Test
     void aHeldPageLeavesTheCursorAndCountsTheHold() {

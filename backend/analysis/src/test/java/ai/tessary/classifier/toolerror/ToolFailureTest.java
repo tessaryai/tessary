@@ -8,10 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import ai.tessary.classifier.toolerror.ToolFailure.Source;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * The definition's tests. {@code devdocs/concepts/tool-error.md} §1 and §2 say what a tool failure is
@@ -21,22 +24,6 @@ class ToolFailureTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /**
-     * Recognize, and fail the test rather than the null check if nothing matched. {@code recognize}
-     * returns null for a clean call, which is a real answer the exclusion tests below assert on — so the
-     * inclusion tests need somewhere to say "this must have matched" that is not a bare dereference.
-     */
-    private static ToolFailure.Recognized recognized(
-            @Nullable String errorType,
-            boolean isError,
-            @Nullable String errorTypeAttr,
-            @Nullable String exceptionAttr,
-            @Nullable JsonNode result) {
-        ToolFailure.Recognized r = ToolFailure.recognize(errorType, isError, errorTypeAttr, exceptionAttr, result);
-        assertNotNull(r, "expected this to be recognized as a failure");
-        return r;
-    }
-
     private static JsonNode json(String raw) {
         try {
             return MAPPER.readTree(raw);
@@ -45,74 +32,70 @@ class ToolFailureTest {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // §1 — the four rules
-    // ---------------------------------------------------------------------------------------------
-
-    @Test
-    void spanStatusIsRuleOneAndKeepsItsMessage() {
-        var r = recognized("HTTP 500 upstream", false, null, null, null);
-        assertEquals(Source.SPAN_STATUS, r.source());
-        assertEquals("http <num> upstream", r.signature());
+    static Stream<Arguments> failures() {
+        return Stream.of(
+                // Rule 1: span status, keeping its message.
+                Arguments.of("HTTP 500 upstream", false, null, null, null, Source.SPAN_STATUS, "http <num> upstream"),
+                // The rule this class exists for: a framework catches the exception, returns an error object to the
+                // model, and closes the span cleanly. Status OK, error_type null, and once invisible.
+                Arguments.of(
+                        null,
+                        false,
+                        null,
+                        null,
+                        "{\"error\": \"no such customer\"}",
+                        Source.RESULT_ERROR,
+                        "no such customer"),
+                Arguments.of(
+                        null,
+                        false,
+                        null,
+                        null,
+                        "{\"isError\": true, \"content\": \"rate limited\"}",
+                        Source.RESULT_ERROR,
+                        "rate limited"),
+                Arguments.of(
+                        null,
+                        false,
+                        null,
+                        null,
+                        "{\"isError\": true}",
+                        Source.RESULT_ERROR,
+                        "tool result reported iserror"),
+                Arguments.of(
+                        null, false, "OrderServiceTimeout", null, null, Source.ERROR_TYPE_ATTR, "orderservicetimeout"),
+                Arguments.of(
+                        null,
+                        false,
+                        null,
+                        "java.net.SocketTimeoutException",
+                        null,
+                        Source.EXCEPTION_ATTR,
+                        "java.net.sockettimeoutexception"),
+                // The sender stating an error outright wins over a read convention.
+                Arguments.of(
+                        "HTTP 500", true, "Timeout", null, "{\"isError\": true}", Source.SPAN_STATUS, "http <num>"),
+                Arguments.of(null, true, null, null, null, Source.SPAN_STATUS, ToolFailure.UNDESCRIBED));
     }
 
-    /**
-     * The rule the old definition was missing, and the reason this whole class exists: a framework
-     * catches the exception, hands an error object back to the model, and closes the span cleanly. Span
-     * status is OK, {@code error_type} is null, and before this the platform could not see it at all.
-     */
-    @Test
-    void aCleanSpanWhoseResultDeclaresAnErrorIsAFailure() {
-        var r = recognized(null, false, null, null, json("{\"error\": \"no such customer\"}"));
-        assertEquals(Source.RESULT_ERROR, r.source());
-        assertEquals("no such customer", r.signature());
+    @ParameterizedTest
+    @MethodSource("failures")
+    void eachRuleRecognizesAFailureWithItsSourceAndSignature(
+            @Nullable String errorType,
+            boolean isError,
+            @Nullable String errorTypeAttr,
+            @Nullable String exceptionAttr,
+            @Nullable String result,
+            Source source,
+            String signature) {
+        ToolFailure.Recognized r = ToolFailure.recognize(
+                errorType, isError, errorTypeAttr, exceptionAttr, result == null ? null : json(result));
+        assertNotNull(r, "expected this to be recognized as a failure");
+        assertEquals(source, r.source());
+        assertEquals(signature, r.signature());
     }
 
-    @Test
-    void mcpIsErrorEnvelopeIsAFailure() {
-        var r = recognized(null, false, null, null, json("{\"isError\": true, \"content\": \"rate limited\"}"));
-        assertEquals(Source.RESULT_ERROR, r.source());
-        assertEquals("rate limited", r.signature());
-    }
-
-    @Test
-    void mcpIsErrorWithoutContentStillGroups() {
-        var r = recognized(null, false, null, null, json("{\"isError\": true}"));
-        assertEquals(Source.RESULT_ERROR, r.source());
-        assertEquals("tool result reported iserror", r.signature());
-    }
-
-    @Test
-    void otelErrorTypeAttributeIsAFailureEvenWithNoSpanStatus() {
-        var r = recognized(null, false, "OrderServiceTimeout", null, null);
-        assertEquals(Source.ERROR_TYPE_ATTR, r.source());
-        assertEquals("orderservicetimeout", r.signature());
-    }
-
-    @Test
-    void recordedExceptionTypeIsAFailure() {
-        var r = recognized(null, false, null, "java.net.SocketTimeoutException", null);
-        assertEquals(Source.EXCEPTION_ATTR, r.source());
-        assertEquals("java.net.sockettimeoutexception", r.signature());
-    }
-
-    @Test
-    void spanStatusOutranksAReadConvention() {
-        var r = recognized("HTTP 500", true, "Timeout", null, json("{\"isError\": true}"));
-        assertEquals(Source.SPAN_STATUS, r.source(), "the sender stating an error outright wins over a convention");
-    }
-
-    @Test
-    void isErrorWithNoMessageAnywhereStillCounts() {
-        var r = recognized(null, true, null, null, null);
-        assertEquals(Source.SPAN_STATUS, r.source());
-        assertEquals(ToolFailure.UNDESCRIBED, r.signature());
-    }
-
-    /**
-     * The exclusions, which matter as much as the inclusions — each of these is a way a broader rule
-     * would have started reporting successes as failures.
-     */
+    /** Each exclusion is a way a broader rule would report successes as failures. */
     @Test
     void whatIsNotAFailure() {
         assertNull(ToolFailure.recognize(null, false, null, null, null), "a clean call");
@@ -130,10 +113,6 @@ class ToolFailureTest {
                 "a top-level array: the convention is a top-level object key, not a search of the payload");
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // §2 — signatures group, and what they erase
-    // ---------------------------------------------------------------------------------------------
-
     @Test
     void placeholdersCoverEachVaryingKind() {
         assertEquals(
@@ -144,27 +123,16 @@ class ToolFailureTest {
         assertEquals(
                 "tool <str> failed after <num>ms (attempt <num>/<num>)",
                 ToolFailure.signature("Tool 'search_docs' failed after 30014ms (attempt 3/3)"));
+        assertEquals(ToolFailure.signature("Connection   Refused"), ToolFailure.signature("connection refused"));
     }
 
     @Test
     void blankAndNullCollapseToOneGroupRatherThanVanishing() {
-        // UNDESCRIBED means "there was no message", and nothing else. A message made entirely of variance
-        // still normalizes to its placeholder form and still groups — two failures reported as bare
-        // numbers are the same kind of unhelpful, and saying so is more accurate than pretending the
-        // sender said nothing at all.
+        // UNDESCRIBED means only "there was no message": a message of pure variance still groups.
         assertEquals("<num>", ToolFailure.signature("12345"), "a message that is only variance still groups");
         assertEquals(ToolFailure.UNDESCRIBED, ToolFailure.signature(null));
         assertEquals(ToolFailure.UNDESCRIBED, ToolFailure.signature("   "));
     }
-
-    @Test
-    void signatureIsStableAcrossCaseAndWhitespace() {
-        assertEquals(ToolFailure.signature("Connection   Refused"), ToolFailure.signature("connection refused"));
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // The SQL predicate's shape — it is interpolated, so its aliases are a contract
-    // ---------------------------------------------------------------------------------------------
 
     /**
      * What a result payload declares about itself. An error object is read for its message, then its code,
